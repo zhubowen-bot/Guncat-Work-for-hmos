@@ -1,0 +1,10 @@
+{
+  "app": {
+    "bundleName": "com.bowenapp.guncataibeta",
+    "vendor": "example",
+    "versionCode": 700,
+    "versionName": "6.2.0",
+    "icon": "$media:layered_image",
+    "label": "$string:app_name"
+  }
+}

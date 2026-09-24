@@ -1,0 +1,24 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "module description"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "description"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Guncat Work"
+    },
+    {
+      "name": "perm_internet_reason",
+      "value": "用于连接 AI 模型与多模态解析服务"
+    },
+    {
+      "name": "perm_microphone_reason",
+      "value": "用于将您的语音转换为聊天输入文字"
+    }
+  ]
+}

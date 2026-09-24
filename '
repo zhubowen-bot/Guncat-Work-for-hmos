@@ -1,0 +1,38 @@
+entry\src\main\ets\export\DocxExporter.ets:import { common } from '@kit.AbilityKit';
+entry\src\main\ets\export\DocxExporter.ets:import { picker, fileIo as fs } from '@kit.CoreFileKit';
+entry\src\main\ets\export\DocxExporter.ets:import { OoxmlBuilder, OoxmlDocument, MediaPart } from './OoxmlBuilder';
+entry\src\main\ets\export\DocxExporter.ets:import { ZipWriter, ZipEntry } from './ZipWriter';
+entry\src\main\ets\export\DocxExporter.ets:import { XmlUtil } from './XmlUtil';
+entry\src\main\ets\export\DocxExporter.ets:    let title: string = defaultName !== '' ? defaultName : 'Guncat AI 对话导出';
+entry\src\main\ets\export\DocxExporter.ets:    entries.push(DocxExporter.entry('[Content_Types].xml', doc.contentTypesXml));
+entry\src\main\ets\export\DocxExporter.ets:    entries.push(DocxExporter.entry('_rels/.rels', doc.rootRelsXml));
+entry\src\main\ets\export\DocxExporter.ets:    entries.push(DocxExporter.entry('word/document.xml', doc.documentXml));
+entry\src\main\ets\export\DocxExporter.ets:    entries.push(DocxExporter.entry('word/styles.xml', doc.stylesXml));
+entry\src\main\ets\export\DocxExporter.ets:    entries.push(DocxExporter.entry('word/numbering.xml', doc.numberingXml));
+entry\src\main\ets\export\DocxExporter.ets:    entries.push(DocxExporter.entry('word/_rels/document.xml.rels', doc.documentRelsXml));
+entry\src\main\ets\export\DocxExporter.ets:      e.name = 'word/media/' + part.name;
+entry\src\main\ets\export\DocxExporter.ets:    entries.push(DocxExporter.entry('docProps/core.xml', doc.coreXml));
+entry\src\main\ets\export\DocxExporter.ets:    entries.push(DocxExporter.entry('docProps/app.xml', doc.appXml));
+entry\src\main\ets\export\DocxExporter.ets:    let fileName: string = XmlUtil.makeFileName('Guncat-导出');
+entry\src\main\ets\export\DocxExporter.ets:    let baseName: string = fileName.endsWith('.docx') ?
+entry\src\main\ets\export\DocxExporter.ets:    options.fileSuffixChoices = ['.docx'];
+entry\src\main\ets\export\DocxExporter.ets:      throw new Error('已取消导出');
+entry\src\main\ets\export\DocxExporter.ets:import { common } from '@kit.AbilityKit';
+entry\src\main\ets\export\DocxExporter.ets:import { picker, fileIo as fs } from '@kit.CoreFileKit';
+entry\src\main\ets\export\DocxExporter.ets:import { OoxmlBuilder, OoxmlDocument, MediaPart } from './OoxmlBuilder';
+entry\src\main\ets\export\DocxExporter.ets:import { ZipWriter, ZipEntry } from './ZipWriter';
+entry\src\main\ets\export\DocxExporter.ets:import { XmlUtil } from './XmlUtil';
+entry\src\main\ets\export\DocxExporter.ets:    let title: string = defaultName !== '' ? defaultName : 'Guncat AI 对话导出';
+entry\src\main\ets\export\DocxExporter.ets:    entries.push(DocxExporter.entry('[Content_Types].xml', doc.contentTypesXml));
+entry\src\main\ets\export\DocxExporter.ets:    entries.push(DocxExporter.entry('_rels/.rels', doc.rootRelsXml));
+entry\src\main\ets\export\DocxExporter.ets:    entries.push(DocxExporter.entry('word/document.xml', doc.documentXml));
+entry\src\main\ets\export\DocxExporter.ets:    entries.push(DocxExporter.entry('word/styles.xml', doc.stylesXml));
+entry\src\main\ets\export\DocxExporter.ets:    entries.push(DocxExporter.entry('word/numbering.xml', doc.numberingXml));
+entry\src\main\ets\export\DocxExporter.ets:    entries.push(DocxExporter.entry('word/_rels/document.xml.rels', doc.documentRelsXml));
+entry\src\main\ets\export\DocxExporter.ets:      e.name = 'word/media/' + part.name;
+entry\src\main\ets\export\DocxExporter.ets:    entries.push(DocxExporter.entry('docProps/core.xml', doc.coreXml));
+entry\src\main\ets\export\DocxExporter.ets:    entries.push(DocxExporter.entry('docProps/app.xml', doc.appXml));
+entry\src\main\ets\export\DocxExporter.ets:    let fileName: string = XmlUtil.makeFileName('Guncat-导出');
+entry\src\main\ets\export\DocxExporter.ets:    let baseName: string = fileName.endsWith('.docx') ?
+entry\src\main\ets\export\DocxExporter.ets:    options.fileSuffixChoices = ['.docx'];
+entry\src\main\ets\export\DocxExporter.ets:      throw new Error('已取消导出');

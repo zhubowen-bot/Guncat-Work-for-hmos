@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "typescript": "^5.5.4"
+  },
+  "_npx": {
+    "packages": [
+      "typescript@5.5.4"
+    ]
+  }
+}

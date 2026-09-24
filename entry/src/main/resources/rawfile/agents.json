@@ -1,0 +1,85 @@
+{
+  "agents": [
+    {
+      "id": "guncat-3.1-flash",
+      "name": "轻简模式",
+      "description": "Guncat 3.1-Flash：专为日常聊天开发的智能体，Guncat系列首个Flash独立基座，适用于简单聊天或简单知识查询",
+      "shortDescription": "Guncat 3.1-Flash「新」",
+      "icon": "icons/guncat-3.1-flash.png",
+      "category": "通用智能体",
+      "promptFile": "Guncat 3.1-Flash_prompt_EN.md"
+    },
+    {
+      "id": "guncat-3.0-flash",
+      "name": "效率模式",
+      "description": "Guncat 3.0-Flash：强大的专家级轻量全能智能体，融合多轮搜索、多步推理与行业领先的反幻觉体系，综合能力接近三倍体量的3.0-Pro",
+      "shortDescription": "Guncat 3.0-Flash",
+      "icon": "icons/guncat-3.0-flash.png",
+      "category": "通用智能体",
+      "promptFile": "Guncat 3.0-Flash_prompt_EN.md"
+    },
+    {
+      "id": "guncat-3.0-pro",
+      "name": "专家模式",
+      "description": "Guncat 3.0-Pro：最强大的专家级单体化超级智能体，融合多轮搜索、多步推理、全系专家智能体能力与行业领先的反幻觉体系",
+      "shortDescription": "Guncat 3.0-Pro",
+      "icon": "icons/guncat-3.0-pro.png",
+      "category": "通用智能体",
+      "promptFile": "Guncat 3.0-Pro_prompt_EN.md"
+    },
+    {
+      "id": "guncat-2.5-lite",
+      "name": "经典模式",
+      "description": "Guncat 2.5-Lite：最成熟的超轻量级通用智能体，结构化思维链引导高质量长输出结果，体量仅为能力相近的Guncat 3.0-Mini的四分之一",
+      "shortDescription": "Guncat 2.5-Lite",
+      "icon": "icons/guncat-2.5-lite.png",
+      "category": "通用智能体",
+      "promptFile": "Guncat 2.5-lite _prompt.md"
+    },
+    {
+      "id": "guncat-cnvt-paper",
+      "name": "转换专家-论文",
+      "description": "Guncat Cnvt-Paper： 转换智能体中的论文转换专家，将非论文文体转化为符合学术规范的论文",
+      "shortDescription": "Guncat Cnvt-Paper",
+      "icon": "icons/guncat-cnvt-paper.png",
+      "category": "改写智能体",
+      "promptFile": "Guncat Cnvt-Paper_prompt.md"
+    },
+    {
+      "id": "guncat-srch-law",
+      "name": "检索专家-法律",
+      "description": "Guncat Srch-Law： 检索智能体中的国企法律分析专家，强制多轮检索与结构化法律意见",
+      "shortDescription": "Guncat Srch-Law",
+      "icon": "icons/guncat-srch-law.png",
+      "category": "检索智能体",
+      "promptFile": "Guncat Srch-Law V1.0-prompt.md"
+    },
+    {
+      "id": "guncat-srch-research",
+      "name": "检索专家-研究",
+      "description": "Guncat Srch-Research： 检索智能体中的多轮验证研究专家，跨领域信息检索与多源交叉验证",
+      "shortDescription": "Guncat Srch-Research",
+      "icon": "icons/guncat-srch-research.png",
+      "category": "检索智能体",
+      "promptFile": "Guncat Srch-Research-prompt.md"
+    },
+    {
+      "id": "guncat-srch-sift",
+      "name": "检索专家-筛滤",
+      "description": "Guncat Srch-Sift： 检索智能体中的信息筛选检索专家，官方溯源与 AI 内容过滤",
+      "shortDescription": "Guncat Srch-Sift",
+      "icon": "icons/guncat-srch-sift.png",
+      "category": "检索智能体",
+      "promptFile": "Guncat Srch-Sift-prompt.md"
+    },
+    {
+      "id": "guncat-eval-LLM",
+      "name": "评估专家-LLM",
+      "description": "Guncat Eval： 评估智能体中的 LLM 评估专家，最大减少幻觉地评估 LLM 模型的性能",
+      "shortDescription": "Guncat Eval-LLM",
+      "icon": "icons/guncat-eval-LLM.png",
+      "category": "评估智能体",
+      "promptFile": "Guncat Eval-LLM_prompt.md"
+    }
+  ]
+}

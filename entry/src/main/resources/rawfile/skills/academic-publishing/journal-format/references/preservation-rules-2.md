@@ -1,0 +1,57 @@
+- Do not make the whole abstract or keyword paragraph bold just because its label should be bold. Apply run-level bold only to the leading labels `摘要`, `关键词`, `Abstract`, and `Key words`/`Keywords`; explicitly keep the following content non-bold. In weak-source fallback, abstract/keyword content defaults to five-point size (`w:sz=21`).
+- Do not treat single-column/multi-column conversion as a harmless style-only change. Warn before formatting because pictures, tables, captions, formulas, floating anchors, page breaks, and section breaks can reflow badly when column counts change.
+- Do not hide column-conversion risk in only the internal report. Include it in the user-facing notes whenever a single-column/multi-column or mixed-column migration was detected or requested.
+- Do not infer formatting from unrelated images, links, PDFs, or screenshots when they do not contain extractable explicit format rules.
+- Do not run content/structure postprocess edits unless the user or extracted source prose explicitly requests the exact operation. This includes moving tables/figures after references, changing body citation markers from `[1]` to `(1)` or italic/superscript variants, converting reference-list prefixes from `[1]` to `(1)`, `1`, `1.`, or `1)`, adding missing reference-list numbers, renumbering references, rewriting figure/table caption prefixes such as `Figure 1` to `Fig. 1:`, and bolding caption first sentences. These are not ordinary style-formatting operations. When extracted text rules clearly request one of these operations, record it as `postprocess_operations` in `rules.json` and let 原 format_docx.py（本项目用 docx 技能） auto-run the explicit postprocess layer; do not require a separate manual JSON.
+- Do not confuse body citation format with reference-list prefix format. A request to change正文引用标记 applies outside `参考文献`/`References`; a request to change参考文献编号 applies only inside the reference zone. Never apply one to the other unless the user explicitly asks for both.
+- Do not add missing reference-list numbers or renumber existing reference entries through explicit postprocess unless the user explicitly asks for adding or renumbering. Merely changing `[1]` to `(1)` or `1` should preserve existing numbers.
+- Do not move tables or figures by broad guessing. Only move clearly identified blocks, skip section properties, fields, drawings/math/OLE internals, and record skipped complex cases for user confirmation.
+- Do not preserve target-manuscript proof/sample watermarks that live as behind-text or large anchored images in `word/header*.xml` or `word/footer*.xml`. Remove only image-only target header/footer paragraphs that structurally look like background watermarks before template header/footer import. Do not remove body images, normal header/footer text, page-number fields, journal names, tabs, breaks, or template-provided header/footer content imported afterward.
+- Do not deliver Feishu/Lark documents as the result; deliver a `.docx`.
+- Do not expose intermediate JSON files in the final answer unless the user asks for audit artifacts.
+- Do not expose `qa_report.json`, rendered PNG pages, visual-diff pages, or other QA intermediates in the final answer unless the user explicitly asks for audit/debug artifacts.
+- Do not make the final answer a verbose format report. Do not list applied styles, successful operations, extracted properties, or fallback-format areas. Only list user-confirmation items and likely visual risks.
+- Do not put the output `.docx` link before the explanation or risk notes. The output file link must be the final line of the final answer.
+- Do not rebuild the document with `python-docx`.
+- Do not rewrite the whole body from plain text.
+- Do not replace `document.xml` wholesale.
+- Do not claim the final DOCX passed visual QA unless it was rendered to page PNGs and inspected. If render QA could not run, failed, or was intentionally skipped for text-rule-source routing, record the risk and tell the user to verify in local Word.
+- Do not skip target-before/final render comparison QA for native DOCX/DOTX visual template sources. It is mandatory for native DOCX templates even when the user or command did not provide `--render-qa-dir`; use the formatter's default `<output-stem>_render_qa` directory.
+- Do skip target-before/final visual comparison when the desired format comes from text-only/OCR/non-DOCX-derived rules rather than a native visual DOCX template, such as explicit plain-text instructions, PDF text rules, converted DOC/DOT text rules, OCR text extracted from images/screenshots, or website/image text instructions. In that route, pass `--format-source-type ocr_text_rules`/`text_rules`/`converted_docx_template` or set `_meta.source_type` in `rules.json`, record `render_compare_skipped_text_rules`, keep structural QA and Word/预览 compatibility QA, and tell the user to confirm the final layout in Word.
+- Do not treat final-only rendering as enough. Render the original target and final DOCX, then compare page counts, page image dimensions, missing pages, and changed pages. Record this under `render_compare_qa`.
+- Do not mix render engines in one comparison. Use Microsoft Word for both files if it succeeds for both; otherwise use Word/预览 for both; otherwise use the next preview/screenshot fallback for both. A one-side Word and one-side Word/预览 comparison is invalid.
+- Do not let Word/预览 success override Word success. Microsoft Word PDF export is the highest-priority DOCX visual authority; Word/预览 is a fallback when Word rendering is unavailable or fails for either side.
+- Do not hide render comparison failure. If the render toolchain or document compatibility prevents rendering, record `mandatory_render_compare_failed`/`render_qa_failed` in `format_report.json` and mention local Word visual confirmation in the final response.
+- Do not use Word/预览 to normalize, repair, or resave the final DOCX as the delivery file. Word/预览 compatibility must be checked by load/export-only QA, such as temporary PDF export, because resaving through Word/预览 can alter OMML formulas, MathType/OLE objects, floating anchors, Word fields, numbering, and Word-specific layout.
+- Do not skip Word/预览 compatibility QA. After final repack and structural QA, invoke Word/预览 to load the final DOCX and export a temporary PDF. If this fails, record `libreoffice_compatibility_failed` in `format_report.json` and include a concise final-note warning. If it succeeds, keep the original OpenXML output as the final DOCX.
+- Do not serialize package relationship parts (`*.rels`) with generated prefixes such as `ns0:Relationships` or `ns0:Relationship`. Word/预览 may reject the DOCX with a source-load failure even when Microsoft Word opens it. Every `.rels` part must use the default package relationship namespace: `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`.
+- Do not solve single-column to multi-column overflow by deleting, recreating, flattening, or re-embedding images/tables. Fit only width/extent/layout properties: drawing `wp:extent`/matching `a:ext`, table `tblW`/`tblGrid`/cell widths, and related layout attributes. Preserve relationships, media files, object payloads, table text, formulas, drawings, and merge topology.
+- Do not let paragraphs containing inline drawings, pictures, OLE/MathType objects, or OMML formulas inherit exact fixed line spacing. A body style such as fixed 18 pt line spacing can clip tall objects and make images/formulas appear as a thin strip. After all style cleanup, table, equation, superscript, and metadata passes, override only those high-inline-content paragraphs to `w:lineRule="auto"` while preserving existing before/after spacing where possible. Do not change normal text-only body paragraphs and do not edit media/OLE/formula payloads.
+- The expected execution environment is cloud-side and should already expose the needed render tools. Invoke them directly and record failures as QA risks.
+- Do not ignore structural QA regressions. If media, embeddings/OLE, charts, diagrams, headers, footers, relationships, numbering, or key package parts unexpectedly disappear or drop in count, stop and repair before delivery.
+- Do not ignore table geometry QA. `tblW`, `tblInd`, `tblGrid`, row/cell widths, table/cell borders, header-row borders, and cell margins can decide whether the table looks like the template even when paragraph styles are correct.
+- Do not ignore image-anchor QA. Floating `wp:anchor` images, missing drawing relationship targets, or large drawing-count changes require render/Word confirmation before delivery.
+- Do not ignore Word field QA. Page numbers, total pages, TOC, REF/PAGEREF, SEQ/caption fields, and cross references may need a Word field refresh after formatting; include this in final confirmation notes when fields are present.
+- Do not ignore heading hierarchy QA. Heading level jumps and numbered non-heading paragraphs can break TOC and journal heading display; inspect and either repair role mapping or warn the user.
+- Do not treat a passing ZIP/package check as proof of visual quality. Structural QA, render QA, and user Word confirmation are separate gates.
+- Do not apply page setup or headers/footers only to the final `body/sectPr`; paragraph-level `pPr/sectPr` sections must be updated too.
+- Do not apply a mixed-column template's body section to an entire single-section target when a safe front/body split point is available. Insert a conservative continuous section break first.
+- Do not insert section breaks when the target body start is ambiguous. Warn instead of guessing.
+- Do not handle section count mismatch by blindly copying the template final section to all remaining target sections. Use content-aware front/body/back section routing and preserve the body section's `w:cols`.
+- Do not use the first multi-column body-like section as the body representative when multiple body-like template sections have different column counts. Score candidates and warn on ambiguity; use `--body-cols` when a hard hint is needed.
+- Do not trust style display names as a formatting bridge.
+- Do not let target styles affect the role style spec.
+- Do not let single-language templates make front-matter roles fall back directly to body. Resolve cross-language role equivalents before body fallback.
+- Do not let a weak exact source such as `english_title -> Para` override a stronger cross-language equivalent such as `title -> Titledocument`.
+- Do not classify comma-separated English/pinyin author lines as `heading1`.
+- Do not rely only on surname/name regexes for author/affiliation classification. Use front-matter position: title first, then author, then affiliation, then abstract/keywords when that structure is present.
+- Do not let heuristic paragraph guessing override canonical publisher style IDs.
+- Do not ignore a reviewed `role_map.json`; when supplied with `--role-map-in`, it is the authority for target role assignment.
+- Do not silently fall back to automatic classification in locked bridge mode. Missing paragraph mappings or unknown roles must stop the run.
+- Do not emit empty `body`, `heading2`, `heading3`, or `reference_item` role styles when `Normal`, `Heading2`, `Heading3`, or `References` exist.
+- Do not leave style `numId` references pointing to missing target numbering definitions.
+- Do not reuse template `numId` values directly; always allocate target-local IDs and rewrite style references.
+
+---
+
+> 因文档体量拆分：后续内容见 `preservation-rules-3.md`。

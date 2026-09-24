@@ -1,0 +1,5 @@
+BOM: False
+UTF-8 decode: OK
+imageResolver(context, root) count: 2
+zh strings intact: True
+GBK mojibake present: False

@@ -1,0 +1,6 @@
+{
+  "name": "libguncatjs.so",
+  "types": "./index.d.ts",
+  "version": "1.0.0",
+  "description": "Guncat Work run_js 工具的 JSVM-API 沙箱(原生模块类型声明)"
+}

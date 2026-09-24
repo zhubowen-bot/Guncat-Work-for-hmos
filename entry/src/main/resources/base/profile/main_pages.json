@@ -1,0 +1,6 @@
+{
+  "src": [
+    "pages/ChatPage",
+    "pages/TableOcrPage"
+  ]
+}

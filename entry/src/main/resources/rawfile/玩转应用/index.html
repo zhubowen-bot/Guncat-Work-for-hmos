@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<!--
+  ════════════════════════════════════════════════════════════════
+  玩转应用 · 本地页面 (在应用内由 PlayGuidePanel 弹窗打开)
+  多页结构: 首页 = 大标题 + 目录; 目录点进去是独立子页 (自带返回按钮)
+
+  怎么维护 (不懂代码也能改):
+  1. 改文字 ──── 每个功能就是一行 <div class="card">…</div> 块,
+                 只改其中的标题 / 描述即可。
+  2. 加功能 ──── 复制任意一个 card 块, 粘贴到想要的位置, 改文字。
+                 正文卡不带图标: 标题居中、文字整段通栏; 长文本可加
+                 class="card card-prose" (标题与正文间距更大)。
+                 图标只保留在首页目录条目里 (card-icon), 不想要时整块删掉。
+  3. 加一页 ──── 复制整个 <section class="view" id="view-xxx">…</section> 块,
+                 改 id (xxx 不重复即可) 和顶栏标题, 里面放卡片;
+                 再到首页「目录」里复制一个目录卡片, href 填 "#/xxx"。
+  4. 换颜色 ──── 全局颜色 / 圆角在 assets/style.css 顶部的「设计变量」区。
+                 图标是单色系统风格 (浅色模式黑 / 深色模式白), 无底色,
+                 颜色跟随 --icon 自动切换, 不需要逐行设置。
+  5. 换图标 ──── 顶部应用图标是 assets/app-icon.png, 直接替换图片文件。
+                 列表里的图标是单色实心 SVG, 换新图标去
+                 https://fonts.google.com/icons 选 Filled 风格复制路径即可。
+  ════════════════════════════════════════════════════════════════
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>玩转应用</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════════════════
+       首页视图 (view-home): 顶部大标题 + 目录
+       ═══════════════════════════════════════════════════ -->
+  <section class="view active" id="view-home">
+    <main class="page">
+
+      <!-- 顶部区 (hero 组件): 渐变背景铺在 body 上, 这里只放图标和标题 -->
+      <header class="hero">
+        <img class="hero-icon" src="assets/app-icon.png" alt="应用图标">
+        <h1 class="hero-title">玩转应用</h1>
+        <p class="hero-sub">Version 6.2.0 (620_6)</p>
+      </header>
+
+      <!-- 新功能体验面板: 首页入口卡, 点击进入 Version 6.2 新功能子页 -->
+      <section class="toc toc-gap">
+        <div class="toc-header">新功能体验</div>
+
+        <a class="card" href="#/008">
+          <div class="card-icon">
+            <svg viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></svg>
+          </div>
+          <div class="card-body">
+            <div class="card-title">看看 Version 6.2 带来哪些新体验</div>
+            <div class="card-text">新版本带来产物卡片、文件预览与一键分享、代码运行沙箱、Office 三件套专业技能、专家智能体内嵌、本地联网搜索、全局自由复制等新能力，每一项都精准落在真实需求的心坎上！</div>
+          </div>
+          <div class="card-arrow"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
+        </a>
+
+      </section>
+
+      <!-- 目录面板: href="#/xxx" 对应一个 view-xxx 子页 -->
+      <nav class="toc">
+        <div class="toc-header">目录</div>
+
+        <!-- 目录项: Guncat Work -->
+        <a class="card" href="#/001">
+          <div class="card-icon">
+            <svg viewBox="0 0 24 24"><path d="M20 9V7c0-1.1-.9-2-2-2h-3c0-1.66-1.34-3-3-3S9 3.34 9 5H6c-1.1 0-2 .9-2 2v2c-1.66 0-3 1.34-3 3s1.34 3 3 3v4c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4c1.66 0 3-1.34 3-3s-1.34-3-3-3zM7.5 11.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5S9.83 13 9 13s-1.5-.67-1.5-1.5zM16 17H8v-2h8v2zm-1-4c-.83 0-1.5-.67-1.5-1.5S14.17 10 15 10s1.5.67 1.5 1.5S15.83 13 15 13z"/></svg>
+          </div>
+          <div class="card-body">
+            <div class="card-title">了解 Guncat Work</div>
+            <div class="card-text">了解 Guncat Work 不同模式的能力，以及擅长完成什么不同类型的任务。</div>
+          </div>
+          <div class="card-arrow"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
+        </a>
+
+        <!-- 目录项: 基础功能 -->
+        <a class="card" href="#/002">
+          <div class="card-icon">
+            <svg viewBox="0 0 24 24"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></svg>
+          </div>
+          <div class="card-body">
+            <div class="card-title">基础功能</div>
+            <div class="card-text">了解 Guncat Work 基本操作，例如经常被忽略的，使用深度思考、联网搜索、新建对话等功能的必要性。</div>
+          </div>
+          <div class="card-arrow"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
+        </a>
+
+        <!-- 目录项: 进阶功能 -->
+        <a class="card" href="#/003">
+          <div class="card-icon">
+            <svg viewBox="0 0 24 24"><path d="M9.19 6.35c-2.04 2.29-3.44 5.58-3.57 5.89L2 10.69l4.05-4.05c.47-.47 1.15-.68 1.81-.55l1.33.26zM11.17 17s3.74-1.55 5.89-3.7c5.4-5.4 4.5-9.62 4.21-10.57-.95-.3-5.17-1.19-10.57 4.21C8.55 9.09 7 12.83 7 12.83L11.17 17zm6.48-2.19c-2.29 2.04-5.58 3.44-5.89 3.57L13.31 22l4.05-4.05c.47-.47.68-1.15.55-1.81l-.26-1.33zM9 18c0 .83-.34 1.58-.88 2.12C6.94 21.3 2 22 2 22s.7-4.94 1.88-6.12A2.996 2.996 0 0 1 9 18zm4-9c0-1.1.9-2 2-2s2 .9 2 2-.9 2-2 2-2-.9-2-2z"/></svg>
+          </div>
+          <div class="card-body">
+            <div class="card-title">进阶功能</div>
+            <div class="card-text">导出 Word、自由复制、系统分享、后台工作……这些进阶功能千万不能不知道！</div>
+          </div>
+          <div class="card-arrow"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
+        </a>
+
+        <!-- 目录项: 实用技巧 -->
+        <a class="card" href="#/004">
+          <div class="card-icon">
+            <svg viewBox="0 0 24 24"><path d="M11 21h-1l1-7H7.5c-.58 0-.57-.32-.38-.66.19-.34.05-.08.07-.12C8.48 10.94 10.42 7.54 13 3h1l-1 7h3.5c.49 0 .56.33.47.51l-.07.15C12.96 17.55 11 21 11 21z"/></svg>
+          </div>
+          <div class="card-body">
+            <div class="card-title">快速上手</div>
+            <div class="card-text">快速掌握 Guncat Work 的高效使用技巧，一举成为 Agent 专业用户。</div>
+          </div>
+          <div class="card-arrow"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
+        </a>
+
+        <!-- 目录项: 工作模式 -->
+        <a class="card" href="#/005">
+          <div class="card-icon">
+            <svg viewBox="0 0 24 24"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/></svg>
+          </div>
+          <div class="card-body">
+            <div class="card-title">工作模式</div>
+            <div class="card-text">工作模式全解：智能体如何自主规划与交付，数十种工具按类详解、逐一说明。</div>
+          </div>
+          <div class="card-arrow"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
+        </a>
+
+        <!-- 目录项: 聊天引擎 -->
+        <a class="card" href="#/006">
+          <div class="card-icon">
+            <svg viewBox="0 0 24 24"><path d="M21 6h-2v9H6v2c0 .55.45 1 1 1h11l4 4V7c0-.55-.45-1-1-1zm-4 6V3c0-.55-.45-1-1-1H3c-.55 0-1 .45-1 1v14l4-4h10c.55 0 1-.45 1-1z"/></svg>
+          </div>
+          <div class="card-body">
+            <div class="card-title">聊天引擎</div>
+            <div class="card-text">聊天引擎全解：轻简、效率、专家、经典四大通用模式与五位专家智能体的详细说明。</div>
+          </div>
+          <div class="card-arrow"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
+        </a>
+
+        <!-- 目录项: 表格识别插件 -->
+        <a class="card" href="#/007">
+          <div class="card-icon">
+            <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM8 20H4v-4h4v4zm0-6H4v-4h4v4zm0-6H4V4h4v4zm6 12h-4v-4h4v4zm0-6h-4v-4h4v4zm0-6h-4V4h4v4zm6 12h-4v-4h4v4zm0-6h-4v-4h4v4zm0-6h-4V4h4v4z"/></svg>
+          </div>
+          <div class="card-body">
+            <div class="card-title">表格识别插件</div>
+            <div class="card-text">表格识别插件指南：图片表格一键转 Excel，操作步骤与识别能力说明。</div>
+          </div>
+          <div class="card-arrow"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
+        </a>
+
+
+      </nav>
+
+      <p class="footer">Guncat Work · 让效率触手可及</p>
+
+    </main>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       子页 001 · Guncat Work
+       ═══════════════════════════════════════════════════ -->
+  <section class="view" id="view-001">
+    <main class="page">
+
+      <!-- 子页顶栏 (pagebar 组件): 返回按钮 + 页名 -->
+      <div class="pagebar">
+        <a class="back" href="#/" aria-label="返回目录">
+          <svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg>
+        </a>
+        <div class="pagebar-title">Guncat Work</div>
+      </div>
+
+      <!-- 顶部图片轮播: 一张 <img> 对应下面一张介绍卡, 顺序一一对应 -->
+      <div class="gallery">
+        <div class="gallery-track">
+          <img src="assets/001-1.png" alt="了解 Guncat Work">
+          <img src="assets/001-2.png" alt="聊天引擎">
+          <img src="assets/001-3.png" alt="Agent引擎(工作模式)">
+          <img src="assets/001-4.png" alt="插件">
+        </div>
+        <div class="gallery-dots"></div>
+      </div>
+
+      <!-- 与轮播联动的介绍卡: 第 N 张图对应第 N 张卡, 只显示当前那张 -->
+      <div class="gallery-cards">
+        <div class="card card-prose">
+        <div class="card-body">
+          <div class="card-title">关于 Guncat Work</div>
+          <div class="card-text">Guncat Work 是整合多项前沿技术打造的新一代智能体平台，旗下包含多款定位各异、能力独立的智能体：</div>
+          <div class="card-text">① 轻量化掌上工作台，拥有数十种工具集与多轮任务执行能力；② 单体超级智能体，面向通用会话；③ 对话智能体，主打日常闲聊交互；⑤ 反幻觉智能体，依托 RAR 架构；⑥ 专家智能体，覆盖通用问答、资料检索、文本改写、法律服务、模型评测等垂直场景。</div>
+          <div class="card-text">适配网页端、安卓端、鸿蒙手机、鸿蒙PC等多端，为用户提供便捷的智能体服务。</div>
+        </div>
+      </div>
+
+      <!-- 聊天引擎 -->
+      <div class="card">
+        <div class="card-body">
+          <div class="card-title">聊天引擎</div>
+          <div class="card-text">聊天引擎对话体验和豆包类似：提出问题→给出回答。</div>
+          <div class="card-text">共包含4个通用对话智能体和5个专家智能体，交付速度快、效率高，不适宜执行复杂长程任务。</div>
+        </div>
+      </div>
+
+      <!-- Agent引擎（工作模式） -->
+      <div class="card">
+        <div class="card-body">
+          <div class="card-title">Agent引擎（工作模式）</div>
+          <div class="card-text">Agent引擎（工作模式）的使用体验和专业编程智能体相近：布置任务→交付结果。</div>
+          <div class="card-text">它能调用几十种工具，进行多轮校验反思。不用你一步步指挥，就能处理文件、搜集资料、做调研、分析数据、写长文，搞定整套复杂的长线工作，但工作时长较长。</div>
+        </div>
+      </div>
+
+      <!-- 表格识别 -->
+      <div class="card">
+        <div class="card-body">
+          <div class="card-title">插件</div>
+          <div class="card-text">插件是Guncat Work面向特定任务开发的独立嵌入式功能，目前支持表格识别插件。关于表格识别插件的使用，请参考表格识别一节的说明。</div>
+        </div>
+      </div>
+      
+    </div>
+
+    </main>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       子页 002 · 基础功能
+       ═══════════════════════════════════════════════════ -->
+  <section class="view" id="view-002">
+    <main class="page">
+
+      <div class="pagebar">
+        <a class="back" href="#/" aria-label="返回目录">
+          <svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg>
+        </a>
+        <div class="pagebar-title">基础功能</div>
+      </div>
+
+      <!-- 顶部图片轮播: 一张 <img> 对应下面一张介绍卡, 顺序一一对应 -->
+      <div class="gallery">
+        <div class="gallery-track">
+          <img src="assets/002-1.png" alt="开关深度思考（聊天引擎）">
+          <img src="assets/002-2.png" alt="控制思考强度（工作模式）">
+          <img src="assets/002-3.png" alt="联网搜索：建议开启">
+          <img src="assets/002-4.png" alt="图片与文件的支持能力">
+          <img src="assets/002-5.png" alt="语音输入：自动入框，离线也能用">
+          <img src="assets/002-6.png" alt="朗读功能：支持后台播放">
+          <img src="assets/002-7.png" alt="新建对话：避免注意力稀疏">
+        </div>
+        <div class="gallery-dots"></div>
+      </div>
+
+      <!-- 与轮播联动的介绍卡: 第 N 张图对应第 N 张卡, 只显示当前那张 -->
+      <div class="gallery-cards">
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">开关深度思考（聊天引擎）</div>
+            <div class="card-text">开启深度思考更擅长应对高复杂度问题，处理数学计算、文稿撰写、资料调研、数据分析等任务时，以及使用垂直专家智能体时，建议启用该能力。</div>
+            <div class="card-text">聊天引擎中的三种通用智能体可自动管理深度思考能力：轻简模式与效率模式自动关闭，专家模式则自动开启。其他智能体不支持自动开关深度思考。</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">控制思考强度（工作模式）</div>
+            <div class="card-text">工作模式的深度思考强制开启，提供更细化的思考档位：极高（Max）、均衡（High）、快速（Low）。在模型选择按钮处可切换不同的思考强度档位。</div>
+            <div class="card-text">选择极高档位可获得极致的交付质量，但交付时间较长。选择快速档位可获得快速的交付时间，但交付质量会下降。</div>
+          </div>
+        </div>
+
+      <!-- 功能: 联网搜索 -->
+      <div class="card">
+        <div class="card-body">
+          <div class="card-title">联网搜索：建议开启</div>
+          <div class="card-text">* 自 6.1.2 版本开始，新增本机内置联网搜索兜底能力，不支持关闭。“联网搜索”开关仍控制 API 服务端联网能力；</div>
+          <div class="card-text">联网搜索默认开启，建议不要手动关闭。关闭联网搜索后，模型无法获取实时网络信息，回答仅依赖过时的知识库。自6.1.2版本开始，关闭联网搜索开关后通过本地联网搜索仍可获取实时网络信息，但仍然建议您开启该开关，以获得最高的性价比和搜索质量。</div>
+          <div class="card-text">联网搜索不属于本地工具，可用能力取决于对接的 API 平台，部分平台不支持该功能就会调用报错。</div>
+          <div class="card-text">DeepSeek 、火山方舟等不少 API 平台在使用 OpenAI‑Completions 协议时可能报错，接入联网搜索更推荐选用 OpenAI‑Responses 或 Anthropic‑Messages 协议。</div>
+        </div>
+      </div>
+
+      <!-- 功能: 图片与附件 -->
+      <div class="card">
+        <div class="card-body">
+          <div class="card-title">图片与文件的支持能力</div>
+          <div class="card-text">点击拍照按钮可拍照上传照片，点击文件按钮可上传本地图片和文件。工作模式还可在工作区面板上传文件。</div>
+          <div class="card-text">对于聊天引擎，由于大多数模型不具备直接理解文件的能力，建议只上传图片，若上传文件模型可能报错。</div>
+          <div class="card-text">对于工作模式，上传的文件会被保存到工作区沙箱，模型可调用工具对文件进行读写操作，你可以自由上传图片、PDF、Office 文档或代码文件等任意文件。</div>
+          <div class="card-text">请确保你使用的模型为多模态模型，如Deepseek-V4-Flash-Vision-Exp，而非Deepseek-V4-Flash，否则模型无法理解图片内容。</div>
+        </div>
+      </div>
+
+      <!-- 功能: 语音输入 -->
+      <div class="card">
+        <div class="card-body">
+          <div class="card-title">语音输入：自动入框</div>
+          <div class="card-text">点击麦克风说话，识别结果直接进入输入框，确认后即可发送，动口不动手。</div>
+          <div class="card-text">支持离线语音输入，网络不佳也能清晰识别。</div>
+        </div>
+      </div>
+
+      <!-- 功能: 朗读功能 -->
+      <div class="card">
+        <div class="card-body">
+          <div class="card-title">朗读功能：支持后台播放</div>
+          <div class="card-text">开启右上角自动朗读按钮后，回答会自动朗读，方便用户阅读和理解。</div>
+          <div class="card-text">每条消息末尾还有手动朗读按钮，点击后可朗读单条消息。</div>
+          <div class="card-text">支持自定义朗读速度（默认1.5倍）和音色，支持后台播放，用户可退出至后台或关闭屏幕继续收听朗读内容。</div>
+        </div>
+      </div>
+
+      <!-- 功能: 新建对话 -->
+      <div class="card">
+        <div class="card-body">
+          <div class="card-title">新建对话：避免注意力稀疏</div>
+          <div class="card-text">点击侧边栏新建对话按钮，即可开始新的对话。</div>
+          <div class="card-text">单条对话上下文过长，建议新建对话，否则可能因为注意力稀疏导致生成质量下降。</div>
+          <div class="card-text">Guncat Work 启动时自动新建对话，无需手动操作。若要接着关闭前的上一轮对话，点击下方历史对话即可。</div>
+        </div>
+      </div>
+
+
+      </div>
+
+    </main>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       子页 003 · 进阶功能
+       ═══════════════════════════════════════════════════ -->
+  <section class="view" id="view-003">
+    <main class="page">
+
+      <div class="pagebar">
+        <a class="back" href="#/" aria-label="返回目录">
+          <svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg>
+        </a>
+        <div class="pagebar-title">进阶功能</div>
+      </div>
+
+      <!-- 顶部图片轮播: 一张 <img> 对应下面一张介绍卡, 顺序一一对应 -->
+      <div class="gallery">
+        <div class="gallery-track">
+          <img src="assets/003-1.png" alt="新功能-全局自由复制">
+          <img src="assets/003-2.png" alt="复制纯文本和MD格式">
+          <img src="assets/003-3.png" alt="输入消息便捷回填">
+          <img src="assets/003-4.png" alt="一键导出 Word">
+          <img src="assets/003-5.png" alt="接收系统分享">
+          <img src="assets/003-6.png" alt="太方便了！长程任务后台可继续工作">
+        </div>
+        <div class="gallery-dots"></div>
+      </div>
+
+      <!-- 与轮播联动的介绍卡: 第 N 张图对应第 N 张卡, 只显示当前那张 -->
+      <div class="gallery-cards">
+        
+        <!-- 功能: 新功能-全局自由复制 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">新功能-全局自由复制</div>
+            <div class="card-text">所有回答文本都能直接自由复制，无需再手动点击复制局部按钮，想复制哪里就复制哪里，随心所欲更方便！</div>
+          </div>
+        </div>
+
+        <!-- 功能: 复制纯文本和MD格式 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">复制全文</div>
+            <div class="card-text">在回答下方点击文本按钮，一键复制纯文本，自动去除AI生成的*、#等符号，免去二次调整的麻烦；</div>
+            <div class="card-text">在回答下方点击MD按钮，一键复制Markdown格式，需要代码块、表格、列表等专业格式也可原样保留。</div>
+          </div>
+        </div>
+        
+        <!-- 功能: 输入消息便捷回填 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">输入消息便捷回填</div>
+            <div class="card-text">点击输入气泡下方编辑按钮，上一条消息自动回填至输入框，补充和修改从未如此简单。</div>
+            <div class="card-text">点击复制按钮，也可复制当前输入框内容到剪贴板。</div>
+          </div>
+        </div>
+
+        <!-- 功能: 一键导出 Word -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">一键导出 Word</div>
+            <div class="card-text">在回答下方点击 Word 按钮，长回答秒变排版精良的Word文档，标题、加粗、斜体、表格、公式、代码块原样保留，无需手动复制。</div>
+          </div>
+        </div>
+
+      <!-- 功能: 接收系统分享 -->
+      <div class="card">
+        <div class="card-body">
+          <div class="card-title">接收系统分享</div>
+          <div class="card-text">在图库或文件管理器选中照片或文件，点击系统分享，选择 Guncat Work，即可加入当前对话的待发送附件区。</div>
+          <div class="card-text">若没有看到Guncat Work，请在系统分享中向右找到“全部”选项，将 Guncat Work 添加到分享列表中。</div>
+          <div class="card-text">分享完成后，可新建对话或切换至其他智能体进行发送。</div>
+        </div>
+      </div>
+
+      <!-- 功能: 太方便了！长程任务后台可继续工作 -->
+      <div class="card">
+        <div class="card-body">
+          <div class="card-title">工作模式后台可继续工作</div>
+          <div class="card-text">工作模式下，退出应用到后台、熄灭屏幕等，智能体会继续在后台工作，任务不会被打断，你可以自由刷视频、看新闻，等待时间也不无聊！</div>
+          <div class="card-text">注意：请不要关闭应用，也不要关闭消息通知中的任务气泡，否则任务会被中断。</div>
+          <div class="card-text">熄屏、休眠状态下的任务后台运行还与系统在熄屏状态下的网络连接状态有关。若您的设备在熄屏状态下没有网络连接，任务会被中断。</div>
+          <div class="card-text">若任务被中断，可重新启动应用，发送“继续任务”，任务会接着之前的进度继续进行。</div>
+        </div>
+      </div>
+
+    </main>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       子页 · 快速上手
+       ═══════════════════════════════════════════════════ -->
+  <section class="view" id="view-004">
+    <main class="page">
+
+      <div class="pagebar">
+        <a class="back" href="#/" aria-label="返回目录">
+          <svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg>
+        </a>
+        <div class="pagebar-title">快速上手</div>
+      </div>
+
+      <!-- 顶部图片轮播: 一张 <img> 对应下面一张介绍卡, 顺序一一对应 -->
+      <div class="gallery">
+        <div class="gallery-track">
+          <img src="assets/004-1.png" alt="日常对话聊天：选择轻简模式">
+          <img src="assets/004-2.png" alt="轻任务求解：效率模式或专家模式">
+          <img src="assets/004-3.png" alt="长程任务交付：工作模式">
+          <img src="assets/004-4.png" alt="四大专业领域：垂直专家智能体">
+        </div>
+        <div class="gallery-dots"></div>
+      </div>
+
+      <!-- 与轮播联动的介绍卡: 第 N 张图对应第 N 张卡, 只显示当前那张 -->
+      <div class="gallery-cards">
+        
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">日常对话聊天：轻简模式</div>
+            <div class="card-text">猪更聪明还是猫更聪明？椰子树有多高？面包放多久会变质？月亮为什么会跟着人走？</div>
+            <div class="card-text">这类问题不需要复杂工具调用与深度推理，轻简模式优先给出快速高效、通俗易懂的生活化回答，满足碎片化闲聊与小科普需求。</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">轻任务：效率&专家模式</div>
+            <div class="card-text">效率模式、专家模式相比轻简模式，回答更详细、更全面、更准确。面对同一个问题时，它会补充关键背景信息、原理说明与实用细节，逻辑完整，论据清晰。适合需要获取完整信息、做简单参考的场景，适度调用必要能力保证回答严谨充实，兼顾信息深度与回复效率。</div>
+            <div class="card-text">其中，效率模式默认不开启深度思考，回答更快速。专家模式默认开启深度思考，回答质量更高。专家模式还包括了四大垂直领域专家智能体，擅长解决专业问题。</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">长程任务交付：工作模式</div>
+            <div class="card-text">- 请结合参考资料①②，为我生成心得体会。</div>
+            <div class="card-text">- 请根据根据这些电脑的价格截图，为我判断哪一款性价比最高。</div>
+            <div class="card-text">- 请结合现有法律法规和标准体系，为我创作关于人工智能合规性审查的调研报告和对应的PPT。</div>
+            <div class="card-text">- 请为我做一个从峨眉坐火车到青海五天四晚游的行程攻略。</div>
+            <div class="card-text">这些任务需要涉及到多样的参考资料，或是多步骤拆解、分段执行的复杂目标，依靠单次简短对话完成无法实现理想的效果。工作模式下将自主梳理任务流程、分阶段完成信息整理、对比分析与内容创作，持续推进直至交付一份结构完整、结果可用的成品方案。适合报告撰写、方案规划、对比研判等具备完整交付目标的工作场景。</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">专业领域：垂直专家智能体</div>
+            <div class="card-text">转换专家-论文 专用于将非论文问题转换为符合学术规范的论文格式；</div>
+            <div class="card-text">检索专家-法律 通过多轮检索给出国企法律知识结构化权威分析；</div>
+            <div class="card-text">检索专家-筛滤 通过RAR反幻觉推理结构，精准过滤搜索结果中的虚假信息与AI信息，提供真实可信的知识；</div>
+            <div class="card-text">检索专家-研究 通过多轮推理与跨领域交叉验证，研究无法直接通过搜索得出的疑难知识。</div>
+            <div class="card-text">这四大专家的能力已经包含在专家模式中，但单独选择使用时，会获得更专业的回答。</div>
+          </div>
+        </div>
+
+      
+      </div>
+
+    </main>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       子页 · 工作模式
+       ═══════════════════════════════════════════════════ -->
+  <section class="view" id="view-005">
+    <main class="page">
+
+      <div class="pagebar">
+        <a class="back" href="#/" aria-label="返回目录">
+          <svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg>
+        </a>
+        <div class="pagebar-title">工作模式</div>
+      </div>
+
+      <!-- 顶部图片轮播: 本页共 25 张图, 文件名 005-1.png ~ 005-25.png (放入 assets/ 即可);
+           每张图对应下面一张介绍卡, 增删时图和卡必须成对同步修改 -->
+      <div class="gallery">
+        <div class="gallery-track">
+          <img src="assets/005-1.png" alt="工作模式是什么">
+          <img src="assets/005-2.png" alt="布置一个任务：完整流程">
+          <img src="assets/005-3.png" alt="智能体是怎么干活的">
+          <img src="assets/005-4.png" alt="沙箱工作区">
+          <img src="assets/005-5.png" alt="时间线：看着它干活">
+          <img src="assets/005-6.png" alt="思考档位">
+          <img src="assets/005-7.png" alt="交付格式">
+          <img src="assets/005-8.png" alt="任务清单 todo_write">
+          <img src="assets/005-9.png" alt="查找文件四件套">
+          <img src="assets/005-10.png" alt="读取文件 read_file">
+          <img src="assets/005-11.png" alt="查看图片 view_image">
+          <img src="assets/005-12.png" alt="PDF 处理三件套">
+          <img src="assets/005-13.png" alt="写入与整理">
+          <img src="assets/005-14.png" alt="精准编辑 edit">
+          <img src="assets/005-15.png" alt="数据管道 transform_file">
+          <img src="assets/005-16.png" alt="Word·Excel·CSV">
+          <img src="assets/005-17.png" alt="PPT 读写编辑">
+          <img src="assets/005-18.png" alt="SVG 绘画生图">
+          <img src="assets/005-19.png" alt="联网搜索与网页抓取">
+          <img src="assets/005-20.png" alt="向你提问 ask_user_question">
+          <img src="assets/005-21.png" alt="定时提醒与自主目标">
+          <img src="assets/005-22.png" alt="子代理 subagent">
+          <img src="assets/005-23.png" alt="会话检索 session_search">
+          <img src="assets/005-24.png" alt="技能系统">
+          <img src="assets/005-25.png" alt="设备内执行代码 run_js">
+        </div>
+        <div class="gallery-dots"></div>
+      </div>
+
+      <!-- 与轮播联动的介绍卡: 第 N 张图对应第 N 张卡, 只显示当前那张 -->
+      <div class="gallery-cards">
+
+        <!-- 1 工作模式是什么 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">工作模式是什么</div>
+            <div class="card-text">工作模式是 Guncat Work 与聊天引擎并列的另一套工作方式：聊天引擎是「提出问题→给出回答」，工作模式则是「布置任务→交付结果」。</div>
+            <div class="card-text">它拥有一个本地沙箱工作区和数十种工具，接到任务后按「思考→调用工具→观察结果→更新清单」的多轮循环自主推进，不用你一步步指挥，就能处理文件、搜集资料、分析数据、写长文，搞定整套复杂的长线工作。</div>
+            <div class="card-text">适合报告撰写、方案规划、资料调研、数据分析等具备完整交付目标的场景。虽然工作时长较长，但是支持后台运行——交完任务你可以去干别的，回来验收成品即可。</div>
+          </div>
+        </div>
+
+        <!-- 2 布置一个任务 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">布置一个任务的流程</div>
+            <div class="card-text">① 侧边栏点击「工作模式」进入，页面标题与空态随之切换为工作模式。</div>
+            <div class="card-text">② 需要材料时，通过工作区面板「上传」添加文件。上传的文件保存到工作区沙箱，智能体可用工具读写。</div>
+            <div class="card-text">③ 在输入框描述任务，越具体越好：目标是什么、材料在哪里、要什么格式、有什么口径。遇到影响方向的关键选择，它也会主动弹出问题卡片问你（见「向你提问」一节）。</div>
+            <div class="card-text">④ 复杂任务会先建立任务清单，再逐项调用工具执行；时间线实时展示每一步的思考、工具调用与产出，点击任意工具步骤可展开参数与结果。</div>
+            <div class="card-text">⑤ 任务执行中你可以继续发消息补充要求：消息不会打断任务，会在本轮结束后作为「用户补充」自动纳入下一步执行。</div>
+            <div class="card-text">⑥ 完成后输出详尽总结，附每个产出文件的路径与用途；点击右上角「导出」可把整个工作区打包为 .zip 保存。</div>
+            <div class="card-text">若任务被中断（关闭应用、断网等），重新打开后发送「继续任务」，它会接着之前的进度继续执行。</div>
+          </div>
+        </div>
+
+        <!-- 3 智能体是怎么干活的 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">工作模式干活的原理</div>
+            <div class="card-text">工作模式的底层是一个 Agent 循环（Agent Loop）。</div>
+            <div class="card-text">系统同时赋予它四种角色：规划者（动手前拆解任务、编排工具、预估步数）、指挥者（按信息缺口推进，一步到位不绕路）、执行者（亲自调用工具、亲自阅读、亲自验证）、终验者（所有结论有依据、有验证之后才交付）。</div>
+            <div class="card-text">标准工作流程：需求分析→规划（复杂任务先建任务清单）→逐项执行（每一次工具调用都为明确的信息缺口服务）→观察与更新（每次工具返回后核对是否覆盖缺口）→终验（确认产出物存在且非空、抽查关键内容）→收口输出总结。</div>
+          </div>
+        </div>
+
+        <!-- 4 沙箱工作区 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">沙箱工作区保障绝对安全</div>
+            <div class="card-text">每个工作会话绑定一个独立的沙箱工作区，所有文件读写都发生在手机本地；文件选择与保存走系统安全组件，不新增任何权限，也不会上传到任何服务器。</div>
+            <div class="card-text">智能体只能通过工具访问工作区内的文件，所有路径都是工作区内的相对路径；代码里从根源上就没有给绝对路径、越界路径留下调用的入口，它从原理上碰不到手机的其他目录。</div>
+            <div class="card-text">你上传的文件出现在工作区根目录。对上传的原始文件默认不修改、不删除，产出物一律写新路径（如 output/report.docx），方便对比与回溯。</div>
+            <div class="card-text">工作区面板可随时查看文件树、上传文件、导出 .zip 或清空。工作区文件不参与上下文压缩，无论任务多长，文件始终完整可查。</div>
+          </div>
+        </div>
+
+        <!-- 5 时间线 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">时间线：看着它干活</div>
+            <div class="card-text">工作模式的执行过程以单容器时间线呈现：每轮按「思考→工具步骤→正文」时序排列，像看一场工作直播。</div>
+            <div class="card-text">思考行实时滚动智能体的推理内容与耗时；工具行显示工具名、参数摘要与状态耗时，点击展开参数与结果详情；编辑文件会渲染成 diff 卡片（+新增 −删除），写任务清单会渲染成清单卡片。</div>
+            <div class="card-text">最终回复下方还附有输出速度、缓存命中率与工具耗时统计，过程透明、每一步都可回溯。</div>
+            <div class="card-text">长任务中早期历史会被自动压缩为状态摘要，时间线会标注「已自动压缩早期历史」。被压缩的只是对话记录——工作区文件与任务清单始终完整。</div>
+          </div>
+        </div>
+
+        <!-- 6 思考档位 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">思考档位：质量与速度</div>
+            <div class="card-text">工作模式的深度思考强制开启（工具行不再显示该开关），并提供更细的思考档位：极高（Max）、均衡（High）、快速（Low），在模型选择按钮处切换。</div>
+            <div class="card-text">极高档位追求极致交付质量，耗时更长；快速档位交付更快，质量有所下降；多数任务建议均衡档位。</div>
+            <div class="card-text">经验法则：写长报告、做 PPT、多文件处理这类大任务用极高；查资料、改文档等中等任务用均衡；轻量小任务用快速。</div>
+          </div>
+        </div>
+
+        <!-- 7 交付格式 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">交付格式：手机能打开的成品</div>
+            <div class="card-text">工作模式的产出直接是手机能打开的格式：报告、方案、纪要等阅读型文档交付 .docx；表格数据交付 .xlsx；演示交付 .pptx；代码、配置与机器可读数据保持源格式。</div>
+            <div class="card-text">它不会把 .md 当作交付格式——即使中途用 Markdown 打了草稿，交付前也会转成对应的成品格式。</div>
+            <div class="card-text">交付前有一套自检清单：产出物全部存在且非空、关键内容抽查核对、所有失败如实报告、总结覆盖每个产出文件的路径与用途。</div>
+            <div class="card-text">最终总结的末尾还会附一张「任务导图」（Mermaid 图），把任务目标、执行路径与产出文件浓缩成一张竖屏可读的总览图，一眼回顾全貌。</div>
+          </div>
+        </div>
+
+        <!-- 8 任务清单 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">任务清单（todo_write）</div>
+            <div class="card-text">这个工具由AI在工作过程中自动管理调用，你无需手动做任何操作。</div>
+            <div class="card-text">任务清单是复杂任务的总管家：智能体用它创建和更新任务清单，每项任务带状态——待办、进行中、已完成，最多 50 项。</div>
+            <div class="card-text">它的纪律很严格：清单整体替换式更新；同一时刻只保留一项进行中；一项任务真正完成并验证之后才会被标为完成，杜绝「边做边全勾完」的假进度。</div>
+            <div class="card-text">清单会随「运行时上下文」快照自动注入对话，并在时间线上渲染成清单卡片——你随时能看到任务推进到了哪一步。预计三步以上的复杂任务，它都会先建清单再动手。</div>
+          </div>
+        </div>
+
+        <!-- 9 查找文件 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">查找文件工具</div>
+            <div class="card-text">这些工具由AI在工作过程中自动管理调用，你无需手动做任何操作。</div>
+            <div class="card-text">查找文件工具是智能体在工作过程中最常用的一套工具之一，帮助它快速定位到需要的文件。</div>
+            <div class="card-text">list_files：递归列出工作区的文件与目录（含子目录与文件大小），是确认产出物、查看目录结构的第一入口。</div>
+            <div class="card-text">glob：按文件名模式找文件，支持跨目录、段内通配、单字符、分支。只匹配路径不读内容，找素材特别快。</div>
+            <div class="card-text">grep：按正则表达式搜索文件内容，返回「文件:行号: 内容」，适合按编号、日期、代码标识等模式精确定位。</div>
+            <div class="card-text">search_files：大小写不敏感的普通子串搜索，覆盖文本文件与 Office 文档（Word/Excel/PPT 自动抽取文字层），还能按文件名过滤（比如只在 *.md 里搜）。</div>
+            <div class="card-text">典型配合：先 glob 或 search_files 缩小范围，找到目标后用 read_file 分页精读。</div>
+          </div>
+        </div>
+
+        <!-- 10 读取文件 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">读取文件工具</div>
+            <div class="card-text">这个工具由AI在工作过程中自动管理调用，你无需手动做任何操作。</div>
+            <div class="card-text">读取文件工具是智能体在工作过程中最常用的一套工具之一，帮助它快速读取文件内容。</div>
+            <div class="card-text">read_file 是读取文本文件的主力工具：按行分页返回，单次默认前约 1.2 万字符，末尾会提示「未读完」并给出下一次读取位置，长文档自动续读。</div>
+            <div class="card-text">Word、Excel、PPT 可以直接读——本地解析引擎在设备上抽取文字层，不依赖任何多模态解析接口，不消耗配额，隐私也更稳。</div>
+            <div class="card-text">它返回的行号与搜索工具一致，所以长文档的标准读法是：先搜索定位行号，再从该位置精读。修改文件前它也会先读取确认现状，避免误改。</div>
+          </div>
+        </div>
+
+        <!-- 11 查看图片 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">查看图片工具</div>
+            <div class="card-text">这个工具由AI在工作过程中自动管理调用，你无需手动做任何操作。</div>
+            <div class="card-text">查看图片工具是智能体在工作过程中最常用的一套工具之一，帮助它快速查看图片内容。</div>
+            <div class="card-text">view_image 把工作区里的图片（png/jpg/jpeg/webp/gif/bmp）送入模型的多模态视觉——图片会作为它的下一条消息出现，它就能真正「看见」图片内容。</div>
+            <div class="card-text">用途很多：读截图里的文字与表格、理解图表含义、核对下载的素材、检查自己生成的图片效果。</div>
+            <div class="card-text">它也是「生成→预览→修正」闭环的另一半：凡是它产出的图片，都会先用这个工具自查一遍再交付。</div>
+          </div>
+        </div>
+
+        <!-- 12 PDF 处理 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">PDF 处理工具</div>
+            <div class="card-text">这些工具由AI在工作过程中自动管理调用，你无需手动做任何操作。</div>
+            <div class="card-text">PDF 处理工具采用鸿蒙原生的PDF Kit解析引擎，渲染效率高、读取速度快、性能开销好、工作状态稳定。</div>
+            <div class="card-text">parse_document：本地解析 PDF 文字（不联网、不耗配额），按页分批返回并带 [第N页] 标注；超长 PDF 按提示传页码继续读，直到文档末页。</div>
+            <div class="card-text">search_pdf：在 PDF 文字层里搜关键词（大小写不敏感），返回页码与上下文摘录——先定位页码，再精读对应页，比整本翻快得多。</div>
+            <div class="card-text">pdf_to_images：把 PDF 页面渲染成图片存入工作区，是扫描件、纯图片 PDF 的专用入口——转成图片后逐张 view_image 查看。</div>
+            <div class="card-text">边界说明：加密 PDF 与扫描件无法直接提取文字；老格式 .doc/.xls/.ppt 不支持，请先转存为 .docx/.xlsx/.pptx。</div>
+          </div>
+        </div>
+
+        <!-- 13 写入与整理 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">写入与整理工具</div>
+            <div class="card-text">这些工具由AI在工作过程中自动管理调用，你无需手动做任何操作。</div>
+            <div class="card-text">写入与整理工具是智能体在工作过程中最常用的一套工具之一，帮助它快速写入与整理文件。</div>
+            <div class="card-text">write_file：覆盖写入文本文件，自动创建父目录，单次上限 512KB；更长的内容会分多次写——先写首段，再连续 append_file 续写。覆盖已有文件前会确认不会丢失你需要的数据。</div>
+            <div class="card-text">append_file：向文件末尾追加内容（文件不存在则创建），长文档分段写作的标准做法。</div>
+            <div class="card-text">create_dir / move_file / delete_file：创建目录、移动或重命名、递归删除。移动时目标已存在会被拒绝（不会覆盖）；删除是不可逆操作，会先核对范围——清空整个工作区只在你明确要求时执行。</div>
+            <div class="card-text">download_file：把网络上的文件（不超过 20MB）下载进工作区。要在产出物里引用网上的图片、素材或数据文件时，它会先用这个工具把原件拿进工作区再使用。</div>
+          </div>
+        </div>
+
+        <!-- 14 精准编辑 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">精准编辑（edit）</div>
+            <div class="card-text">edit：对已有文件做逐字符精确匹配替换。旧文本必须与文件内容逐字符一致，默认要求唯一匹配（多处匹配会被拒绝，需要补充上下文或改为全部替换）；返回行级 diff（+新增 −删除），时间线上渲染成 diff 卡片，改了什么一目了然。</div>
+            <div class="card-text">相比 write_file 整个重写，edit 只动该动的那几行，更安全更快，是对已有文件做小改动的首选。</div>
+            <div class="card-text">str_replace_editor：多命令编辑器，提供 view（分页查看）、create（新建）、str_replace（唯一匹配替换）、insert（在指定行后插入）四个命令，需要在特定行插入内容时用它。</div>
+            <div class="card-text">简单记：新建文件用 write_file，改已有文件优先 edit。</div>
+          </div>
+        </div>
+
+        <!-- 15 数据管道 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">数据管道（transform_file）</div>
+            <div class="card-text">transform_file 专门处理「read_file 读不全」的大文件与非标数据：支持 CSV、TSV、Markdown 表格、JSON、JSONL、文本行等输入，能做过滤、派生列、正则提取、拆列、去重、排序、替换、数值化，以及 CSV、TSV、JSON、Markdown、Excel 之间的相互转换。</div>
+            <div class="card-text">最大的特色：数据全程在本地管道里流动，不经过模型上下文——再大的表也不会撑爆对话记忆，上限为单次 2MB、10 万行、30 个步骤。</div>
+            <div class="card-text">工作纪律是「先预览、后写盘」：先不带输出参数预览前 3 行，确认转换逻辑无误后再写盘并抽查结果。</div>
+            <div class="card-text">完整语法内置在 data 技能里，执行前会自动加载。小表格直接生成即可，不必动用管道。</div>
+          </div>
+        </div>
+
+        <!-- 16 Word·Excel·CSV -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">Office 办公三件套（write_docx / write_xlsx / write_csv）</div>
+            <div class="card-text">write_docx：把 Doc JSON（或 Markdown）生成 Word 文档（.docx）。分级标题、加粗斜体、列表、表格、引用、代码块、公式、封面、静态目录都支持，产出排版精良、手机上可直接阅读的成品；read_docx 读回源、edit_docx 改块/增删/全文替换/换样式，外来文件修改前自动备份。</div>
+            <div class="card-text">write_xlsx：生成 Excel（.xlsx）。正式表格用 Workbook JSON：多工作表、表头、公式（合计/同比等派生值必须写成公式，改数自动联动）、数字格式（金额/百分比/年份）、列宽、冻结窗格；简单表也可直接吃 Markdown 表格/CSV/TSV。read_xlsx 读回、edit_xlsx 改单元格/加行/加表/全局改词。</div>
+            <div class="card-text">write_csv：同样输入生成 CSV 文件，遵循 RFC 4180 标准转义，默认带 UTF-8 BOM——用 Excel 或 WPS 打开中文不乱码。</div>
+            <div class="card-text">怎么选：给人看的、带样式的表格选 xlsx；后续还要程序处理或导入其他系统选 csv；文章报告选 docx。</div>
+            <div class="card-text">与聊天引擎「一键导出 Word」的区别：导出是把已有回答转成 Word；write_docx 是工作模式里主动产出的成品文件，内容、文件名、路径都由任务决定。生成前会先加载 docx / xlsx 技能获取语法与排版规范。</div>
+          </div>
+        </div>
+
+        <!-- 17 PPT 读写编辑 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">演示文稿三件套（write_pptx / read_ppt / edit_ppt）</div>
+            <div class="card-text">write_pptx：生成 16:9 演示文稿（.pptx）。三种输入方式：deck（结构化 Deck 源，13 种版式、图表、表格、图片、演讲备注——正式 PPT 一律用它）、deck_file（很长的内容先写成文件再导出，改内容后可重复导出）、outline（「# 页标题 / ## 分节 / - 要点」的简易大纲，快速起稿）。</div>
+            <div class="card-text">内置 8 套主题（brand-blue、midnight、forest、sunset、violet、graphite、ivory、crimson），支持柱状、折线、面积、饼、环五种图表，深色背景自动反白保证可读性。</div>
+            <div class="card-text">read_ppt：把 .pptx 读回结构化源——本应用生成的文件可无损还原；外来 pptx 会近似导入（文本、表格、版面保留）。</div>
+            <div class="card-text">edit_ppt：对已有 PPT 应用结构化操作后保存：加页、删页、移动、改单页内容、全局替换文字、换主题、改标题、改备注。外来文件修改前会先自动备份。</div>
+            <div class="card-text">做正式 PPT 前，它会先加载 ppt 技能获取 Deck 语法与设计规范，保证版式统一、细节到位。</div>
+          </div>
+        </div>
+
+        <!-- 18 SVG 绘画生图 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">SVG 绘画生图（write_svg）</div>
+            <div class="card-text">write_svg 是工作模式最有特色的工具之一：没有接入专门的绘画服务，而是让模型直接手写 SVG 矢量代码来「画」图——图标、示意图、流程图、架构图、信息图、简单插画都能画，而且矢量格式无限放大不失真。</div>
+            <div class="card-text">保存为 .svg 矢量文件的同时，自动栅格化出一张 PNG 预览（同名 _preview.png），方便查看与引用。</div>
+            <div class="card-text">标准工作流：先加载 svg 技能获取绘制规范与配方→生成→view_image 预览→发现不满意就修正重画，循环直到满意再交付。</div>
+            <div class="card-text">与其他工具联动：write_pptx 可以直接引用 .svg（导出时自动转成 PNG），write_docx 引用预览 PNG——汇报里配一张自己画的流程图非常方便。</div>
+            <div class="card-text">边界说明：照片级的真实图像画不了，那类素材会用 download_file 下载原件。</div>
+          </div>
+        </div>
+
+        <!-- 19 联网搜索与网页抓取 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">联网搜索与网页抓取（record_search / web_fetch）</div>
+            <div class="card-text">工作模式保留联网搜索开关（工具行可开可关）。开启后，服务端会为智能体补充最新网络资料；它与本地工具并存，互不冲突。</div>
+            <div class="card-text">一个关键机制：服务端搜索不会在对话历史里留下「搜过什么」的记录。所以智能体每次搜索获得有用信息后，都会立即用 record_search 把关键词、结论摘要与来源网址登记到工作区的 .searches.md 文件——这样后续任何一轮都能追溯，也避免重复搜索。收口前它会通读这份登记簿，汇总所有来源。</div>
+            <div class="card-text">web_fetch：抓取网页或接口原文（单次不超过 2MB）。网页会自动剥离脚本与样式、只留可读正文；JSON 与纯文本原样返回。看到来源网址后它会主动抓取原文核对，不只凭搜索摘要下结论。</div>
+            <div class="card-text">记住分工：只读网页内容用 web_fetch；要把文件本体（图片、PDF、数据）存进工作区用 download_file。</div>
+          </div>
+        </div>
+
+        <!-- 20 向你提问 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">向你提问（ask_user_question）</div>
+            <div class="card-text">ask_user_question 让智能体暂停执行，弹出一张问题卡片等你作答：支持单选、多选，也可以自由输入补充说明，统一点「提交」发送。</div>
+            <div class="card-text">它的提问很克制：只有存在影响整体方向的关键缺口（目标格式、范围、口径、删除确认等）且没有合理默认值时才会问；小事不问，先用合理默认值做，并在总结里说明。</div>
+            <div class="card-text">因为提问会暂停整个任务，它会一次把问题问全，不会挤牙膏式追问。若 5 分钟未作答会按取消处理，然后基于合理假设继续推进，并在总结中标注哪些是假设。</div>
+            <div class="card-text">用好它的诀窍：看到问题卡片尽量给出明确答复——方向确认得越早，返工越少。</div>
+          </div>
+        </div>
+
+        <!-- 21 定时提醒与自主目标 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">定时提醒与自主目标（schedule / goal）</div>
+            <div class="card-text">schedule_create：会话内定时提醒。可以是一次性（多少秒后触发）或循环（最小间隔 5 分钟）；到点后自动作为一条消息「唤醒」智能体继续执行。schedule_list 查看全部提醒，schedule_delete 取消某个提醒。你说「10 分钟后提醒我」「每小时检查一次」，就是它在干活。</div>
+            <div class="card-text">goal_create / goal_get / goal_update：会话自主目标。长任务开工前先立一个目标锚定总意图，执行中随时记录关键进展或受阻原因——目标会随运行时快照注入每一步，防止多轮执行之后「忘了当初为什么出发」。执行轮次达到上限会自动暂停并等你确认。</div>
+          </div>
+        </div>
+
+        <!-- 22 子代理 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">子代理（subagent）</div>
+            <div class="card-text">subagent 会派生一个「子代理」去独立完成子任务：它与主任务共享同一个工作区（能读写同样的文件），但拥有独立的上下文，最多 40 步，完成后把最终报告交还主任务。</div>
+            <div class="card-text">价值在于分工：把成体系的大块工作外包出去——独立调研、批量检索、成套素材整理——主任务只消费报告，上下文保持轻盈，整体更快更稳。</div>
+            <div class="card-text">子代理的指令是自包含的（背景、要求、验收标准、产出路径都要写清楚），它不能向用户提问，也不能再派出自己的子代理。</div>
+          </div>
+        </div>
+
+        <!-- 23 会话检索 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">会话检索（session_search）</div>
+            <div class="card-text">长任务执行中，早期的对话历史会被自动压缩成状态摘要，细节可能被精简。session_search 可以检索本会话的事件日志（历史消息、每次工具调用与结果），找回被压缩掉的具体细节。</div>
+            <div class="card-text">典型用途：核对「之前执行过什么」、找回某个中间数据、确认某次工具调用的原始结果——相当于给任务配了一本全程可查的工作日志。</div>
+          </div>
+        </div>
+
+        <!-- 24 技能系统 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">技能系统（list_skills / load_skill）</div>
+            <div class="card-text">技能是打包好的领域操作指南（纯文档）。接到对应任务时，智能体先 list_skills 查看有哪些技能，再 load_skill 按需加载——就像新员工上岗前先翻一遍岗位手册，而不是凭感觉干活。</div>
+            <div class="card-text">内置技能从十大扩展到三十二个（10 个核心技能 + 22 个移植领域技能）。核心技能：ppt（Deck 语法、设计规范、主题、自检清单，任何 PPT 任务开始前先加载）；svg（SVG 绘制规范与「生成→预览→修正」工作流，图标/流程图/信息图配方）；data（数据管道的完整语法与清洗、提取、互转配方）；docx（Word 的 Doc JSON 语法与排版规范，任何 Word 任务先加载）；xlsx（Excel 的 Workbook JSON 语法、公式优先与数字格式规范，任何表格任务先加载）；以及五位专家智能体技能：paper（论文改写）、law（法律意见书）、research（深度调研）、sift（时效信息筛滤）、llm-eval（大模型评测）——需要专家级处理时说明用哪一位，即按该专家的完整方法论执行。</div>
+            <div class="card-text">22 个移植领域技能（来自四大主流 AI 工作平台并完成本应用工具适配）——写作类：humanizer（去 AI 味/可读性）、khazix-writer（公众号长文）、newmedia-writing（小红书/公众号/短视频新媒体）、content-rewrite（多平台改写分发）、translation（法律/医学翻译与术语一致性）；Office/内容类：prompt-engineering（提示词工程）、pdf（PDF 读取/搜索/扫描件阅读）、html（单页 HTML 开发）；营销类：marketing-plan（营销策划方案）、marketing-material-review（营销素材审核）、sentiment-tracker（舆情追踪与溯源）；学术类：paper-reviewer（学术论文审稿）、paper-rebuttal（审稿意见回复）、paper-close-reading（论文精读）、reference-audit（参考文献审计）、research-lineage-map（研究谱系演进图）、journal-format（学术论文 DOCX 格式排版）、research-proposal（学术立项书/基金申请撰写）、patent-drafting（专利申请文件撰写）；研究类：questionnaire（问卷/深访/原声打标/定量分析）、industry-analysis（行业深度研究）、review-agent（代码评审）。这些技能在交付时都会按需加载 docx / xlsx / ppt / svg / data 等核心技能，用本应用的 Office 工具直接产出文件。</div>
+            <div class="card-text">加载是渐进式的：先读技能正文，需要细节再读参考分册。技能正文优先于模型自己的默认做法——这保证了产出稳定符合规范，也是 PPT、生图、Office 文档与专家任务质量的秘密所在。</div>
+          </div>
+        </div>
+
+        <!-- 25 设备内执行代码 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">设备内执行代码（run_js）</div>
+            <div class="card-text">run_js 补上了工作模式最后一块拼图：在没有终端、不能安装软件的环境里，它也能「写几行代码算一下」。典型场景——把格式凌乱的文本按正则清洗、统计一组数据的分布、按规则从已有文件重组出结构化数据、批量生成接下来要成文的表格；凡是「写段代码处理」比「读进对话再写」更划算的活，都可以交给它。</div>
+            <div class="card-text">它是设备本机上的独立 JS 引擎沙箱：每次执行都是全新实例，不联网、不能读写文件系统、也不能加载外部模块。文件进出由工作区显式桥接——在 files 参数里列出的工作区文件会以只读方式预载给脚本，脚本里用 write 声明的产出会在执行成功后落入工作区（路径同样受工作区边界校验）。</div>
+            <div class="card-text">执行跑在后台线程，界面不会卡住；单次执行有默认 10 秒上限，内存与输出体积也都有上限。唯一无法兜底的是死循环——JS 引擎没有中断接口，遇到这种情况系统会放弃等待、把错误交回，让你改写代码（连续超时后本会话会暂时停用该工具，重启应用即恢复），而不是让界面一直转圈。</div>
+            <div class="card-text">与 transform_file 的分工：规则固定、批量清洗转换用 transform_file（内置管道，数据不进对话）；需要现写逻辑、做计算或程序化拼数据时用 run_js。最顺手的接力是 run_js 产出 JSON，再交给 write_docx / write_xlsx / write_pptx 成文。</div>
+          </div>
+        </div>
+
+      </div>
+
+    </main>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       子页 · 聊天引擎
+       ═══════════════════════════════════════════════════ -->
+  <section class="view" id="view-006">
+    <main class="page">
+
+      <div class="pagebar">
+        <a class="back" href="#/" aria-label="返回目录">
+          <svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg>
+        </a>
+        <div class="pagebar-title">聊天引擎</div>
+      </div>
+
+      <!-- 顶部图片轮播: 本页共 12 张图, 文件名 006-1.png ~ 006-12.png (放入 assets/ 即可);
+           每张图对应下面一张介绍卡, 增删时图和卡必须成对同步修改 -->
+      <div class="gallery">
+        <div class="gallery-track">
+          <img src="assets/006-1.png" alt="聊天引擎是什么">
+          <img src="assets/006-2.png" alt="怎么选模式">
+          <img src="assets/006-3.png" alt="轻简模式">
+          <img src="assets/006-4.png" alt="效率模式">
+          <img src="assets/006-5.png" alt="专家模式">
+          <img src="assets/006-6.png" alt="经典模式">
+          <img src="assets/006-7.png" alt="五位专家智能体总览">
+          <img src="assets/006-8.png" alt="转换专家-论文">
+          <img src="assets/006-9.png" alt="检索专家-法律">
+          <img src="assets/006-10.png" alt="检索专家-研究">
+          <img src="assets/006-11.png" alt="检索专家-筛滤">
+          <img src="assets/006-12.png" alt="评估专家-LLM">
+        </div>
+        <div class="gallery-dots"></div>
+      </div>
+
+      <!-- 与轮播联动的介绍卡: 第 N 张图对应第 N 张卡, 只显示当前那张 -->
+      <div class="gallery-cards">
+
+        <!-- 1 聊天引擎是什么 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">聊天引擎是什么</div>
+            <div class="card-text">侧边栏「聊天模式」分组下的智能体统称聊天引擎，目前包含 4 个通用对话智能体和 5 个专家智能体。对话体验是「提出问题→给出回答」：一轮问答即交付，速度快、效率高。</div>
+            <div class="card-text">聊天引擎不执行复杂长程任务——需要多轮工具调用、文件产出与过程管理的工作，请交给工作模式；两种模式在侧边栏中并列，随时切换。</div>
+            <div class="card-text">深度思考默认值：轻简模式与效率模式默认关闭，专家模式默认开启，新建对话时自动重置；其他智能体不自动管理这个开关，可在工具行手动切换。</div>
+            <div class="card-text">超过 200 字的正式回答都会以一张 Mermaid 结构图开篇（流程图或时序图，专为手机竖屏优化），先看清全局骨架，再进入正文。</div>
+          </div>
+        </div>
+
+        <!-- 2 怎么选模式 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">怎么选模式</div>
+            <div class="card-text">① 日常闲聊、快问快答、生活小科普 → 轻简模式。</div>
+            <div class="card-text">② 高质量日常问答、轻量任务，想要详尽又不想等太久 → 效率模式。</div>
+            <div class="card-text">③ 硬核复杂问题、专业领域分析、追求最强质量 → 专家模式。</div>
+            <div class="card-text">④ 经典稳定的轻量全能、结构清晰的长输出 → 经典模式。</div>
+            <div class="card-text">⑤ 论文格式转换 → 转换专家-论文；国企法律分析 → 检索专家-法律；深度调研报告 → 检索专家-研究；「最新版本、当前现状」类易被 AI 水文污染的查询 → 检索专家-筛滤；大模型对比与选型 → 评估专家-LLM。</div>
+            <div class="card-text">五位专家的完整能力均已内置在专家模式中；单独选择时，回答会完全按该专家的工作流与输出规范执行，更专注、更专业。</div>
+          </div>
+        </div>
+
+        <!-- 3 轻简模式 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">轻简模式（Guncat 3.1-Flash 基座）</div>
+            <div class="card-text">专为日常聊天开发的智能体，搭载 Guncat 系列首个 Flash 独立轻量基座：全新设计、不继承 2.0/2.5/3.0 系列架构，接替 3.0-Mini 成为系列的最轻量入口。</div>
+            <div class="card-text">它与效率模式是并列关系而非升级关系：效率模式承担全能任务执行，轻简模式承担日常对话与轻量信息任务——在绝对能力上限上有所取舍，换来更低的系统开销、更高效的语言与更自然的聊天体验。</div>
+            <div class="card-text">性格温暖、好奇、机智、有活力，像人和人聊天一样松弛自然；回答是对话式散文，善用加粗突出重点，不堆砌套话，简单问题秒问秒答。</div>
+            <div class="card-text">适合：碎片化闲聊、生活小科普、简单知识查询等不需要复杂工具调用与深度推理的场景。</div>
+          </div>
+        </div>
+
+        <!-- 4 效率模式 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">效率模式（Guncat 3.0-Flash 基座）</div>
+            <div class="card-text">基于 3.0-Pro 超级智能体基座精简打造的轻量全能智能体：完整继承内化结构化思维链、工具调用方法论与行业领先的反幻觉体系，移除领域专家模块，把执行路径压缩到极致——缺口驱动，能一步到位绝不绕路。</div>
+            <div class="card-text">三层一体架构：元认知层（默认不超过 5 步的轻量思维链，负责拆解、编排、监控、回溯）+ 执行层（极速/标准双档：无需工具直接回答；需要工具时轻量编排，通常 1-3 轮调用即收口）+ 工具层（联网搜索、图片理解、文档解析、代码解释）。</div>
+            <div class="card-text">反幻觉体系：官方渠道溯源、信源 S/A/B/C/D 分级、AI 内容识别过滤、交叉验证、信息半衰期管理（超过 3 个月的数据标注「可能已过时」）。</div>
+            <div class="card-text">输出丰富性原则全程生效：不压缩、不省略、不敷衍——提速只提在过程，回答的详尽程度与专家模式保持同一标准。深度思考默认关闭。</div>
+          </div>
+        </div>
+
+        <!-- 5 专家模式 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">专家模式（Guncat 3.0-Pro 基座）</div>
+            <div class="card-text">最强大的单体化超级智能体：把论文改写、国企法律、深度研究、信息筛选、LLM 评测五大专家的能力整合进同一个大脑，一个智能体应对任何任务。</div>
+            <div class="card-text">四层一体架构：元认知层 + 执行层（极速/标准/深度三档）+ 工具层 + 专业能力层。收到任务后会自动识别任务特征、激活对应专家工作流——宁可多激活不可漏激活，还支持跨模块交叉协作。</div>
+            <div class="card-text">深度模式下执行全流程监控：规划→执行→评估→调整→整合→自检→输出，细粒度拆解、逐步验证；反幻觉体系也最为完整，额外包含评测任务专用的信源分级。</div>
+            <div class="card-text">质量绝对优先：宁可时间长，也要质量好。深度思考默认开启，适合复杂、专业、高难度的任务。</div>
+          </div>
+        </div>
+
+        <!-- 6 经典模式 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">经典模式（Guncat 2.5-Lite 基座）</div>
+            <div class="card-text">最成熟的超轻量级通用智能体：2.5 系列从零打造的全新基座，用结构化思维链驱动思考，在不开启深度思考的状态下也能稳定完成多轮工具调用。</div>
+            <div class="card-text">极速/标准双档：无需工具时直接回答；需要工具时先建立轻量任务清单（不超过 5 步），按「拆解→编排→执行→整合」推进，步骤可控、过程可视。</div>
+            <div class="card-text">输出丰富性原则完整保留：不压缩、不省略、不敷衍，结构化思维链引导高质量长输出。</div>
+            <div class="card-text">适合想要经典稳定手感的场景：体量小、速度快、结构清晰。</div>
+          </div>
+        </div>
+
+        <!-- 7 五位专家智能体总览 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">五位专家智能体总览</div>
+            <div class="card-text">转换专家-论文（改写智能体）、检索专家-法律、检索专家-研究、检索专家-筛滤（检索智能体）、评估专家-LLM（评估智能体）——覆盖学术写作、法律分析、深度研究、信息筛选与模型评测五个垂直领域。</div>
+            <div class="card-text">它们的完整能力均已内置在专家模式中；单独选择时，回答会完全按该专家的工作流与输出规范执行，输出各自的结构化模板（论文、法律意见书、研究报告、溯源清单、评测报告）。</div>
+            <div class="card-text">共同底色：强制多轮检索、深度推理链条、详尽输出原则与严格的反幻觉纪律——宁可多查一次，不可编造一句。</div>
+          </div>
+        </div>
+
+        <!-- 8 转换专家-论文 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">转换专家-论文</div>
+            <div class="card-text">定位：精通学术写作的论文改写专家，把各种非论文文体（综述、散文、笔记、实验报告、课程讲义、对话记录、博客等）转化为符合学术规范的论文——不只是改文字，而是重构论证逻辑、补全学术要素、升级语言风格。</div>
+            <div class="card-text">工作流四步：① 源文体诊断（文体类型、原始结构、语言特征、信息密度、逻辑完整性）；② 参数确认（你没指定它会主动问）：目标论文类型（课程作业/文献综述/开题报告/期刊投稿/毕业论文章节/会议摘要）、改写模式（保留原文/轻度扩充/大幅扩充/重构/仅润色）、扩充策略、专业程度、字数策略、引用格式（APA/MLA/Chicago/GB/T 7714 等）、语言风格、输出粒度，共八组；③ 针对性改写（口语转书面、补全「背景-问题-文献-方法-分析-结论」链条、术语升级、嵌入研究问题与文献综述）；④ 质量自检。</div>
+            <div class="card-text">反幻觉纪律：选择深度素材补充时，会联网核实（2-5 轮搜索），绝不编造数据与文献；改写后保留原文核心观点，不扭曲原意。</div>
+          </div>
+        </div>
+
+        <!-- 9 检索专家-法律 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">检索专家-法律</div>
+            <div class="card-text">定位：国企法律事务的高级法律顾问——专精复杂商事、行政及刑事交叉案件，识别国资监管、合规、反腐败、三重一大等国企特殊法律风险，产出结构化法律意见书。</div>
+            <div class="card-text">强制检索六项：最新法律条款、司法解释、国资监管规定、地方性规定、典型案例、时效性校验；严禁引用已废止或已修订的条款，每条引用标注法律名称、条款序号与最新修订日期。</div>
+            <div class="card-text">深度分析三板斧：关键术语逐个辨析（法定含义与合同约定含义的差异）；合同解释方法论（体系解释、目的解释、文义解释、历史解释、诚信解释缺一不可）；法理工具箱（整体对价理论、不当得利、权利义务一致性、风险收益匹配、控股股东信义义务等）。</div>
+            <div class="card-text">输出结构：摘要→关键术语辨析→法律适用分析→国企特殊规则→合同体系化解释→法理深度分析→风险识别与等级→法律意见与建议（含保全、合规与争议解决路径）→参考案例。首次咨询会先向你确认基本事实、企业层级与核心诉求。</div>
+          </div>
+        </div>
+
+        <!-- 10 检索专家-研究 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">检索专家-研究</div>
+            <div class="card-text">定位：多轮验证研究专家，通过跨领域信息检索与多源交叉验证，研究无法直接通过搜索得出的疑难知识，输出结构化研究报告。</div>
+            <div class="card-text">强制至少 4-6 轮检索：基础事实确认→权威来源验证→多视角交叉验证→数据与统计口径验证→时效性校验→深度细节补充；优先采信政府网站、官媒、学术机构等高置信度来源。</div>
+            <div class="card-text">深度分析：术语精细化辨析；多源信息的体系化解释（理清主从、补充、矛盾、修正关系）；分析工具箱（利益相关方分析、因果链分析、反事实推演、基准线对比等）；矛盾信息显性化，不隐瞒、不选择性呈现。</div>
+            <div class="card-text">输出结构：摘要→关键术语辨析→检索轮次记录与多源交叉验证矩阵→体系化解释→深度分析→风险识别与等级→研究结论与建议（区分确定性结论与待验证推测）→参考来源清单。</div>
+          </div>
+        </div>
+
+        <!-- 11 检索专家-筛滤 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">检索专家-筛滤</div>
+            <div class="card-text">定位：信息筛选检索专家——面向时效性强、AI 水文泛滥的查询（新产品版本、最新政策、行业现状等），从搜索结果中滤掉 AI 生成的旧信息与营销内容，给出真实可信的最新知识。</div>
+            <div class="card-text">核心理念：官方一手来源才是唯一可信的版本依据——「AI 写旧文→搜索引擎收录→AI 再引用」的污染循环必须被打破。</div>
+            <div class="card-text">九步深度搜索法：查询意图与时效敏感度评估→官方渠道溯源（官网、官方公告、代码仓库、官方社媒）→实体状态锚定（以官方原文确认最新状态）→搜索策略设计→执行搜索→AI 内容识别与过滤→信息整合与状态校准→来源分级标注→结构化输出。</div>
+            <div class="card-text">AI 内容过滤：盘点体标题、无署名、时间模糊、版本号无出处、模板化结构等特征内容一律降级或排除；信源按 S/A/B/C/D 分级，历史信息与当前状态严格隔离。</div>
+            <div class="card-text">典型场景：「XX 现在最新版本是多少」「XX 和 YY 现在谁更强」这类极易被过时信息误导的问题。</div>
+          </div>
+        </div>
+
+        <!-- 12 评估专家-LLM -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">评估专家-LLM</div>
+            <div class="card-text">定位：大模型评测情报分析师——过滤低质量评测水文，追踪大语言模型与多模态模型的真实能力边界与生态位，为选型提供可验证的依据。</div>
+            <div class="card-text">12 步工作流：日期确认与需求澄清（含问题类型识别）→定向检索与信源分级→低信息密度模型锚定→时效性校验与版本管理→模型代际确认与纠偏→能力维度拆解→场景化选型→版本与模式差异标注→生态位与性价比分析→认知误区纠正→自检→结构化输出。</div>
+            <div class="card-text">特色机制：以代码能力（SWE-bench Verified 等真实工程基准）为综合智能的核心代理指标；能力对比必须量化——差距多少个百分点、对应多少排名位次，禁止「大致相当」式和稀泥；还会检测「代际错位」（若不如对方前代版本，直说）。</div>
+            <div class="card-text">适合：模型选型、能力对标、benchmark 解读、「XX 模型现在怎么样」等问题；会区分研究探索、生产部署、个人使用、私有化部署等不同场景给出建议。</div>
+          </div>
+        </div>
+
+      </div>
+
+    </main>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       子页 · 表格识别插件
+       ═══════════════════════════════════════════════════ -->
+  <section class="view" id="view-007">
+    <main class="page">
+
+      <div class="pagebar">
+        <a class="back" href="#/" aria-label="返回目录">
+          <svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg>
+        </a>
+        <div class="pagebar-title">表格识别插件</div>
+      </div>
+
+      <!-- 顶部图片轮播: 本页共 5 张图, 文件名 007-1.png ~ 007-5.png (放入 assets/ 即可);
+           每张图对应下面一张介绍卡, 增删时图和卡必须成对同步修改 -->
+      <div class="gallery">
+        <div class="gallery-track">
+          <img src="assets/007-1.png" alt="表格识别插件是什么">
+          <img src="assets/007-2.png" alt="操作步骤">
+          <img src="assets/007-3.png" alt="识别能力">
+          <img src="assets/007-4.png" alt="结果查看与导出">
+          <img src="assets/007-5.png" alt="使用建议">
+        </div>
+        <div class="gallery-dots"></div>
+      </div>
+
+      <!-- 与轮播联动的介绍卡: 第 N 张图对应第 N 张卡, 只显示当前那张 -->
+      <div class="gallery-cards">
+
+        <!-- 1 表格识别插件是什么 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">表格识别插件是什么</div>
+            <div class="card-text">插件是 Guncat Work 面向特定任务开发的独立嵌入式功能，目前提供表格识别插件：把图片里的表格一键转成可编辑的 Excel，流程为 图片 → HTML 表格 → Excel。</div>
+            <div class="card-text">入口：在任意回答的操作区点击「表格识别」，进入独立的表格识别页。识别由多模态模型完成，Excel 导出在设备本地生成，不依赖网页上传。</div>
+            <div class="card-text">适用场景：截图表格、拍照的登记表、报表、审批单、成绩单等纸质与图片表格的数字化。</div>
+          </div>
+        </div>
+
+        <!-- 2 操作步骤 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">操作步骤</div>
+            <div class="card-text">第 1 步 选择识别模型：下拉框自动汇总所有 API 配置中的主模型与多模态解析模型（去重后直接选择）。识别时使用所选模型对应的地址与 API Key，无需在此填写；请选择具备多模态（视觉）能力的模型。</div>
+            <div class="card-text">第 2 步 上传表格图片：点击虚线框选择图片，支持 JPG/PNG/WebP，建议宽度 1000-3000px；过大的图片会自动压缩后再上传，不影响识别清晰度。</div>
+            <div class="card-text">第 3 步 点击「识别表格」，等待识别完成（状态栏会显示进度与结果状态）。</div>
+            <div class="card-text">第 4 步 在结果区查看与核对：渲染预览、HTML 代码、网格结构、调试信息四个标签页（见下一节）。</div>
+            <div class="card-text">第 5 步 点击「下载 Excel (.xlsx)」导出文件，或在 HTML 代码页复制、下载源码。</div>
+          </div>
+        </div>
+
+        <!-- 3 识别能力 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">识别能力</div>
+            <div class="card-text">合并单元格：跨行（rowspan）、跨列（colspan）的合并关系完整保留，导出 Excel 后仍是真实合并单元格，不会拆散。</div>
+            <div class="card-text">表头与内容：表头单元格与数据单元格区分标记；数字、小数、百分比、货币符号、千分位、空格原样保留；单元格内换行保留；空单元格保留为空，绝不擅自补全。</div>
+            <div class="card-text">行高信息：视觉上明显更高、预留给人手写填写的行（如审批意见、签名栏），按「书写行数」单独标注，并在预览与导出的 Excel 中还原行高；仅因文字换行撑高的行不会被误标。</div>
+            <div class="card-text">忠实原则：看不清或模糊的字一律留空，宁可空着也不猜测；不添加原表没有的标题、说明或汇总行。</div>
+          </div>
+        </div>
+
+        <!-- 4 结果查看与导出 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">结果查看与导出</div>
+            <div class="card-text">渲染预览：网格化还原表格——合并单元格跨行跨列显示，高行按书写行数加高，所见即所得。</div>
+            <div class="card-text">HTML 代码：查看识别出的 HTML 表格源码，可一键复制或下载为 .html 文件，方便在网页或文档中二次加工。</div>
+            <div class="card-text">网格结构：自动校验并显示「共 N 行 × M 列」、列数一致性检查结果与高行标注，帮你快速核对识别质量。</div>
+            <div class="card-text">调试信息：模型原始输出，排查识别问题时使用。</div>
+            <div class="card-text">导出 Excel：点击「下载 Excel (.xlsx)」，在设备本地原生生成文件；导出前显示「N 行 × M 列 · X 个合并 · Y 个高行」摘要，合并单元格与行高在 Excel 中完整还原。</div>
+          </div>
+        </div>
+
+        <!-- 5 使用建议 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">使用建议</div>
+            <div class="card-text">拍摄时保证光线充足、表格完整入框、避免透视变形与反光，识别质量更好；表格过长或分页时，分开拍摄、逐张识别。</div>
+            <div class="card-text">个别单元格识别有误时，可在 HTML 代码页复制源码手动修正后再用，或重新拍摄更清晰的图片识别。</div>
+            <div class="card-text">识别依赖多模态模型：请先在设置中配置好主模型或多模态解析模型，并选择具备视觉能力的模型，否则会提示配置缺失。</div>
+            <div class="card-text">表格识别是独立页面，不占用对话上下文；识别结果与聊天记录互相独立，可放心反复尝试。</div>
+          </div>
+        </div>
+
+      </div>
+
+    </main>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       子页 · Version 6.2 新功能体验
+       ═══════════════════════════════════════════════════ -->
+  <section class="view" id="view-008">
+    <main class="page">
+
+      <div class="pagebar">
+        <a class="back" href="#/" aria-label="返回目录">
+          <svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg>
+        </a>
+        <div class="pagebar-title">Version 6.2 新功能体验</div>
+      </div>
+
+      <!-- 顶部图片轮播: 照片先留空待补充, 后续把 008-1.png ~ 008-8.png 放入 assets/,
+           并把下方占位 src 替换为 assets/008-N.png 即可;
+           每张图对应下面一张介绍卡, 增删时图和卡必须成对同步修改 -->
+      <div class="gallery">
+        <div class="gallery-track">
+          <img src="assets/008-1.png" alt="产物卡片">
+          <img src="assets/008-2.png" alt="JS 代码运行沙箱">
+          <img src="assets/008-3.png" alt="Office 技能">
+          <img src="assets/008-4.png" alt="专家智能体嵌入工作模式">
+          <img src="assets/008-5.png" alt="本地联网搜索">
+          <img src="assets/008-6.png" alt="全局自由复制">
+          <img src="assets/008-7.png" alt="工作模式后台继续工作">
+
+        </div>
+        <div class="gallery-dots"></div>
+      </div>
+
+      <!-- 与轮播联动的介绍卡: 第 N 张图对应第 N 张卡, 只显示当前那张 -->
+      <div class="gallery-cards">
+
+        <!-- 1 新增产物汇总卡片 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">新增交付卡片、文件预览与分享</div>
+            <div class="card-text">任务完成后，改动的文件会以卡片汇总在对话流末尾，默认展开；需要时点开还可查看每个文件的增删详情。</div>
+            <div class="card-text">重磅更新来啦！产物卡片、工作区面板中的文件可直接点击预览！可一键通过系统分享面板分享原始文件，陈年老问题终于被解决！</div>
+          </div>
+        </div>
+
+
+        <!-- 2 JS 代码运行沙箱 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">新增 JS 代码运行沙箱</div>
+            <div class="card-text">工作模式新增 JS 代码运行沙箱，支持在设备本机的独立 JS 引擎沙箱里现场执行代码，结果可直接写成工作区文件。</div>
+          </div>
+        </div>
+
+        <!-- 3 全套 Office Skill -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">全套 Office Skill 上线</div>
+            <div class="card-text">心心念念的工作模式的全套 Office 技能正式上线啦！现在你可以专业化地处理和生成 PPT、Word、Excel 等办公文档，日常办公琐事一站搞定。</div>
+            <div class="card-text">如今，Excel支持专业化的格式编辑、数据清洗与处理工作，PPT和Word已上线全量格式处理能力与内容嵌入能力，Office办公AI化从未如此真实！</div>
+          </div>
+        </div>
+
+        <!-- 4 专家智能体嵌入工作模式 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">专家智能体嵌入工作模式</div>
+            <div class="card-text">原有的五个专家模式——论文转换专家，法律、研究、筛滤检索专家，LLM评估专家，现已打包为 Skill 嵌入工作模式，无需切换到对应聊天引擎，即可在工作模式中直接使用五大专家模式的全量能力！</div>
+          </div>
+        </div>
+
+        <!-- 5 本地联网搜索 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">本地联网搜索</div>
+            <div class="card-text">新增本地联网搜索（软件内置，无需手动开关），工作模式、聊天模式都能调用，即使不小心关闭了联网搜索开关也不用担心断网啦！</div>
+          </div>
+        </div>
+
+        <!-- 6 全局自由复制 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">全局自由复制</div>
+            <div class="card-text">所有回答文本都能直接自由复制，无需再手动点击复制局部按钮，想复制哪里就复制哪里，随心所欲更方便！</div>
+          </div>
+        </div>
+
+        <!-- 7 工作模式后台继续工作 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">工作模式后台继续工作</div>
+            <div class="card-text">工作模式下，退出应用到后台、熄灭屏幕等，智能体会继续在后台工作，任务不会被打断，你可以自由刷视频、看新闻，等待时间也不无聊！</div>
+          </div>
+        </div>
+
+      </div>
+
+    </main>
+  </section>
+
+  <!-- 多页路由: 目录 href="#/xxx" ↔ 显示 id="view-xxx"; 空路由或未知路由 = 首页 (无需维护) -->
+  <script>
+    (function () {
+      function route() {
+        var id = (location.hash || '').replace(/^#\/?/, '');
+        var view = document.getElementById('view-' + id);
+        if (!view) view = document.getElementById('view-home');
+        document.querySelectorAll('.view').forEach(function (v) {
+          v.classList.toggle('active', v === view);
+        });
+        window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      }
+      window.addEventListener('hashchange', route);
+      route();
+    })();
+  </script>
+
+  <!-- 顶部轮播: 手指左右滑动切换, 圆点 + 第 N 张图联动第 N 张介绍卡 (无需维护) -->
+  <script>
+    document.querySelectorAll('.gallery').forEach(function (g) {
+      var track = g.querySelector('.gallery-track');
+      var dotsBox = g.querySelector('.gallery-dots');
+      var cardsBox = g.parentNode.querySelector('.gallery-cards');
+      var imgs = track ? Array.prototype.slice.call(track.children) : [];
+      if (imgs.length === 0 || !track) return;
+
+      // 圆点
+      imgs.forEach(function (_, i) {
+        var d = document.createElement('span');
+        if (i === 0) d.classList.add('on');
+        if (dotsBox) dotsBox.appendChild(d);
+      });
+      var dotEls = dotsBox ? Array.prototype.slice.call(dotsBox.children) : [];
+
+      // 联动介绍卡 (第 N 张图 ↔ 第 N 张卡)
+      var cards = cardsBox ? Array.prototype.slice.call(cardsBox.children) : [];
+
+      function index() {
+        // 找出中心点离视口中心最近的那张图 (兼容每张宽度不同)
+        var viewCenter = track.scrollLeft + track.clientWidth / 2;
+        var best = 0, dist = Infinity;
+        imgs.forEach(function (img, i) {
+          var d = Math.abs(img.offsetLeft + img.offsetWidth / 2 - viewCenter);
+          if (d < dist) { dist = d; best = i; }
+        });
+        return best;
+      }
+      function refresh() {
+        var i = Math.min(index(), imgs.length - 1);
+        dotEls.forEach(function (d, k) { d.classList.toggle('on', k === i); });
+        cards.forEach(function (c, k) { c.classList.toggle('on', k === i); });
+      }
+      track.addEventListener('scroll', refresh);
+      refresh();
+    });
+  </script>
+</body>
+</html>

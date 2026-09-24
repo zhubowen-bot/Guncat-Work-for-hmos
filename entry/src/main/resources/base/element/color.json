@@ -1,0 +1,148 @@
+{
+  "color": [
+    {
+      "name": "start_window_background",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "background",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "surface",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "raised_surface",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "surface_secondary",
+      "value": "#F5F6F7"
+    },
+    {
+      "name": "sidebar_fill",
+      "value": "#F9FAFB"
+    },
+    {
+      "name": "sidebar_item_active",
+      "value": "#EBEEF2"
+    },
+    {
+      "name": "sidebar_item_hover",
+      "value": "#F1F3F5"
+    },
+    {
+      "name": "interactive_hover",
+      "value": "#0F263148"
+    },
+    {
+      "name": "text_primary",
+      "value": "#0F1115"
+    },
+    {
+      "name": "text_secondary",
+      "value": "#61666B"
+    },
+    {
+      "name": "text_tertiary",
+      "value": "#81858C"
+    },
+    {
+      "name": "text_quaternary",
+      "value": "#ADB2B8"
+    },
+    {
+      "name": "brand",
+      "value": "#4176E6"
+    },
+    {
+      "name": "brand_pressed",
+      "value": "#679EFE"
+    },
+    {
+      "name": "brand_light",
+      "value": "#E4EDFD"
+    },
+    {
+      "name": "user_msg",
+      "value": "#4176E6"
+    },
+    {
+      "name": "ai_msg",
+      "value": "#EDF3FE"
+    },
+    {
+      "name": "border",
+      "value": "#1A000000"
+    },
+    {
+      "name": "divider",
+      "value": "#0F000000"
+    },
+    {
+      "name": "shadow",
+      "value": "#0A000000"
+    },
+    {
+      "name": "toast_bg",
+      "value": "#353638"
+    },
+    {
+      "name": "input_bg",
+      "value": "#F5F6F7"
+    },
+    {
+      "name": "header_bg",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "frosted_glass",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "toggle_active",
+      "value": "#22C55E"
+    },
+    {
+      "name": "toggle_inactive",
+      "value": "#D4D9E1"
+    },
+    {
+      "name": "danger",
+      "value": "#EC1313"
+    },
+    {
+      "name": "warning",
+      "value": "#F59E0B"
+    },
+    {
+      "name": "success",
+      "value": "#22C55E"
+    },
+    {
+      "name": "diff_add",
+      "value": "#22C55E"
+    },
+    {
+      "name": "diff_del",
+      "value": "#EC1313"
+    },
+    {
+      "name": "code_bg",
+      "value": "#F9FAFB"
+    },
+    {
+      "name": "code_text",
+      "value": "#0F1115"
+    },
+    {
+      "name": "modal_backdrop",
+      "value": "#3D000000"
+    },
+    {
+      "name": "stop_btn",
+      "value": "#EC1313"
+    }
+  ]
+}

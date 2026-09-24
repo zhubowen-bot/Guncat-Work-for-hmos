@@ -1,0 +1,21 @@
+0 verbose cli C:\Program Files\nodejs\node.exe C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js
+1 info using npm@11.6.2
+2 info using node@v25.2.1
+3 silly config load:file:C:\Program Files\nodejs\node_modules\npm\npmrc
+4 silly config load:file:C:\Users\a1519\Documents\GuncatAI_HMOS-APP\test\pptx-harness\.npmrc
+5 silly config load:file:C:\Users\a1519\.npmrc
+6 silly config load:file:C:\Users\a1519\AppData\Roaming\npm\etc\npmrc
+7 verbose title npm exec tsc -p check/tsconfig.json
+8 verbose argv "exec" "--cache" "C:\\Users\\a1519\\Documents\\GuncatAI_HMOS-APP\\test\\.npm-cache" "--yes" "--package" "typescript@5.5.4" "--" "tsc" "-p" "check/tsconfig.json"
+9 verbose logfile logs-max:10 dir:C:\Users\a1519\Documents\GuncatAI_HMOS-APP\test\.npm-cache\_logs\2026-09-13T09_19_50_942Z-
+10 verbose logfile C:\Users\a1519\Documents\GuncatAI_HMOS-APP\test\.npm-cache\_logs\2026-09-13T09_19_50_942Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+13 http fetch GET 200 https://registry.npmmirror.com/typescript 146ms (cache revalidated)
+14 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+15 verbose cwd C:\Users\a1519\Documents\GuncatAI_HMOS-APP\test\pptx-harness
+16 verbose os Windows_NT 10.0.26220
+17 verbose node v25.2.1
+18 verbose npm  v11.6.2
+19 verbose exit 0
+20 info ok

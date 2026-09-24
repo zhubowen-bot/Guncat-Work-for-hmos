@@ -1,0 +1,7 @@
+{
+  "layered-image":
+  {
+    "background" : "$media:cat_avatar",
+    "foreground" : "$media:cat_avatar"
+  }
+}
