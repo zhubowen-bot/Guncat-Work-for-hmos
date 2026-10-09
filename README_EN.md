@@ -115,6 +115,16 @@ The final read-aloud implementation uses HarmonyOS CoreSpeechKit `textToSpeech`.
 - Supports creating, switching, and deleting conversations.
 - Follows the system light/dark theme, including system bars and Markdown styles.
 
+### Interactive mode (Intelligent UI)
+
+Interactive mode is the **second delivery form of the same Agent Loop** — the ✦ "Interactive Mode" entry right below 🛠 "Work Mode" in the "Agent Mode" group. It shares the exact same loop, sandbox workspace, and 42 tools with work mode; the only difference is that **answers are no longer plain text**: the model emits a live, operable interface — metric cards, progress bars, tables, horizontal bar / line / donut charts, sliders, switches, dropdowns, text inputs, and choice buttons. Ask one question, get a dashboard you can drag, tap, and re-tune. This mirrors GPT-6's Intelligent UI.
+
+- **Delivery form**: the model writes a strict JSON document inside a ` ```guncat-ui ` fence (a `render_ui`-style tool path is planned), and the app parses it into native ArkUI components rendered inline in the conversation; any text outside the fence still renders as Markdown.
+- **Interaction loop**: dragging a slider, toggling a switch, or picking an option refreshes the values live inside the card. Tapping "Submit" (or a choice button) packs every control value into one user message — e.g. `【交互界面回传】- 金额 = 45万 / 按新的金额重新测算。` — and the model immediately **regenerates the updated interface**. The interface becomes a reusable dashboard rather than a static picture.
+- **Streaming shape-up**: a UI block renders progressively from the parts already parsed (showing "generating…" and disabling interaction until the JSON closes), so you never wait for the full document.
+- **Fail-safe first**: malformed or unclosed JSON is **rendered verbatim** back through Markdown — content never silently disappears. Unknown element kinds are dropped, and element/row/bar counts are capped, so a malformed document can never blow up the renderer.
+- **Shared infrastructure**: task checklist, tool timeline, workspace upload, artifacts card, forced deep thinking, three-protocol streaming function calling, and context compaction all come from work mode. `AgentLoopService.buildWorkSystemPromptFor(mode)` selects the prompt, and compaction rebuilds history with the same mode.
+
 ### Work mode (Agent Loop)
 
 Work mode is an **independent identity parallel to the chat agents** — the 🛠 "Work Mode" entry in its own "Agent Mode" group above the "Chat Mode" section header in the drawer. It opens an Agent loop with a per-conversation local sandbox workspace and tool-calling capability, allowing the agent to autonomously complete multi-step, long-horizon tasks. See "[Work mode architecture & maintenance guide](#work-mode-architecture--maintenance-guide)" below.
@@ -154,6 +164,8 @@ Agents are managed through `resources/rawfile/agents.json` and separate Markdown
 | 检索专家-研究               | Search     | Based on Guncat Srch-Research: cross-domain retrieval with multi-source cross-validation                                                              |
 | 检索专家-筛滤               | Search     | Based on Guncat Srch-Sift: official-source tracing and AI content filtering                                                                           |
 | 评估专家-LLM              | Evaluation | Based on Guncat Eval-LLM: LLM evaluation with minimized hallucination                                                                                 |
+| Work Mode (virtual)   | Agent Mode | Guncat Harness: local sandbox workspace + 42 tools + multi-turn Agent Loop, autonomously completing long-horizon tasks and producing files             |
+| Interactive Mode (virtual) | Agent Mode | Intelligent UI: the same Agent Loop, but answers are delivered as operable interfaces (charts/forms/tables) that recompute as you tune parameters      |
 
 ## Persistence and themes
 
@@ -833,6 +845,17 @@ You can also select content in Gallery or a file manager and choose Guncat Work 
 5. Tap any tool step to expand its arguments and results; "Export" packages the whole workspace into a `.zip`.
 6. When finished, the agent outputs a detailed summary (including produced file paths); switching to another agent exits work mode — the work conversation and workspace files are preserved.
 
+### Interactive mode (Intelligent UI)
+
+1. In the sidebar's "Agent Mode" group, tap ✦ "Interactive Mode" (right below "Work Mode").
+2. Just ask normally — e.g. "compare the returns of these three plans and let me tune the parameters" or "turn this data into a table I can filter".
+3. Instead of a long text answer, the agent returns an **operable interface**: metric cards, charts, tables, plus sliders, switches, dropdowns, and text inputs.
+4. Drag a slider, flip a switch, or pick a dropdown item — the values inside the card update instantly.
+5. Tap "Submit" (or a choice button) and your input is sent back as a message; the agent immediately **regenerates the interface** with the new parameters. Tuning repeatedly is just recomputing repeatedly.
+6. Uploading works exactly like work mode: use the "Interactive UI" pill's panel to add files to the sandbox workspace, and the agent can read, compute, and chart them with the same 42 tools.
+7. Only the newest interface is interactive (older ones are greyed out and archived), and an interface shapes up progressively while streaming — it shows "generating…" until the JSON closes.
+8. Need a real file (Word / Excel / PPT)? Just ask — interactive mode still produces files on request.
+
 ### Read-aloud
 
 1. Tap the read-aloud action on an assistant message.
@@ -867,6 +890,16 @@ You can also select content in Gallery or a file manager and choose Guncat Work 
 - Items received from the system share sheet are never sent automatically; the user must tap Send.
 - Original attachments are not copied into permanent app storage.
 - Requests use HTTPS. Data-processing policies still depend on the configured model provider.
+
+## Version 6.3.0 (Interactive Mode · Intelligent UI)
+
+- Added **a third Agent Mode entry: Interactive Mode (Intelligent UI)**, shown in parallel with Work Mode under the sidebar's "Agent Mode" group. It shares the same Agent Loop, sandbox workspace, and 42 tools, but **answers are not plain text — they are operable interfaces**: metric cards, progress bars, tables, horizontal bar / line / donut charts, sliders, switches, dropdowns, text inputs, and choice buttons.
+- **Interaction loop**: drag a parameter, flip a switch, or pick an option and tap "Submit"; every value is packed into one message back to the model, which then **recomputes and re-renders the updated interface**. The interface becomes a reusable dashboard instead of a static picture. Choice buttons report back on a single tap, no submit needed.
+- **Native rendering, no extra dependencies**: the strict JSON inside a ` ```guncat-ui ` fence is parsed by `GuncatUiSpec` and rendered by `GuncatUiView` into native ArkUI components. Line and donut charts are drawn on the fly with Shape + Path — no chart library and no image files.
+- **Streaming shape-up and fail-safe parsing**: a UI block renders progressively from the parts already parsed (showing "generating…" and disabling interaction until the JSON closes). Malformed or unclosed blocks are **rendered verbatim through Markdown** so content never disappears; unknown element kinds are dropped and element/row/bar counts are capped.
+- **Single-source prompt**: the interactive-mode system prompt (DSL contract + anti-patterns + mode duty) lives in the same file as the parser (`common/GuncatUiSpec.ts`), so the documented contract and the parsed contract cannot drift. Context compaction rebuilds history with the same mode-specific prompt.
+- Interactive mode reuses all work-mode infrastructure: task checklist, tool timeline, workspace upload, artifacts card, forced deep thinking, and three-protocol streaming function calling. Word / Excel / PPT output still works whenever you ask for a real file.
+- App version bumped to `6.3.0` (versionCode 710).
 
 ## Version 6.2.0 (New Skill System)
 

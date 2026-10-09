@@ -1,5 +1,5 @@
 // WorkSkillService: 工作模式的「技能」注册与加载
-// 技能 = 打包在 rawfile/skills/<id>/ 下的领域操作指南(SKILL.md + reference/*.md)。
+// 技能 = 打包在 rawfile/skills/ 下的领域操作指南；主 Skill 在顶层，分支 Skill 可位于主 Skill 子目录（SKILL.md + reference/*.md）。
 // 对齐 Agent Skills 的渐进披露设计: 系统提示词只保留一句触发提示(前缀稳定),
 // 模型通过 list_skills 看到技能清单, 需要时用 load_skill 按文件加载正文。
 import { common } from '@kit.AbilityKit';
@@ -48,7 +48,7 @@ export class WorkSkillService {
     WorkSkillService.skillsSynced = true;
   }
 
-  // ===== 技能注册表(新增技能: 在 rawfile/skills/<id>/ 放文档 + 在此登记) =====
+  // ===== 技能注册表(新增技能: 在 rawfile/skills/ 放文档 + 在此登记；分支 Skill 子目录由 skillPath() 映射) =====
   private static registry(): SkillInfo[] {
     let list: SkillInfo[] = [];
     let ppt: SkillInfo = new SkillInfo();
@@ -170,7 +170,7 @@ export class WorkSkillService {
       '格式互转(CSV/TSV/JSON/Markdown 表格/XLSX)、大文件本地转换, 或任何 transform_file 任务开始前: ' +
       '管道 ops 与表达式完整语法、场景配方、能力边界(无分组聚合/merge/concat, 替代方案见技能正文)、限额与自检清单。';
     list.push(data);
-    // ===== 五个专家智能体的 prompt 注册为技能(prompt 原文在 skills/<id>/SKILL.md) =====
+    // ===== 五个专家智能体的 prompt 注册为技能(prompt 原文在 skills/ 下的 SKILL.md，分支 Skill 可在主 Skill 子目录) =====
     let paper: SkillInfo = new SkillInfo();
     paper.id = 'paper';
     paper.name = '论文改写与学术化';
@@ -863,25 +863,134 @@ export class WorkSkillService {
     industryAnalysis.files.push(ia8);
     industryAnalysis.files.push(ia9);
     list.push(industryAnalysis);
+    // ===== 【新增】主 Skill 路由入口（结构重组；仅新增路由层，不改动任何原有技能正文） =====
+    let researchIntelligence: SkillInfo = new SkillInfo();
+    researchIntelligence.id = 'research-intelligence';
+    researchIntelligence.name = '情报调研与分析（主 Skill 路由入口）';
+    researchIntelligence.description = '【新增主 Skill·命中必加载】触发词：调研/查一下/研究/最新情况/最新版本/溯源/验证/舆情/行业分析/行业报告/模型对比/模型选型/问卷/访谈/用户研究。' +
+      '用户请求需要联网检索、溯源、验证、调研、舆情、行业研究、模型评测或用户研究时，**必须先 load_skill("research-intelligence")，不得自行处理**；' +
+      '按意图分流到 research/sift/llm-eval/sentiment-tracker/industry-analysis/research-lineage-map/questionnaire；学术论文任务请转 academic-publishing。';
+    let ri1: SkillFileInfo = new SkillFileInfo();
+    ri1.file = 'ROUTING.md';
+    ri1.desc = 'research-intelligence 分支路由索引';
+    researchIntelligence.files.push(ri1);
+    list.push(researchIntelligence);
+    let academicPublishing: SkillInfo = new SkillInfo();
+    academicPublishing.id = 'academic-publishing';
+    academicPublishing.name = '学术写作与论文全流程（主 Skill 路由入口）';
+    academicPublishing.description = '【新增主 Skill·命中必加载】触发词：论文改写/论文润色/论文精读/深度解读/论文审稿/审稿意见/rebuttal/回复审稿人/基金申请/立项书/开题报告/参考文献检查/引用核对/论文排版/期刊格式。' +
+      '用户请求属于论文改写/精读/审稿/rebuttal/基金立项/引用审计/论文 DOCX 排版时，**必须先 load_skill("academic-publishing")，不得自行处理**；' +
+      '按学术生命周期分流到 paper/paper-close-reading/paper-reviewer/paper-rebuttal/research-proposal/reference-audit/journal-format；开放主题调研请转 research-intelligence。';
+    let ap1: SkillFileInfo = new SkillFileInfo();
+    ap1.file = 'ROUTING.md';
+    ap1.desc = 'academic-publishing 分支路由索引';
+    academicPublishing.files.push(ap1);
+    list.push(academicPublishing);
+    let contentWriting: SkillInfo = new SkillInfo();
+    contentWriting.id = 'content-writing';
+    contentWriting.name = '内容创作与营销文案（主 Skill 路由入口）';
+    contentWriting.description = '【新增主 Skill·命中必加载】触发词：写公众号/公众号文章/小红书笔记/短视频脚本/分镜/文案/多平台分发/一稿多发/去AI味/自然一点/营销方案/营销策划。' +
+      '用户请求属于公众号长文/小红书/短视频/多平台改写/去 AI 味/营销策划方案时，**必须先 load_skill("content-writing")，不得自行处理**；' +
+      '按创作类型分流到 khazix-writer/newmedia-writing/content-rewrite/humanizer/marketing-plan；营销素材合规审核请转 legal-ip。';
+    let cw1: SkillFileInfo = new SkillFileInfo();
+    cw1.file = 'ROUTING.md';
+    cw1.desc = 'content-writing 分支路由索引';
+    contentWriting.files.push(cw1);
+    list.push(contentWriting);
+    let legalIp: SkillInfo = new SkillInfo();
+    legalIp.id = 'legal-ip';
+    legalIp.name = '法律/IP/合规（主 Skill 路由入口）';
+    legalIp.description = '【新增主 Skill·命中必加载】触发词：法律分析/合同纠纷/国企合规/法律意见书/专利撰写/技术交底书/权利要求/法律翻译/合同翻译/广告合规/宣传语审核/素材审核。' +
+      '用户请求属于法律案例分析/专利申请文件撰写/法律翻译/营销素材合规审核时，**必须先 load_skill("legal-ip")，不得自行处理**；' +
+      '按法律/IP/合规场景分流到 law/patent-drafting/translation/marketing-material-review。';
+    let li1: SkillFileInfo = new SkillFileInfo();
+    li1.file = 'ROUTING.md';
+    li1.desc = 'legal-ip 分支路由索引';
+    legalIp.files.push(li1);
+    list.push(legalIp);
+    let aiTooling: SkillInfo = new SkillInfo();
+    aiTooling.id = 'ai-tooling';
+    aiTooling.name = 'AI 工程与提示词（主 Skill 路由入口）';
+    aiTooling.description = '【新增主 Skill·命中必加载】触发词：优化prompt/写提示词/系统提示词/自定义指令/让AI更听话/代码评审/review code/审代码。' +
+      '用户请求属于写/优化 AI 提示词、系统提示词、自定义指令、Agent 技能说明，或代码变更只读代码评审时，**必须先 load_skill("ai-tooling")，不得自行处理**；' +
+      '按 AI 工程辅助分流到 prompt-engineering/review-agent；大模型评测选型请转 research-intelligence。';
+    let at1: SkillFileInfo = new SkillFileInfo();
+    at1.file = 'ROUTING.md';
+    at1.desc = 'ai-tooling 分支路由索引';
+    aiTooling.files.push(at1);
+    list.push(aiTooling);
     return list;
   }
 
   // list_skills 输出: 技能清单(含触发语义与文件索引)
   static listText(): string {
     WorkSkillService.ensureToolSkills();
-    return SkillDirectoryFormatter.listText(ToolRegistry.skillList());
+    return SkillDirectoryFormatter.listText(WorkSkillService.visibleSkillList());
   }
 
   // @deprecated 请使用 promptSectionWithMode(mode); 保留默认 full_index 兼容
   static promptSection(): string {
     WorkSkillService.ensureToolSkills();
-    return SkillDirectoryFormatter.format(ToolRegistry.skillList(), SkillDirectoryFormatter.MODE_FULL_INDEX);
+    return SkillDirectoryFormatter.format(WorkSkillService.visibleSkillList(), SkillDirectoryFormatter.MODE_FULL_INDEX);
   }
 
   // 按目录模式生成技能提示词(full_index 完整清单 / trigger_only 渐进披露)
   static promptSectionWithMode(mode: string): string {
     WorkSkillService.ensureToolSkills();
-    return SkillDirectoryFormatter.format(ToolRegistry.skillList(), mode);
+    return SkillDirectoryFormatter.format(WorkSkillService.visibleSkillList(), mode);
+  }
+
+  // 【新增】物理目录路径映射：分支 Skill 已归入主 Skill 子目录；返回相对 skills/ 的目录，空串表示仍用 id 作为顶层目录。
+  private static skillPath(id: string): string {
+    switch (id) {
+      case 'research': return 'research-intelligence/research';
+      case 'sift': return 'research-intelligence/sift';
+      case 'llm-eval': return 'research-intelligence/llm-eval';
+      case 'sentiment-tracker': return 'research-intelligence/sentiment-tracker';
+      case 'industry-analysis': return 'research-intelligence/industry-analysis';
+      case 'research-lineage-map': return 'research-intelligence/research-lineage-map';
+      case 'questionnaire': return 'research-intelligence/questionnaire';
+      case 'paper': return 'academic-publishing/paper';
+      case 'paper-close-reading': return 'academic-publishing/paper-close-reading';
+      case 'paper-reviewer': return 'academic-publishing/paper-reviewer';
+      case 'paper-rebuttal': return 'academic-publishing/paper-rebuttal';
+      case 'research-proposal': return 'academic-publishing/research-proposal';
+      case 'reference-audit': return 'academic-publishing/reference-audit';
+      case 'journal-format': return 'academic-publishing/journal-format';
+      case 'khazix-writer': return 'content-writing/khazix-writer';
+      case 'newmedia-writing': return 'content-writing/newmedia-writing';
+      case 'content-rewrite': return 'content-writing/content-rewrite';
+      case 'humanizer': return 'content-writing/humanizer';
+      case 'marketing-plan': return 'content-writing/marketing-plan';
+      case 'law': return 'legal-ip/law';
+      case 'patent-drafting': return 'legal-ip/patent-drafting';
+      case 'translation': return 'legal-ip/translation';
+      case 'marketing-material-review': return 'legal-ip/marketing-material-review';
+      case 'prompt-engineering': return 'ai-tooling/prompt-engineering';
+      case 'review-agent': return 'ai-tooling/review-agent';
+      default: return '';
+    }
+  }
+
+  // 【新增】对外可见技能：只暴露主 Skill + 顶层格式分支；嵌套分支由主 Skill 路由后 load_skill，不直接出现在技能清单。
+  private static visibleSkillList(): SkillMeta[] {
+    let all: SkillMeta[] = ToolRegistry.skillList();
+    let out: SkillMeta[] = [];
+    for (let i: number = 0; i < all.length; i++) {
+      if (WorkSkillService.skillPath(all[i].id).length === 0) {
+        out.push(all[i]);
+      }
+    }
+    return out;
+  }
+
+  private static visibleSkillIds(): string[] {
+    let list: SkillMeta[] = WorkSkillService.visibleSkillList();
+    let out: string[] = [];
+    for (let i: number = 0; i < list.length; i++) {
+      out.push(list[i].id);
+    }
+    return out;
   }
 
   // load_skill: 读取技能文档; 技能名或文件名不在注册表内时报错(防路径探测)
@@ -890,7 +999,7 @@ export class WorkSkillService {
     let id: string = skillId.trim().toLowerCase();
     let skill: SkillMeta | null = ToolRegistry.findSkill(id);
     if (skill === null) {
-      let ids: string[] = ToolRegistry.skillIds();
+      let ids: string[] = WorkSkillService.visibleSkillIds();
       return 'ERROR: 未知技能 "' + skillId + '"。可用技能: ' + (ids.length > 0 ? ids.join(' / ') : '(无)');
     }
     let target: string = file.trim();
@@ -915,7 +1024,8 @@ export class WorkSkillService {
       }
       return 'ERROR: 技能 ' + skill.id + ' 没有 "' + file + '"。可用文件: ' + names.join(' / ');
     }
-    let rawPath: string = 'skills/' + skill.id + '/' + target;
+    let dir: string = WorkSkillService.skillPath(skill.id);
+    let rawPath: string = 'skills/' + (dir.length > 0 ? dir : skill.id) + '/' + target;
     try {
       let raw: Uint8Array = await context.resourceManager.getRawFileContent(rawPath);
       let decoder: util.TextDecoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
@@ -940,9 +1050,10 @@ export class WorkSkillService {
     for (let i: number = 0; i < skill.files.length; i++) {
       files.push(skill.files[i].file);
     }
+    let dir: string = WorkSkillService.skillPath(skill.id);
     for (let i: number = 0; i < files.length; i++) {
       let target: string = files[i];
-      let rawPath: string = 'skills/' + skill.id + '/' + target;
+      let rawPath: string = 'skills/' + (dir.length > 0 ? dir : skill.id) + '/' + target;
       try {
         let raw: Uint8Array = await context.resourceManager.getRawFileContent(rawPath);
         let decoder: util.TextDecoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });

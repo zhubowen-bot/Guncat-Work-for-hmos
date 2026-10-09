@@ -1,5 +1,21 @@
 # BACKLOG
 
+## 交互模式（Intelligent UI，6.3.0）本轮完成
+- [x] 虚拟智能体与会话模式：`Constants.INTERACTIVE_AGENT_ID` / `MODE_INTERACTIVE`，`buildInteractiveAgent()` 注入列表第二位，`AgentDrawerView`/`DswSidebar` 归入「Agent模式」分组（`ic_interactive.svg` 图标）。
+- [x] DSL 单一事实源 `common/GuncatUiSpec.ts`：11 种元素 + 4 种控件 + 图表/动作模型、容错解析（补括号修复 → 逐元素退化 → 骨架）、流式渐进解析、围栏分词、回传载荷构造、系统提示词正文（含反例）。
+- [x] 消息体切分 `common/GuncatUiParts.ts`：文本片段 + 界面片段；非法块保留原文交还 Markdown，不丢内容。
+- [x] 原生渲染器 `views/GuncatUiView.ets`：指标卡/指标组/进度条/表格/横向柱状图/Shape+Path 折线图/Path 环形占比/提示条/卡片与分栏容器/表单控件（Slider·Toggle·Select·TextInput）/选项按钮；未被 form 引用的控件自动成卡。
+- [x] 双向交互闭环：`sendUiInteraction()` 把界面取值打包为中文用户消息回传（空闲即重跑循环、执行中走插 steer），`pendingUiMessageId` 决定置灰，历史界面归档。
+- [x] 循环与提示词分叉：`AgentLoopService.buildWorkSystemPromptFor(mode)` + `compactWorkHistoryIfNeeded(messages, force, loopMode)`，交互模式与工作模式共享循环/工具/工作区，仅提示词与渲染不同。
+- [x] 回归护栏：`GuncatUiSpec` / `GuncatUiParts` 纳入 `test/guncat-harness`（分词、渐进解析、非法 JSON、未知 kind、限额、回传组装）；`test-core` 328 项全绿；`assembleHap` BUILD SUCCESSFUL。
+
+## 交互模式后续待办
+- [ ] 交互状态归档：把用户提交过的控件取值随消息持久化（当前仅存于组件内 @State，重启后回到默认值）。
+- [ ] 数据集绑定：让界面元素可绑定工作区数据文件（如 `table` 直接引用 `data.csv` 列），改参数由本地管道重算而不必再过模型。
+- [ ] 元素扩充：`timeline`（时间轴）、`kanban`（分组看板）、`slider` 双端区间、`date` 控件。
+- [ ] 界面块回退：解析失败时在气泡内给出「查看原始 JSON」折叠入口（当前仅按普通代码块渲染）。
+- [ ] 工具化渲染：新增 `render_ui` 工具，让模型在长任务中间主动弹界面，而不必等最终回答。
+
 ## 核心层待办（按杠杆排序，R1–R12 已完成项见 ITERATION_LOG.md）
 
 ### 已完成里程碑

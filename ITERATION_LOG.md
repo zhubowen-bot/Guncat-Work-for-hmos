@@ -1,5 +1,47 @@
 # ITERATION_LOG
 
+## 2026-10-09 R68: 交互模式（Intelligent UI）——Agent Loop 的第二种交付形态
+
+### 目标
+对齐 GPT-6 的 Intelligent UI：新增与工作模式平行的「交互模式」，让模型的回答不再是纯文本，而是可交互的原生界面（指标/图表/表格/表单控件/选项按钮），并且**用户改参数 → 回传模型 → 模型重出更新后的界面**形成闭环。
+
+### 设计边界（先定边界再动手）
+- 复用：Agent Loop（`executeWorkLoop` / 驱动路径）、42 个工具、沙箱工作区、上下文压缩、时间线 UI、产物卡片、三协议流式 function-calling。
+- 分叉：只有两处——**系统提示词**（按会话模式选择）与**正文渲染**（围栏块切出原生组件）。这样避免了复制一整套循环带来的双份维护。
+
+### 变更
+- 新增 `entry/src/main/ets/common/GuncatUiSpec.ts`（纯逻辑，交互模式单一事实源）：
+  - 模型类 `GuncatUiSpec/GuncatUiElement/GuncatUiInput/GuncatUiAction` 与常量类（`GuncatUiKind` 11 种、`GuncatUiControlType` 4 种、`GuncatUiChartType`、`GuncatUiLimits` 限额）。
+  - `GuncatUiSpecParser.parse` 容错解析（缺字段取默认、未知 kind 丢弃）+ `parseStreaming` 三级流式容错（补括号修复 → `parseLoosePrefix` 逐元素扫描 → 骨架文档）。
+  - `GuncatUiBlocks`：围栏分词（`split` 允许语言标记后空格/回车、未闭合块单列）、`extract`/`parseComplete`/`renderRaw`/`progress`。
+  - `GuncatUiMessageBuilder.toUserText`：界面取值 → 中文回传消息（`【交互界面回传】… / - 标签 = 取值 / confirm`）。
+  - `GuncatUiPrompt`：DSL 契约 + 反例 + `INTERACTIVE_DUTY`（交互模式职责，追加在共享提示词之后以覆盖其「交付格式」章节）。
+- 新增 `entry/src/main/ets/common/GuncatUiParts.ts`：消息体切分为「文本片段 + 界面片段」；**解析失败的块保留原文（含围栏）交还 Markdown**，杜绝内容消失。
+- 新增 `entry/src/main/ets/views/GuncatUiView.ets`：原生渲染器。指标卡/指标组/进度条/表格（横向滚动）/横向柱状图/`Shape`+`Path` 折线图/`Path` 圆弧环形占比 + 图例/提示条/卡片与分栏容器（list·grid·row）/表单（Slider·Toggle(Switch)·Select·TextInput）/选项按钮组；未被 form 引用的控件自动成独立卡片并带默认提交；`@State values` 持有控件取值（不落盘、不膨胀会话），`@Watch('onSpecChanged')` 只为新控件补默认值。
+- 新增 `entry/src/main/resources/base/media/ic_interactive.svg`（Agent 模式第二枚矢量图标）。
+- `common/Constants.ts`：`INTERACTIVE_AGENT_ID` / `MODE_CHAT|MODE_WORK|MODE_INTERACTIVE` / `UI_BLOCK_LANG` / `UI_MAX_BLOCKS_PER_MESSAGE`。
+- `service/AgentLoopService.ts`：`buildInteractiveSystemPrompt()`（`GuncatUiPrompt.promptSection()` + 共享循环提示词 + `INTERACTIVE_DUTY`，进程内缓存）与 `buildWorkSystemPromptFor(mode)` 模式分派。
+- `viewmodel/ChatViewModel.ets`：`buildInteractiveAgent()` 注入 agents 第二位；`interactiveMode` / `agentLoopMode` / `loopModeTitle|Hint|InputPlaceholder|EmptyDescription|ToolLabel` 文案 getter；`startNewConversation`/`selectAgent`/`deleteConversation`/`refreshWorkspace`/`steerWork`/`tickSchedules`/`sendMessage`/`regenerateMessage` 全量改为按 `MODE_*` 判定；新增 `sendUiInteraction(messageId, payload)` 与 `pendingUiMessageId`；`compactWorkHistoryIfNeeded(messages, force, loopMode)` 与 `runStepWithOverflowRetry(..., loopMode, ...)` 透传模式，压缩重建历史时取同一模式提示词。
+- `views/ChatBubbleView.ets` / `views/WorkTurnView.ets`：正文渲染改为「片段分发」——文本片段走 `RichTextView`，界面片段走 `GuncatUiView`；消息体不含 ` ```guncat-ui ` 时不重建片段（普通消息零开销）；两条渲染路径均接入 `onUiInteract`。
+- `pages/ChatPage.ets`：`vm.workMode` → `vm.agentLoopMode`（时间线、工作区弹层、上传落盘、产物卡、计时、工具行），时间线标题/提示改走 `loopModeTitle`/`loopModeHint`，胶囊文案走 `loopToolLabel`，输入框占位走 `loopModeInputPlaceholder`，空态描述走 `loopModeEmptyDescription`；`WorkTurnView` 增加 `uiLocked`（仅最新一轮可交互）与 `onUiInteract` 接线。
+- `views/AgentDrawerView.ets` / `views/DswSidebar.ets`：「Agent模式」分组与聊天分组的分流改为同时识别 `work` 与 `interactive`，并为交互模式渲染 `ic_interactive`。
+- `AppScope/app.json5`：版本 `6.2.0`(700) → `6.3.0`(710)。
+- `test/guncat-harness`：`setup.mjs`/`check-setup.mjs` 纳入 `GuncatUiSpec`/`GuncatUiParts`；`test-core.mjs` 新增 33 条断言（分词、已闭合/未闭合提取、渐进解析、非法 JSON 不抛出且保留原文、未知 kind 丢弃、元素数封顶、回传消息组装、片段切分）。
+
+### 验证
+- `node test/guncat-harness/setup.mjs && node test/guncat-harness/test-core.mjs`：**passed=328 failed=0**（新增 33 项全绿）。
+- `node check-setup.mjs && tsc -p check/tsconfig.json`（typescript 5.5.4）：TYPECHECK OK（退出码 0）。
+- DevEco `assembleHap`：**BUILD SUCCESSFUL**，产出 `entry-default-signed.hap`（约 73 MB）。
+  - 构建期间发现环境问题：`@luvi/lv-markdown-in` 的 ohpm 解包目录为空（`oh_modules/.ohpm/@luvi+lv-markdown-in@3.4.6` 只剩空目录），导致 `RichTextView.ets` 报 "Cannot find module" 级联错误。已用 DevEco 自带 `ohpm install @luvi/lv-markdown-in@3.4.6` 修复（`entry/oh-package.json5` 版本范围改回 `^3.4.6`），**与本轮代码改动无关**。
+
+### 已知限制
+- 交互取值只存在组件内 `@State`，重启后回到默认值（会话消息不落盘界面状态）。
+- 界面块解析失败时按普通代码块渲染，暂不提供「查看原始 JSON」折叠入口。
+- 交互模式仍走最终回答 + 界面块，尚未提供长任务中途主动弹界面的 `render_ui` 工具。
+
+### 下一项
+见 `BACKLOG.md`「交互模式后续待办」：交互状态归档、数据集绑定（界面元素直连工作区文件本地重算）、元素扩充（timeline/kanban/区间滑块/日期）、解析失败回退入口、`render_ui` 工具化渲染。
+
 ## 2026-09-16 R1: 工具执行超时/取消护栏
 
 ### 目标

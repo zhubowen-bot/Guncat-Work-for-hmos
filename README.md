@@ -10,7 +10,7 @@ Guncat Work 支持完整丰富的客户端功能：聊天模式内置通用、�
 
 工程上，项目采用 MVVM 分层，三协议 SSE 统一进协议适配层，每个文档生成器都配有针对性的离线验证环境（Node 构建 + Python 结构校验 + tsc 类型检查）。运行时只使用应用沙箱（filesDir/workspaces/）与系统安全组件完成文件读写，未新增任何存储权限；聊天请求与附件只发送到用户自行配置的模型服务。
 
-当前应用版本：`6.2.0`
+当前应用版本：`6.3.0`
 
 ## 主要功能
 
@@ -115,6 +115,16 @@ Guncat Work 支持完整丰富的客户端功能：聊天模式内置通用、�
 - 支持新建、切换和删除对话。
 - 跟随系统切换深色/浅色主题，并同步状态栏、导航栏和 Markdown 样式。
 
+### 交互模式（Intelligent UI）
+
+交互模式是 **Agent 循环的第二种交付形态**（侧边栏「Agent模式」分组中紧随「工作模式」的 ✦「交互模式」项）：它与工作模式**共用同一套 Agent Loop、沙箱工作区与 42 个工具**，唯一区别是**回答不再是纯文本**，而是由模型现场生成的、可以直接上手操作的界面——指标卡、进度条、表格、横向柱状图 / 折线图 / 环形占比、滑块 / 开关 / 下拉 / 输入框、选项按钮。对齐 GPT-6 的 Intelligent UI：说一句话，拿到一个能拖、能点、能改参数并即时重算的仪表盘。
+
+- **交付形态**：模型用 ` ```guncat-ui ` 围栏输出一段严格 JSON（或调用 `render_ui` 工具），应用把它解析成原生 ArkUI 组件渲染在对话流里；围栏块之外的文字仍按 Markdown 渲染。
+- **交互闭环**：拖动滑块 / 切换开关 / 下拉选择会在卡片内实时刷新数值预览；点「提交」或某个选项后，界面上的全部取值被打包成一条用户消息回传（形如「【交互界面回传】- 金额 = 45万 / 按新的金额重新测算。」），模型据此**重新生成更新后的界面**——界面因此成为可反复操作的仪表盘，而不是一张死图。
+- **流式成形**：界面块在生成过程中就按已解析出的部分渐进渲染（未闭合时显示「生成中…」并禁用交互），不需要等整段 JSON 输出完。
+- **容错优先**：JSON 非法或块未闭合时**原文照旧渲染**（交给 Markdown 库），绝不出现"内容凭空消失"；未知 `kind` / 控件类型被丢弃，元素数量、表格行列、柱状条数均有上限，畸形输出不会撑爆渲染。
+- **与工作模式的关系**：两者共用 `executeWorkLoop` 主循环与全部工具面，系统提示词按会话模式选择（`AgentLoopService.buildWorkSystemPromptFor(mode)`），压缩重建历史时同样按模式重建提示词。完整维护说明见下文「[交互模式架构（Intelligent UI）](#交互模式架构intelligent-ui)」。
+
 ### 工作模式（Agent Loop）
 
 工作模式是**与聊天智能体平行的独立身份**（侧边栏「聊天模式」标题上方的「Agent模式」分组中的 🛠「工作模式」项），进入后进入一个具备本地沙箱工作区与工具调用能力的 Agent 循环，可自主完成多步骤长程任务。完整架构见下文「[工作模式架构与维护指南](#工作模式架构与维护指南)」。
@@ -154,6 +164,8 @@ Guncat Work 支持完整丰富的客户端功能：聊天模式内置通用、�
 | 检索专家-研究  | 检索智能体 | 基于 Guncat Srch-Research：跨领域信息检索与多源交叉验证                     |
 | 检索专家-筛滤  | 检索智能体 | 基于 Guncat Srch-Sift：官方溯源与 AI 内容过滤                          |
 | 评估专家-LLM | 评估智能体 | 基于 Guncat Eval-LLM：最大减少幻觉地评估 LLM 模型的性能                     |
+| 工作模式（虚拟） | Agent 模式 | Guncat Harness：本地沙箱工作区 + 42 个工具 + 多轮 Agent Loop，自主完成长程任务并产出文件 |
+| 交互模式（虚拟） | Agent 模式 | Intelligent UI：同一套 Agent Loop，但回答交付为图表 / 表单 / 表格等可操作界面，调参即重算 |
 
 ## 持久化与主题系统
 
@@ -177,12 +189,13 @@ entry/src/main/ets/
 ├── entryability/
 │   └── EntryAbility.ets
 ├── pages/
-│   ├── ChatPage.ets                # 主页：聊天 + 工作模式时间线 + 工作区面板接线
+│   ├── ChatPage.ets                # 主页：聊天 + Agent 模式时间线（工作/交互）+ 工作区面板接线
 │   └── TableOcrPage.ets
 ├── views/
 │   ├── ChatBubbleView.ets          # 聊天气泡（含深度思考条 / 工具步骤时间线 / WorkStepFormat）
-│   ├── WorkTurnView.ets            # 工作模式时间线的单轮渲染（思考→工具→正文，无头像）
-│   ├── WorkspaceBar.ets            # 工作模式工作区面板（文件列表/上传/导出/清空）
+│   ├── WorkTurnView.ets            # Agent 模式时间线的单轮渲染（思考→工具→正文，无头像）
+│   ├── GuncatUiView.ets            # 交互模式渲染器：把 guncat-ui 文档渲染为原生可交互组件
+│   ├── WorkspaceBar.ets            # Agent 模式工作区面板（文件列表/上传/导出/清空）
 │   ├── RichTextView.ets
 │   ├── MessageInputView.ets
 │   ├── AgentDrawerView.ets
@@ -193,10 +206,10 @@ entry/src/main/ets/
 │   ├── FilePreviewBar.ets
 │   └── ImageLightbox.ets
 ├── viewmodel/
-│   └── ChatViewModel.ets           # 聊天状态 + 工作模式 Agent Loop 驱动（注意是 .ets）
+│   └── ChatViewModel.ets           # 聊天状态 + Agent Loop 驱动（工作/交互模式共用，注意是 .ets）
 ├── service/
 │   ├── ChatService.ts              # 三协议 SSE 流式（解析函数已导出供 AgentLoopService 复用）
-│   ├── AgentLoopService.ts         # 工作模式：三协议 tool-calling 单轮请求 + 系统提示词（静态, 缓存红线）
+│   ├── AgentLoopService.ts         # Agent Loop：三协议 tool-calling 单轮请求 + 按模式的系统提示词（静态, 缓存红线）
 │   ├── WorkToolRunner.ets          # 工作模式工具统一分发入口（Office 生成/PPT 读写等 .ets 能力）
 │   ├── WorkFileService.ts          # 沙箱工作区 + 文件类/技能类工具实现 + 工具 Schema（toolDefs）
 │   ├── WorkSkillService.ts         # 技能注册表（registry）+ rawfile 技能文档加载（list/load）
@@ -236,6 +249,8 @@ entry/src/main/ets/
 │   └── Agent.ts / ApiConfig.ts / ApiProfile.ts / MultimodalConfig.ts
 └── common/
     ├── Constants.ts / Types.ts / Utils.ts / MarkdownSanitizer.ts
+    ├── GuncatUiSpec.ts              # 交互模式单一事实源：DSL 模型/解析器/流式分词/回传载荷/系统提示词
+    └── GuncatUiParts.ts             # 消息体切分：Markdown 文本片段 + guncat-ui 界面片段
 
 entry/src/main/resources/rawfile/
 ├── agents.json + *_prompt*.md      # 聊天智能体定义与提示词
@@ -784,6 +799,107 @@ description 同时承担两个职责：系统提示词触发提示的展开、`l
 - 聊天模式完全沿用 `ChatBubbleView`（深度思考条同样为无底色行内样式），两条渲染路径互不影响。
 - `WorkspaceBar`：工作区弹层（文件列表 + 上传/导出 zip/删除）；文件行按扩展名映射类别图标（`sys.symbol`：图片/表格/演示文稿/PDF/压缩包/代码/音视频等），未知类型回退通用文档图标。
 
+## 交互模式架构（Intelligent UI）
+
+交互模式不是第二套循环，而是**同一套 Agent Loop 的第二种交付形态**。维护时先记住这条边界：**循环、工具、沙箱工作区、上下文压缩全部复用；只有「系统提示词」与「正文渲染」两处按模式分叉。**
+
+### 1. 身份与会话模型
+
+- **虚拟智能体**：`Constants.INTERACTIVE_AGENT_ID = 'interactive'`，由 `ChatViewModel.buildInteractiveAgent()` 注入 `agents` 列表**第二位**（`work` 之后），`AgentDrawerView` / `DswSidebar` 把它和工作模式一起归入「Agent模式」分组（`workAgents()` 判定两个 id）。
+- **会话绑定**：`Conversation.mode = 'chat' | 'work' | 'interactive'`，`agentId` 固定为 `'interactive'`；`startNewConversation()` / `selectAgent()` / `deleteConversation()` 三处的模式推导统一走 `Constants.MODE_*`。
+- **界面跟随**：`ChatPage` 用 `vm.agentLoopMode`（work 或 interactive）代替原来的 `vm.workMode` 选择时间线、工作区面板、上传落盘路径等共享能力；只有文案类差异走 `loopModeTitle` / `loopModeHint` / `loopModeInputPlaceholder` / `loopModeEmptyDescription` / `loopToolLabel` 五个 getter。
+- **深度思考**：与工作模式一致，进入即强制开启（工具行不显示该开关）。
+
+### 2. 提示词分叉
+
+```text
+ChatViewModel.executeWorkLoop(conv)
+  → AgentLoopService.buildWorkSystemPromptFor(conv.mode)
+      mode === 'interactive' → buildInteractiveSystemPrompt()   // 缓存于 cachedInteractivePrompt
+      mode === 'work'        → buildWorkSystemPrompt()
+```
+
+`buildInteractiveSystemPrompt()` = `GuncatUiPrompt.promptSection()`（DSL 契约 + 反例）+ 共享 Agent Loop 提示词（工具目录/技能目录/工作流，与工作模式逐字节同源）+ `GuncatUiPrompt.INTERACTIVE_DUTY`（交互模式职责，追加在末尾以覆盖共享提示词里的「交付格式」章节）。三段拼接后**整体静态**、进程内缓存一次，KV 缓存前缀与工作模式同样逐字节稳定。
+
+上下文压缩（`compactWorkHistoryIfNeeded`）在重建历史时会用**同一个 `loopMode`** 重新取系统提示词，因此压缩后不会串模式。
+
+### 3. DSL：模型看到的契约 = 我们解析的契约
+
+`common/GuncatUiSpec.ts` 是**唯一事实源**，同时承载四件事：模型类（`GuncatUiSpec` / `GuncatUiElement` / `GuncatUiInput` / `GuncatUiAction`）、解析器（容错 + 限额 + 流式渐进）、围栏分词器（`GuncatUiBlocks`）、系统提示词正文（`GuncatUiPrompt`）。**改 DSL 只需改这一个文件**，提示词文档与解析行为不会漂移。
+
+```json
+{
+  "version": 1,
+  "title": "贷款测算",
+  "subtitle": "拖动金额查看月供",
+  "controls": [
+    {"name": "amount", "type": "slider", "label": "金额", "min": 0, "max": 100, "step": 5, "default": 30, "unit": "万"}
+  ],
+  "elements": [
+    {"kind": "metrics", "items": [{"label": "月供", "value": 1234.5, "unit": "元", "delta": "-12"}]},
+    {"kind": "chart", "chart": "bar", "title": "收益对比", "labels": ["方案A", "方案B"], "values": [4.8, 3.9], "series": ["年化"]},
+    {"kind": "form", "title": "调整参数", "controls": ["amount"], "action": {"id": "recalc", "label": "重新计算", "confirm": "按新的金额重新测算。"}}
+  ]
+}
+```
+
+| 元素 kind | 渲染形态 |
+| --- | --- |
+| `card` / `layout` | 卡片容器（`layout` 支持 list / grid 两列 / row 等分）与嵌套子元素 |
+| `note` | 语气提示条（info / success / warn / danger，左侧语义色竖条） |
+| `metric` / `metrics` | 大号数值 + 单位 + 增减量，指标组自动 1–3 列 |
+| `progress` | 百分比进度条（可绑数值控件，拖动即刷新） |
+| `table` | 表头 + 交错行表格，超宽横向滚动（列宽 92vp） |
+| `chart` | `bar` 横向柱状图（手机竖屏最易读）/ `line` 原生 Shape+Path 折线 / `pie` Path 圆弧环形 + 图例百分比 |
+| `form` | 控件集合 + 提交按钮（未改动时次要样式，改动后转主色） |
+| `choice` | 选项按钮组，点击即回传；可带 `action2` 次要动作 |
+| `markdown` | 需要 Markdown 排版的正文段落（走 RichTextView） |
+
+控件类型 `slider` / `toggle` / `select` / `text` 由 `GuncatUiView` 渲染为 Slider / Toggle(Switch) / Select / TextInput；**未被任何 form 引用的控件**会自动成为独立卡片并附带默认提交按钮（避免模型漏写 form 时控件不可用）。
+
+**容错与限额**（`GuncatUiLimits`）：控件 ≤12、元素 ≤60、表格 ≤60×8、柱状条 ≤24（渲染前 12）、选项 ≤24、提示/文本行 ≤24；未知 `kind` / 控件类型 / 图表类型 / 语气取值一律**丢弃降级**，而不是报错。
+
+### 4. 渲染与流式成形
+
+```text
+assistant Message.content（含 ```guncat-ui 围栏）
+  → GuncatUiParts.build(content)                  // common/GuncatUiParts.ts
+      ├─ TEXT 片段 → RichTextView（Markdown 渲染）
+      └─ UI 片段   → GuncatUiView（@Prop spec + complete + locked + onInteract）
+```
+
+- **闭合块**：`GuncatUiBlocks.extract/parseComplete` 解析成功才从 Markdown 正文中移除并原生渲染；**解析失败则原文（含围栏）照旧交给 Markdown 库**——用户永远看得到模型的真实输出，不会"内容凭空消失"。
+- **未闭合块**（流式中）：`GuncatUiBlocks.progress` → `GuncatUiSpecParser.parseStreaming` 用「补括号修复 → 退化逐元素扫描 → 骨架文档」三级容错给出中间态，界面**边生成边成形**，此时 `complete=false` 显示「生成中…」并禁用全部交互与提交。
+- **重建时机**：`WorkTurnView` / `ChatBubbleView` 在消息体含 ` ```guncat-ui ` 时才重建片段（普通消息零开销），重建源为流式 33ms flush 的 `visibleText`；`GuncatUiView` 用 `@Watch('onSpecChanged')` 只为**新出现的控件**补默认值，不覆盖用户已改的值。
+- **界面归属**：交互模式走 `ChatPage.buildWorkTimeline()` → `WorkTurnView`（共享时间线，含思考/工具行），聊天模式走 `ChatBubbleView`，两条路径都接了 `GuncatUiView`。
+
+### 5. 交互闭环（回传）
+
+```text
+用户在界面拖动/输入 → GuncatUiView.values（组件内 @State，不落盘、不膨胀会话）
+点击提交/选项 → GuncatUiPayload{kind, actionId, names/labels/values | value, confirm}
+  → ChatBubbleView/WorkTurnView.onUiInteract(messageId, payload)
+  → ChatViewModel.sendUiInteraction(messageId, payload)
+      ├─ 校验 messageId === 最后一条 assistant 消息（历史界面已归档, 仅提示不发送）
+      ├─ GuncatUiMessageBuilder.toUserText(payload) → 中文用户消息（【交互界面回传】… + 逐项取值 + confirm）
+      ├─ 循环空闲 → executeWorkLoop(conv) 立即重算并重出界面
+      └─ 循环进行中 → 推入 workSteerQueue, 本轮工具结束后作为「用户补充」注入
+```
+
+置灰规则：`vm.pendingUiMessageId` 给出「当前可交互的那条消息 id」，其余界面（历史轮次、执行中的中间态）`locked=true`，防止重复提交。
+
+### 6. 扩展与维护入口
+
+| 想改什么 | 改哪里 |
+| --- | --- |
+| 新增元素种类 / 控件类型 | `common/GuncatUiSpec.ts`（常量 + `isAllowed` + `parseElement`/`parseInput` + 提示词表格）→ `views/GuncatUiView.ets`（`buildElement` 分发 + 新 `@Builder`） |
+| 调整界面文案 / 引导语 | `GuncatUiPrompt.RULES`（DSL 契约）与 `GuncatUiPrompt.INTERACTIVE_DUTY`（模式职责） |
+| 新增整块消息渲染路径 | 参照 `ChatBubbleView.buildAIContent()` / `WorkTurnView.buildTurnContent()`，接入 `GuncatUiParts.build()` + `GuncatUiView` |
+| 交互模式专属文案 | `ChatViewModel` 的 `loopModeTitle` / `loopModeHint` / `loopModeInputPlaceholder` / `loopModeEmptyDescription` / `loopToolLabel` |
+| 模式常量 | `Constants.INTERACTIVE_AGENT_ID` / `MODE_*` / `UI_BLOCK_LANG` / `UI_MAX_BLOCKS_PER_MESSAGE` |
+
+> 回归护栏：`common/GuncatUiSpec.ts` 与 `common/GuncatUiParts.ts` 已纳入 `test/guncat-harness`（纯逻辑用例含分词、渐进解析、非法 JSON 保留原文、未知 kind 丢弃、限额封顶、回传消息组装），改完跑 `node setup.mjs && node test-core.mjs`。
+
 ## 构建要求
 
 - DevEco Studio 6.0.1 或兼容版本
@@ -869,6 +985,17 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 5. 点击任意工具步骤可展开查看参数与执行结果；右上角「导出」把整个工作区打包为 `.zip` 保存。
 6. 完成后 Agent 输出详尽总结（含产出文件路径）；侧边栏切换到其他智能体即退出工作模式，工作会话与工作区文件保留。
 
+### 交互模式（Intelligent UI）
+
+1. 侧边栏「Agent模式」分组点击 ✦「交互模式」进入（就在「工作模式」下方）。
+2. 像平时一样提问即可，例如「帮我算一下 30 万房贷在不同利率下的月供」「对比这三个方案的收益并让我调参数」「把这段数据做成能筛选的表格」。
+3. Agent 不做长篇文字回答，而是给出**可操作的界面**：指标卡、图表、表格，以及滑块 / 开关 / 下拉 / 输入框。
+4. 直接拖动滑块、切换开关、选择下拉项——卡片内的数值会随之刷新。
+5. 点「提交」或某个选项，你的操作会作为一条消息回传，Agent 立即按新参数**重新生成界面**；反复调参就是反复重算。
+6. 需要材料时和工作模式一样：通过胶囊的「交互界面」面板上传文件（进入沙箱工作区），Agent 可以用同一套 42 个工具读取、计算、再画进界面。
+7. 只有最新一条界面可交互（历史界面自动置灰归档），避免改到旧参数上；界面在生成过程中会渐进成形，未完成时显示「生成中…」。
+8. 需要正式文件（Word / Excel / PPT）时直接说，Agent 会照常落盘产出——交互模式并不取消文件能力。
+
 ### 朗读
 
 1. 点击助手消息的朗读操作。
@@ -903,6 +1030,16 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 - 从系统分享接收的内容不会自动发送，必须由用户主动点击发送。
 - 原始附件不会作为永久文件复制到应用数据中。
 - 网络请求使用 HTTPS，实际数据处理政策以所配置的模型服务商为准。
+
+## 6.3.0 更新（交互模式 · Intelligent UI）
+
+- 新增 **Agent 模式第三项：交互模式（Intelligent UI）**，与「工作模式」平行展示在侧边栏的「Agent模式」分组中。它共用同一套 Agent Loop、沙箱工作区与 42 个工具，但**回答不是纯文本，而是可交互的界面**：指标卡、进度条、表格、横向柱状图 / 折线图 / 环形占比，以及滑块 / 开关 / 下拉 / 输入框与选项按钮。
+- **交互闭环**：在界面上拖动参数、切换开关、选择选项后点「提交」，全部取值会打包成一条消息回传，模型随即**重算并重出更新后的界面**——界面成为可反复操作的仪表盘，而不是一张死图；也支持点选项即回传（无需提交）。
+- **原生渲染、零额外依赖**：` ```guncat-ui ` 围栏里的严格 JSON 由 `GuncatUiSpec` 解析、`GuncatUiView` 渲染为原生 ArkUI 组件；折线图与环形占比用 Shape + Path 现场绘制，不引入图表库、不产生图片文件。
+- **流式成形与容错**：界面在生成过程中就按已解析出的部分渐进渲染（未完成时显示「生成中…」并禁用交互）；JSON 非法或块未闭合时**原文照旧交给 Markdown 渲染**，绝不出现内容消失；未知元素类型丢弃降级，元素/行列/柱条数量均有上限，畸形输出不会撑爆界面。
+- **提示词同源**：交互模式的系统提示词（DSL 契约 + 反例 + 模式职责）与解析器同文件维护（`common/GuncatUiSpec.ts`），提示词文档与解析行为不会漂移；上下文压缩后重建历史同样按会话模式取提示词。
+- 交互模式沿用工作模式的全部基础设施：任务清单、工具时间线、工作区上传、产物卡片、深度思考默认开启、三协议流式 function-calling；需要正式文件时照常产出 Word / Excel / PPT。
+- 应用版本号升至 `6.3.0`（versionCode 710）。
 
 ## 6.2.0更新
 

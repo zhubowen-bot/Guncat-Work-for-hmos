@@ -72,6 +72,8 @@ for (const [relSrc, relDst, replaces] of [
   ['common/LoopTurnInfoMapper.ts', 'LoopTurnInfoMapper.ts', []],
   ['common/WorkLoopStepInfoBuilder.ts', 'WorkLoopStepInfoBuilder.ts', []],
   ['common/Types.ts', 'Types.ts', []],
+  ['common/GuncatUiSpec.ts', 'GuncatUiSpec.ts', []],
+  ['common/GuncatUiParts.ts', 'GuncatUiParts.ts', []],
   ['common/MarkdownSanitizer.ts', 'MarkdownSanitizer.ts', []],
   ['export/ZipWriter.ets', 'ZipWriter.ts', [["from '@kit.ArkTS'", "from './arkts-shim'"]]],
   ['export/ZipWriterTs.ts', 'ZipWriterTs.ts', []],

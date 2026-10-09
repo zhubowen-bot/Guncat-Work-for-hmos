@@ -1485,11 +1485,11 @@ export class WorkFileService {
         'sources', WorkFileService.strProp('主要来源 URL, 多个用换行分隔, 可省略')),
       ['query', 'summary']));
     defs.push(WorkFileService.makeTool('list_skills',
-      '列出当前可用的技能(领域操作指南)。接到 PPT/演示文稿等对应任务时, 先加载对应技能再动手。',
+      '列出当前可用的技能(领域操作指南)。任务开始前无法确定是否命中技能时, 先调用本工具检查; 命中即 load_skill, 不要直接自行处理。',
       WorkFileService.props0(),
       []));
     defs.push(WorkFileService.makeTool('load_skill',
-      '加载技能文档全文。name 为技能 id(见 list_skills); file 可选, 传技能的参考文件名(如 reference/deck-dsl.md)加载深入资料, 省略时返回技能正文 SKILL.md(ppt/docx/xlsx 技能为全量 bundle: SKILL.md + 全部 reference, 必须一次加载完)。',
+      '加载技能文档全文。命中技能触发条件时, 第一步必须调用本工具, 未加载前不得开始处理。name 为技能 id(见 list_skills); file 可选, 传技能的参考文件名(如 reference/deck-dsl.md)加载深入资料, 省略时返回技能正文 SKILL.md(ppt/docx/xlsx 技能为全量 bundle: SKILL.md + 全部 reference, 必须一次加载完)。',
       WorkFileService.props2(
         'name', WorkFileService.strProp('技能 id, 如 ppt'),
         'file', WorkFileService.strProp('可选: 技能内的参考文件相对路径, 省略返回 SKILL.md 或全量 bundle')),

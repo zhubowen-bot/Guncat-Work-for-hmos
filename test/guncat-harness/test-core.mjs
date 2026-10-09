@@ -34,6 +34,12 @@ import { LoopError } from './gen/LoopError.ts';
 import { ToolCallRecord } from './gen/ToolCallRecord.ts';
 import { AbortSignal } from './gen/Types.ts';
 import { SubagentIsolation } from './gen/SubagentIsolation.ts';
+import {
+  GuncatUiBlocks,
+  GuncatUiPayload,
+  GuncatUiMessageBuilder
+} from './gen/GuncatUiSpec.ts';
+import { GuncatUiParts, GuncatUiSegType } from './gen/GuncatUiParts.ts';
 
 let passed = 0;
 let failed = 0;
@@ -1201,6 +1207,103 @@ console.log('[LoopError]');
   const overflow = new LoopError('context length exceeded', 400, 'http');
   check('上下文溢出识别', overflow.isContextOverflow() === true);
   check('上下文默认提示', overflow.contextOverflowMessage().indexOf('上下文窗口超限') === 0);
+}
+
+// ===== GuncatUiSpec / GuncatUiParts（交互模式 Intelligent UI DSL）=====
+console.log('[GuncatUiSpec]');
+
+{
+  const sample = [
+    '引导文字。',
+    '```guncat-ui',
+    '{',
+    '  "version": 1,',
+    '  "title": "贷款测算",',
+    '  "subtitle": "拖动金额查看月供",',
+    '  "controls": [',
+    '    {"name": "amount", "type": "slider", "label": "金额", "min": 0, "max": 100, "step": 5, "default": 30, "unit": "万"},',
+    '    {"name": "vip", "type": "toggle", "label": "会员", "default": true}',
+    '  ],',
+    '  "elements": [',
+    '    {"kind": "metrics", "items": [{"label": "月供", "value": 1234.5, "unit": "元", "delta": "-12"}]},',
+    '    {"kind": "chart", "chart": "bar", "title": "对比", "labels": ["A","B"], "values": [4.8, 3.9], "series": ["年化"]},',
+    '    {"kind": "table", "headers": ["项", "值"], "rows": [["利率", "4.2%"]]},',
+    '    {"kind": "form", "title": "调整", "controls": ["amount","vip"], "action": {"id": "recalc", "label": "重算", "confirm": "按新参数重算"}}',
+    '  ]',
+    '}',
+    '```',
+    '结尾文字。'
+  ].join('\n');
+
+  const frags = GuncatUiBlocks.split(sample);
+  check('分词 3 段', frags.length === 3);
+  check('围栏段已闭合', frags[1].fence === true && frags[1].complete === true);
+  const specs = GuncatUiBlocks.extract(sample);
+  check('提取 1 个界面文档', specs.length === 1);
+  const s = specs[0];
+  check('标题/副标题解析', s.title === '贷款测算' && s.subtitle === '拖动金额查看月供');
+  check('滑块默认值与单位', s.controls[0].defNum === 30 && s.controls[0].unit === '万');
+  check('开关默认值', s.controls[1].defBool === true);
+  check('元素 4 个', s.elements.length === 4);
+  check('metrics items 解析', s.elements[0].items.length === 1 && s.elements[0].items[0].value === 1234.5);
+  check('chart 解析', s.elements[1].chart === 'bar' && s.elements[1].values[1] === 3.9);
+  check('table 行解析', s.elements[2].rows[0][1] === '4.2%');
+  check('form 引用控件与动作', s.elements[3].controls.length === 2 && s.elements[3].action.id === 'recalc');
+  check('findControl 命中/未命中', s.findControl('vip') !== null && s.findControl('nope') === null);
+
+  // 流式: 未闭合时渐进解析
+  const streamed = '```guncat-ui\n{\n "title": "T",\n "elements": [\n  {"kind":"card","title":"A"},\n  {"kind":"card","title":"B"}\n ';
+  const prog = GuncatUiBlocks.progress(streamed);
+  check('流式 progress 有 spec', prog !== null && prog.spec !== null);
+  check('流式已解析 2 个元素', prog !== null && prog.spec !== null && prog.spec.elements.length === 2);
+  check('未闭合块不计入 extract', GuncatUiBlocks.extract(streamed).length === 0);
+
+  // 非法 / 未知 kind / 限额
+  check('非法 JSON 不抛出且不可提取', GuncatUiBlocks.extract('```guncat-ui\n{ "kind": nope }\n```').length === 0);
+  const unknown = GuncatUiBlocks.extract(
+    '```guncat-ui\n{"version":1,"elements":[{"kind":"hologram"},{"kind":"note","text":"ok"}]}\n```');
+  check('未知 kind 被丢弃', unknown.length === 1 && unknown[0].elements.length === 1);
+  const many = { version: 1, elements: [] };
+  for (let i = 0; i < 200; i++) { many.elements.push({ kind: 'note', text: 'x' + i }); }
+  check('元素数量封顶 60',
+    GuncatUiBlocks.extract('```guncat-ui\n' + JSON.stringify(many) + '\n```')[0].elements.length === 60);
+
+  // 回传消息组装
+  const payload = new GuncatUiPayload();
+  payload.kind = 'form';
+  payload.title = '贷款测算';
+  payload.names = ['amount'];
+  payload.labels = ['金额'];
+  payload.values = ['45'];
+  payload.confirm = '按新的金额重新测算。';
+  const text = GuncatUiMessageBuilder.toUserText(payload);
+  check('回传含标题/取值/确认语',
+    text.indexOf('【交互界面回传】贷款测算') === 0 && text.indexOf('- 金额 = 45') > 0 &&
+    text.indexOf('按新的金额重新测算。') > 0);
+  const action = new GuncatUiPayload();
+  action.kind = 'action';
+  action.label = '方案B';
+  action.value = '方案B';
+  check('动作回传含选择结果', GuncatUiMessageBuilder.toUserText(action).indexOf('选择结果：方案B') > 0);
+  check('控件取值文本(含单位)',
+    GuncatUiMessageBuilder.controlValueText(s.controls[0], {}) === '30万' &&
+    GuncatUiMessageBuilder.controlValueText(s.controls[0], { amount: 45 }) === '45万');
+  check('开关取值文本',
+    GuncatUiMessageBuilder.controlValueText(s.controls[1], { vip: false }) === '关闭');
+
+  // 片段切分(渲染层): 文本片段保留原文, 界面片段带 spec
+  const parts = GuncatUiParts.build(sample);
+  check('片段: 文本+界面+文本', parts.segments.length === 3 && parts.hasUi === true);
+  check('片段类型正确', parts.segments[0].type === GuncatUiSegType.TEXT &&
+    parts.segments[1].type === GuncatUiSegType.UI && parts.segments[2].type === GuncatUiSegType.TEXT);
+  check('界面片段携带 spec', parts.segments[1].spec !== null && parts.segments[1].complete === true);
+  const badParts = GuncatUiParts.build('```guncat-ui\n{oops}\n```');
+  // 非法块不渲染为界面, 但原文(含围栏)必须保留给 Markdown 库, 避免内容"凭空消失"
+  check('非法块保留原文渲染', badParts.hasUi === false &&
+    badParts.segments.length === 1 && badParts.segments[0].text.indexOf('{oops}') >= 0 &&
+    badParts.segments[0].text.indexOf('```guncat-ui') >= 0);
+  const plainParts = GuncatUiParts.build('普通回答, 无界面块');
+  check('无界面块时单文本片段', plainParts.segments.length === 1 && plainParts.hasUi === false);
 }
 
 console.log('');

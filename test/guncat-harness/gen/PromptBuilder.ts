@@ -87,9 +87,9 @@ export class PromptBuilder {
     lines.push('- goal_create(objective) / goal_get() / goal_update(status, note)：维护本会话的自主目标。长程任务开工前立目标锚定总意图，期间用 goal_update 记录关键进展或受阻原因，防止执行漂移；目标会注入运行时快照。');
     lines.push('- subagent(description, prompt)：派生子代理独立完成子任务（共享工作区、独立上下文、最多 40 步），返回其最终报告。把可外包的大块工作（独立调研、批量检索、成套素材整理）交给子代理，主任务保持轻盈；prompt 必须自包含（背景/要求/验收标准/产出路径），子代理不能向用户提问。');
     lines.push('- session_search(query)：检索本会话事件日志（历史消息/工具调用与结果）。上下文被压缩后要找回早期细节、或核对"之前执行过什么"时用它。');
-    lines.push('**技能系统**');
-    lines.push('- list_skills()：列出可用技能（领域操作指南）及其触发条件。');
-    lines.push('- load_skill(name, file?)：加载技能文档。省略 file 返回技能正文（ppt/docx/xlsx 技能返回 SKILL.md + 全部 reference 的全量 bundle，必须一次加载完，禁止挑读）；file 传技能内参考文件（如 reference/deck-dsl.md）加载深入资料。接到对应任务先加载技能再动手——技能正文优先于你自己的默认做法。');
+    lines.push('**技能系统（技能优先于默认做法）**');
+    lines.push('- list_skills()：列出可用技能（领域操作指南）及其触发条件。任务开始前如果无法确定是否命中技能，**先调用本工具检查，不要直接自行处理**。');
+    lines.push('- load_skill(name, file?)：加载技能文档。省略 file 返回技能正文（ppt/docx/xlsx 技能返回 SKILL.md + 全部 reference 的全量 bundle，必须一次加载完，禁止挑读）；file 传技能内参考文件（如 reference/deck-dsl.md）加载深入资料。**命中技能触发条件时，第一步必须调用本工具，未加载前不得开始处理**；技能正文优先于你的默认做法。');
     lines.push('');
     lines.push('所有工具的返回超过约 1.2 万字符会被截断并在末尾标注；被截断时不要凭截断结果下结论——文本与 Office 文档用 search_files 定位后 read_file 传 offset 分页读取，PDF 用 search_pdf 定位页码后 parse_document 分页读取。');
     return lines.join('\n');
@@ -146,11 +146,12 @@ export class PromptBuilder {
     let lines: string[] = [];
     lines.push('# 工具调用方法论（四步法）');
     lines.push('1. **明确信息缺口**：先问自己"我还缺什么信息？"，把缺口写成一句话。说不清缺什么的调用，不做。');
-    lines.push('2. **选择工具**：要原文 → read_file/parse_document；要定位 → search_files（文本与 Office）/search_pdf（PDF）/list_files；要看图 → view_image；要清洗/转换/提取大文件数据 → transform_file（先 load_skill）；要写代码算/程序化拼数据 → run_js；要产出 → write_* 系列（演示文稿先 load_skill）；要管理进度 → todo_write。');
+    lines.push('2. **技能优先**：先判断是否命中技能清单（主 Skill 或格式分支）的领域/触发词；命中即**第一步 load_skill**，未加载前不要选工具。**选择工具**：要原文 → read_file/parse_document；要定位 → search_files（文本与 Office）/search_pdf（PDF）/list_files；要看图 → view_image；要清洗/转换/提取大文件数据 → transform_file（先 load_skill("data")）；要写代码算/程序化拼数据 → run_js；要产出 → write_* 系列（先 load_skill 对应格式技能）；要管理进度 → todo_write。');
     lines.push('3. **构造最准确的输入**：目标明确（提取什么、生成什么）、范围限定（哪个文件/目录/章节）、期望输出格式（结构化/原文/表格）。');
     lines.push('4. **接收与校验**：检查返回是否覆盖缺口、有无截断或报错；不充分时基于已有结果构造更精准的输入再次调用（迭代逼近），而不是机械重复同一调用。');
     lines.push('');
     lines.push('调用调度原则：');
+    lines.push('- **技能是第一动作**：命中技能时，`load_skill` 必须出现在任何产出/搜索/写文件工具之前；宁可先加载再判断，不可先做再补。');
     lines.push('- **有依赖就等待，无依赖就合并**：后一步需要前一步结果的，必须等结果返回再发；相互独立的调用（如同时读几个文件）合并在同一轮连续发出，系统会自动并发执行只读调用。');
     lines.push('- **大块独立工作外包 subagent**：成体系的调研/检索/批量产出派子代理完成，指令写全；主任务只消费报告，上下文保持轻盈。');
     lines.push('- **不压缩返回**：工具返回的内容是后续输出的原材料，整合前不删减、不丢弃。超长结果系统会自动截断并把全文暂存到工作区 .spill/ 文件——需要原文时用 read_file 读回，不要凭截断结果下结论。');
@@ -164,7 +165,7 @@ export class PromptBuilder {
     lines.push('# 工作流程（严格遵守）');
     lines.push('1. **需求分析**：理解明确需求，推测潜在需求。存在影响整体方向的关键缺口（目标格式、范围、口径等）且无法用合理默认值时，用 ask_user_question 一次问全再动手；小事不问，用合理默认值并在总结中说明。**技能强制前置提问（如 ppt/docx/xlsx 新建）按技能执行，不适用“能默认就不问”**。提问会暂停循环等待用户回复，所以务必一次问完，不要挤牙膏式追问。');
     lines.push('2. **规划**：判断复杂度。复杂任务（预计 ≥3 步）先用 todo_write 建立任务清单（每项写清产出物），并用 1-2 句话向用户说明执行计划；简单任务直接执行，不必建清单。拆解到可执行即可，两步能完成的不拆成五步。');
-    lines.push('3. **执行**：按四步法逐项推进，每完成一项立即用 todo_write 更新状态。关键中间结论、重要数据与发现，及时写入工作区文件落盘，不要只留在对话里（文件不参与上下文压缩，永远可查）。');
+    lines.push('3. **执行**：命中技能时第一步先 load_skill，再按四步法逐项推进；每完成一项立即用 todo_write 更新状态。关键中间结论、重要数据与发现，及时写入工作区文件落盘，不要只留在对话里（文件不参与上下文压缩，永远可查）。');
     lines.push('4. **观察与更新**：每次工具返回后快速评估：覆盖缺口了吗？结果之间一致吗？有缺口就补查，有矛盾就核实，无缺口就推进下一步。需要向用户同步进展时，每条进展独立成段（前后空行或列表项），不要写成整段。');
     lines.push('5. **失败处理**：');
     lines.push('   - 第一次失败：分析原因（路径错？格式不支持？内容为空？超出上限？），调整后重试。');
