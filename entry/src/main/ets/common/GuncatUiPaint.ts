@@ -316,7 +316,7 @@ export class UiChartGeom {
       ' A' + UiChartGeom.n(r) + ' ' + UiChartGeom.n(r) + ' 0 1 1 ' + UiChartGeom.n(left) + ' ' + UiChartGeom.n(cy) + ' Z';
   }
 
-  // ===== 饼图 / 环形 / 径向(全部绝对坐标, 单位 vp) =====
+  // ===== 饼图 / 环形 / 径向(几何按 vp, 序列化时统一换算成 px) =====
   // 不用 viewPort 的原因见 UiBox 注释: strokeWidth 不随 viewPort 缩放, 用它会画出巨型圆环被裁掉。
 
   // 从 12 点方向开始的一段圆弧(描边用)

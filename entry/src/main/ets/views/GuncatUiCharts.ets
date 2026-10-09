@@ -268,9 +268,9 @@ export struct GuncatUiBarChart {
 
 // ===== 折线图 / 面积图 =====
 //
-// 尺寸策略: 折线图宽度必须自适应, 而 ArkUI 的 Shape+viewPort 会把内容缩放到组件尺寸、
-// strokeWidth 却不跟着缩放(真机上出现过"图只画了一小块、剩下大片空白"), 因此这里改为
-// **先量出真实宽度, 再按 vp 绝对坐标画** —— onAreaChange 拿到宽度后重算路径, 无 viewPort 缩放。
+// 尺寸策略: 折线图宽度必须自适应, 而 ArkUI 里 `Path.commands` 用 px、组件宽高与 strokeWidth
+// 用 vp(见 UiChartGeom.n() 的说明), 用 viewPort 缩放又会把 strokeWidth 甩掉。
+// 因此这里: **onAreaChange 量出真实宽度 → 几何按 vp 计算 → 序列化时统一换算成 px**。
 @Component
 export struct GuncatUiLineChart {
   @Prop labels: string[] = [];
@@ -750,7 +750,7 @@ export struct GuncatUiRadarChart {
     Column({ space: 8 }) {
       Stack() {
         Shape() {
-          // 与饼图/径向同理: 固定 220vp 的盒子 + 绝对坐标, 不设 viewPort(1 单位 = 1vp)
+          // 与饼图/径向同理: 固定 220vp 的盒子 + 绝对坐标(几何按 vp, 输出时由 UiChartGeom.unit 换算成 px)
           ForEach(UiChartGeom.radarGrid(this.labels.length, GuncatUiRadarChart.R,
             GuncatUiRadarChart.RINGS, GuncatUiRadarChart.BOX), (path: string, i: number) => {
             Path()
