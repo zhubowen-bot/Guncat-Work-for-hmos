@@ -252,4 +252,8 @@ export class Constants {
   static readonly WORK_LOG_REASONING_CHARS: number = 2000;
   // 单个 diff 卡片最多的展示行数(超出折叠)
   static readonly WORK_DIFF_MAX_LINES: number = 400;
+  // 手动停止一轮时追加到正文末尾的标注。
+  // 生产者是 ChatViewModel.finalizeWorkTurn, 消费者是 WorkTurnView 的活动折叠栏
+  // (据此把"已完成"显示成"已停止") —— 所以必须是同一份常量, 不要在两处各写一遍字面量。
+  static readonly WORK_STOPPED_NOTE: string = '任务已手动停止';
 }

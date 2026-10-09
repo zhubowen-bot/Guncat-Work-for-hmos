@@ -2946,7 +2946,7 @@ if (this.abortSignal.aborted) {
       return;
     }
     if (aborted) {
-      this.appendTurnNote(turnMsg, '任务已手动停止');
+      this.appendTurnNote(turnMsg, Constants.WORK_STOPPED_NOTE);
     }
     turnMsg.displayContent = turnMsg.content;
   }

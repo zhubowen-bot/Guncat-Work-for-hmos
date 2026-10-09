@@ -1280,6 +1280,57 @@ struct ChatPage {
     .padding({ left: this.isWide ? 28 : 0, right: this.isWide ? 28 : 0 })
   }
 
+  // ===== 交互模式: 把"一个用户任务"之后的连续若干轮 assistant 消息看成一个回合 =====
+  //
+  // 为什么在渲染层合并而不是合并数据: 一轮一条 assistant 消息是 Agent Loop 的既定结构 ——
+  // 下一轮请求的历史由 conv.messages 重建(assistant 与它的 toolCalls 必须同进同出),
+  // 把多轮并成一条会让模型看到"一条 assistant 同时调了所有工具", 时序错乱。所以只在渲染层
+  // 把多轮的思考/工具收进同一个折叠栏, 数据保持原样。
+  //
+  // 索引越界/非 assistant 一律返回安全值, 避免流式中间态(消息数组正在变)读到 undefined。
+  private isLoopRunLast(index: number): boolean {
+    let msgs: Message[] = this.vm.currentMessages;
+    if (index < 0 || index >= msgs.length || msgs[index].role !== 'assistant') {
+      return false;
+    }
+    if (index + 1 >= msgs.length) {
+      return true;
+    }
+    return msgs[index + 1].role !== 'assistant';
+  }
+
+  private turnSection(msg: Message, index: number): string {
+    if (!this.vm.interactiveMode) {
+      return 'full';
+    }
+    return this.isLoopRunLast(index) ? 'grouped' : 'content';
+  }
+
+  // 历史轮没有正文就整条不渲染(否则折叠栏旁边会多出一片空白)
+  private shouldRenderTurn(msg: Message, index: number): boolean {
+    if (!this.vm.interactiveMode || this.isLoopRunLast(index)) {
+      return true;
+    }
+    return msg.content !== '';
+  }
+
+  // 本回合中位于 index 之前的若干轮(用于折叠栏里的历史活动)
+  private priorRunMessages(index: number): Message[] {
+    let msgs: Message[] = this.vm.currentMessages;
+    let out: Message[] = [];
+    if (!this.vm.interactiveMode) {
+      return out;
+    }
+    let lead: number = index;
+    while (lead > 0 && msgs[lead - 1].role === 'assistant') {
+      lead--;
+    }
+    for (let i: number = lead; i < index && i < msgs.length; i++) {
+      out.push(msgs[i]);
+    }
+    return out;
+  }
+
   // 工作模式 / 交互模式时间线: 单容器 + 单一标识, 用户任务与各轮 思考→工具→正文 按发生顺序排列
   @Builder
   buildWorkTimeline() {
@@ -1309,20 +1360,23 @@ struct ChatPage {
       .width('100%')
       .alignItems(VerticalAlign.Center)
 
-      ForEach(this.vm.currentMessages, (msg: Message) => {
+      ForEach(this.vm.currentMessages, (msg: Message, i: number) => {
         if (msg.role === 'user') {
           this.buildWorkTaskCard(msg)
-        } else {
+        } else if (this.shouldRenderTurn(msg, i)) {
           WorkTurnView({
             message: msg,
+            // 工作模式一輪一条(思考条 + 正文 + 工具行);
+            // 交互模式按"一个用户任务 = 一个回合"合并: 只有回合最后一条出活动折叠栏,
+            // 历史轮只出正文(没有正文就整条不渲染, 它的思考/工具已收进折叠栏)
+            section: this.turnSection(msg, i),
+            priorMessages: this.priorRunMessages(i),
             isStreaming: this.vm.isStreaming &&
               msg === this.vm.currentMessages[this.vm.currentMessages.length - 1],
             isLastAssistant: msg === this.vm.currentMessages[this.vm.currentMessages.length - 1] &&
               msg.role === 'assistant',
             // 交互模式选「关闭」思考时不再挂空的"思考中"条(历史消息有思考内容仍会显示)
             thinkingExpected: this.vm.loopThinkingEnabled,
-            // 交互模式: 思考与工具调用合成一条活动折叠栏, 正文开始输出后默认收起成"已完成"
-            groupActivity: this.vm.interactiveMode,
             // 交互模式: 仅最新一轮界面可交互, 历史界面块与执行中的界面置灰防重复提交
             uiLocked: this.vm.interactiveMode &&
               (msg.id !== this.vm.pendingUiMessageId || this.vm.isStreaming),

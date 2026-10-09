@@ -131,12 +131,12 @@ Guncat Work 支持完整丰富的客户端功能：聊天模式内置通用、�
   - **交互模式**：均衡(High) / 快速(Low) / **关闭(Off)** —— 交付物是界面、追求响应快，去掉 `max`、多了关闭。
   「关闭」不是改全局 `thinkingEnabled`（那会把工作/聊天模式的深度思考一起关掉），而是由 `ChatViewModel` 的三个模式感知取值器在**下发请求时**生效：`loopEffort`（弹层高亮哪一档）、`loopEffortForRequest`（选关闭时强度退回 `low`，避免服务端校验 `reasoning_effort` 合法性失败）、`loopThinkingEnabled`（选关闭时为 `false`）。服务层无需改动：`thinkingEnabled=false` 时三种协议分别下发 `thinking:{type:'disabled'}`（OpenAI 兼容）/ `reasoning:{effort:'none'}`（Responses）/ `thinking:{type:'disabled'}` 且不带 `output_config`（Anthropic）。交互模式下的**子代理**与**上下文压缩**同样沿用该模式的档位。（存储键：`guncat_reasoning_effort` / `guncat_interactive_effort`）
 - **与工作模式的关系**：两者共用 `executeWorkLoop` 主循环与全部工具面，系统提示词按会话模式选择（`AgentLoopService.buildWorkSystemPromptFor(mode)`），压缩重建历史时同样按模式重建提示词。完整维护说明见下文「[交互模式架构（Intelligent UI）](#交互模式架构intelligent-ui)」。
-- **活动折叠栏（思考 + 工具调用）：交互模式独有**。交互模式的产出是界面，过程信息不该和界面抢版面，所以 `WorkTurnView` 在交互模式下把「思考 + 全部工具调用」合成**一个**活动折叠栏放在正文之前：
-  - **正文之前**保持展开，实时显示思考跑马灯与工具行（用户知道它在干什么）；
-  - **正文一开始输出就自动收起**成一条「✓ 已完成 · 思考 + 3 个工具 · 12.4s」，点一下可以重新展开；
-  - 开合状态是**纯派生**的（`activityOpenNow()`，依据 `isStreaming` + `message.content`），不在 `build()` 里改 `@State` —— ArkUI 构建期改状态会抖动；`message.content` 变化本就会让 `@ObjectLink` 重渲染，所以正文一出现就自然收起。用户点过之后 `activityTouched` 置位，之后完全听用户的。
-  - 标题与转圈图标另外由 `activityRunning()` 决定（流式中且「正文未出现」或「还有工具在跑」），保证**"已完成"只在真的做完时才出现**；刻意不因"又有新工具在跑"而自动重新展开，避免多轮之间来回开合晃眼。
-  - 工作模式**不受影响**（`groupActivity=false`，仍是思考条在上、工具行在正文之后、各自独立开合）。
+- **活动折叠栏（思考 + 工具调用）：交互模式独有，且按「回合」合并**。交互模式的产出是界面，过程信息不该和界面抢版面。Agent Loop 一轮一条 assistant 消息（这是**不能动**的结构：下一轮请求的历史由 `conv.messages` 重建，assistant 与它的 `toolCalls` 必须同进同出，合并数据会让模型看到"一条 assistant 同时调了所有工具"、时序错乱），所以合并只做在**渲染层**：一个用户任务之后的连续若干条 assistant 消息视为一个**回合**，只有回合**最后一条**渲染活动折叠栏，前面几轮只出正文（没有正文就整条不渲染，它的思考与工具已经收进折叠栏）。
+  - **正文之前**保持展开，实时显示思考跑马灯与工具行；**正文一开始输出就自动收起**成一条「✓ 已完成 · 思考 ×4 · 5 个工具 · 12.4s」，点一下重新展开；
+  - 展开后能看到**整个回合**的活动：历史轮以只读摘要列出（思考文字 + 工具名/耗时），本轮是完整形态（跑马灯 + 可展开 IO/diff 卡片的工具行）。历史轮不做 IO 展开是因为 **ArkUI 不允许组件递归**（`WorkTurnView` 里没法再套 `WorkTurnView` 去复用完整工具行），为此复制一份完整实现不值当；
+  - 开合状态是**纯派生**的（`activityOpenNow()`，依据 `isStreaming` + `message.content`），不在 `build()` 里改 `@State`；`message.content` 变化本就会让 `@ObjectLink` 重渲染，所以正文一出现就自然收起。用户点过后 `activityTouched` 置位，之后完全听用户的。
+  - 标题与转圈由 `activityRunning()` 决定（流式中且「正文未出现」或「还有工具在跑」），保证**"已完成"不会出现在还没跑完的时候**；被手动停止的回合显示「已停止」（靠 `Constants.WORK_STOPPED_NOTE` 判定，生产者在 `finalizeWorkTurn`、消费者在折叠栏，共用同一常量）。刻意不因"又有新工具在跑"而自动重新展开，避免多轮之间来回开合晃眼。
+  - 工作模式**不受影响**（`section='full'`，仍是思考条在上、工具行在正文之后、各自独立开合）。`WorkTurnView` 的 `section` 取 `'full' | 'grouped' | 'content'`，由 `ChatPage.turnSection()` / `shouldRenderTurn()` / `priorRunMessages()` 决定。
 
 ### 工作模式（Agent Loop）
 
@@ -1168,6 +1168,7 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 - **提示词「丰富度」微调（同日第五次）**：新增 `GuncatUiPrompt.RICHNESS` 专节（约 3.3k 字符），把模型从"一段文字 + 一张表格的排列组合"推向更复杂的组件组合：**组件选择优先级表**（要表达的内容 → 优先用 → 不要退化成，覆盖图表/卡片块/结构类/操作类几十种替代方案）、**分层配方**（抬头 → 结论指标 → 可视化 → 明细 → 操作，典型 8~14 个组件）、**防堆砌**（同一份数据不许原样说三遍，指标卡/图表/表格必须互补）、**同一份数据的「不合格 vs 合格」对照示例**。同步调整：`STREAMING` 取消"元素越少越好"、`ANTI_PATTERNS` 新增三条（偷懒的文字+表格组合 / 把结构化指标塞进正文 / 为丰富而重复数据）、`INTERACTIVE_DUTY` 新增"默认往丰富那一侧靠"、`REPAIR_*` 从"3~5 个元素"改为要求分层与图表。新增 17 条提示词断言，单测 448 → 465 项。
 
 - **活动折叠栏（同日第六次）**：交互模式下，正文前的**思考与全部工具调用**在正文开始输出后自动收成**一个**「✓ 已完成 · 思考 + 3 个工具 · 12.4s」折叠栏（点开可看完整思考与工具 IO）。正文之前保持展开以实时显示进度；开合状态为纯派生（`activityOpenNow()`），用户点过后完全听用户的；标题/转圈由 `activityRunning()` 决定，避免"还在跑却写着已完成"。工作模式不受影响。
+- **活动折叠栏合并（同日第七次）**：一个用户任务往往跑好几轮，原先**每轮一条**折叠栏（真机上出现四条「已完成」叠在一起）。现在按**回合**合并：只有回合最后一条渲染折叠栏，历史轮只出正文（无正文则整条不渲染），展开后能看到整个回合的活动（历史轮为只读摘要）。合并只做在渲染层 —— 一轮一条 assistant 消息是 Agent Loop 的既定结构（下一轮历史由 `conv.messages` 重建，assistant 与 `toolCalls` 必须同进同出），合并数据会让模型看到"一条 assistant 同时调了所有工具"。同时新增「已停止」状态（`Constants.WORK_STOPPED_NOTE`，生产者与消费者共用），避免手动停止的回合显示"已完成"。
 
 ## 6.3.0 更新（交互模式 · Intelligent UI）
 

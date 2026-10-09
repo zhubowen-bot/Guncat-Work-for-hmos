@@ -13,6 +13,7 @@ import { FileDiff } from '../common/DiffUtil';
 import { GuncatUiView } from './GuncatUiView';
 import { GuncatUiParts, GuncatUiSeg, GuncatUiSegType } from '../common/GuncatUiParts';
 import { GuncatUiEvent } from '../common/GuncatUiRuntime';
+import { Constants } from '../common/Constants';
 
 // diff 卡片行模型
 class DiffRow {
@@ -28,8 +29,12 @@ export struct WorkTurnView {
   // 本轮是否会产出思考内容: 交互模式选「关闭」思考时为 false,
   // 用于避免流式期间挂一条永远不填内容的"思考中"条
   @Prop thinkingExpected: boolean = true;
-  // 交互模式: 把"思考 + 工具调用"合成一个活动折叠栏, 正文开始输出后默认收起成"已完成"
-  @Prop groupActivity: boolean = false;
+  // 渲染段: 'full'(工作模式, 思考条 + 正文 + 工具行) / 'grouped'(交互模式本回合最后一轮:
+  // 聚合活动折叠栏 + 正文) / 'content'(交互模式本回合的历史轮: 只出正文, 不出活动)
+  @Prop section: string = 'full';
+  // 'grouped' 时: 本回合中位于本条之前的若干轮消息 —— 它们的思考与工具调用要一并收进折叠栏。
+  // 这些轮次已经跑完(冻结), 所以按值传进来即可, 不需要被观察。
+  @Prop priorMessages: Message[] = [];
   // 用户是否手动开合过活动栏; 没动过时按"是否还在跑"自动决定开合
   @State private activityTouched: boolean = false;
   @State private activityOpen: boolean = false;
@@ -321,15 +326,20 @@ export struct WorkTurnView {
   build() {
     Column({ space: 8 }) {
       // 活动区(思考 + 工具调用)。
-      // 交互模式: 合成**一个**活动折叠栏, 正文开始输出后默认收起(见 buildActivityGroup);
-      // 其它模式: 保持原样 —— 思考条在上、工具行在正文之后, 各自独立开合。
-      if (this.groupActivity) {
+      //   full    = 工作模式: 思考条在上, 工具行在正文之后(各自独立开合)
+      //   grouped = 交互模式本回合最后一轮: 思考与整个回合的工具**合并成一个**折叠栏
+      //   content = 交互模式本回合的历史轮: 不出活动(已收进折叠栏), 只出正文
+      if (this.section === 'full') {
+        // thinkingExpected: 交互模式选「关闭」思考时为 false。
+        // 之前只看 isStreaming, 关掉思考后仍会挂一条永远不填内容的"思考中"条, 看起来像卡住。
+        if (this.message.reasoning !== '' ||
+          (this.isStreaming && this.thinkingExpected)) {
+          this.buildThinking()
+        }
+      } else if (this.section === 'grouped') {
         if (this.hasActivity()) {
           this.buildActivityGroup()
         }
-      } else if (this.message.reasoning !== '' ||
-        (this.isStreaming && this.thinkingExpected)) {
-        this.buildThinking()
       }
       // 正文: 本轮叙述/结论, 按发生时序渲染在工具行之前
       if (this.isStreaming || this.message.content !== '') {
@@ -355,8 +365,8 @@ export struct WorkTurnView {
         .alignItems(HorizontalAlign.Start)
       }
       // 工具步骤(dsh 式行内工具行, 点击展开 IO 卡片/diff 卡片)。
-      // 分组模式下工具行已经进了活动栏(位于正文之前), 这里不再重复渲染。
-      if (!this.groupActivity && this.message.toolCalls.length > 0) {
+      // grouped 模式下工具行已经进了活动栏(位于正文之前), 这里不再重复渲染。
+      if (this.section === 'full' && this.message.toolCalls.length > 0) {
         this.buildSteps()
       }
       // 统计行(dsh StatsLine): 仅最终回复且数据可用时展示
@@ -506,18 +516,53 @@ export struct WorkTurnView {
     return totalMs;
   }
 
-  // ===== 交互模式: 活动折叠栏(思考 + 工具调用) =====
+  // ===== 交互模式: 活动折叠栏(整个回合的思考 + 工具调用) =====
   //
-  // 需求: 正文前的思考与工具调用, 在**正文开始输出后**默认收成一条"已完成"折叠栏。
-  // 实现要点:
+  // 一轮一条 assistant 消息是 Agent Loop 的既定结构(assistant 与其工具结果必须同进同出,
+  // 否则压缩/裁剪会拆散协议对), 所以**不动数据**, 只在渲染层合并:
+  //   本回合**最后一条**消息渲染这个折叠栏, 前面几轮的思考与工具作为"历史活动"一并收进来。
+  //
+  // 其它要点:
   //   1. 开合状态是**纯派生**的(activityOpenNow), 不在 build 里改 @State ——
   //      ArkUI 构建期改状态会触发重渲染告警/抖动, 而这里每次 message.content 变化
   //      (ObjectLink 会触发重渲染)都会自然重算, 正文一出现就自动收起;
   //   2. 用户点过之后(activityTouched)完全听用户的, 不再自动开合;
   //   3. 只有"还在跑"的时候默认展开, 跑完(含没有正文的轮次)一律收成一条已完成栏。
+  private priorReasoningRounds(): number {
+    let n: number = 0;
+    for (let i: number = 0; i < this.priorMessages.length; i++) {
+      if (this.priorMessages[i].reasoning !== '') {
+        n++;
+      }
+    }
+    return n;
+  }
+
+  private priorToolCount(): number {
+    let n: number = 0;
+    for (let i: number = 0; i < this.priorMessages.length; i++) {
+      n += this.priorMessages[i].toolCalls.length;
+    }
+    return n;
+  }
+
+  private priorToolMs(): number {
+    let totalMs: number = 0;
+    for (let i: number = 0; i < this.priorMessages.length; i++) {
+      let calls: ToolCallRecord[] = this.priorMessages[i].toolCalls;
+      for (let k: number = 0; k < calls.length; k++) {
+        if (calls[k].durationMs > 0) {
+          totalMs += calls[k].durationMs;
+        }
+      }
+    }
+    return totalMs;
+  }
+
+  // 本回合是否出现过活动(含前面几轮)
   private hasActivity(): boolean {
-    return this.message.toolCalls.length > 0 || this.message.reasoning !== '' ||
-      (this.isStreaming && this.thinkingExpected);
+    return this.priorMessages.length > 0 || this.message.toolCalls.length > 0 ||
+      this.message.reasoning !== '' || (this.isStreaming && this.thinkingExpected);
   }
 
   private activityOpenNow(): boolean {
@@ -532,6 +577,7 @@ export struct WorkTurnView {
 
   // 是否还有活在做: 流式中且(正文还没出现 或 还有工具在跑)。
   // 用于标题与转圈图标 —— 保证"已完成"只在真的做完时才出现。
+  // 前面几轮已经跑完, 只看本轮即可。
   private activityRunning(): boolean {
     if (!this.isStreaming) {
       return false;
@@ -549,20 +595,32 @@ export struct WorkTurnView {
   }
 
   private activityTitle(): string {
-    return this.activityRunning() ? '正在处理…' : '已完成';
+    if (this.activityRunning()) {
+      return '正在处理…';
+    }
+    return this.isStopped() ? '已停止' : '已完成';
   }
 
-  // 折叠态摘要: "思考 + 3 个工具 · 12.4s"
+  // 被手动停止的轮次: finalizeWorkTurn 会往正文末尾追加这句标注。
+  // 折叠栏据此把"已完成"改成"已停止", 避免明明被打断却写着完成。
+  private isStopped(): boolean {
+    return this.message.content.indexOf(Constants.WORK_STOPPED_NOTE) >= 0;
+  }
+
+  // 折叠态摘要, 覆盖整个回合: "思考 ×4 · 5 个工具 · 12.4s"
   private activitySummary(): string {
+    let thinkingRounds: number = this.priorReasoningRounds() +
+      (this.message.reasoning !== '' ? 1 : 0);
+    let tools: number = this.priorToolCount() + this.message.toolCalls.length;
     let parts: string[] = [];
-    if (this.message.reasoning !== '') {
-      parts.push('思考');
+    if (thinkingRounds > 0) {
+      parts.push(thinkingRounds > 1 ? '思考 ×' + thinkingRounds.toString() : '思考');
     }
-    if (this.message.toolCalls.length > 0) {
-      parts.push(this.message.toolCalls.length.toString() + ' 个工具');
+    if (tools > 0) {
+      parts.push(tools.toString() + ' 个工具');
     }
     let text: string = parts.join(' + ');
-    let ms: number = this.toolTotalMs();
+    let ms: number = this.priorToolMs() + this.toolTotalMs();
     if (ms > 0) {
       text = text === '' ? WorkStepFormat.formatDuration(ms)
         : text + ' · ' + WorkStepFormat.formatDuration(ms);
@@ -585,7 +643,8 @@ export struct WorkTurnView {
           Text('✓')
             .fontSize(12)
             .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.brand'))
+            // 被停止的轮次: 对勾保留但转成弱色, 表示"结束了"而不是"成功完成了"
+            .fontColor(this.isStopped() ? $r('app.color.text_tertiary') : $r('app.color.brand'))
             .width(12)
             .textAlign(TextAlign.Center)
             .flexShrink(0)
@@ -622,9 +681,13 @@ export struct WorkTurnView {
         this.activityTouched = true;
       })
 
-      // 展开体: 思考(跑动中显示最新一句跑马灯, 结束后显示完整思考) + 工具行
+      // 展开体: 历史轮的思考与工具(只读摘要) + 本轮思考(跑动中显示最新一句跑马灯,
+      // 结束后显示完整思考) + 本轮工具行(带 IO/diff 卡片)
       if (this.activityOpenNow()) {
         Column({ space: 6 }) {
+          if (this.priorMessages.length > 0) {
+            this.buildPriorActivity()
+          }
           if (this.message.reasoning !== '' || (this.isStreaming && this.thinkingExpected)) {
             this.buildActivityThinking()
           }
@@ -637,6 +700,65 @@ export struct WorkTurnView {
       }
     }
     .width('100%')
+  }
+
+  // 历史轮的活动(只读摘要): 思考文字 + 工具行。
+  // 这些轮次已经跑完, 按值传进来即可; 这里不做 IO/diff 展开 —— ArkUI 不允许组件递归
+  // (WorkTurnView 里没法再套 WorkTurnView 去复用完整工具行), 反复制一份完整实现不值当,
+  // 摘要已经能回答"当时在做什么"。
+  @Builder
+  private buildPriorActivity() {
+    Column({ space: 6 }) {
+      ForEach(this.priorMessages, (m: Message, i: number) => {
+        Column({ space: 4 }) {
+          if (m.reasoning !== '') {
+            Row({ space: 6 }) {
+              SymbolGlyph($r('sys.symbol.lightbulb'))
+                .fontSize(12)
+                .fontColor([$r('app.color.text_tertiary')])
+                .flexShrink(0)
+              Text('思考')
+                .fontSize(11)
+                .fontColor($r('app.color.text_tertiary'))
+                .flexShrink(0)
+            }
+            .width('100%')
+            .alignItems(VerticalAlign.Center)
+            Text(m.reasoning)
+              .fontSize(12)
+              .fontColor($r('app.color.text_secondary'))
+              .lineHeight(19)
+              .width('100%')
+          }
+          ForEach(m.toolCalls, (call: ToolCallRecord, k: number) => {
+            Row({ space: 6 }) {
+              SymbolGlyph(WorkStepFormat.iconRes(call.name))
+                .fontSize(13)
+                .fontColor([call.isError ? $r('app.color.danger') : $r('app.color.text_tertiary')])
+                .flexShrink(0)
+              Text(WorkStepFormat.displayName(call.name))
+                .fontSize(12)
+                .fontColor(call.isError ? $r('app.color.danger') : $r('app.color.text_secondary'))
+                .flexShrink(0)
+              if (call.durationMs > 0) {
+                Text(WorkStepFormat.formatDuration(call.durationMs))
+                  .fontSize(11)
+                  .fontColor($r('app.color.text_tertiary'))
+                  .flexShrink(0)
+              }
+              Blank()
+            }
+            .width('100%')
+            .alignItems(VerticalAlign.Center)
+          }, (call: ToolCallRecord, k: number) => 'pt' + i.toString() + '_' + k.toString() + call.id)
+        }
+        .width('100%')
+        .padding({ left: 12, right: 2 })
+        .alignItems(HorizontalAlign.Start)
+      }, (m: Message, i: number) => 'pm' + m.id)
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
   }
 
   @Builder
