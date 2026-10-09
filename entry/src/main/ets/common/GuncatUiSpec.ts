@@ -741,14 +741,25 @@ export class GuncatUiParseResult {
   error: string = '';
 }
 
-// 从流式缓冲中截取某个键之后的原文(用于未闭合 JSON 的渐进解析)
+// 从流式缓冲中截取某个键之后的原文(用于未闭合 JSON 的渐进解析)。
+// 注意: 必须避免把 "subtitle" / "totalLabel" 之类的键误当成 "title" / "label",
+// 因此要求匹配位置的前一个字符不是字母或数字。
 function sliceAfterKey(text: string, key: string): string {
   let token: string = '"' + key + '"';
-  let idx: number = text.indexOf(token);
-  if (idx < 0) {
-    return '';
+  let from: number = 0;
+  while (from <= text.length) {
+    let idx: number = text.indexOf(token, from);
+    if (idx < 0) {
+      return '';
+    }
+    let prev: string = idx > 0 ? text.charAt(idx - 1) : '';
+    let isWordChar: boolean = prev !== '' && /[A-Za-z0-9_]/.test(prev);
+    if (!isWordChar) {
+      return text.substring(idx + token.length);
+    }
+    from = idx + token.length;
   }
-  return text.substring(idx + token.length);
+  return '';
 }
 
 export class GuncatUiSpecParser {
@@ -853,7 +864,8 @@ export class GuncatUiSpecParser {
   // 尚未成形时返回「骨架文档」(title 可能已有, elements 为空), 让界面立刻出现占位。
   static parseStreaming(json: string): GuncatUiParseResult {
     // 先清洗(注释/尾随逗号/全角符号)再补括号, 两种容错叠加后中间态的命中率最高
-    let text: string = sanitizeJsonText(json);
+    let raw: string = sanitizeJsonText(json);
+    let text: string = raw;
     let completed: boolean = false;
     try {
       GuncatUiSpecParser.parse(text);
@@ -869,24 +881,244 @@ export class GuncatUiSpecParser {
       result.error = '尚未成形';
     }
     if (!completed && result.spec !== null) {
-      // 中间态: 元素可能少于最终结果, 调用方据 fragment.complete 判定是否可交互
-      return result;
+      // 中间态: 元素可能少于最终结果, 调用方据 fragment.complete 判定是否可交互。
+      // 补括号会截掉尾部, 因此标题与已出现的控件要从原文再扫一遍补齐。
+      return GuncatUiSpecParser.mergeRescued(result.spec, raw);
     }
     if (result.spec !== null) {
       return result;
     }
     // 补括号仍失败: 退化为「逐元素」渐进解析(同样先清洗)
-    let loose: GuncatUiParseResult = GuncatUiSpecParser.parseLoosePrefix(sanitizeJsonText(json));
-    if (loose.spec === null) {
-      // 连一个完整元素都没有: 给出骨架, 保证流式期间界面盒子已经存在
-      let skeleton: GuncatUiParseResult = new GuncatUiParseResult();
-      let empty: GuncatUiSpec = new GuncatUiSpec();
-      empty.title = GuncatUiSpecParser.looseTitle(json);
-      skeleton.spec = empty;
-      skeleton.error = loose.error;
-      return skeleton;
+    let loose: GuncatUiParseResult = GuncatUiSpecParser.parseLoosePrefix(raw);
+    if (loose.spec !== null) {
+      return loose;
     }
-    return loose;
+    // 再退化: 尾部被截断在字符串/半截数字里时, 逐级砍尾重试, 尽量救出已写完的元素。
+    // (模型输出超长被截断时, 界面不该永远停在"生成中"的空骨架上)
+    let salvaged: GuncatUiParseResult = GuncatUiSpecParser.salvageTruncated(raw);
+    if (salvaged.spec !== null && salvaged.spec.elements.length > 0) {
+      return salvaged;
+    }
+    // 连一个元素都没救出来: 退化为「文本级救助」——从**原文**里取出标题与已出现的控件, 做成一张可提交的表单。
+    // 传原文而非补括号后的文本: 补括号会截掉尾部, 那里往往正是 title / 控件定义所在。
+    return GuncatUiSpecParser.rescue(raw);
+  }
+
+  // 把「原文里能扫到的标题/控件」合并进已解析出的中间态文档:
+  // 修复补括号截断尾部导致的「标题丢失」「控件只出现一部分」。
+  private static mergeRescued(spec: GuncatUiSpec, raw: string): GuncatUiParseResult {
+    let result: GuncatUiParseResult = new GuncatUiParseResult();
+    if (spec.title === '') {
+      spec.title = GuncatUiSpecParser.looseTitle(raw);
+    }
+    if (spec.subtitle === '') {
+      spec.subtitle = GuncatUiSpecParser.looseSubtitle(raw);
+    }
+    let extra: GuncatUiParseResult = GuncatUiSpecParser.rescue(raw);
+    if (extra.spec !== null) {
+      // 补齐原文里已声明但补括号阶段被截掉的控件
+      for (let i: number = 0; i < extra.spec.controls.length; i++) {
+        let candidate: GuncatUiInput = extra.spec.controls[i];
+        let exists: boolean = false;
+        for (let j: number = 0; j < spec.controls.length; j++) {
+          if (spec.controls[j].name === candidate.name) {
+            exists = true;
+            break;
+          }
+        }
+        if (!exists && spec.controls.length < GuncatUiLimits.MAX_CONTROLS) {
+          spec.controls.push(candidate);
+        }
+      }
+      // 表单引用同步补齐(去重, 顺序保持)
+      for (let i: number = 0; i < spec.elements.length; i++) {
+        let el: GuncatUiElement = spec.elements[i];
+        if (el.kind !== GuncatUiKind.FORM) {
+          continue;
+        }
+        for (let j: number = 0; j < spec.controls.length; j++) {
+          let name: string = spec.controls[j].name;
+          let referenced: boolean = false;
+          for (let k: number = 0; k < el.controls.length; k++) {
+            if (el.controls[k] === name) {
+              referenced = true;
+              break;
+            }
+          }
+          if (!referenced) {
+            el.controls.push(name);
+          }
+        }
+      }
+    }
+    result.spec = spec;
+    return result;
+  }
+
+  // 极端截断的兜底: 从尾部逐级砍掉(最后一行 → 尾部 5% → 20% → 二分), 每次尝试清洗+补括号。
+  // 只接受"能解析出至少 1 个元素"的结果, 避免把半截文档当完整文档。
+  private static salvageTruncated(json: string): GuncatUiParseResult {
+    let base: GuncatUiParseResult = new GuncatUiParseResult();
+    base.error = '尚未成形';
+    if (json.length < 2) {
+      return base;
+    }
+    let cuts: number[] = [];
+    // 1) 砍掉最后一个不完整的行(流式最常见的截断点)
+    let lastNl: number = json.lastIndexOf('\n');
+    if (lastNl > 0) {
+      cuts.push(lastNl);
+    }
+    // 2) 尾部 5% / 15% / 30%(数字写成 "123.45" 或长字符串被截断的情形)
+    cuts.push(json.length - Math.max(1, Math.floor(json.length * 0.05)));
+    cuts.push(json.length - Math.max(1, Math.floor(json.length * 0.15)));
+    cuts.push(json.length - Math.max(1, Math.floor(json.length * 0.30)));
+    // 3) 二分兜底
+    cuts.push(Math.floor(json.length / 2));
+    for (let i: number = 0; i < cuts.length; i++) {
+      let cut: number = cuts[i];
+      if (cut <= 1 || cut >= json.length) {
+        continue;
+      }
+      let candidate: string = sanitizeJsonText(json.substring(0, cut));
+      let repaired: string = GuncatUiSpecParser.repairOpenJson(candidate);
+      try {
+        let r: GuncatUiParseResult = GuncatUiSpecParser.parse(repaired);
+        if (r.spec !== null && r.spec.elements.length > 0) {
+          return r;
+        }
+      } catch (e) {
+        // 该截断点仍不可解析: 换下一个
+      }
+      let byElement: GuncatUiParseResult = GuncatUiSpecParser.parseLoosePrefix(candidate);
+      if (byElement.spec !== null && byElement.spec.elements.length > 0) {
+        return byElement;
+      }
+    }
+    return base;
+  }
+
+  // 文本级救助: 结构已经完全不可解析时(输出在 controls/开头就被截断),
+  // 直接从原文里扫出 title / subtitle / controls, 拼出一张**能真正用的表单**。
+  // 目的: 界面卡片永远不出现"什么都没有"的空白态。
+  private static rescue(json: string): GuncatUiParseResult {
+    let result: GuncatUiParseResult = new GuncatUiParseResult();
+    let spec: GuncatUiSpec = new GuncatUiSpec();
+    spec.title = GuncatUiSpecParser.looseTitle(json);
+    spec.subtitle = GuncatUiSpecParser.looseSubtitle(json);
+    // 逐个 name 字段扫出控件(按下标命名兜底)
+    let names: string[] = [];
+    let search: string = '"name"';
+    let from: number = 0;
+    while (names.length < GuncatUiLimits.MAX_CONTROLS) {
+      let idx: number = json.indexOf(search, from);
+      if (idx < 0) {
+        break;
+      }
+      let colon: number = json.indexOf(':', idx + search.length);
+      if (colon < 0) {
+        break;
+      }
+      let value: string = GuncatUiSpecParser.readJsonStringAt(json, colon + 1);
+      from = colon + 1;
+      if (value === '') {
+        continue;
+      }
+      let duplicated: boolean = false;
+      for (let i: number = 0; i < names.length; i++) {
+        if (names[i] === value) {
+          duplicated = true;
+          break;
+        }
+      }
+      if (!duplicated) {
+        names.push(value);
+      }
+    }
+    if (names.length === 0) {
+      result.spec = spec;
+      result.error = '尚未成形';
+      return result;
+    }
+    let form: GuncatUiElement = new GuncatUiElement();
+    form.kind = GuncatUiKind.FORM;
+    form.id = 'rescue_form';
+    form.title = '';
+    form.controls = names;
+    form.action = GuncatUiSpecParser.rescueAction(json);
+    for (let i: number = 0; i < names.length; i++) {
+      let input: GuncatUiInput = new GuncatUiInput();
+      input.name = names[i];
+      input.type = GuncatUiControlType.TEXT;
+      input.label = names[i];
+      spec.controls.push(input);
+    }
+    spec.elements.push(form);
+    result.spec = spec;
+    return result;
+  }
+
+  private static rescueAction(json: string): GuncatUiAction {
+    let action: GuncatUiAction = new GuncatUiAction();
+    action.id = 'submit';
+    action.label = '提交';
+    action.style = GuncatUiActionStyle.PRIMARY;
+    // 只在 action 块内找 label(控件自己也有 label, 不能误取)
+    let actionIdx: number = json.lastIndexOf('"action"');
+    if (actionIdx < 0) {
+      return action;
+    }
+    let block: string = json.substring(actionIdx);
+    let idx: number = block.indexOf('"label"');
+    if (idx >= 0) {
+      let colon: number = block.indexOf(':', idx + 7);
+      if (colon >= 0) {
+        let value: string = GuncatUiSpecParser.readJsonStringAt(block, colon + 1);
+        if (value !== '' && value.length <= 8) {
+          action.label = value;
+        }
+      }
+    }
+    return action;
+  }
+
+  private static looseSubtitle(json: string): string {
+    let tail: string = sliceAfterKey(json, 'subtitle');
+    let colon: number = tail.indexOf(':');
+    if (colon < 0) {
+      return '';
+    }
+    return clampText(GuncatUiSpecParser.readJsonStringAt(tail, colon + 1),
+      GuncatUiLimits.MAX_TITLE);
+  }
+
+  // 从 ": " 之后读取一个 JSON 字符串字面量(未闭合也能取值), 失败返回 ''
+  private static readJsonStringAt(text: string, colonOrFrom: number): string {
+    let i: number = colonOrFrom;
+    while (i < text.length && (text.charAt(i) === ' ' || text.charAt(i) === '\t')) {
+      i++;
+    }
+    if (i >= text.length || text.charAt(i) !== '"') {
+      return '';
+    }
+    i++;
+    let out: string = '';
+    let escaped: boolean = false;
+    while (i < text.length) {
+      let ch: string = text.charAt(i);
+      if (escaped) {
+        out = out + ch;
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        break;
+      } else {
+        out = out + ch;
+      }
+      i++;
+    }
+    return out;
   }
 
   // 从流式缓冲中尽可能取出 title

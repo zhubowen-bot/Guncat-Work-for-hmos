@@ -263,7 +263,8 @@ export struct ChatBubbleView {
     }
   }
 
-  // 交互界面块切分(仅在消息体含 guncat-ui 标记时才重建, 普通消息零开销)
+  // 交互界面块切分(仅在消息体含 guncat-ui 标记时才重建, 普通消息零开销)。
+  // finalized = 该条消息产出已结束: 未闭合的界面块据此从"生成中"转为"未完成"静态展示。
   private refreshUiParts(): void {
     let content: string = this.isStreaming ? this.visibleText : this.message.content;
     if (content.indexOf(GuncatUiBlocks.OPEN) < 0) {
@@ -272,7 +273,7 @@ export struct ChatBubbleView {
       }
       return;
     }
-    this.uiParts = GuncatUiParts.build(content);
+    this.uiParts = GuncatUiParts.build(content, !this.isStreaming);
   }
 
   aboutToAppear(): void {
@@ -453,6 +454,7 @@ export struct ChatBubbleView {
             GuncatUiView({
               spec: seg.spec as GuncatUiSpec,
               complete: seg.complete,
+              truncated: seg.truncated,
               locked: this.uiLocked,
               rawFallback: seg.raw,
               onInteract: (payload: GuncatUiPayload): void => {

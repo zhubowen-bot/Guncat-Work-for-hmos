@@ -26,6 +26,8 @@ export struct GuncatUiView {
   @Prop @Watch('onSpecChanged') spec: GuncatUiSpec;
   // 文档是否已闭合(流式中为 false, 界面按中间态渲染并禁用交互)
   @Prop complete: boolean = true;
+  // 未闭合且本轮产出已结束(输出被截断/中断): 按"未完成"静态渲染, 而不是一直显示"生成中"
+  @Prop truncated: boolean = false;
   // 已提交/已点击过: 置灰防止重复回传(由父组件按消息维度控制)
   @Prop locked: boolean = false;
   // 解析失败时块内原文: 非空则卡片展示「原始输出」而不是空盒子(spec 为 null 或解析不出元素时)
@@ -37,6 +39,8 @@ export struct GuncatUiView {
   @State private values: Record<string, Object> = {};
   // 用户是否已改动过任一控件(未改动时提交按钮弱化为次要样式)
   @State private dirty: boolean = false;
+  // 「查看原始输出」开关(解析失败或输出被截断时可用于自查)
+  @State private showRaw: boolean = false;
 
   aboutToAppear(): void {
     this.seedDefaults();
@@ -233,7 +237,8 @@ export struct GuncatUiView {
 
   private statsText(): string {
     if (!this.complete) {
-      return '生成中…';
+      // 产出已结束但块没闭合 = 输出被截断/中断, 不能再说"生成中"
+      return this.truncated ? '未完成' : '生成中…';
     }
     if (this.locked) {
       return '已提交';
@@ -255,12 +260,20 @@ export struct GuncatUiView {
     return this.orphanControls().length > 0;
   }
 
-  // 兜底文案: 说明为什么这里没有界面
+  // 兜底文案: 说明为什么这里没有正常界面
   private fallbackText(): string {
+    if (this.truncated) {
+      return '这段界面输出没有写完（模型输出被截断或中断），已按已生成的部分展示。发一句"继续"或让它重新生成即可。';
+    }
     if (this.complete) {
       return '这段内容没有生成可交互的元素（JSON 结构不被识别），已按原始输出展示。';
     }
-    return '解析中…';
+    return '界面生成中…';
+  }
+
+  // "查看原始输出"开关文案
+  private rawToggleText(): string {
+    return this.showRaw ? '收起原始输出' : '查看原始输出';
   }
 
   build() {
@@ -314,8 +327,8 @@ export struct GuncatUiView {
         }, (input: GuncatUiInput) => 'c_' + input.name)
       }
 
-      // 流式骨架(尚未成形)
-      if (!this.complete && !this.hasContent()) {
+      // 骨架: 仅"正在生成且尚无内容"时显示(产出已结束的未闭合块走下面的"未完成"分支)
+      if (!this.complete && !this.truncated && !this.hasContent()) {
         Column({ space: 8 }) {
           Row()
             .width('70%')
@@ -332,29 +345,52 @@ export struct GuncatUiView {
         .alignItems(HorizontalAlign.Start)
       }
 
-      // 兜底: 已闭合但解析不出任何元素 → 展示原因 + 原始输出, 绝不出现空盒子
-      if (this.complete && !this.hasContent()) {
+      // 兜底: 没有可渲染内容(已闭合但解析不出元素 / 输出被截断) → 说明原因 + 原始输出入口
+      if (!this.hasContent() && (this.complete || this.truncated)) {
         Text(this.fallbackText())
           .fontSize(11)
           .fontColor($r('app.color.text_secondary'))
           .width('100%')
-        if (this.rawFallback.trim() !== '') {
-          Scroll() {
-            Text(this.rawFallback)
-              .fontSize(10)
-              .fontColor($r('app.color.text_tertiary'))
-              .fontFamily('monospace')
-              .width('100%')
-          }
-          .scrollable(ScrollDirection.Vertical)
-          .scrollBar(BarState.Off)
-          .constraintSize({ maxHeight: 180 })
+      }
+      // 有内容但块没写完: 明确标注(避免用户以为界面"就这些")
+      if (this.hasContent() && this.truncated) {
+        Text('界面输出未完成，以下为已生成的部分。')
+          .fontSize(11)
+          .fontColor($r('app.color.warning'))
           .width('100%')
-          .padding(10)
-          .backgroundColor($r('app.color.surface_secondary'))
-          .borderRadius(10)
-          .align(Alignment.TopStart)
+      }
+      // 原始输出(自查用): 解析失败时默认展开, 其余情况折叠
+      if (this.rawFallback.trim() !== '' && (this.showRaw || (!this.hasContent() && this.complete))) {
+        Scroll() {
+          Text(this.rawFallback)
+            .fontSize(10)
+            .fontColor($r('app.color.text_tertiary'))
+            .fontFamily('monospace')
+            .width('100%')
         }
+        .scrollable(ScrollDirection.Vertical)
+        .scrollBar(BarState.Off)
+        .constraintSize({ maxHeight: 180 })
+        .width('100%')
+        .padding(10)
+        .backgroundColor($r('app.color.surface_secondary'))
+        .borderRadius(10)
+        .align(Alignment.TopStart)
+      }
+      // 「查看原始输出」开关: 有任何原文时都可点开核对
+      if (this.rawFallback.trim() !== '' && !(!this.hasContent() && this.complete)) {
+        Button() {
+          Text(this.rawToggleText())
+            .fontSize(11)
+            .fontColor($r('app.color.text_secondary'))
+        }
+        .height(30)
+        .padding({ left: 12, right: 12 })
+        .borderRadius(10)
+        .backgroundColor($r('app.color.surface_secondary'))
+        .onClick(() => {
+          this.showRaw = !this.showRaw;
+        })
       }
     }
     .width('100%')

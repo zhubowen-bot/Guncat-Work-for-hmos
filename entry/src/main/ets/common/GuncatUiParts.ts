@@ -22,9 +22,11 @@ export class GuncatUiSeg {
   text: string = '';
   // UI 片段: 完整闭合为 true, 流式中间态为 false
   complete: boolean = true;
+  // 未闭合但产出已结束(输出被截断/中断): 按"未完成"静态渲染, 不再显示"生成中"
+  truncated: boolean = false;
   spec: GuncatUiSpec | null = null;
   error: string = '';
-  // 解析失败时保留块内原文(界面卡片上以「原始输出」展示, 避免出现空盒子)
+  // 块内原文(解析失败时兜底展示; 未闭合时供"查看原始输出"用)
   raw: string = '';
 }
 
@@ -33,7 +35,7 @@ export class GuncatUiParts {
   // 存在至少一个已解析成功的界面块(用于决定是否隐藏原始围栏文本)
   hasUi: boolean = false;
 
-  static build(content: string): GuncatUiParts {
+  static build(content: string, finalized: boolean = false): GuncatUiParts {
     let parts: GuncatUiParts = new GuncatUiParts();
     if (content === '' || content.indexOf(GuncatUiBlocks.OPEN) < 0) {
       if (content !== '') {
@@ -61,6 +63,7 @@ export class GuncatUiParts {
           uiSeg.type = GuncatUiSegType.UI;
           uiSeg.complete = true;
           uiSeg.spec = result.spec;
+          uiSeg.raw = f.text;
           parts.segments.push(uiSeg);
           parts.hasUi = true;
         } else {
@@ -70,11 +73,13 @@ export class GuncatUiParts {
           parts.segments.push(rawSeg);
         }
       } else {
-        // 流式中间态: 渐进渲染, 禁用交互; 同时带上原文, 便于解析始终失败时兜底展示
+        // 未闭合: 渐进渲染, 禁用交互。finalized 表示本轮产出已结束(输出被截断/中断),
+        // 此时按"未完成"静态渲染, 绝不停在"生成中"的空骨架上。
         let progress: GuncatUiProgress | null = GuncatUiBlocks.progress(content);
         let uiSeg2: GuncatUiSeg = new GuncatUiSeg();
         uiSeg2.type = GuncatUiSegType.UI;
         uiSeg2.complete = false;
+        uiSeg2.truncated = finalized;
         uiSeg2.raw = f.text;
         if (progress !== null) {
           uiSeg2.spec = progress.spec;

@@ -58,7 +58,8 @@ export struct WorkTurnView {
     }
   }
 
-  // 交互界面块切分(仅正文含 guncat-ui 标记时重建, 工作模式零开销)
+  // 交互界面块切分(仅正文含 guncat-ui 标记时重建, 工作模式零开销)。
+  // finalized = 本轮产出已结束(不再流式): 未闭合的界面块据此从"生成中"转为"未完成"静态展示。
   private refreshUiParts(): void {
     let content: string = this.isStreaming ? this.visibleText : this.message.content;
     if (content.indexOf(GuncatUiBlocks.OPEN) < 0) {
@@ -67,7 +68,7 @@ export struct WorkTurnView {
       }
       return;
     }
-    this.uiParts = GuncatUiParts.build(content);
+    this.uiParts = GuncatUiParts.build(content, !this.isStreaming);
   }
 
   aboutToAppear(): void {
@@ -157,6 +158,7 @@ export struct WorkTurnView {
               GuncatUiView({
                 spec: seg.spec as GuncatUiSpec,
                 complete: seg.complete,
+                truncated: seg.truncated,
                 locked: this.uiLocked,
                 rawFallback: seg.raw,
                 onInteract: (payload: GuncatUiPayload): void => {

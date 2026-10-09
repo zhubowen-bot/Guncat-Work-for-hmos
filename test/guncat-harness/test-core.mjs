@@ -1348,10 +1348,33 @@ console.log('[GuncatUiSpec]');
   const openUi = openSeg.segments.find((s) => s.type === GuncatUiSegType.UI);
   check('未闭合片段带原文兜底', openUi !== undefined && openUi.complete === false &&
     openUi.raw.indexOf('{') >= 0);
-  // 真正无法理解的结构仍退回原文渲染
-  const hopeless = GuncatUiParts.build('```guncat-ui\n{"elements":{"nope":1}}\n```');
-  check('无法理解的结构退回原文', hopeless.hasUi === false &&
-    hopeless.segments[0].text.indexOf('nope') >= 0);
+  // ===== 输出被截断(未闭合)的界面块: 不得永远停在"生成中" =====
+  const truncDoc = '{"version":1,"title":"红薯","elements":[{"kind":"card","text":"结论A"},' +
+    '{"kind":"table","headers":["地区","叫法"],"rows":[["北方","红薯"]]},{"kind":"note","text":"还没写完';
+  const truncText = '前言\n```guncat-ui\n' + truncDoc;
+  const truncProg = GuncatUiBlocks.progress(truncText);
+  check('截断文档能救出已写完的元素', truncProg !== null && truncProg.spec !== null &&
+    truncProg.spec.elements.length >= 1 && truncProg.spec.title === '红薯');
+  const streamingSeg = GuncatUiParts.build(truncText, false).segments.find((s) => s.type === GuncatUiSegType.UI);
+  check('流式中未闭合 → 生成中(truncated=false)', streamingSeg !== undefined &&
+    streamingSeg.complete === false && streamingSeg.truncated === false &&
+    streamingSeg.spec !== null && streamingSeg.spec.elements.length >= 1);
+  const endedSeg = GuncatUiParts.build(truncText, true).segments.find((s) => s.type === GuncatUiSegType.UI);
+  check('产出结束后未闭合 → 未完成(truncated=true)', endedSeg !== undefined &&
+    endedSeg.complete === false && endedSeg.truncated === true &&
+    endedSeg.raw.indexOf('还没写完') >= 0);
+  // 极端截断: 连一个元素都没有时, 也要救出标题与已出现的控件, 拼成可用表单
+  const rescueText = '```guncat-ui\n{"version":1,"title":"参数面板","controls":[' +
+    '{"name":"amount","type":"slider","label":"金额"},{"name":"vip","type":"toggle","label":"会员"}';
+  const rescueProg = GuncatUiBlocks.progress(rescueText);
+  check('极端截断救出标题与控件', rescueProg !== null && rescueProg.spec !== null &&
+    rescueProg.spec.title === '参数面板' && rescueProg.spec.controls.length === 2 &&
+    rescueProg.spec.elements.length === 1 && rescueProg.spec.elements[0].kind === 'form' &&
+    rescueProg.spec.elements[0].controls.length === 2);
+  // 完全空白的开头(标题都没写出来): 仍返回可用 spec(标题空, 无元素), 由渲染层显示"未完成"而非空骨架
+  const emptyProg = GuncatUiBlocks.progress('```guncat-ui\n{"ver');
+  check('刚开栏不抛出且返回骨架', emptyProg !== null && emptyProg.spec !== null &&
+    emptyProg.spec.elements.length === 0);
 }
 
 console.log('');
