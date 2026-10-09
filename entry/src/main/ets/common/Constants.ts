@@ -183,6 +183,10 @@ export class Constants {
   static readonly UI_BLOCK_LANG: string = 'guncat-ui';
   // 交互模式单条消息最多渲染的界面块数(超出部分按原文 Markdown 渲染)
   static readonly UI_MAX_BLOCKS_PER_MESSAGE: number = 3;
+  // 界面块被输出上限截断时, 自动追补的用户消息(最多自动续写一轮, 防止无限循环)
+  static readonly UI_CONTINUE_MESSAGE: string =
+    '【系统】你的上一条回复在 guncat-ui 界面块中间被输出上限截断了。请只输出该界面块的**剩余部分**（从被截断处继续，包括结尾的 ``` 与 JSON 收尾括号），不要重复已输出的内容，也不要重新解释。';
+  static readonly UI_CONTINUE_MAX_ROUNDS: number = 1;
 
   // ===== Guncat Work 6.1 (DeepSeek Harness 移植) =====
   // 工具输出溢出暂存目录(工作区内, 不注入运行时快照文件树; 对齐 dsh 的 spill store)

@@ -43,7 +43,7 @@ import { StorageManager } from '../data/StorageManager';
 import { Constants } from '../common/Constants';
 import { generateMessageId } from '../common/Utils';
 import { arrayBufferToBase64 } from '../common/Utils';
-import { GuncatUiPayload, GuncatUiMessageBuilder } from '../common/GuncatUiSpec';
+import { GuncatUiPayload, GuncatUiMessageBuilder, GuncatUiBlocks } from '../common/GuncatUiSpec';
 import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { common, Want, wantConstant } from '@kit.AbilityKit';
@@ -1289,8 +1289,25 @@ export class ChatViewModel {
     });
   }
 
-  // ===== 交互模式 (Intelligent UI): 界面回传 =====
-  // 用户在交互界面上的操作(表单提交 / 选项点击)转化为一条 user 消息:
+  // 交互模式: 最后一条 assistant 消息里的界面块是否被截断(块没闭合)。
+  // 这是"输出顶到上限"的信号——用它触发一次自动续写, 把界面块写完。
+  private needsUiContinuation(conv: Conversation): boolean {
+    if (conv.mode !== Constants.MODE_INTERACTIVE) {
+      return false;
+    }
+    for (let i: number = conv.messages.length - 1; i >= 0; i--) {
+      let m: Message = conv.messages[i];
+      if (m.role === 'assistant') {
+        if (m.content.indexOf('```' + Constants.UI_BLOCK_LANG) < 0) {
+          return false;
+        }
+        return GuncatUiBlocks.lastPartial(m.content) !== '';
+      }
+    }
+    return false;
+  }
+
+  // ===== 交互模式 (Intelligent UI): 界面回传 =====  // 用户在交互界面上的操作(表单提交 / 选项点击)转化为一条 user 消息:
   // - 循环空闲: 立即触发下一轮 Agent Loop(模型据新参数重出界面, 形成闭环);
   // - 循环进行中: 走插话通道, 由主循环在本轮工具执行结束后注入(对齐 steer 语义)。
   sendUiInteraction(messageId: string, payload: GuncatUiPayload): void {
@@ -1752,7 +1769,10 @@ export class ChatViewModel {
           // 粘性 max-tokens(对齐 dsh): 输出顶到上限即收尾并提示续跑
           if (LoopDecisions.shouldBreakOnMaxTokens(turn.finishReason)) {
             metrics.recordMaxTokens();
-            this.appendTurnNote(turnMsg, ' 本轮输出达到模型上限(max tokens), 已自动收尾。发送"继续"接着输出。');
+            let tailNote: string = this.needsUiContinuation(conv) ?
+              ' 本轮输出达到模型上限(max tokens), 界面块未写完, 正在自动续写…' :
+              ' 本轮输出达到模型上限(max tokens), 已自动收尾。发送"继续"接着输出。';
+            this.appendTurnNote(turnMsg, tailNote);
             turnEndStatus = 'max_tokens';
           }
           break;
@@ -2097,14 +2117,45 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
 
       let step: number = 0;
       let state: WorkLoopStepState = new WorkLoopStepState();
+      // 自动续写: 交互模式下的界面块可能被输出上限截断(块没闭合), 此时自动追补一轮请求把它写完。
+      // 最多 Constants.UI_CONTINUE_MAX_ROUNDS 轮, 且每个界面块只补一次, 避免死循环。
+      let continueRounds: number = 0;
+      let startStep: number = 0;
       let res = await WorkLoopDriverBridge.runWithStep(async (i: number): Promise<WorkLoopTurnInfo> => {
-        return await this.runDriverStep(conv, messages, metrics, turnToolEvents, state, i);
+        return await this.runDriverStep(conv, messages, metrics, turnToolEvents, state, i + startStep);
       }, Constants.WORK_MAX_STEPS, (s: number, action: string, reason?: string): void => {
         if (this.context !== null) {
           SessionLogService.append(this.context, conv.id, 'driver_step',
             { 'step': s, 'action': action, 'reason': reason !== undefined ? reason : '' });
         }
       });
+      while (!this.abortSignal.aborted &&
+        continueRounds < Constants.UI_CONTINUE_MAX_ROUNDS &&
+        this.needsUiContinuation(conv) && messages.length > 0) {
+        continueRounds++;
+        let continueText: string = Constants.UI_CONTINUE_MESSAGE;
+        // 落进会话(用户可见可回溯)并进入请求历史, 让模型从被截断处接着输出
+        let continueMsg: Message = Message.ofUser(generateMessageId(), continueText,
+          '（界面输出被截断，已自动续写）', []);
+        conv.messages.push(continueMsg);
+        messages.push(LoopMessage.user(continueText));
+        this.persistConversations();
+        this.notifyUIChange();
+        if (this.context !== null) {
+          SessionLogService.append(this.context, conv.id, 'ui_continue', { 'round': continueRounds });
+        }
+        startStep = startStep + Math.max(1, res.steps);
+        state = new WorkLoopStepState();
+        this.markStreamStart();
+        res = await WorkLoopDriverBridge.runWithStep(async (i: number): Promise<WorkLoopTurnInfo> => {
+          return await this.runDriverStep(conv, messages, metrics, turnToolEvents, state, i + startStep);
+        }, Constants.WORK_MAX_STEPS, (s: number, action: string, reason?: string): void => {
+          if (this.context !== null) {
+            SessionLogService.append(this.context, conv.id, 'driver_step',
+              { 'step': s, 'action': action, 'reason': reason !== undefined ? reason : '' });
+          }
+        });
+      }
       if (res.maxStepsReached) {
         step = Constants.WORK_MAX_STEPS;
       }
@@ -2326,7 +2377,10 @@ if (this.abortSignal.aborted) {
           // 粘性 max-tokens(对齐 dsh): 输出顶到上限即收尾并提示续跑
           if (LoopDecisions.shouldBreakOnMaxTokens(turn.finishReason)) {
             metrics.recordMaxTokens();
-            this.appendTurnNote(turnMsg, ' 本轮输出达到模型上限(max tokens), 已自动收尾。发送"继续"接着输出。');
+            let tailNote: string = this.needsUiContinuation(conv) ?
+              ' 本轮输出达到模型上限(max tokens), 界面块未写完, 正在自动续写…' :
+              ' 本轮输出达到模型上限(max tokens), 已自动收尾。发送"继续"接着输出。';
+            this.appendTurnNote(turnMsg, tailNote);
             state.turnEndStatus = 'max_tokens';
           }
           info = WorkLoopStepInfoBuilder.finish(turn.content.length, turn.finishReason);

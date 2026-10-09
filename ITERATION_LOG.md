@@ -72,6 +72,13 @@
 
 **给维护者的结论**：交互模式的界面块应当被当作「**随时可能被输出上限砍断的流**」来设计——任何"等待完整输入"的状态都必须有终态，任何中间态都必须尽量渲染已到达的部分。剩余唯一无内容的情形是"输出在前 100 字符内就被砍断"（此时连控件都没开始写），此时卡片显示「未完成」+ 原文，属可接受下限。
 
+### R68.3：界面块被截断时自动续写（同日第三次）
+**动机**：R68.2 让截断"体面收场"，但根因是模型输出顶到上限——只是止损，没有解决问题。
+
+**实现**：`ChatViewModel.needsUiContinuation(conv)` 判定"最后一条 assistant 消息含 ` ```guncat-ui ` 且存在未闭合块"（`GuncatUiBlocks.lastPartial`），驱动路径在主循环结束后自动追补最多 `Constants.UI_CONTINUE_MAX_ROUNDS(=1)` 轮：向会话与请求历史各追加一条 `UI_CONTINUE_MESSAGE`（"只输出该界面块的剩余部分，不要重复已输出内容"），然后重新 `WorkLoopDriverBridge.runWithStep`（步数偏移用 `startStep` 累计，避免第二轮步数从 0 重数、也避免触到 `WORK_MAX_STEPS` 保护）。会话中留痕为一条带「（界面输出被截断，已自动续写）」显示文案的用户消息，并发 `ui_continue` 会话事件。max-tokens 提示语同步区分"正在自动续写…"与"发送继续接着输出"。
+
+**验证**：`test-core` 349 项全绿；`tsc` 通过；`assembleHap` **BUILD SUCCESSFUL**。
+
 ### 下一项
 见 `BACKLOG.md`「交互模式后续待办」：交互状态归档、数据集绑定（界面元素直连工作区文件本地重算）、元素扩充（timeline/kanban/区间滑块/日期）、解析失败回退入口、`render_ui` 工具化渲染。
 
