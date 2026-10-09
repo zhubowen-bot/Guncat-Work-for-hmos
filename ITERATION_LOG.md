@@ -79,6 +79,20 @@
 
 **验证**：`test-core` 349 项全绿；`tsc` 通过；`assembleHap` **BUILD SUCCESSFUL**。
 
+### R68.4：接入 DeepSeek JSON Output，界面块改由 JSON 模式请求产出（同日第四次）
+**动机**：用户提供了 DeepSeek 官方 *JSON Output* 文档（`response_format={'type':'json_object'}`，要求提示词含 json 字样并给出样例，且提示"需要合理设置 max_tokens 防止 JSON 被中途截断"）。这正是 R68.2/R68.3 那个截断问题的官方解法。
+
+**实现**：
+- **请求层支持 JSON 模式**：`AgentLoopService.runTurn` / `runTurnWithRetry` 新增 `forceJsonMode` 形参并透传到协议体构造；`buildCompletionsBody` 输出 `response_format={'type':'json_object'}`，`buildResponsesBody` 输出 `text={format:{type:'json_object'}}`；两者在未显式配置 `maxTokens` 时用 `Constants.DEFAULT_JSON_OUTPUT_TOKENS(8000)` 填空，满足官方"合理设置 max_tokens"的要求（Anthropic 无对应参数，走提示词约束）。
+- **`AgentLoopService.generateUiSpec()`**：交互模式专用的界面 JSON 请求——系统提示 `UI_JSON_SYSTEM`（含 json 字样与完整 schema 样例）+ 复用主循环最近 6 条上下文 + 用户指令 `UI_JSON_INSTRUCTION`（含输出样例），`includeTools=false`、`maxRetries=1`、`forceJsonMode=true`；返回前剥掉可能的围栏，并用 `GuncatUiSpecParser.parse → parseStreaming` 双重容错解析，失败返回 `null`。
+- **`GuncatUiSpecWriter`（common/GuncatUiSpec.ts）**：把 `GuncatUiSpec` 序列化回规范 JSON 与完整 ` ```guncat-ui ` 块（控件按类型只写必要字段，元素按 kind 写对应字段，嵌套 items/children 递归），供 `ChatViewModel` 把 JSON 模式的结果落成一条新的 assistant 消息——渲染路径完全复用，无需改动 UI。
+- **ChatViewModel 续写改为"JSON 优先"**：`needsUiContinuation` 命中时先调 `generateUiSpec`；成功则追加一条 `displayContent='（界面已由 JSON 输出模式生成）'` 的 assistant 消息并结束；失败才回落到原文本续写路径（留痕「（界面输出被截断，已自动续写）」）。
+- **提示词篇幅纪律**：`GuncatUiPrompt.RULES` 增加"界面 JSON 写太长会被输出上限截断、整块作废"的显式警告与硬上限（默认 2–4 个元素、≤6 个；controls ≤3；table ≤8 行；chart ≤8 点；文案 ≤60 字；title ≤20 字），从源头降低截断概率。
+
+**验证**：`test-core` 由 349 扩到 **362 项全绿**（新增 13 条 `GuncatUiSpecWriter` 往返断言：标题/副标题、三类控件取值、8 种元素、图表数值、表格行、语气、进度、表单动作与引用、选项动作、嵌套子元素）；`tsc` 通过；`assembleHap` **BUILD SUCCESSFUL**。
+
+**已知限制**：DeepSeek 文档明确说明 JSON Output 有概率返回空 `content` —— `generateUiSpec` 对此返回 `null`，主循环自动回落到文本续写路径，不会卡住。
+
 ### 下一项
 见 `BACKLOG.md`「交互模式后续待办」：交互状态归档、数据集绑定（界面元素直连工作区文件本地重算）、元素扩充（timeline/kanban/区间滑块/日期）、解析失败回退入口、`render_ui` 工具化渲染。
 

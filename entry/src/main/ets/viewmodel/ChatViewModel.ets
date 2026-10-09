@@ -43,7 +43,7 @@ import { StorageManager } from '../data/StorageManager';
 import { Constants } from '../common/Constants';
 import { generateMessageId } from '../common/Utils';
 import { arrayBufferToBase64 } from '../common/Utils';
-import { GuncatUiPayload, GuncatUiMessageBuilder, GuncatUiBlocks } from '../common/GuncatUiSpec';
+import { GuncatUiPayload, GuncatUiMessageBuilder, GuncatUiBlocks, GuncatUiSpec, GuncatUiSpecWriter } from '../common/GuncatUiSpec';
 import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { common, Want, wantConstant } from '@kit.AbilityKit';
@@ -2133,17 +2133,40 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
         continueRounds < Constants.UI_CONTINUE_MAX_ROUNDS &&
         this.needsUiContinuation(conv) && messages.length > 0) {
         continueRounds++;
+        if (this.context !== null) {
+          SessionLogService.append(this.context, conv.id, 'ui_continue', { 'round': continueRounds });
+        }
+        // 首选: 用 JSON Output 模式单独请求一份界面 JSON(response_format=json_object +
+        // 充足 max_tokens), 从根本上绕开"聊天输出里写长 JSON 被截断"的问题。
+        let spec: GuncatUiSpec | null = null;
+        try {
+          spec = await AgentLoopService.generateUiSpec(this.apiConfig, messages, this.abortSignal);
+        } catch (e) {
+          spec = null;
+        }
+        if (this.abortSignal.aborted) {
+          break;
+        }
+        let uiMsgId: string = generateMessageId();
+        if (spec !== null) {
+          let blockText: string = GuncatUiSpecWriter.toBlock(spec);
+          let uiMsg: Message = Message.ofAssistant(uiMsgId, blockText);
+          uiMsg.displayContent = '（界面已由 JSON 输出模式生成）';
+          conv.messages.push(uiMsg);
+          this.persistConversations();
+          this.notifyUIChange();
+          // 让下一轮请求也能看到这份界面(保持历史完整)
+          messages.push(LoopMessage.assistant(blockText, []));
+          break;
+        }
+        // 兜底: JSON 模式失败, 退回"文本续写"路径(让模型接着把界面块写完)
         let continueText: string = Constants.UI_CONTINUE_MESSAGE;
-        // 落进会话(用户可见可回溯)并进入请求历史, 让模型从被截断处接着输出
-        let continueMsg: Message = Message.ofUser(generateMessageId(), continueText,
+        let continueMsg: Message = Message.ofUser(uiMsgId, continueText,
           '（界面输出被截断，已自动续写）', []);
         conv.messages.push(continueMsg);
         messages.push(LoopMessage.user(continueText));
         this.persistConversations();
         this.notifyUIChange();
-        if (this.context !== null) {
-          SessionLogService.append(this.context, conv.id, 'ui_continue', { 'round': continueRounds });
-        }
         startStep = startStep + Math.max(1, res.steps);
         state = new WorkLoopStepState();
         this.markStreamStart();

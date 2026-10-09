@@ -28,7 +28,7 @@ import { SSEProtocolAdapter, SSEParseContext } from './SSEProtocolAdapter.ts';
 import { RetryPolicy } from './RetryPolicy.ts';
 import { RetryAfterParser } from './RetryAfterParser.ts';
 import { LoopError } from './LoopError.ts';
-import { GuncatUiPrompt } from './GuncatUiSpec.ts';
+import { GuncatUiPrompt, GuncatUiSpec, GuncatUiParseResult, GuncatUiSpecParser } from './GuncatUiSpec.ts';
 export { LoopError };
 
 // 带分类的循环层错误已迁移到 common/LoopError(纯逻辑, 可单测);
@@ -147,7 +147,8 @@ export class AgentLoopService {
     thinkingEnabled: boolean, reasoningEffort: string, webSearchEnabled: boolean,
     callbacks: LoopTurnCallbacks, abortSignal: AbortSignal,
     includeTools: boolean = true,
-    toolOverrides: Record<string, Object>[] | null = null): Promise<LoopTurnResult> {
+    toolOverrides: Record<string, Object>[] | null = null,
+    forceJsonMode: boolean = false): Promise<LoopTurnResult> {
     let protocol: string = LLMProtocol.pick(config.provider);
     AgentLoopService.lastProtocol = protocol;
     let url: string = LLMProtocol.resolveEndpoint(config.baseUrl, protocol, config.autoSuffix);
@@ -156,11 +157,13 @@ export class AgentLoopService {
       (toolOverrides !== null ? toolOverrides : AgentLoopService.getToolDefs(webSearchEnabled)) : [];
     let body: Record<string, Object>;
     if (protocol === 'responses') {
-      body = AgentLoopService.buildResponsesBody(config, messages, tools, thinkingEnabled, reasoningEffort, webSearchEnabled);
+      body = AgentLoopService.buildResponsesBody(config, messages, tools, thinkingEnabled,
+        reasoningEffort, webSearchEnabled, forceJsonMode);
     } else if (protocol === 'anthropic') {
       body = AgentLoopService.buildAnthropicBody(config, messages, tools, thinkingEnabled, reasoningEffort, webSearchEnabled);
     } else {
-      body = AgentLoopService.buildCompletionsBody(config, messages, tools, thinkingEnabled, reasoningEffort, webSearchEnabled);
+      body = AgentLoopService.buildCompletionsBody(config, messages, tools, thinkingEnabled,
+        reasoningEffort, webSearchEnabled, forceJsonMode);
     }
     let bodyStr: string = JSON.stringify(body);
 
@@ -422,7 +425,8 @@ export class AgentLoopService {
     callbacks: LoopTurnCallbacks, abortSignal: AbortSignal,
     includeTools: boolean = true,
     maxRetries: number = Constants.WORK_LLM_RETRY_MAX,
-    toolOverrides: Record<string, Object>[] | null = null): Promise<LoopTurnResult> {
+    toolOverrides: Record<string, Object>[] | null = null,
+    forceJsonMode: boolean = false): Promise<LoopTurnResult> {
     let attempt: number = 0;
     let policy: RetryPolicy = new RetryPolicy(maxRetries, 500, 8000, 0.2,
       ['rate_limit', 'server', 'transport', 'empty']);
@@ -432,7 +436,7 @@ export class AgentLoopService {
       try {
         turn = await AgentLoopService.runTurn(config, messages, thinkingEnabled,
           reasoningEffort, webSearchEnabled, callbacks, abortSignal, includeTools,
-          toolOverrides);
+          toolOverrides, forceJsonMode);
       } catch (e) {
         let err: Error = e as Error;
         if (err instanceof LoopError) {
@@ -690,7 +694,99 @@ export class AgentLoopService {
     }
   }
 
-  // 兜底补全: 缺名字的调用记录不送回(避免协议校验失败), 空 argsJson 填 '{}'
+  // ===== 交互模式: 结构化 JSON 界面块(JSON Output 专用请求) =====
+
+  // JSON 输出模式的系统提示(DeepSeek JSON Output 要求提示词含 json 字样 + 期望格式样例)
+  static readonly UI_JSON_SYSTEM: string = [
+    '你是界面 JSON 生成器。你只输出一个合法 JSON 对象, 不输出任何解释、Markdown 围栏或多余文字。',
+    'JSON 必须符合下面的 schema(方括号表示可选, 数组元素数量受上限约束):',
+    '{',
+    '  "title": "界面标题(≤20字)",',
+    '  "subtitle": "一句话说明(≤30字, 可选)",',
+    '  "controls": [ {"name":"英文名","type":"slider|toggle|select|text","label":"标签","min":0,"max":100,"step":1,"default":0,"unit":"","options":["A","B"]} ],',
+    '  "elements": [',
+    '    {"kind":"card","title":"","text":"正文"},',
+    '    {"kind":"metrics","items":[{"label":"指标","value":0,"unit":"","delta":""}]},',
+    '    {"kind":"progress","title":"","value":0,"total":100,"unit":"%"},',
+    '    {"kind":"table","headers":["列1","列2"],"rows":[["a","b"]]},',
+    '    {"kind":"chart","chart":"bar|line|pie","title":"","labels":["A","B"],"values":[1,2],"series":["系列"],"unit":""},',
+    '    {"kind":"note","tone":"info|success|warn|danger","text":""},',
+    '    {"kind":"form","title":"","controls":["控件name"],"action":{"id":"submit","label":"提交","confirm":""}},',
+    '    {"kind":"choice","title":"","options":["选项A","选项B"],"action":{"id":"pick","label":"选择"}},',
+    '    {"kind":"markdown","text":"需要 Markdown 的正文"},',
+    '    {"kind":"layout","layout":"list|grid|row","children":[]}',
+    '  ]',
+    '}',
+    '硬性约束: elements 必填且 2~4 个元素(总数不超过 4); controls 最多 3 个; table rows 不超过 8 行; ',
+    'chart 的 labels 与 values 数量必须一致; 文案尽量短(每条 ≤60 字); 数值必须是真实算得或用工具查到的; ',
+    '只使用上面列出的 kind 与 type 取值; 不要输出颜色、样式、坐标或注释。'
+  ].join('\n');
+
+  // 触发请求的用户指令: 明确要求"只输出 json", 并给出样例
+  static readonly UI_JSON_INSTRUCTION: string = [
+    '请把上一条回答的内容转成一个可用于界面的 JSON 对象(只输出 json, 不要任何解释或围栏)。',
+    '要求: 用 2~4 个元素把核心结论与数据表达清楚; 需要用户调节参数时给 controls 并配一个 form; ',
+    '需要用户做选择时用 choice; 数值必须来自上文真实计算或工具结果, 不要编造。',
+    '输出样例(结构照抄, 内容替换): {"title":"结论","subtitle":"一句话说明",',
+    '"elements":[{"kind":"card","text":"核心结论"},',
+    '{"kind":"metrics","items":[{"label":"指标A","value":12,"unit":"%"}]},',
+    '{"kind":"choice","title":"想继续了解哪块?","options":["选项A","选项B"],"action":{"id":"pick","label":"选择"}}]}'
+  ].join('\n');
+
+  // 交互模式专用: 用 JSON Output 模式单独请求一个界面 JSON。
+  // 目的(对齐 DeepSeek JSON Output 文档): 用 response_format 保证输出是合法 JSON,
+  // 并给足 max_tokens, 从根本上避免界面块被中途截断; 请求不带工具, 与主循环隔离。
+  // 返回已解析并修复的 GuncatUiSpec; 失败返回 null(调用方回落到原文渲染)。
+  static async generateUiSpec(config: ApiConfig, messages: LoopMessage[],
+    abortSignal: AbortSignal): Promise<GuncatUiSpec | null> {
+    let input: LoopMessage[] = [];
+    input.push(LoopMessage.system(AgentLoopService.UI_JSON_SYSTEM));
+    // 复用主循环的最近上下文(仅文本), 让 JSON 请求知道"上一条回答/工具结果"是什么
+    let kept: LoopMessage[] = [];
+    for (let i: number = 1; i < messages.length; i++) {
+      let m: LoopMessage = messages[i];
+      if (m.role === 'system' || m.content === '') {
+        continue;
+      }
+      kept.push(m);
+    }
+    if (kept.length > 6) {
+      kept = kept.slice(kept.length - 6);
+    }
+    for (let i: number = 0; i < kept.length; i++) {
+      input.push(kept[i]);
+    }
+    input.push(LoopMessage.user(AgentLoopService.UI_JSON_INSTRUCTION));
+    let callbacks: LoopTurnCallbacks = new LoopTurnCallbacks();
+    let turn: LoopTurnResult = await AgentLoopService.runTurnWithRetry(
+      config, input, false, 'low', false, callbacks, abortSignal,
+      false, 1, null, true);
+    let text: string = turn.content.trim();
+    if (text === '') {
+      return null;
+    }
+    // 模型可能仍套了围栏: 剥掉后按 JSON 解析(内部已含补括号/清洗容错)
+    let body: string = text;
+    let fenceStart: number = body.indexOf('```');
+    if (fenceStart >= 0) {
+      let afterFence: number = body.indexOf('\n', fenceStart);
+      let fenceEnd: number = body.lastIndexOf('```');
+      if (afterFence > 0 && fenceEnd > afterFence) {
+        body = body.substring(afterFence + 1, fenceEnd);
+      }
+    }
+    let result: GuncatUiParseResult = GuncatUiSpecParser.parse(body);
+    if (result.spec !== null && result.spec.elements.length > 0) {
+      return result.spec;
+    }
+    let repaired: GuncatUiParseResult = GuncatUiSpecParser.parseStreaming(body);
+    if (repaired.spec !== null && repaired.spec.elements.length > 0) {
+      return repaired.spec;
+    }
+    return null;
+  }
+
+  // 截图前的兜底补全: 缺名字的调用记录不送回(避免协议校验失败), 空 argsJson 填 '{}'
   private static normalizeCalls(callAcc: ToolCallRecord[]): ToolCallRecord[] {
     let out: ToolCallRecord[] = [];
     for (let i: number = 0; i < callAcc.length; i++) {
@@ -714,7 +810,7 @@ export class AgentLoopService {
   // openai Chat Completions: assistant(tool_calls) + role:'tool'
   private static buildCompletionsBody(config: ApiConfig, messages: LoopMessage[],
     tools: Record<string, Object>[], thinkingEnabled: boolean, reasoningEffort: string,
-    webSearchEnabled: boolean): Record<string, Object> {
+    webSearchEnabled: boolean, jsonMode: boolean = false): Record<string, Object> {
     let msgs: Record<string, Object>[] = [];
     let systemText: string = messages.length > 0 ? messages[0].content : '';
     if (messages.length > 0 && messages[0].role === 'system' && systemText !== '') {
@@ -781,6 +877,14 @@ export class AgentLoopService {
     }
     if (config.maxTokens !== null) {
       body['max_tokens'] = config.maxTokens;
+    } else if (jsonMode) {
+      // JSON 输出模式: 未显式配置上限时给一个够用的默认值, 避免界面 JSON 被截断
+      body['max_tokens'] = Constants.DEFAULT_JSON_OUTPUT_TOKENS;
+    }
+    // 结构化 JSON 输出(DeepSeek / OpenAI 兼容: response_format={'type':'json_object'})。
+    // 官方要求提示词里出现 json 字样并给出期望格式样例, UI_JSON_INSTRUCTION 已满足。
+    if (jsonMode) {
+      body['response_format'] = { 'type': 'json_object' };
     }
     AgentLoopService.mergeExtraBody(body, config.extraBody);
     // 深度思考开关(OpenAI 兼容格式): thinking.type 控制开关, reasoning_effort 强度可选 max/high/low
@@ -794,7 +898,7 @@ export class AgentLoopService {
   // openai Responses: function_call / function_call_output 输入项
   private static buildResponsesBody(config: ApiConfig, messages: LoopMessage[],
     tools: Record<string, Object>[], thinkingEnabled: boolean, reasoningEffort: string,
-    webSearchEnabled: boolean): Record<string, Object> {
+    webSearchEnabled: boolean, jsonMode: boolean = false): Record<string, Object> {
     let input: Record<string, Object>[] = [];
     let systemText: string = messages.length > 0 ? messages[0].content : '';
     for (let i: number = 0; i < messages.length; i++) {
@@ -860,6 +964,12 @@ export class AgentLoopService {
     }
     if (config.maxTokens !== null) {
       body['max_output_tokens'] = config.maxTokens;
+    } else if (jsonMode) {
+      body['max_output_tokens'] = Constants.DEFAULT_JSON_OUTPUT_TOKENS;
+    }
+    // 结构化 JSON 输出(Responses: text.format)
+    if (jsonMode) {
+      body['text'] = { format: { type: 'json_object' } };
     }
     AgentLoopService.mergeExtraBody(body, config.extraBody);
     body['reasoning'] = { effort: thinkingEnabled ? reasoningEffort : 'none' };

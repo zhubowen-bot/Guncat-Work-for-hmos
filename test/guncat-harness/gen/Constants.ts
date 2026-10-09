@@ -187,6 +187,8 @@ export class Constants {
   static readonly UI_CONTINUE_MESSAGE: string =
     '【系统】你的上一条回复在 guncat-ui 界面块中间被输出上限截断了。请只输出该界面块的**剩余部分**（从被截断处继续，包括结尾的 ``` 与 JSON 收尾括号），不要重复已输出的内容，也不要重新解释。';
   static readonly UI_CONTINUE_MAX_ROUNDS: number = 1;
+  // JSON Output 模式下未显式配置 max_tokens 时的默认输出上限(界面 JSON 需要足够额度)
+  static readonly DEFAULT_JSON_OUTPUT_TOKENS: number = 8000;
 
   // ===== Guncat Work 6.1 (DeepSeek Harness 移植) =====
   // 工具输出溢出暂存目录(工作区内, 不注入运行时快照文件树; 对齐 dsh 的 spill store)

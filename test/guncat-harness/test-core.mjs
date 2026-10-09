@@ -37,7 +37,8 @@ import { SubagentIsolation } from './gen/SubagentIsolation.ts';
 import {
   GuncatUiBlocks,
   GuncatUiPayload,
-  GuncatUiMessageBuilder
+  GuncatUiMessageBuilder,
+  GuncatUiSpecWriter
 } from './gen/GuncatUiSpec.ts';
 import { GuncatUiParts, GuncatUiSegType } from './gen/GuncatUiParts.ts';
 
@@ -1375,6 +1376,49 @@ console.log('[GuncatUiSpec]');
   const emptyProg = GuncatUiBlocks.progress('```guncat-ui\n{"ver');
   check('刚开栏不抛出且返回骨架', emptyProg !== null && emptyProg.spec !== null &&
     emptyProg.spec.elements.length === 0);
+
+  // ===== JSON Output 模式产出的界面: 序列化 → 重新解析 必须无损往返 =====
+  const roundTrip = [
+    '{',
+    ' "title":"往返测试","subtitle":"writer/parser 一致性",',
+    ' "controls":[{"name":"amount","type":"slider","label":"金额","min":0,"max":100,"step":5,"default":35,"unit":"万"},',
+    '  {"name":"vip","type":"toggle","label":"会员","default":true},',
+    '  {"name":"region","type":"select","label":"地区","options":["A","B"],"default":"A"}],',
+    ' "elements":[',
+    '  {"kind":"metrics","items":[{"label":"月供","value":1234.5,"unit":"元","delta":"-12"}]},',
+    '  {"kind":"chart","chart":"bar","title":"对比","labels":["A","B"],"values":[4.8,3.9],"series":["年化"],"unit":"%"},',
+    '  {"kind":"table","headers":["项","值"],"rows":[["利率","4.2%"]]},',
+    '  {"kind":"note","tone":"warn","text":"注意"},',
+    '  {"kind":"progress","title":"进度","value":30,"total":100,"unit":"%"},',
+    '  {"kind":"form","title":"调整","controls":["amount","vip"],"action":{"id":"recalc","label":"重算","confirm":"按新参数重算"}},',
+    '  {"kind":"choice","title":"继续?","options":["是","否"],"action":{"id":"pick","label":"选择"}},',
+    '  {"kind":"layout","layout":"grid","children":[{"kind":"card","text":"子项"}]}',
+    ' ]',
+    '}'
+  ].join('\n');
+  const parsedSpec = GuncatUiBlocks.parseComplete(roundTrip).spec;
+  check('往返前置: 解析成功', parsedSpec !== null && parsedSpec.elements.length === 8);
+  const block = GuncatUiSpecWriter.toBlock(parsedSpec);
+  check('序列化产出带围栏的块', block.indexOf('```guncat-ui') === 0 &&
+    block.lastIndexOf('```') > block.indexOf('```guncat-ui'));
+  const reparsed = GuncatUiBlocks.extract(block);
+  check('序列化后可被 extract 解析', reparsed.length === 1);
+  const rt = reparsed[0];
+  check('往返: 标题与副标题', rt.title === '往返测试' && rt.subtitle === 'writer/parser 一致性');
+  check('往返: 控件数量与取值', rt.controls.length === 3 &&
+    rt.controls[0].defNum === 35 && rt.controls[0].unit === '万' &&
+    rt.controls[1].defBool === true &&
+    rt.controls[2].defText === 'A' && rt.controls[2].options.length === 2);
+  check('往返: 元素数量与种类', rt.elements.length === 8 &&
+    rt.elements[0].items.length === 1 && rt.elements[0].items[0].value === 1234.5);
+  check('往返: 图表数值与标签', rt.elements[1].labels.length === 2 && rt.elements[1].values[1] === 3.9);
+  check('往返: 表格行', rt.elements[2].rows.length === 1 && rt.elements[2].rows[0][1] === '4.2%');
+  check('往返: 提示条语气', rt.elements[3].tone === 'warn');
+  check('往返: 进度条', rt.elements[4].value === 30 && rt.elements[4].total === 100);
+  check('往返: 表单动作与引用', rt.elements[5].action.id === 'recalc' &&
+    rt.elements[5].action.confirm === '按新参数重算' && rt.elements[5].controls.length === 2);
+  check('往返: 选项动作', rt.elements[6].options.length === 2 && rt.elements[6].action.id === 'pick');
+  check('往返: 嵌套子元素', rt.elements[7].kind === 'layout' && rt.elements[7].children.length === 1);
 }
 
 console.log('');

@@ -1416,6 +1416,151 @@ export class GuncatUiBlocks {
   }
 }
 
+// ===== 序列化: 把 GuncatUiSpec 重新写成标准界面块 =====
+// 用途: 主回答里的界面块被输出上限截断时, 用「JSON Output 专用请求」另出一份界面,
+// 再由这里序列化成规范的 ```guncat-ui 块追加到该条消息末尾, 渲染路径完全复用。
+export class GuncatUiSpecWriter {
+  // 规范化 JSON 文本(不含围栏)
+  static toJsonText(spec: GuncatUiSpec): string {
+    let obj: Record<string, Object> = {};
+    obj['version'] = 1;
+    if (spec.title !== '') {
+      obj['title'] = spec.title;
+    }
+    if (spec.subtitle !== '') {
+      obj['subtitle'] = spec.subtitle;
+    }
+    if (spec.controls.length > 0) {
+      let controls: Record<string, Object>[] = [];
+      for (let i: number = 0; i < spec.controls.length; i++) {
+        let input: GuncatUiInput = spec.controls[i];
+        let c: Record<string, Object> = {};
+        c['name'] = input.name;
+        c['type'] = input.type;
+        c['label'] = input.label;
+        if (input.type === GuncatUiControlType.SLIDER) {
+          c['min'] = input.min;
+          c['max'] = input.max;
+          c['step'] = input.step;
+          c['default'] = input.defNum;
+        } else if (input.type === GuncatUiControlType.TOGGLE) {
+          c['default'] = input.defBool;
+        } else if (input.type === GuncatUiControlType.SELECT) {
+          c['options'] = input.options;
+          c['default'] = input.defText;
+        } else {
+          c['default'] = input.defText;
+          if (input.placeholder !== '') {
+            c['placeholder'] = input.placeholder;
+          }
+        }
+        if (input.unit !== '') {
+          c['unit'] = input.unit;
+        }
+        controls.push(c);
+      }
+      obj['controls'] = controls;
+    }
+    let elements: Record<string, Object>[] = [];
+    for (let i: number = 0; i < spec.elements.length; i++) {
+      elements.push(GuncatUiSpecWriter.elementToJson(spec.elements[i]));
+    }
+    obj['elements'] = elements;
+    return JSON.stringify(obj, null, 2);
+  }
+
+  private static elementToJson(el: GuncatUiElement): Record<string, Object> {
+    let out: Record<string, Object> = {};
+    out['kind'] = el.kind;
+    if (el.title !== '') {
+      out['title'] = el.title;
+    }
+    if (el.text !== '') {
+      out['text'] = el.text;
+    }
+    if (el.bind !== '') {
+      out['bind'] = el.bind;
+    }
+    if (el.kind === GuncatUiKind.NOTE) {
+      out['tone'] = el.tone;
+    }
+    if (el.kind === GuncatUiKind.LAYOUT) {
+      out['layout'] = el.layout === '' ? 'list' : el.layout;
+    }
+    if (el.kind === GuncatUiKind.PROGRESS) {
+      out['value'] = el.value;
+      out['total'] = el.total;
+      out['label'] = el.label;
+      out['unit'] = el.unit;
+    }
+    if (el.kind === GuncatUiKind.METRIC || el.kind === GuncatUiKind.METRICS) {
+      out['value'] = el.value;
+      out['unit'] = el.unit;
+      out['label'] = el.label;
+      out['delta'] = el.delta;
+    }
+    if (el.kind === GuncatUiKind.TABLE) {
+      out['headers'] = el.headers;
+      out['rows'] = el.rows;
+    }
+    if (el.kind === GuncatUiKind.CHART) {
+      out['chart'] = el.chart;
+      out['labels'] = el.labels;
+      out['values'] = el.values;
+      out['series'] = el.series;
+      out['unit'] = el.unit;
+    }
+    if (el.controls.length > 0) {
+      out['controls'] = el.controls;
+    }
+    if (el.options.length > 0) {
+      out['options'] = el.options;
+    }
+    if (el.action !== null) {
+      out['action'] = GuncatUiSpecWriter.actionToJson(el.action);
+    }
+    if (el.action2 !== null) {
+      out['action2'] = GuncatUiSpecWriter.actionToJson(el.action2);
+    }
+    if (el.items.length > 0) {
+      let items: Record<string, Object>[] = [];
+      for (let i: number = 0; i < el.items.length; i++) {
+        let metric: GuncatUiElement = el.items[i];
+        items.push({
+          'label': metric.label, 'value': metric.value,
+          'unit': metric.unit, 'delta': metric.delta
+        });
+      }
+      out['items'] = items;
+    }
+    if (el.children.length > 0) {
+      let children: Record<string, Object>[] = [];
+      for (let i: number = 0; i < el.children.length; i++) {
+        children.push(GuncatUiSpecWriter.elementToJson(el.children[i]));
+      }
+      out['children'] = children;
+    }
+    return out;
+  }
+
+  private static actionToJson(action: GuncatUiAction): Record<string, Object> {
+    let out: Record<string, Object> = {};
+    out['id'] = action.id;
+    out['label'] = action.label;
+    out['style'] = action.style;
+    if (action.confirm !== '') {
+      out['confirm'] = action.confirm;
+    }
+    return out;
+  }
+
+  // 完整界面块(带围栏), 可直接追加到消息正文末尾
+  static toBlock(spec: GuncatUiSpec): string {
+    return GuncatUiBlocks.OPEN + '\n' + GuncatUiSpecWriter.toJsonText(spec) +
+      '\n' + GuncatUiBlocks.FENCE;
+  }
+}
+
 // ===== 交互回传 =====
 export class GuncatUiPayload {
   // 'form' = 表单提交(带控件值), 'action' = 按钮/选项点击(带 value)
@@ -1536,6 +1681,9 @@ export class GuncatUiPrompt {
     '## 硬性纪律',
     '- 一个 guncat-ui 块内只放一个 JSON 对象；一次回复最多 3 个界面块，宁少勿滥。',
     '- **elements 是必填数组，且至少有 1 个元素**；单个元素也要写进数组里，不要把它当成顶层文档。',
+    '> **篇幅纪律（最重要）**：界面 JSON 写太长会被模型的输出上限截断，从而整块作废。因此**默认只写 2~4 个元素**，',
+    '> 最多不超过 6 个；controls 最多 3 个；table rows 不超过 8 行、chart 不超过 8 个数据点；',
+    '> 每条文案 ≤60 字、title ≤20 字；能 3 个元素说清的事绝不写 6 个。要展示更多内容时分两轮给（先说结论，再按需展开）。',
     '- 界面块之外可以写文字，但必须简短；**禁止在正文里重复界面已经表达的数据**。',
     '- 数值必须真实可核对：来自计算或工具结果的数值直接写；给不出数据的字段不要编造，改用 note 说明。',
     '- 图表 values 与 labels 数量必须一致；bar/line 的 values 默认 1 条序列与 labels 一一对应（多序列才用 series）。',
