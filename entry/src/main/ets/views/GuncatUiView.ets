@@ -45,6 +45,17 @@ export struct GuncatUiView {
   // 比手指移动的间隔(通常 16~32ms)宽得多, 又比人反应过来"我松手了"短得多。
   private static readonly DRAG_IDLE_MS: number = 220;
 
+  // ==== 临时诊断开关(定位"拖动后不刷新"用; 修好后连同 debugDragText/计数器一起删掉) ====
+  private static readonly DEBUG_DRAG: boolean = true;
+  private dbgBegin: number = 0;
+  private dbgMoving: number = 0;
+  private dbgEnd: number = 0;
+  private dbgClick: number = 0;
+  private dbgIdle: number = 0;
+  private dbgFinish: number = 0;
+  private dbgKey: string = '';
+  private dbgFrozen: number = 0;
+
   // 程序源码。传字符串而不是对象: ArkUI 里字符串 @Prop 的变更通知最可靠,
   // 而嵌套对象经 @Prop 深拷贝后既慢又容易丢状态。
   @Prop @Watch('onProgramChanged') programText: string = '';
@@ -146,6 +157,8 @@ export struct GuncatUiView {
   // 必须在 `state.set` **之前**调用 —— 快照要和"上一次已渲染出来的键"完全一致, 否则快照本身
   // 就成了一次键变化, 照样重建。
   private beginDrag(el: UiElement): void {
+    this.dbgBegin++;
+    this.dbgKey = GuncatUiRuntime.stateKeyOf(el);
     this.dragging = true;
     let chain: UiElement[] = GuncatUiLang.pathToKey(this.root, el.key);
     let frozen: Record<string, string> = {};
@@ -153,6 +166,8 @@ export struct GuncatUiView {
       frozen[chain[i].key] = GuncatUiLang.elementSignature(chain[i], this.state.values);
     }
     this.dragFreeze = frozen;
+    this.dbgFrozen = chain.length;
+    this.sigTick++;   // 诊断行随之刷新
   }
 
   // 结束一次拖动/点选: 丢掉冻结快照 + 整树重新物化(拖动期间被压住的变化一次全部刷出来) +
@@ -162,6 +177,7 @@ export struct GuncatUiView {
   // 用 dragging 去重保证一次手势只回传一次。
   private finishDrag(explicit: boolean): void {
     let wasDragging: boolean = this.dragging;
+    this.dbgFinish++;
     this.disarmDragIdleTimer();
     this.dragging = false;
     this.dragFreeze = {};
@@ -184,6 +200,7 @@ export struct GuncatUiView {
     this.disarmDragIdleTimer();
     this.dragIdleTimer = setTimeout(() => {
       this.dragIdleTimer = -1;
+      this.dbgIdle++;
       this.finishDrag(false);
     }, GuncatUiView.DRAG_IDLE_MS);
   }
@@ -197,6 +214,21 @@ export struct GuncatUiView {
 
   private interactive(): boolean {
     return this.complete && !this.locked;
+  }
+
+  // 临时诊断文本: 读一下 sigTick/rev —— 只要有事件推进它们, 这行字就该跟着变。
+  // 字段含义: B=Begin M=Moving E=End C=Click I=静默计时器收尾 F=finishDrag
+  //           frz=拖动链快照条数 rev/sig=两个 epoch key/val=滑块的 state 键与当前值
+  private debugDragText(): string {
+    let wake: number = this.rev + this.sigTick;
+    let raw: Object | undefined = this.state.values[this.dbgKey];
+    let val: string = raw === undefined ? '-' : raw.toString();
+    return 'DBG B' + this.dbgBegin.toString() + ' M' + this.dbgMoving.toString() +
+      ' E' + this.dbgEnd.toString() + ' C' + this.dbgClick.toString() +
+      ' I' + this.dbgIdle.toString() + ' F' + this.dbgFinish.toString() +
+      ' frz' + this.dbgFrozen.toString() +
+      ' rev' + this.rev.toString() + ' sig' + this.sigTick.toString() +
+      ' key=' + this.dbgKey + ' val=' + val + (wake < 0 ? '' : '');
   }
 
   // ===== 回传 =====
@@ -432,6 +464,18 @@ export struct GuncatUiView {
 
   build() {
     Column({ space: 0 }) {
+      // ==== 临时诊断行(定位"拖动后不刷新"用, 定位完删掉) ====
+      // 它能回答四个问题: ①Begin/Moving/End/Click 这些回调到底有没有来(M/E/C/B + I=静默计时器
+      // 收尾 + F=finishDrag); ②rev/sigTick 有没有推进; ③滑块写进的 state 键与当前值;
+      // ④最关键: 这**行字本身**会不会变 —— 它靠读取 sigTick 刷新, 如果连它都不动, 说明这个
+      // 组件的重渲染链路根本没通, 后面所有"换键重建"的推断都不成立。
+      if (GuncatUiView.DEBUG_DRAG) {
+        Text(this.debugDragText())
+          .fontSize(10)
+          .fontColor($r('app.color.danger'))
+          .width('100%')
+          .padding({ left: this.edge(), right: this.edge(), bottom: 6 })
+      }
       if (this.root === null) {
         this.buildEmpty()
       } else {
@@ -2400,8 +2444,17 @@ export struct GuncatUiView {
             // 快照必须在 state.set **之前**做: 它要和"上一次已渲染的键"一致
             this.beginDrag(el);
           }
+          if (mode === SliderChangeMode.Moving) {
+            this.dbgMoving++;
+            this.sigTick++;   // 诊断: 让诊断行跟着 Moving 走
+          }
           this.state.set(GuncatUiRuntime.stateKeyOf(el), value);
           if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
+            if (mode === SliderChangeMode.End) {
+              this.dbgEnd++;
+            } else {
+              this.dbgClick++;
+            }
             this.finishDrag(true);
             return;
           }
