@@ -61,6 +61,8 @@ export struct WorkTurnView {
   @State private uiRenderKey: number = 0;
   // [诊断] 上一次重建看到的正文长度
   @State private uiSeenLen: number = 0;
+  // 文本片段的历史 renderKey(按下标记账): 文案变化时递增, 迫使尾部 RichTextView 重建
+  private textKeySeq: Map<number, number> = new Map<number, number>();
   // 思考跑马灯: 流式中在思考条右侧空白区滚动呈现最新思考内容
   private marqueeScroller: Scroller = new Scroller();
 
@@ -113,10 +115,28 @@ export struct WorkTurnView {
     this.applyUiSegs(next);
   }
 
-  // 应用新的片段数组。**渲染 key 只在语义变化时递增**(闭环/未完成状态或片段数量变化),
-  // 绝不在流式期间每次刷新都递增 —— 那等于每 33ms 销毁重建整张卡片, 表现为"疯狂闪烁"。
+  // 应用新的片段数组。
+  // 两条关键的刷新规则(真机教训):
+  //  1) 文本片段的内容变化时要递增其 renderKey —— 否则卡片后面的正文只显示一两个字,
+  //     刷新后才完整(渲染库复用了同一实例, 没有按新内容重新排版);
+  //  2) 界面片段的渲染 key 只在语义变化时递增 —— 否则流式期间每 33ms 销毁重建整张卡片, 疯狂闪烁。
   private applyUiSegs(next: GuncatUiSeg[]): void {
     let oldShape: string = this.uiSegsShape();
+    // 按片段下标记账: 每次 build 都会产出全新的 GuncatUiSeg 对象, 不能用对象字段当历史
+    for (let i: number = 0; i < next.length; i++) {
+      let seg: GuncatUiSeg = next[i];
+      if (seg.type === GuncatUiSegType.UI) {
+        continue;
+      }
+      let previous: number = this.textKeySeq.get(i) !== undefined ? this.textKeySeq.get(i) as number : 0;
+      let wasSame: boolean = i < this.uiSegs.length && this.uiSegs[i].text === seg.text;
+      if (wasSame && previous > 0) {
+        seg.renderKey = previous;
+      } else {
+        seg.renderKey = previous + 1;
+      }
+      this.textKeySeq.set(i, seg.renderKey);
+    }
     this.uiSegs = next;
     let newShape: string = this.uiSegsShape();
     this.uiContentRev++;
@@ -330,7 +350,8 @@ export struct WorkTurnView {
             RichTextView({ content: seg.text, selectionTrigger: 0 })
           }
         }, (seg: GuncatUiSeg, index: number) => 'tseg' + index + '_' +
-          (seg.type === GuncatUiSegType.UI ? 'ui' : 'tx') + '_k' + this.uiRenderKey.toString())
+          (seg.type === GuncatUiSegType.UI ? 'ui' : 'tx' + seg.renderKey.toString()) +
+          '_k' + this.uiRenderKey.toString())
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)

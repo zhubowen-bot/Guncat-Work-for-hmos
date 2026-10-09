@@ -20,6 +20,10 @@ export class GuncatUiSegType {
 export class GuncatUiSeg {
   type: string = GuncatUiSegType.TEXT;
   text: string = '';
+  // 文本片段的渲染 key: 内容变化时递增, 父组件据此强制重建 RichTextView。
+  // 真机事故: 卡片后面的正文只显示一两个字, 刷新后才完整 —— 渲染库复用了同一个
+  // RichTextView 实例而没有重新排版尾部文本, 所以尾部文本必须有独立且可变的 key。
+  renderKey: number = 0;
   // UI 片段: 完整闭合为 true, 流式中间态为 false
   complete: boolean = true;
   // 未闭合但产出已结束(输出被截断/中断): 按"未完成"静态渲染, 不再显示"生成中"

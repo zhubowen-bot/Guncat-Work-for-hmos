@@ -261,6 +261,8 @@ export struct ChatBubbleView {
   private uiMountTick: number = -1;
   // 界面片段渲染 key 版本: 变化即让 ForEach key 变化 → 强制重建子组件(绕开失效的观察链)
   @State private uiRenderKey: number = 0;
+  // 文本片段的历史 renderKey(按下标记账): 文案变化时递增, 迫使尾部 RichTextView 重建
+  private textKeySeq: Map<number, number> = new Map<number, number>();
   // 思考跑马灯: 流式中在思考条右侧空白区滚动呈现最新思考内容(对齐工作模式 WorkTurnView)
   private marqueeScroller: Scroller = new Scroller();
 
@@ -312,10 +314,25 @@ export struct ChatBubbleView {
     this.applyUiSegs(next);
   }
 
-  // 应用新的片段数组。**渲染 key 只在语义变化时递增**(闭环/未完成状态或片段数量变化),
-  // 绝不在流式期间每次刷新都递增 —— 那等于每 33ms 销毁重建整张卡片, 表现为"疯狂闪烁"。
+  // 应用新的片段数组。
+  //  1) 文本片段内容变化时递增其 renderKey —— 否则卡片后面的正文只显示一两个字, 刷新后才完整;
+  //  2) 界面片段的渲染 key 只在语义变化时递增 —— 否则流式期间每帧销毁重建卡片, 疯狂闪烁。
   private applyUiSegs(next: GuncatUiSeg[]): void {
     let oldShape: string = this.uiSegsShape();
+    for (let i: number = 0; i < next.length; i++) {
+      let seg: GuncatUiSeg = next[i];
+      if (seg.type === GuncatUiSegType.UI) {
+        continue;
+      }
+      let previous: number = this.textKeySeq.get(i) !== undefined ? this.textKeySeq.get(i) as number : 0;
+      let wasSame: boolean = i < this.uiSegs.length && this.uiSegs[i].text === seg.text;
+      if (wasSame && previous > 0) {
+        seg.renderKey = previous;
+      } else {
+        seg.renderKey = previous + 1;
+      }
+      this.textKeySeq.set(i, seg.renderKey);
+    }
     this.uiSegs = next;
     let newShape: string = this.uiSegsShape();
     this.uiContentRev++;
@@ -613,7 +630,8 @@ export struct ChatBubbleView {
           RichTextView({ content: seg.text })
         }
       }, (seg: GuncatUiSeg, index: number) => 'seg' + index + '_' +
-        (seg.type === GuncatUiSegType.UI ? 'ui' : 'tx') + '_k' + this.uiRenderKey.toString())
+        (seg.type === GuncatUiSegType.UI ? 'ui' : 'tx' + seg.renderKey.toString()) +
+        '_k' + this.uiRenderKey.toString())
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
