@@ -59,11 +59,25 @@ export struct GuncatUiView {
   private onInteract: (ev: GuncatUiEvent) => void = (_ev: GuncatUiEvent): void => {};
 
   @State private rev: number = 0;
+  // 拖动中的"实时刷新"唤醒源(与 rev 分开: rev 表示"整树重新物化", sigTick 表示"只把内联表达式
+  // 重画一遍" —— 拖动期间被冻结的项不能整项重建, 但里面的数值文案要跟着走, 见 sliderValueText)
+  @State private sigTick: number = 0;
   @State private showRaw: boolean = false;
   @State private showErrors: boolean = false;
   // 折叠/选项卡的展开状态(键 = 元素 key + 子项 value)
   @State private expanded: Record<string, boolean> = {};
   @State private selectedTab: Record<string, number> = {};
+
+  // 拖动期间的"键冻结"快照: 元素 key → 拖动开始那一刻它的指纹。
+  // 拖动开始时把**从 root 到被拖控件**整条链的指纹快照下来, 拖动期间这些元素的键与拖动前
+  // 逐字节相同 → ForEach 不会重建它们 → 手势不会被销毁。为什么不能用"命中就返回一个常量"
+  // 来冻结: 那样键本身变了, 照样会销毁重建那一项(只是把丢失推迟一次刷新), 详见
+  // GuncatUiLang.elementSignature 的注释。
+  private dragFreeze: Record<string, string> = {};
+  // 拖动是否已开始(Begin 置位, 收尾清掉): Slider 的 End/Click 与触摸抬起都可能触发收尾, 用它去重
+  private dragging: boolean = false;
+  // 拖动中实时刷新的节流时间戳(80ms 一次, 不必每帧都重新物化)
+  private lastLiveTickMs: number = 0;
 
   private program: UiProgram = new UiProgram();
   private root: UiElement | null = null;
@@ -105,6 +119,36 @@ export struct GuncatUiView {
   private rematerialize(): void {
     this.root = GuncatUiLang.render(this.program, this.state.values);
     this.rev++;
+  }
+
+  // 开始拖动: 把"从 root 到该控件"整条链的**当前指纹**快照下来(见 dragFreeze)。
+  // 必须在 `state.set` **之前**调用 —— 快照要和"上一次已渲染出来的键"完全一致, 否则快照本身
+  // 就成了一次键变化, 照样重建。
+  private beginDrag(el: UiElement): void {
+    this.dragging = true;
+    let chain: UiElement[] = GuncatUiLang.pathToKey(this.root, el.key);
+    let frozen: Record<string, string> = {};
+    for (let i: number = 0; i < chain.length; i++) {
+      frozen[chain[i].key] = GuncatUiLang.elementSignature(chain[i], this.state.values);
+    }
+    this.dragFreeze = frozen;
+  }
+
+  // 结束一次拖动/点选: 丢掉冻结快照 + 整树重新物化(拖动期间被压住的变化一次全部刷出来) +
+  // 回传状态。
+  //
+  // 为什么要三种信号一起收: Slider 的 `End` 在真机上**不一定来**(用户反馈"松手后也不刷新,
+  // 必须切走再切回"就是这个原因), 所以再用触摸抬起兜底。explicit = 这次调用来自 End/Click
+  // 这种明确信号; 触摸抬起跟在 End 后面时不该重复回传, 用 dragging 去重保证一次手势只回传一次。
+  private finishDrag(explicit: boolean): void {
+    let wasDragging: boolean = this.dragging;
+    this.dragging = false;
+    this.dragFreeze = {};
+    this.rematerialize();
+    this.sigTick++;
+    if (explicit || wasDragging) {
+      this.emitState();
+    }
   }
 
   private interactive(): boolean {
@@ -432,9 +476,10 @@ export struct GuncatUiView {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-    // rev 只在这里被读取: 它的作用是"绑定值变化后通知框架本组件需要重渲染"
-    // (this.root 是普通字段, 不是可观察状态, 靠 rev 的赋值把重渲染打起来)。
-    .id('guncat-ui-r' + this.rev.toString())
+    // 这里从前是 `.id('guncat-ui-r' + rev)` —— 靠"id 每次变化"来触发重渲染。现在唤醒改由
+    // itemKey / wake() 里的 rev+sigTick 读取承担(见那两处注释), id 保持恒定: 一个每次都变的
+    // id 有可能让整棵子树被当成新节点重建, 会把正在拖动的 Slider 一起干掉。
+    .id('guncat-ui')
   }
 
   @Builder
@@ -503,20 +548,41 @@ export struct GuncatUiView {
 
   // 渲染元素的子元素。
   //
-  // ⚠️ key 里**必须带 rev**(页面版本号), 这是 ArkUI 的硬约束, 真机踩过:
-  //   ForEach 在父组件重渲染时会先比对新旧键值,**键值不变的项直接复用已有子组件,
-  //   连 item builder 都不会重新执行**。于是"绑定值变了 → 重新物化出新树"这件事
-  //   根本传不到界面上: 点 Chips / 单选 / 多选后选中态不变, 切到别的会话再切回来
-  //   (整棵组件被销毁重建)才显示正确。
-  //   把 rev 拼进 key 后, 每次重新物化都会重建这些子项, 选中态/表达式结果立刻刷新。
-  //   代价是重建开销 —— 用两个手段压住:
-  //     1) 流式期间控件本来就是禁用的, 重建只影响观感;
-  //     2) Slider 拖动中不重新物化(见 buildSlider), 松手才刷新, 避免把正在进行的拖拽手势销毁。
+  // ⚠️ ForEach 的键里放的是**渲染指纹**(`GuncatUiLang.elementSignature`), 不再是无脑拼全局版本号
+  // rev。这是 ArkUI 的硬约束 + 真机踩过的坑:
+  //   ForEach 在父组件重渲染时先比对新旧键值, **键值不变的项直接复用已有子组件, 连 item builder
+  //   都不会重新执行**。于是"绑定值变了 → 重新物化出新树"这件事根本传不到界面上(早先表现为:
+  //   点 Chips / 单选 / 多选后选中态不变, 切到别的会话再切回来才正常)。
+  //   用指纹后: 内容真的变了的项照样换键重建(实时刷新), 内容没变的项键值不变、继续复用。
+  //   但**正在拖动的 Slider 内容恰恰一直在变**(它的 value 就绑在被拖的变量上), 所以还要靠
+  //   dragFreeze: 拖动开始时把"它到 root 整条链"的指纹快照下来, 用快照当键(见 beginDrag),
+  //   这样它和它的祖先在这一期间都不会被重建, 手势不会断。
+  // 这里读一下 rev/sigTick 只是给框架**登记依赖**(键值本身不含它们): 值变了要靠 @State 变化把
+  // ForEach 重跑一遍, 重跑时才会重新计算每个子项的指纹。
+  private itemKey(child: UiElement): string {
+    let wake: number = this.rev + this.sigTick;
+    // 拖动期间: 冻结链上的元素直接用快照指纹 → 与拖动前的键逐字节相同 → 不重建、手势不断
+    let snapped: string | undefined = this.dragFreeze[child.key];
+    let sig: string = snapped !== undefined ? snapped
+      : GuncatUiLang.elementSignature(child, this.state.values);
+    return child.key + '#' + sig + (wake < 0 ? '#w' : '');
+  }
+
+  // 读一下 rev/sigTick 再原样返回列表: 读 @State 就给 ForEach 登记了依赖(见 itemKey),
+  // 它们变化 → 本组件重渲染 → ForEach 重跑 → 各子项指纹重算。列表本身不变。
+  private wake(list: UiElement[]): UiElement[] {
+    let tick: number = this.rev + this.sigTick;
+    if (tick === -1) {
+      return [];
+    }
+    return list;
+  }
+
   @Builder
   buildElements(list: UiElement[], topLevel: boolean) {
-    ForEach(list, (child: UiElement, index: number) => {
+    ForEach(this.wake(list), (child: UiElement, index: number) => {
       this.renderNode(child, topLevel)
-    }, (child: UiElement, index: number) => child.key + '#' + this.rev.toString())
+    }, (child: UiElement, index: number) => this.itemKey(child))
   }
 
   // 通用 children 容器
@@ -2255,7 +2321,7 @@ export struct GuncatUiView {
         } else {
           Blank()
         }
-        Text(UiNum.trim(this.bindNum(GuncatUiRuntime.stateKeyOf(el), GuncatUiRuntime.sliderDefault(el))))
+        Text(this.sliderValueText(el))
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.brand'))
@@ -2276,18 +2342,49 @@ export struct GuncatUiView {
         .blockColor($r('app.color.surface'))
         .enabled(this.interactive())
         .onChange((value: number, mode: SliderChangeMode) => {
-          // 拖动过程中**只更新状态、不重新物化整棵树**: 重新物化会把正在拖的这个 Slider
-          // 组件销毁重建, 手势随之丢失(表现为"拖到一半卡住")。
-          // 松手(End)或点击轨道(Click)时再整棵树刷新 —— 此时标签数值、依赖它的图表一起更新。
+          // 拖动期间的刷新策略(本版核心):
+          //   旧实现是"拖动中完全不重新物化, 只在 End/Click 时整树重建", 有两个问题 ——
+          //   ① 拖动期间依赖 $amount 的指标卡/图表/文案全是死的(用户看到的"不实时重渲染");
+          //   ② 真机上 End 这个信号并不一定来, 于是松手后也不刷新(必须切走再切回)。
+          //   现在: 拖动一开始就把"自己到 root 这条链"的指纹快照下来(键与拖动前逐字节相同 →
+          //   这一项不会被重建 → 手势不丢), 同时按 80ms 节流重新物化 —— 指纹机制下只有"画出来
+          //   会不一样"的其他项会换键重建; 收尾统一走 finishDrag(End/Click + 触摸抬起兜底)。
+          if (mode === SliderChangeMode.Begin) {
+            // 快照必须在 state.set **之前**做: 它要和"上一次已渲染的键"一致
+            this.beginDrag(el);
+          }
           this.state.set(GuncatUiRuntime.stateKeyOf(el), value);
           if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
+            this.finishDrag(true);
+            return;
+          }
+          let now: number = Date.now();
+          if (now - this.lastLiveTickMs >= 80) {
+            this.lastLiveTickMs = now;
             this.rematerialize();
-            this.emitState();
+            this.sigTick++;
+          }
+        })
+        // End 信号在真机上不一定来, 用触摸抬起兜底(finishDrag 幂等, 不会重复回传)
+        .onTouch((e: TouchEvent) => {
+          if (e.type === TouchType.Up || e.type === TouchType.Cancel) {
+            this.finishDrag(false);
           }
         })
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
+  }
+
+  // Slider 自己的数值文案。
+  // 拖动期间 Slider 所在的项被**冻结**(为了不销毁手势), 整项不会重建 —— 但这一行文字必须继续
+  // 跟着走。这里读一下 sigTick, 就让 ArkUI 把这个 Text 元素登记成依赖它的元素: sigTick 一变
+  // 它自己重画, 不需要整项重建(同文件里折叠/选项卡也是靠按元素依赖跟踪工作的)。
+  private sliderValueText(el: UiElement): string {
+    let tick: number = this.sigTick;
+    let text: string = UiNum.trim(this.bindNum(GuncatUiRuntime.stateKeyOf(el),
+      GuncatUiRuntime.sliderDefault(el)));
+    return tick < 0 ? '' : text;
   }
 
   private sliderStep(el: UiElement): number {

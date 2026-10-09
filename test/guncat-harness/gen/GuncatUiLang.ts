@@ -1222,6 +1222,169 @@ export class GuncatUiLang {
     return program.root;
   }
 
+  // ===== 渲染指纹 =====
+
+  // 元素子树的「渲染指纹」: 只要它变了, 说明这棵子树画出来会不一样。
+  // 给渲染层当 ForEach 的键用 —— ArkUI 的 ForEach 对**键值不变**的项直接复用已有子组件
+  // (连 item builder 都不会重新执行), 所以"绑定值变了 → 重新物化出新树"必须靠键值变化才能
+  // 传到界面。用指纹而不是全局版本号, 是为了让"内容没变"的子项继续复用(不重建), 只有真的会
+  // 画出不同结果的项才换键重建。
+  //
+  // values: 当前绑定值(绑定属性取实时值)。
+  //
+  // ⚠️ 这里**没有**"冻结某个 key"的开关, 冻结改由渲染层按"祖先链快照"实现(见 pathToKey 与
+  // GuncatUiView.beginDrag)。原因: 冻结如果实现成"命中该 key 就返回一个常量指纹", 那个键在
+  // 拖动开始的一瞬间就从真实指纹变成了常量 —— 键变了, ForEach 照样会**销毁重建这一项**,
+  // 正在拖的 Slider 连同手势一起没了(只是把丢失推迟到第一次实时刷新)。要真正保住手势,
+  // 拖动期间的键必须与拖动前**逐字节相同**, 也就是快照, 而不是换一个常量。
+  static elementSignature(el: UiElement | null, values: Record<string, Object>): string {
+    if (el === null) {
+      return 'nil';
+    }
+    let acc: number = 5381;
+    acc = GuncatUiLang.hashStr(acc, el.type);
+    // 属性名排序后遍历, 保证同一棵树每次算出同一个指纹
+    let names: string[] = Object.keys(el.props);
+    names.sort();
+    for (let i: number = 0; i < names.length; i++) {
+      let name: string = names[i];
+      acc = GuncatUiLang.hashStr(acc, name);
+      acc = GuncatUiLang.hashValue(acc, GuncatUiLang.propValue(el, name, values), values);
+    }
+    // 控件状态键的实时值也要进指纹。
+    //   Chips / 单选 / 多选这类"按 name 绑定"的控件, 选中值存在 values[name] 里、**并没有 baked
+    //   进 props**, 只看 binds 会让"选中态变化"不进指纹 → 项被复用 → 高亮不刷新(就是当初
+    //   "点按钮后 UI 没切换过去"那个真机 bug 复发)。这里就地判断 binds['value'] / props['name'],
+    //   不去调 GuncatUiRuntime.stateKeyOf —— 那个文件 import 了本文件, 反向 import 会成环。
+    let stateKey: string = GuncatUiLang.stateKeyOfLocal(el);
+    if (stateKey !== '') {
+      let live: Object | undefined = values[stateKey];
+      if (live !== undefined) {
+        acc = GuncatUiLang.hashStr(acc, '~state');
+        acc = GuncatUiLang.hashValue(acc, live, values);
+      }
+    }
+    return (acc >>> 0).toString(36);
+  }
+
+  // 从 el 出发找到 key 对应元素, 返回**从 el 到它的链**(含两端); 找不到返回空数组。
+  //
+  // 拖动期间要冻的不是"一个控件", 而是"它到根的整条链": 祖先项的指纹里含子树, 只要链上任何
+  // 一个节点画出来会变(比如同级的指标卡跟着 $amount 变了), 祖先项就会换键重建, 把正在拖的
+  // Slider 一起销毁。渲染层在拖动开始时用本方法拿到这条链, 把链上每个元素当时的指纹快照下来。
+  static pathToKey(el: UiElement | null, key: string): UiElement[] {
+    if (el === null || key === '') {
+      return [];
+    }
+    if (el.key === key) {
+      return [el];
+    }
+    let props: Record<string, Object> = el.props;
+    let names: string[] = Object.keys(props);
+    for (let i: number = 0; i < names.length; i++) {
+      let v: Object | undefined = props[names[i]];
+      if (v === undefined || v === null) {
+        continue;
+      }
+      if (v instanceof UiElement) {
+        let sub: UiElement[] = GuncatUiLang.pathToKey(v as UiElement, key);
+        if (sub.length > 0) {
+          let out: UiElement[] = [el];
+          for (let k: number = 0; k < sub.length; k++) {
+            out.push(sub[k]);
+          }
+          return out;
+        }
+      } else if (v instanceof Array) {
+        let arr: Object[] = v as Object[];
+        for (let j: number = 0; j < arr.length; j++) {
+          if (!(arr[j] instanceof UiElement)) {
+            continue;
+          }
+          let sub2: UiElement[] = GuncatUiLang.pathToKey(arr[j] as UiElement, key);
+          if (sub2.length > 0) {
+            let out2: UiElement[] = [el];
+            for (let k2: number = 0; k2 < sub2.length; k2++) {
+              out2.push(sub2[k2]);
+            }
+            return out2;
+          }
+        }
+      }
+    }
+    return [];
+  }
+
+  // 属性在指纹里该用的值: 是绑定属性且绑定值存在 → 用**实时值**(表达式重算的依据),
+  // 否则用物化时 baked 进 props 的值。
+  private static propValue(el: UiElement, name: string, values: Record<string, Object>):
+    Object | null {
+    let bindName: string = UiNode.bindOf(el, name);
+    if (bindName !== '') {
+      let live: Object | undefined = values[bindName];
+      if (live !== undefined) {
+        return live;
+      }
+    }
+    let baked: Object | undefined = el.props[name];
+    return baked === undefined ? null : baked;
+  }
+
+  // 元素的状态键(与 GuncatUiRuntime.stateKeyOf 同一套规则, 就地实现避免循环依赖)
+  private static stateKeyOfLocal(el: UiElement): string {
+    let bindName: string = UiNode.bindOf(el, 'value');
+    if (bindName !== '') {
+      return bindName;
+    }
+    return UiNode.str(el, 'name', '');
+  }
+
+  // djb2 变体: 32 位累加(acc * 33 + x), 用 | 0 截成 int32
+  private static hashStr(acc: number, s: string): number {
+    let out: number = acc;
+    for (let i: number = 0; i < s.length; i++) {
+      out = (out * 33 + s.charCodeAt(i)) | 0;
+    }
+    return out;
+  }
+
+  // 值递归进指纹: string 逐字符 / number / boolean / null / 嵌套 UiElement / 数组 / 普通对象
+  private static hashValue(acc: number, v: Object | null,
+    values: Record<string, Object>): number {
+    if (v === null || v === undefined) {
+      return GuncatUiLang.hashStr(acc, '~nil');
+    }
+    if (typeof v === 'string') {
+      return GuncatUiLang.hashStr(acc, 's' + (v as string));
+    }
+    if (typeof v === 'number') {
+      return GuncatUiLang.hashStr(acc, 'n' + (v as number).toString());
+    }
+    if (typeof v === 'boolean') {
+      return GuncatUiLang.hashStr(acc, (v as boolean) ? '#t' : '#f');
+    }
+    if (v instanceof UiElement) {
+      return GuncatUiLang.hashStr(acc, GuncatUiLang.elementSignature(v as UiElement, values));
+    }
+    if (v instanceof Array) {
+      let arr: Object[] = v as Object[];
+      let out: number = GuncatUiLang.hashStr(acc, '[' + arr.length.toString());
+      for (let i: number = 0; i < arr.length; i++) {
+        out = GuncatUiLang.hashValue(out, arr[i], values);
+      }
+      return GuncatUiLang.hashStr(out, ']');
+    }
+    let obj: Record<string, Object> = v as Record<string, Object>;
+    let names: string[] = Object.keys(obj);
+    names.sort();
+    let out2: number = GuncatUiLang.hashStr(acc, '{');
+    for (let i: number = 0; i < names.length; i++) {
+      out2 = GuncatUiLang.hashStr(out2, names[i]);
+      out2 = GuncatUiLang.hashValue(out2, obj[names[i]], values);
+    }
+    return GuncatUiLang.hashStr(out2, '}');
+  }
+
   // 判断某段文本是否「像」一份界面程序(用于把非围栏正文识别为界面)
   static looksLikeProgram(text: string): boolean {
     if (text === null || text === undefined || text === '') {

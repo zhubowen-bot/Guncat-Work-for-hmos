@@ -1278,6 +1278,83 @@ console.log('[绑定与重算]');
   check('绑定值仍是 45', p.state['$amount'] === 45);
 }
 
+console.log('[渲染指纹]');
+{
+  // 指纹是渲染层 ForEach 的键: 内容没变的项键值不变(继续复用、不重建), 画出来会不一样的项
+  // 换键重建(实时刷新)。正在拖动的 Slider 靠"冻结"保住手势。
+  const src = [
+    'root = Card([kpi, ch, slider, chips])',
+    '$amount = 10',
+    'kpi = OverviewCardBlock([OverviewCardItem(IconText(Icon("star"), "金额", "万"), ' +
+      'MetricIndicatorInline("" + $amount, "同比", {direction: "up", value: 1}))])',
+    'ch = BarChart(["A"], [Series("s", [1])], "grouped")',
+    'slider = Slider("amount", "discrete", 0, 200, 5, [30], "金额", $amount)',
+    'chips = Chips("metric", "single", [ChipItem("revenue", "营收"), ChipItem("customers", "客户")])'
+  ].join('\n');
+  const p = GuncatUiLang.parse(src);
+  const v10 = { '$amount': 10, 'metric': 'revenue' };
+  const v20 = { '$amount': 20, 'metric': 'customers' };
+  const k1 = UiNode.elementList(GuncatUiLang.render(p, v10), 'children');
+  check('指纹用例 root 有 4 个子项', k1.length === 4);
+
+  const sigKpi1 = GuncatUiLang.elementSignature(k1[0], v10);
+  check('指纹非空', sigKpi1.length > 0);
+  check('指纹稳定(同一棵树 + 同一组值算两次一致)',
+    sigKpi1 === GuncatUiLang.elementSignature(k1[0], v10));
+  check('空元素指纹固定为 nil', GuncatUiLang.elementSignature(null, v10) === 'nil');
+
+  // 重新物化出新值 → 依赖 $amount 的项指纹必须变(这就是"实时重渲染"的依据)
+  const k2 = UiNode.elementList(GuncatUiLang.render(p, v20), 'children');
+  check('表达式依赖绑定值的项: 值变 → 指纹变',
+    sigKpi1 !== GuncatUiLang.elementSignature(k2[0], v20));
+  // 与绑定无关的子树: 指纹不变 → 继续复用, 不重建
+  check('不依赖绑定值的项: 值变 → 指纹不变',
+    GuncatUiLang.elementSignature(k1[1], v10) ===
+    GuncatUiLang.elementSignature(k2[1], v20));
+
+  // 控件的实时值写在 state 里(没有 baked 进 props), 也要进指纹 —— 否则选中态不刷新
+  check('绑定控件(value 绑定): 实时值变 → 指纹变',
+    GuncatUiLang.elementSignature(k1[2], v10) !==
+    GuncatUiLang.elementSignature(k1[2], v20));
+  // Chips 这类"按 name 绑定"的控件 el.binds 是空的, 选中值以 name 为键存在 state 里
+  check('name 绑定控件: state 变 → 指纹变',
+    GuncatUiLang.elementSignature(k1[3], { '$amount': 10, 'metric': 'a' }) !==
+    GuncatUiLang.elementSignature(k1[3], { '$amount': 10, 'metric': 'b' }));
+
+  // 数组与嵌套元素都参与指纹
+  const a1 = GuncatUiLang.parse('root = Card([c])\nc = BarChart(["A", "B"], [Series("s", [1, 2])], "grouped")');
+  const a2 = GuncatUiLang.parse('root = Card([c])\nc = BarChart(["A", "C"], [Series("s", [1, 2])], "grouped")');
+  check('数组内容进指纹',
+    GuncatUiLang.elementSignature(UiNode.elementList(GuncatUiLang.render(a1, {}), 'children')[0], {}) !==
+    GuncatUiLang.elementSignature(UiNode.elementList(GuncatUiLang.render(a2, {}), 'children')[0], {}));
+
+  // 拖动冻结走的是"祖先链指纹快照": 键必须与拖动前逐字节相同(返回常量常量会换键 → 照样重建
+  // 那一项 → 手势照样丢)。所以渲染层拖开始时用 pathToKey 拿到整条链, 逐个快照当时的指纹。
+  const two = GuncatUiLang.parse('root = Card([kpi, slider])\n$amount = 10\n' +
+    'kpi = Text("number", "金额 " + $amount + " 万")\n' +
+    'slider = Slider("amount", "discrete", 0, 200, 5, [30], "金额", $amount)');
+  const tl = GuncatUiLang.render(two, { '$amount': 10 });
+  const kids = UiNode.elementList(tl, 'children');
+  const chain = GuncatUiLang.pathToKey(tl, kids[1].key);
+  check('pathToKey 给出 root → 被拖控件 的整条链',
+    chain.length === 2 && chain[0].type === 'Card' && chain[1].type === 'Slider');
+  check('pathToKey 找不到时返回空', GuncatUiLang.pathToKey(tl, 'no-such-key').length === 0);
+  // 拖动中值变了: 快照算出的键与拖动前一致(不重建), 而链上祖先的实时指纹其实已经变了
+  // —— 正因如此才必须按链快照, 只冻控件自己是不够的。
+  const snap = {};
+  for (let i = 0; i < chain.length; i++) {
+    snap[chain[i].key] = GuncatUiLang.elementSignature(chain[i], { '$amount': 10 });
+  }
+  const tl2 = GuncatUiLang.render(two, { '$amount': 55 });
+  const kids2 = UiNode.elementList(tl2, 'children');
+  check('冻结快照: 被拖控件与祖先的键与拖动前逐字节相同',
+    snap[kids2[1].key] === GuncatUiLang.elementSignature(kids[1], { '$amount': 10 }) &&
+    snap[tl2.key] === GuncatUiLang.elementSignature(tl, { '$amount': 10 }));
+  check('拖动中祖先的实时指纹确实会变(所以只冻自己不成立)',
+    GuncatUiLang.elementSignature(tl, { '$amount': 10 }) !==
+    GuncatUiLang.elementSignature(tl2, { '$amount': 55 }));
+}
+
 console.log('[Action]');
 {
   const src = [
