@@ -1516,6 +1516,10 @@ console.log('[图表几何与数值格式]');
   // 绝对坐标绘制: 用真实盒尺寸算出的折线要落在盒内
   const box = UiBox.of(240, 140);
   check('盒内边距按比例收缩', box.padL < 240 * 0.2 && box.innerW() > 0 && box.innerH() > 0);
+  // 折线图不画 y 轴刻度文字, 左侧不留大空白(否则绘图区被推到右边, 看起来没对齐)
+  check('绘图区内边距左右接近对称',
+    UiChartGeom.LINE_PAD_L <= 16 &&
+    Math.abs(UiChartGeom.LINE_PAD_L - UiChartGeom.LINE_PAD_R) <= 8);
   const boxLine = UiChartGeom.linePath([1, 5, 3], sc, 'linear', false, box);
   check('盒内折线可生成', boxLine.indexOf('M') === 0);
   check('盒内网格线不超过 6 条', UiChartGeom.gridPaths(sc, 4, box).length === 5);

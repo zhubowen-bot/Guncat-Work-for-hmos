@@ -214,7 +214,10 @@ export class UiChartGeom {
   // ===== 折线/面积(默认盒尺寸; 实际绘制请用 UiBox.of(实测宽, 高)) =====
   static readonly LINE_W: number = 320;
   static readonly LINE_H: number = 160;
-  static readonly LINE_PAD_L: number = 34;
+  // 左内边距只留一点点: 本项目的折线图**不画 y 轴刻度文字**(极值改在下方单独一行展示),
+  // 原来按"有轴标签"留了 34vp 的左侧留白, 真机上就是一整块空白、绘图区被推到右边,
+  // 看起来像"图表内容偏右/没对齐"。左右接近对称(12 / 8)才正常。
+  static readonly LINE_PAD_L: number = 12;
   static readonly LINE_PAD_R: number = 8;
   static readonly LINE_PAD_T: number = 10;
   static readonly LINE_PAD_B: number = 20;

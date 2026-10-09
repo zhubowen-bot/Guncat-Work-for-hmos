@@ -1107,6 +1107,10 @@ export struct GuncatUiView {
 
   @Builder
   buildChart(el: UiElement, topLevel: boolean) {
+    // 图表**不做通栏**(不再 bleed)。真机反馈: 顶层图表比同卡片的文字更靠左, 看起来"位置偏左";
+    // 而嵌在 SectionBlock/Tabs 里的图表本来就对齐, 于是同一屏里图表左边缘忽左忽右(用户说的"偶尔")。
+    // 图表自带刻度/图例文字, 属于"要跟正文对齐"的一类(和表格同理); 通栏只留给纯视觉的
+    // 图片 / 图片墙 / 轮播(用户明确说过"其他组件宽些没关系")。
     Column({ space: 10 }) {
       // 图表标题用邻近的 InlineHeader 承载, 这里不再重复
       if (el.type === 'BarChart') {
@@ -1162,7 +1166,6 @@ export struct GuncatUiView {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-    .margin(this.bleed(topLevel))
   }
 
   // 折线/面积图的绘图高度: 模型给的 height 参数优先, 否则 160vp
