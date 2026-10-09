@@ -1312,14 +1312,59 @@ console.log('[渲染指纹]');
     GuncatUiLang.elementSignature(k1[1], v10) ===
     GuncatUiLang.elementSignature(k2[1], v20));
 
-  // 控件的实时值写在 state 里(没有 baked 进 props), 也要进指纹 —— 否则选中态不刷新
-  check('绑定控件(value 绑定): 实时值变 → 指纹变',
-    GuncatUiLang.elementSignature(k1[2], v10) !==
+  // Slider 是**唯一**的例外: 它自己绑定的 value 不进指纹(常驻豁免 —— 见下面那组断言与
+  // GuncatUiLang.elementSignature 的注释: 进了指纹的话, 拖动时它和它每一层祖先项都会换键重建,
+  // 正在拖的 Slider 被销毁、手势丢失)。它的显示值由渲染层的 live() 自己刷新。
+  check('Slider(拖动类控件): 绑定值变 → 指纹**不变**',
+    GuncatUiLang.elementSignature(k1[2], v10) ===
     GuncatUiLang.elementSignature(k1[2], v20));
   // Chips 这类"按 name 绑定"的控件 el.binds 是空的, 选中值以 name 为键存在 state 里
   check('name 绑定控件: state 变 → 指纹变',
     GuncatUiLang.elementSignature(k1[3], { '$amount': 10, 'metric': 'a' }) !==
     GuncatUiLang.elementSignature(k1[3], { '$amount': 10, 'metric': 'b' }));
+
+  // Slider 常驻豁免: 它自己绑定的 value 不进指纹 —— 指纹是递归的, 一旦进了, 拖动时它**和它每一层
+  // 祖先项**都会换键重建, 正在拖的 Slider 被销毁、手势当场丢失(真机反复踩过)。豁免必须常驻:
+  // 只在拖动期间豁免的话, 拖动开始那一刻键就变了, 同样会触发一次重建。
+  {
+    const sSrc = ['root = Card([ctrl])', '$amount = 120',
+      'ctrl = SectionBlock([sec1], true)',
+      'sec1 = SectionItem("n", "① 数值", [f1])',
+      'f1 = FormControl("金额", Slider("amount", "continuous", 0, 500, 5, [120], "金额", $amount), "h")'
+    ].join('\n');
+    const sp = GuncatUiLang.parse(sSrc);
+    const sa = [];
+    const sb = [];
+    const collect = (el, out) => {
+      if (!el || !el.props) { return; }
+      out.push(el);
+      const rec = (v) => {
+        if (v && v.props) { collect(v, out); }
+        else if (Array.isArray(v)) { for (const it of v) { rec(it); } }
+        else if (v && typeof v === 'object') { for (const k of Object.keys(v)) { rec(v[k]); } }
+      };
+      for (const k of Object.keys(el.props)) { rec(el.props[k]); }
+    };
+    collect(GuncatUiLang.render(sp, { '$amount': 120 }), sa);
+    collect(GuncatUiLang.render(sp, { '$amount': 365 }), sb);
+    const stable = (type) => {
+      const x = sa.find((e) => e.type === type);
+      const y = sb.find((e) => e.type === type);
+      return GuncatUiLang.elementSignature(x, { '$amount': 120 }) ===
+        GuncatUiLang.elementSignature(y, { '$amount': 365 });
+    };
+    check('Slider 指纹不随自己的绑定值变(拖动不会被重建)', stable('Slider'));
+    check('Slider 的祖先链指纹也稳定(FormControl)', stable('FormControl'));
+    check('Slider 的祖先链指纹也稳定(SectionItem)', stable('SectionItem'));
+    check('Slider 的祖先链指纹也稳定(SectionBlock)', stable('SectionBlock'));
+    // 但结构性参数仍要进指纹(否则程序重排后滑块不更新)
+    const s2 = GuncatUiLang.parse(sSrc.replace('0, 500, 5', '0, 900, 5'));
+    const sc = [];
+    collect(GuncatUiLang.render(s2, { '$amount': 120 }), sc);
+    check('Slider 的结构性参数仍进指纹(max 变了 → 指纹变)',
+      GuncatUiLang.elementSignature(sa.find((e) => e.type === 'Slider'), { '$amount': 120 }) !==
+      GuncatUiLang.elementSignature(sc.find((e) => e.type === 'Slider'), { '$amount': 120 }));
+  }
 
   // 数组与嵌套元素都参与指纹
   const a1 = GuncatUiLang.parse('root = Card([c])\nc = BarChart(["A", "B"], [Series("s", [1, 2])], "grouped")');

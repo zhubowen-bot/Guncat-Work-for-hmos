@@ -1232,11 +1232,12 @@ export class GuncatUiLang {
   //
   // values: 当前绑定值(绑定属性取实时值)。
   //
-  // ⚠️ 这里**没有**"冻结某个 key"的开关, 冻结改由渲染层按"祖先链快照"实现(见 pathToKey 与
-  // GuncatUiView.beginDrag)。原因: 冻结如果实现成"命中该 key 就返回一个常量指纹", 那个键在
-  // 拖动开始的一瞬间就从真实指纹变成了常量 —— 键变了, ForEach 照样会**销毁重建这一项**,
-  // 正在拖的 Slider 连同手势一起没了(只是把丢失推迟到第一次实时刷新)。要真正保住手势,
-  // 拖动期间的键必须与拖动前**逐字节相同**, 也就是快照, 而不是换一个常量。
+  // ⚠️ Slider 有**常驻豁免**(见下面循环里的 continue): 它绑定的 value 不参与指纹。理由是真机
+  // 反复踩出来的: 指纹是**递归**的, Slider 的 value 一进指纹, 它自己**以及它每一层祖先项**的键
+  // 都会随拖动变 → ForEach 重建那些项 → 正在拖的 Slider 被销毁, 手势当场丢失(表现为"只能点一下、
+  // 不跟手")。豁免必须是**常驻**的: 若只在拖动期间豁免, 拖动开始那一瞬间键就从"含 value"变成
+  // "不含 value", 同样会触发一次重建 —— 键必须与上一次渲染完全一致。
+  // (选择类控件不能这么豁免: Chips/单选/多选的选中值不在 props 里, 靠下面的状态值进指纹才能刷新。)
   static elementSignature(el: UiElement | null, values: Record<string, Object>): string {
     if (el === null) {
       return 'nil';
@@ -1248,6 +1249,9 @@ export class GuncatUiLang {
     names.sort();
     for (let i: number = 0; i < names.length; i++) {
       let name: string = names[i];
+      if (el.type === 'Slider' && UiNode.bindOf(el, name) !== '') {
+        continue;
+      }
       acc = GuncatUiLang.hashStr(acc, name);
       acc = GuncatUiLang.hashValue(acc, GuncatUiLang.propValue(el, name, values), values);
     }
@@ -1256,7 +1260,8 @@ export class GuncatUiLang {
     //   进 props**, 只看 binds 会让"选中态变化"不进指纹 → 项被复用 → 高亮不刷新(就是当初
     //   "点按钮后 UI 没切换过去"那个真机 bug 复发)。这里就地判断 binds['value'] / props['name'],
     //   不去调 GuncatUiRuntime.stateKeyOf —— 那个文件 import 了本文件, 反向 import 会成环。
-    let stateKey: string = GuncatUiLang.stateKeyOfLocal(el);
+    //   Slider 例外(同上): 它的状态值也不进指纹, 否则拖动中祖先项照样会换键重建。
+    let stateKey: string = el.type === 'Slider' ? '' : GuncatUiLang.stateKeyOfLocal(el);
     if (stateKey !== '') {
       let live: Object | undefined = values[stateKey];
       if (live !== undefined) {
