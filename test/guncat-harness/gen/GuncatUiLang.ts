@@ -2053,6 +2053,13 @@ export class GuncatUiMaterializer {
   }
 
   // 为元素树分配稳定 key(渲染层 ForEach 依赖)
+  //
+  // ⚠️ 真机踩过的坑: 这里必须覆盖**所有**装着子元素的属性形状, 漏一种就会出现一批 key 为空的
+  // 元素。渲染层的 live(el)(按 key 从当前树里取新元素)对空 key 只能放弃查找、退回过期对象,
+  // 于是那些节点永远显示旧值 —— 症状就是"绑定的值怎么都不刷新"。
+  // 三种形状: ① children 列表; ② 元素数组属性(items/series/columns/sections...);
+  //          ③ **单元素属性**(如 OverviewCardItem(top, bottom) 的 top/bottom、FormControl 的
+  //          control)—— 第三种原先没遍历, 正是空 key 的来源。
   private static assignKeys(el: UiElement, prefix: string): void {
     if (el.key === '') {
       el.key = prefix;
@@ -2064,7 +2071,7 @@ export class GuncatUiMaterializer {
       }
       GuncatUiMaterializer.assignKeys(children[i], children[i].key);
     }
-    // 元素类型的数组属性(series / items / columns ...)
+    // 元素类型的属性: 数组 → 逐项; 单个元素 → 直接递归
     let keys: string[] = GuncatUiMaterializer.propNames(el);
     for (let i: number = 0; i < keys.length; i++) {
       let value: Object | undefined = el.props[keys[i]];
@@ -2078,6 +2085,14 @@ export class GuncatUiMaterializer {
             }
             GuncatUiMaterializer.assignKeys(child, child.key);
           }
+        }
+      } else {
+        let single: UiElement | null = GuncatUiMaterializer.asElement(value);
+        if (single !== null) {
+          if (single.key === '') {
+            single.key = el.key + '_' + keys[i];
+          }
+          GuncatUiMaterializer.assignKeys(single, single.key);
         }
       }
     }

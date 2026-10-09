@@ -54,7 +54,6 @@ export struct GuncatUiView {
   private dbgIdle: number = 0;
   private dbgFinish: number = 0;
   private dbgKey: string = '';
-  private dbgFrozen: number = 0;
 
   // 程序源码。传字符串而不是对象: ArkUI 里字符串 @Prop 的变更通知最可靠,
   // 而嵌套对象经 @Prop 深拷贝后既慢又容易丢状态。
@@ -83,18 +82,15 @@ export struct GuncatUiView {
   @State private expanded: Record<string, boolean> = {};
   @State private selectedTab: Record<string, number> = {};
 
-  // 拖动期间的"键冻结"快照: 元素 key → 拖动开始那一刻它的指纹。
-  // 拖动开始时把**从 root 到被拖控件**整条链的指纹快照下来, 拖动期间这些元素的键与拖动前
-  // 逐字节相同 → ForEach 不会重建它们 → 手势不会被销毁。为什么不能用"命中就返回一个常量"
-  // 来冻结: 那样键本身变了, 照样会销毁重建那一项(只是把丢失推迟一次刷新), 详见
-  // GuncatUiLang.elementSignature 的注释。
-  private dragFreeze: Record<string, string> = {};
-  // 拖动是否已开始(Begin 置位, 收尾清掉): Slider 的 End/Click 与触摸抬起都可能触发收尾, 用它去重
+  // 拖动是否已开始(Begin 置位, 收尾清掉): Slider 的 End/Click 与静默计时器都可能触发收尾, 用它去重
   private dragging: boolean = false;
   // 拖动中实时刷新的节流时间戳(80ms 一次, 不必每帧都重新物化)
   private lastLiveTickMs: number = 0;
   // 拖动"静默"计时器: 拖动中每次 Moving 重新起表, 超时即当作松手(见 armDragIdleTimer)
   private dragIdleTimer: number = -1;
+  // live() 的缓存: 一份 key→当前元素 的映射, 按 (rev, sigTick) 失效(见 live)
+  private liveStamp: string = '';
+  private liveMap: Record<string, UiElement> = {};
 
   private program: UiProgram = new UiProgram();
   // ⚠️ 必须是 @State, 不能是普通字段!! 真机踩透的坑:
@@ -118,7 +114,6 @@ export struct GuncatUiView {
   aboutToDisappear(): void {
     this.disarmDragIdleTimer();
     this.dragging = false;
-    this.dragFreeze = {};
   }
 
   // 程序文本变化(流式/最终): 重新解析并保持用户已改的绑定值
@@ -153,32 +148,79 @@ export struct GuncatUiView {
   }
 
   // 拖动中的实时刷新: 同样重新物化, 但**只动 sigTick、不动 rev**。
-  // 为什么要分开: rev 被 .id() 读到(重渲染触发器), 拖动期间每 80ms 变一次 id 没必要也不稳妥;
-  // sigTick 只影响各子项的指纹重算 —— 冻结链上的键来自快照(不变), 其它项的键随新值变化 → 重建。
+  // 它唯一的作用是让各节点**自己重画**(见 live): sigTick 一变, 表达式里调过 live() 的节点就被
+  // 标脏、重画时从新树里取值。它不负责、也不会触发 ForEach 项的重建(真机证明那条路不可靠)。
   private revalue(): void {
     this.root = GuncatUiLang.render(this.program, this.state.values);
     this.sigTick++;
   }
 
-  // 开始拖动: 把"从 root 到该控件"整条链的**当前指纹**快照下来(见 dragFreeze)。
-  // 必须在 `state.set` **之前**调用 —— 快照要和"上一次已渲染出来的键"完全一致, 否则快照本身
-  // 就成了一次键变化, 照样重建。
-  private beginDrag(el: UiElement): void {
-    this.dbgBegin++;
-    this.dbgKey = GuncatUiRuntime.stateKeyOf(el);
-    this.dragging = true;
-    let chain: UiElement[] = GuncatUiLang.pathToElement(this.root, el);
-    let frozen: Record<string, string> = {};
-    for (let i: number = 0; i < chain.length; i++) {
-      frozen[chain[i].key] = GuncatUiLang.elementSignature(chain[i], this.state.values);
+  // 取"当前物化树里"的那个元素, 并在**表达式里**读一下 sigTick。
+  //
+  // 为什么必须这样(真机多轮实测的结论, 别改成别的形态):
+  //   - 物化树每次都是新对象(root 的赋值会换掉整棵树), 而各个 @Builder 里的 el 是**上一次
+  //     构建时闭包捕获的旧对象**, 它的 props 里是旧值 —— 直接读它就永远是旧值;
+  //   - ArkUI 只把"构建期表达式里当场读到"的 @State 登记成依赖。本方法是在属性/组件参数表达式
+  //     里被调用的(如 Text(UiNode.str(this.live(el), 'value', ''))), 所以这个 sigTick 读取会被
+  //     登记 → sigTick 一变, 这个节点自己重画, 重画时取到的就是新树里的新值;
+  //   - 而"换 ForEach 键 ⇒ 重建该项"这条路上所有变体在这台设备上都不可靠(见文件里各处注释),
+  //     所以值节点必须能"自己重画", 不能指望祖先重建。
+  // 按 key 找(而不是对象身份): key 跨物化稳定(GuncatUiMaterializer.assignKeys 保证), 而对象
+  // 身份会因为 rebuild/revalue 换树而漂移(真机就出现过"时找到时找不到")。找不到就退回传进来的 el。
+  //
+  // 一次构建里同一个元素可能被读几十次, 所以按 (rev, sigTick) 缓存一份 key→当前元素 的映射:
+  // 缓存只在"树或 epoch 变了"时失效, 不改变任何行为。
+  private live(el: UiElement): UiElement {
+    let tick: number = this.sigTick;
+    if (tick < 0) {
+      return el;
     }
-    this.dragFreeze = frozen;
-    this.dbgFrozen = chain.length;
-    this.sigTick++;   // 诊断行随之刷新
+    let stamp: string = this.rev.toString() + ':' + tick.toString();
+    if (stamp !== this.liveStamp) {
+      this.liveStamp = stamp;
+      this.liveMap = {};
+    }
+    let hit: UiElement | undefined = this.liveMap[el.key];
+    if (hit !== undefined) {
+      return hit;
+    }
+    let chain: UiElement[] = GuncatUiLang.pathToKey(this.root, el.key);
+    let cur: UiElement = chain.length === 0 ? el : chain[chain.length - 1];
+    this.liveMap[el.key] = cur;
+    return cur;
   }
 
-  // 结束一次拖动/点选: 丢掉冻结快照 + 整树重新物化(拖动期间被压住的变化一次全部刷出来) +
-  // 回传状态。
+  // 取"当前树里"的某个 **Record 值**(对象数组属性按下标; 单对象属性用 index < 0)。
+  //
+  // 为什么光有 live(el) 还不够: 列表行里的值是 baked 在 Record 里的(EntityList 的 rows、
+  // ImageGallery 的 images、Table 的 data...), 而 ForEach 的 item builder 在键值不变时**根本不会
+  // 重跑** —— 它闭包捕获的那个旧 Record 永远出不来新值。所以行文本必须在**自己的表达式**里
+  // 重新取一次 Record(顺便读一下 sigTick 登记依赖), 才会跟着绑定值变。
+  private liveRow(el: UiElement, prop: string, index: number): Record<string, Object> | null {
+    let tick: number = this.sigTick;
+    let cur: UiElement = tick < 0 ? el : this.live(el);
+    if (index < 0) {
+      return UiNode.obj(cur, prop);
+    }
+    let rows: Record<string, Object>[] = UiNode.objList(cur, prop);
+    if (index >= rows.length) {
+      return null;
+    }
+    return rows[index];
+  }
+
+  // 表格单元: 与 liveRow 同理, 但表格的行是 string[] (由 colTexts 拼出来的)
+  private liveCell(el: UiElement, row: number, col: number): string {
+    let tick: number = this.sigTick;
+    let cur: UiElement = tick < 0 ? el : this.live(el);
+    let rows: string[][] = this.tableRows(cur);
+    if (row >= rows.length || col >= rows[row].length) {
+      return '';
+    }
+    return rows[row][col];
+  }
+
+  // 结束一次拖动/点选: 重新物化(把值刷进树) + 整树重画 + 回传状态。
   //
   // explicit = 这次调用来自 End/Click 这种明确信号; 静默计时器跟在 End 后面时不该重复回传,
   // 用 dragging 去重保证一次手势只回传一次。
@@ -187,18 +229,11 @@ export struct GuncatUiView {
     this.dbgFinish++;
     this.disarmDragIdleTimer();
     this.dragging = false;
-    this.dragFreeze = {};
     this.rematerialize();
     this.sigTick++;
     if (explicit || wasDragging) {
       this.emitState();
     }
-  }
-
-  // 拖动链是否真的冻住了(见 buildSlider 里的安全检查): 链上一个元素都没快照到, 就说明这次
-  // 拖动没有保护, 此时**不能**做实时刷新 —— 一重建就会把正在拖的 Slider 销毁。
-  private dragFrozen(): boolean {
-    return this.dragging && Object.keys(this.dragFreeze).length > 0;
   }
 
   // "静默计时器": 拖动中每次 Moving 重新起表, 一段时间没有新的 Moving 就当作松手。
@@ -240,7 +275,7 @@ export struct GuncatUiView {
 
   // 临时诊断文本: 读一下 sigTick/rev —— 只要有事件推进它们, 这行字就该跟着变。
   // 字段含义: B=Begin M=Moving E=End C=Click I=静默计时器收尾 F=finishDrag
-  //           frz=拖动链快照条数 rev/sig=两个 epoch key/val=滑块的 state 键与当前值
+  //           rev/sig=两个 epoch key/val=滑块的 state 键与当前值
   private debugDragText(): string {
     let wake: number = this.rev + this.sigTick;
     let raw: Object | undefined = this.state.values[this.dbgKey];
@@ -248,7 +283,6 @@ export struct GuncatUiView {
     return 'DBG B' + this.dbgBegin.toString() + ' M' + this.dbgMoving.toString() +
       ' E' + this.dbgEnd.toString() + ' C' + this.dbgClick.toString() +
       ' I' + this.dbgIdle.toString() + ' F' + this.dbgFinish.toString() +
-      ' frz' + this.dbgFrozen.toString() +
       ' rev' + this.rev.toString() + ' sig' + this.sigTick.toString() +
       ' key=' + this.dbgKey + ' val=' + val + (wake < 0 ? '' : '');
   }
@@ -345,7 +379,7 @@ export struct GuncatUiView {
     if (!this.interactive()) {
       return;
     }
-    let steps: UiActionStep[] = UiNode.actionSteps(el, 'action');
+    let steps: UiActionStep[] = UiNode.actionSteps(this.live(el), 'action');
     let url: string = GuncatUiRuntime.urlOf(steps);
     if (url !== '') {
       this.openUrl(url);
@@ -433,7 +467,7 @@ export struct GuncatUiView {
     }
     let raw: Object | null = this.state.get(key);
     if (raw === null) {
-      raw = UiNode.raw(el, 'defaultValue');
+      raw = UiNode.raw(this.live(el), 'defaultValue');
     }
     if (raw instanceof Array) {
       let arr: Object[] = raw as Object[];
@@ -659,11 +693,11 @@ export struct GuncatUiView {
   }
 
   private sourceCount(root: UiElement): number {
-    return UiNode.objList(root, 'sources').length;
+    return UiNode.objList(this.live(root), 'sources').length;
   }
 
   private sourceRows(root: UiElement): string[] {
-    let rows: Record<string, Object>[] = UiNode.objList(root, 'sources');
+    let rows: Record<string, Object>[] = UiNode.objList(this.live(root), 'sources');
     let out: string[] = [];
     for (let i: number = 0; i < rows.length; i++) {
       let name: string = UiNode.objStr(rows[i], 'sourceName', '');
@@ -677,25 +711,18 @@ export struct GuncatUiView {
 
   // 渲染元素的子元素。
   //
-  // ⚠️ ForEach 的键里放的是**渲染指纹**(`GuncatUiLang.elementSignature`), 不再是无脑拼全局版本号
-  // rev。这是 ArkUI 的硬约束 + 真机踩过的坑:
-  //   ForEach 在父组件重渲染时先比对新旧键值, **键值不变的项直接复用已有子组件, 连 item builder
-  //   都不会重新执行**。于是"绑定值变了 → 重新物化出新树"这件事根本传不到界面上(早先表现为:
-  //   点 Chips / 单选 / 多选后选中态不变, 切到别的会话再切回来才正常)。
-  //   用指纹后: 内容真的变了的项照样换键重建(实时刷新), 内容没变的项键值不变、继续复用。
-  //   但**正在拖动的 Slider 内容恰恰一直在变**(它的 value 就绑在被拖的变量上), 所以还要靠
-  //   dragFreeze: 拖动开始时把"它到 root 整条链"的指纹快照下来, 用快照当键(见 beginDrag),
-  //   这样它和它的祖先在这一期间都不会被重建, 手势不会断。
-  // 这里读一下 rev/sigTick 只是给框架**登记依赖**(键值本身不含它们): 值变了要靠 @State 变化把
-  // ForEach 重跑一遍, 重跑时才会重新计算每个子项的指纹。
+  // ⚠️ ForEach 的键里放的是**渲染指纹**(`GuncatUiLang.elementSignature`)。这是 ArkUI 的硬约束:
+  //   ForEach 在父组件重渲染时先比对新旧键值, **键值不变的项直接复用已有子组件、连 item builder
+  //   都不会重新执行**。用指纹后: 内容真的变了的项换键重建, 内容没变的项继续复用。
   //
-  // ⚠️ 依赖必须**在键箭头里当场读到**(所以 wake 是参数而不是方法内的局部读): 真机踩过 —— 把读取
-  // 藏进方法内部时依赖没登记上, ForEach 不会重跑, 表现就是"松手后什么都不刷新"。
+  //   ⚠️ 真机结论: **不要再指望"换键 ⇒ 重建该项"来刷新绑定值**(这条路上所有变体在这台设备上
+  //   都不可靠: .id(rev) 触发器、恒真 if 包住全树、root 改 @State + 当场取新树、拖动链指纹快照
+  //   —— 全部试过, 都出现过"值写对了界面就是不动")。绑定值的刷新现在由 live() 负责: 值节点在
+  //   自己的表达式里读 @State 并当场从当前树取值, 于是**自己重画**, 与祖先是否重建无关。
+  //   指纹键保留的意义变成: 结构真的变了(增删项、切换选中态)时该项仍能重建。
+  //   键里的 epoch 参数(wake)只用来给 ForEach 登记依赖, **不进键值**。
   private itemKey(child: UiElement, wake: number): string {
-    // 拖动期间: 冻结链上的元素直接用快照指纹 → 与拖动前的键逐字节相同 → 不重建、手势不断
-    let snapped: string | undefined = this.dragFreeze[child.key];
-    let sig: string = snapped !== undefined ? snapped
-      : GuncatUiLang.elementSignature(child, this.state.values);
+    let sig: string = GuncatUiLang.elementSignature(child, this.state.values);
     return child.key + '#' + sig + (wake < 0 ? '#w' : '');
   }
 
@@ -710,7 +737,7 @@ export struct GuncatUiView {
   @Builder
   buildElements(list: UiElement[], topLevel: boolean) {
     ForEach(this.wake(list, this.rev + this.sigTick), (child: UiElement, index: number) => {
-      this.renderNode(child, topLevel)
+      this.renderNode(this.live(child), topLevel)
     }, (child: UiElement, index: number) => this.itemKey(child, this.rev + this.sigTick))
   }
 
@@ -721,7 +748,7 @@ export struct GuncatUiView {
   @Builder
   buildRootTree(tree: UiElement | null, epoch: number) {
     ForEach(this.rootKids(tree, epoch), (child: UiElement, index: number) => {
-      this.renderNode(child, true)
+      this.renderNode(this.live(child), true)
     }, (child: UiElement, index: number) => this.itemKey(child, epoch))
   }
 
@@ -736,10 +763,14 @@ export struct GuncatUiView {
   // 通用 children 容器
   @Builder
   buildChildren(el: UiElement, topLevel: boolean) {
-    this.buildElements(UiNode.elementList(el, 'children'), topLevel)
+    this.buildElements(UiNode.elementList(this.live(el), 'children'), topLevel)
   }
 
   // ===== 元素分发 =====
+  //
+  // ⚠️ 这里**不能**写 `el = this.live(el);` —— ArkTS 不允许在 @Builder 体内赋值
+  // ("does not meet UI component syntax")。所以"换成当前树里的新元素"这一步放在**调用点**
+  // (buildElements / buildRootTree 的 item builder 传 this.live(child)), 见那两处注释。
   @Builder
   renderNode(el: UiElement, topLevel: boolean) {
     if (el.type === 'Card') {
@@ -824,7 +855,7 @@ export struct GuncatUiView {
     } else if (el.type === 'IconButton') {
       this.buildIconButton(el, null)
     } else if (el.type === 'Icon') {
-      GuncatUiIcon({ name: UiNode.str(el, 'name', 'dot'), iconSize: 14 })
+      GuncatUiIcon({ name: UiNode.str(this.live(el), 'name', 'dot'), iconSize: 14 })
     } else if (el.type === 'Series' || el.type === 'Col' || el.type === 'SectionItem' ||
       el.type === 'TabItem' || el.type === 'AccordionItem' || el.type === 'StepsItem' ||
       el.type === 'SelectItem' || el.type === 'RadioItem' || el.type === 'CheckBoxItem' ||
@@ -847,7 +878,7 @@ export struct GuncatUiView {
   private fallbackLabel(el: UiElement): string {
     let keys: string[] = ['text', 'title', 'label', 'value', 'heading', 'name', 'trigger'];
     for (let i: number = 0; i < keys.length; i++) {
-      let v: string = UiNode.str(el, keys[i], '');
+      let v: string = UiNode.str(this.live(el), keys[i], '');
       if (v !== '') {
         return v;
       }
@@ -859,13 +890,13 @@ export struct GuncatUiView {
   @Builder
   buildCardHeader(el: UiElement) {
     Column({ space: 4 }) {
-      Text(UiNode.str(el, 'title', ''))
+      Text(UiNode.str(this.live(el), 'title', ''))
         .fontSize(21)
         .fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.text_primary'))
         .width('100%')
-      if (UiNode.has(el, 'subtitle')) {
-        Text(UiNode.str(el, 'subtitle', ''))
+      if (UiNode.has(this.live(el), 'subtitle')) {
+        Text(UiNode.str(this.live(el), 'subtitle', ''))
           .fontSize(12)
           .fontColor($r('app.color.text_tertiary'))
           .width('100%')
@@ -878,13 +909,13 @@ export struct GuncatUiView {
   @Builder
   buildInlineHeader(el: UiElement) {
     Column({ space: 3 }) {
-      Text(UiNode.str(el, 'heading', ''))
+      Text(UiNode.str(this.live(el), 'heading', ''))
         .fontSize(17)
         .fontWeight(FontWeight.Medium)
         .fontColor($r('app.color.text_primary'))
         .width('100%')
-      if (UiNode.has(el, 'description')) {
-        Text(UiNode.str(el, 'description', ''))
+      if (UiNode.has(this.live(el), 'description')) {
+        Text(UiNode.str(this.live(el), 'description', ''))
           .fontSize(12)
           .fontColor($r('app.color.text_secondary'))
           .width('100%')
@@ -897,14 +928,14 @@ export struct GuncatUiView {
   @Builder
   buildTextContent(el: UiElement) {
     Column() {
-      this.inlineRich(UiNode.str(el, 'text', ''), this.contentSize(el), $r('app.color.text_primary'), false)
+      this.inlineRich(UiNode.str(this.live(el), 'text', ''), this.contentSize(el), $r('app.color.text_primary'), false)
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
   }
 
   private contentSize(el: UiElement): number {
-    let size: string = UiNode.str(el, 'size', 'default');
+    let size: string = UiNode.str(this.live(el), 'size', 'default');
     if (size === 'small') {
       return 13;
     }
@@ -1008,11 +1039,11 @@ export struct GuncatUiView {
   @Builder
   buildMarkdown(el: UiElement) {
     Column() {
-      RichTextView({ content: UiNode.str(el, 'textMarkdown', '') })
+      RichTextView({ content: UiNode.str(this.live(el), 'textMarkdown', '') })
     }
     .width('100%')
     .borderRadius(12)
-    .backgroundColor(UiNode.str(el, 'variant', 'clear') === 'sunk'
+    .backgroundColor(UiNode.str(this.live(el), 'variant', 'clear') === 'sunk'
       ? $r('app.color.surface_secondary') : Color.Transparent)
     .clip(true)
   }
@@ -1021,20 +1052,20 @@ export struct GuncatUiView {
   buildCallout(el: UiElement) {
     Row() {
       GuncatUiIcon({
-        name: this.toneIcon(UiNode.str(el, 'variant', 'info')),
+        name: this.toneIcon(UiNode.str(this.live(el), 'variant', 'info')),
         iconSize: 15,
-        color: this.toneColor(UiNode.str(el, 'variant', 'info'))
+        color: this.toneColor(UiNode.str(this.live(el), 'variant', 'info'))
       })
       Column({ space: 3 }) {
-        if (UiNode.has(el, 'title')) {
-          Text(UiNode.str(el, 'title', ''))
+        if (UiNode.has(this.live(el), 'title')) {
+          Text(UiNode.str(this.live(el), 'title', ''))
             .fontSize(13)
             .fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.text_primary'))
             .width('100%')
         }
-        if (UiNode.has(el, 'description')) {
-          Text(UiNode.str(el, 'description', ''))
+        if (UiNode.has(this.live(el), 'description')) {
+          Text(UiNode.str(this.live(el), 'description', ''))
             .fontSize(13)
             .lineHeight(20)
             .fontColor($r('app.color.text_secondary'))
@@ -1080,7 +1111,7 @@ export struct GuncatUiView {
 
   @Builder
   buildSeparator(el: UiElement) {
-    if (UiNode.str(el, 'orientation', 'horizontal') === 'vertical') {
+    if (UiNode.str(this.live(el), 'orientation', 'horizontal') === 'vertical') {
       Divider()
         .vertical(true)
         .height(16)
@@ -1094,11 +1125,11 @@ export struct GuncatUiView {
 
   // ArkTS 的 @Builder 体内只允许 UI 组件语法(不能声明局部变量), 所以取值一律走私有方法
   private imageSrc(el: UiElement): string {
-    return UiNode.str(el, 'src', '');
+    return UiNode.str(this.live(el), 'src', '');
   }
 
   private imageAlt(el: UiElement): string {
-    return UiNode.str(el, 'alt', '');
+    return UiNode.str(this.live(el), 'alt', '');
   }
 
   @Builder
@@ -1143,10 +1174,10 @@ export struct GuncatUiView {
   @Builder
   buildGallery(el: UiElement, topLevel: boolean) {
     Row({ space: 8 }) {
-      ForEach(UiNode.objList(el, 'images'), (img: Record<string, Object>, i: number) => {
+      ForEach(UiNode.objList(this.live(el), 'images'), (img: Record<string, Object>, i: number) => {
         Column() {
-          if (this.isRemoteImage(UiNode.objStr(img, 'src', ''))) {
-            Image(UiNode.objStr(img, 'src', ''))
+          if (this.isRemoteImage(UiNode.objStr(this.liveRow(el, 'images', i), 'src', ''))) {
+            Image(UiNode.objStr(this.liveRow(el, 'images', i), 'src', ''))
               .width('100%')
               .aspectRatio(1.25)
               .objectFit(ImageFit.Cover)
@@ -1162,8 +1193,8 @@ export struct GuncatUiView {
             .backgroundColor($r('app.color.surface_secondary'))
             .borderRadius(12)
           }
-          if (UiNode.objStr(img, 'alt', '') !== '') {
-            Text(UiNode.objStr(img, 'alt', ''))
+          if (UiNode.objStr(this.liveRow(el, 'images', i), 'alt', '') !== '') {
+            Text(UiNode.objStr(this.liveRow(el, 'images', i), 'alt', ''))
               .fontSize(10)
               .fontColor($r('app.color.text_tertiary'))
               .maxLines(1)
@@ -1184,7 +1215,7 @@ export struct GuncatUiView {
   buildCodeBlock(el: UiElement) {
     Column({ space: 6 }) {
       Row({ space: 6 }) {
-        Text(UiNode.str(el, 'language', 'text'))
+        Text(UiNode.str(this.live(el), 'language', 'text'))
           .fontSize(10)
           .fontColor($r('app.color.text_tertiary'))
           .layoutWeight(1)
@@ -1192,12 +1223,12 @@ export struct GuncatUiView {
           .fontSize(10)
           .fontColor($r('app.color.brand'))
           .onClick(() => {
-            this.copyText(UiNode.str(el, 'codeString', ''));
+            this.copyText(UiNode.str(this.live(el), 'codeString', ''));
           })
       }
       .width('100%')
       Scroll() {
-        Text(UiNode.str(el, 'codeString', ''))
+        Text(UiNode.str(this.live(el), 'codeString', ''))
           .fontSize(12)
           .fontFamily('monospace')
           .fontColor($r('app.color.code_text'))
@@ -1221,9 +1252,9 @@ export struct GuncatUiView {
   buildTags(el: UiElement) {
     Flex({ wrap: FlexWrap.Wrap }) {
       if (el.type === 'Tag') {
-        this.tagPill(UiNode.str(el, 'text', ''), UiNode.str(el, 'variant', 'neutral'))
+        this.tagPill(UiNode.str(this.live(el), 'text', ''), UiNode.str(this.live(el), 'variant', 'neutral'))
       } else {
-        ForEach(UiNode.strList(el, 'tags'), (tag: string, i: number) => {
+        ForEach(UiNode.strList(this.live(el), 'tags'), (tag: string, i: number) => {
           this.tagPill(tag, 'neutral')
         }, (tag: string, i: number) => 'tg' + i.toString() + tag)
       }
@@ -1277,14 +1308,14 @@ export struct GuncatUiView {
   @Builder
   buildEntityList(el: UiElement) {
     Column({ space: 0 }) {
-      if (UiNode.obj(el, 'header') !== null) {
-        this.entityRow(UiNode.obj(el, 'header'), true)
+      if (UiNode.obj(this.live(el), 'header') !== null) {
+        this.entityRow(el, 'header', -1, true)
       }
-      ForEach(UiNode.objList(el, 'rows'), (row: Record<string, Object>, i: number) => {
-        this.entityRow(row, false)
+      ForEach(UiNode.objList(this.live(el), 'rows'), (row: Record<string, Object>, i: number) => {
+        this.entityRow(el, 'rows', i, false)
       }, (row: Record<string, Object>, i: number) => 'er' + i.toString())
-      if (UiNode.obj(el, 'footer') !== null) {
-        this.entityRow(UiNode.obj(el, 'footer'), true)
+      if (UiNode.obj(this.live(el), 'footer') !== null) {
+        this.entityRow(el, 'footer', -1, true)
       }
     }
     .width('100%')
@@ -1293,15 +1324,16 @@ export struct GuncatUiView {
     .clip(true)
   }
 
+  // 一行实体: 值从**当前树**里当场取(见 liveRow), 这样绑定值一变这一行自己就重画。
   @Builder
-  entityRow(row: Record<string, Object> | null, emphasize: boolean) {
+  entityRow(el: UiElement, prop: string, index: number, emphasize: boolean) {
     Row() {
-      Text(UiNode.objStr(row, 'left', ''))
+      Text(UiNode.objStr(this.liveRow(el, prop, index), 'left', ''))
         .fontSize(emphasize ? 12 : 13)
         .fontWeight(emphasize ? FontWeight.Medium : FontWeight.Normal)
         .fontColor($r('app.color.text_primary'))
         .layoutWeight(1)
-      Text(UiNode.objStr(row, 'right', ''))
+      Text(UiNode.objStr(this.liveRow(el, prop, index), 'right', ''))
         .fontSize(emphasize ? 12 : 13)
         .fontWeight(FontWeight.Medium)
         .fontColor($r('app.color.text_primary'))
@@ -1329,26 +1361,26 @@ export struct GuncatUiView {
       // 图表标题用邻近的 InlineHeader 承载, 这里不再重复
       if (el.type === 'BarChart') {
         GuncatUiBarChart({
-          labels: UiNode.strList(el, 'labels'),
+          labels: UiNode.strList(this.live(el), 'labels'),
           seriesNames: this.seriesNames(el),
           seriesValues: this.seriesValues(el),
-          stacked: UiNode.str(el, 'variant', 'grouped') === 'stacked',
-          bodyHeight: UiNode.num(el, 'height', 150),
-          yLabel: UiNode.str(el, 'yLabel', '')
+          stacked: UiNode.str(this.live(el), 'variant', 'grouped') === 'stacked',
+          bodyHeight: UiNode.num(this.live(el), 'height', 150),
+          yLabel: UiNode.str(this.live(el), 'yLabel', '')
         })
       } else if (el.type === 'LineChart' || el.type === 'AreaChart') {
         GuncatUiLineChart({
-          labels: UiNode.strList(el, 'labels'),
+          labels: UiNode.strList(this.live(el), 'labels'),
           seriesNames: this.seriesNames(el),
           seriesValues: this.seriesValues(el),
-          smooth: UiNode.str(el, 'variant', 'linear') === 'natural',
+          smooth: UiNode.str(this.live(el), 'variant', 'linear') === 'natural',
           area: el.type === 'AreaChart',
-          showDots: UiNode.strList(el, 'labels').length <= 12,
+          showDots: UiNode.strList(this.live(el), 'labels').length <= 12,
           chartHeight: this.chartHeight(el)
         })
       } else if (el.type === 'HorizontalBarChart') {
         GuncatUiHorizontalBars({
-          labels: UiNode.strList(el, 'labels'),
+          labels: UiNode.strList(this.live(el), 'labels'),
           seriesNames: this.seriesNames(el),
           seriesValues: this.seriesValues(el),
           colors: [],
@@ -1356,23 +1388,23 @@ export struct GuncatUiView {
         })
       } else if (el.type === 'PieChart') {
         GuncatUiPieChart({
-          labels: UiNode.strList(el, 'labels'),
-          values: UiNode.numList(el, 'values'),
-          donut: UiNode.str(el, 'variant', 'donut') !== 'pie'
+          labels: UiNode.strList(this.live(el), 'labels'),
+          values: UiNode.numList(this.live(el), 'values'),
+          donut: UiNode.str(this.live(el), 'variant', 'donut') !== 'pie'
         })
       } else if (el.type === 'RadialChart') {
         GuncatUiRadialChart({
-          labels: UiNode.strList(el, 'labels'),
-          values: UiNode.numList(el, 'values')
+          labels: UiNode.strList(this.live(el), 'labels'),
+          values: UiNode.numList(this.live(el), 'values')
         })
       } else if (el.type === 'SingleStackedBarChart') {
         GuncatUiStackedBar({
-          labels: UiNode.strList(el, 'labels'),
-          values: UiNode.numList(el, 'values')
+          labels: UiNode.strList(this.live(el), 'labels'),
+          values: UiNode.numList(this.live(el), 'values')
         })
       } else {
         GuncatUiRadarChart({
-          labels: UiNode.strList(el, 'labels'),
+          labels: UiNode.strList(this.live(el), 'labels'),
           seriesNames: this.seriesNames(el),
           seriesNorm: this.seriesNorm(el)
         })
@@ -1385,7 +1417,7 @@ export struct GuncatUiView {
   // 折线/面积图的绘图高度: 模型给的 height 参数优先, 否则 160vp
   // (旧实现用 aspectRatio 让 ArkUI 推导高度, 真机上推出来的盒子又高又空、内容只画了一小块)
   private chartHeight(el: UiElement): number {
-    let h: number = UiNode.num(el, 'height', 0);
+    let h: number = UiNode.num(this.live(el), 'height', 0);
     if (h < 80) {
       return 160;
     }
@@ -1395,19 +1427,19 @@ export struct GuncatUiView {
     return h;
   }
 
-  private seriesNames(el: UiElement): string[] {    let series: UiElement[] = UiNode.elementList(el, 'series');
+  private seriesNames(el: UiElement): string[] {    let series: UiElement[] = UiNode.elementList(this.live(el), 'series');
     let out: string[] = [];
     for (let i: number = 0; i < series.length; i++) {
-      out.push(UiNode.str(series[i], 'category', '系列' + (i + 1).toString()));
+      out.push(UiNode.str(this.live(series[i]), 'category', '系列' + (i + 1).toString()));
     }
     return out;
   }
 
   private seriesValues(el: UiElement): number[][] {
-    let series: UiElement[] = UiNode.elementList(el, 'series');
+    let series: UiElement[] = UiNode.elementList(this.live(el), 'series');
     let out: number[][] = [];
     for (let i: number = 0; i < series.length; i++) {
-      out.push(UiNode.numList(series[i], 'values'));
+      out.push(UiNode.numList(this.live(series[i]), 'values'));
     }
     return out;
   }
@@ -1445,8 +1477,8 @@ export struct GuncatUiView {
       Scroll() {
         Column({ space: 0 }) {
           Row() {
-            ForEach(UiNode.elementList(el, 'columns'), (col: UiElement, ci: number) => {
-              Text(UiNode.str(col, 'label', ''))
+            ForEach(UiNode.elementList(this.live(el), 'columns'), (col: UiElement, ci: number) => {
+              Text(UiNode.str(this.live(col), 'label', ''))
                 .fontSize(11)
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('app.color.brand'))
@@ -1460,10 +1492,10 @@ export struct GuncatUiView {
           .width(this.tableWidth(el))
           .backgroundColor($r('app.color.brand_light'))
 
-          ForEach(this.tableRows(el), (row: string[], ri: number) => {
+          ForEach(this.tableRows(this.live(el)), (row: string[], ri: number) => {
             Row() {
               ForEach(row, (cell: string, ci: number) => {
-                Text(cell)
+                Text(this.liveCell(el, ri, ci))
                   .fontSize(11)
                   .fontColor($r('app.color.text_primary'))
                   .layoutWeight(1)
@@ -1491,16 +1523,16 @@ export struct GuncatUiView {
   }
 
   private tableWidth(el: UiElement): number {
-    let cols: number = UiNode.elementList(el, 'columns').length;
+    let cols: number = UiNode.elementList(this.live(el), 'columns').length;
     return cols <= 0 ? 300 : cols * 116;
   }
 
   private colAlign(col: UiElement): TextAlign {
-    return UiNode.str(col, 'type', 'string') === 'number' ? TextAlign.End : TextAlign.Start;
+    return UiNode.str(this.live(col), 'type', 'string') === 'number' ? TextAlign.End : TextAlign.Start;
   }
 
   private colAlignAt(el: UiElement, index: number): TextAlign {
-    let cols: UiElement[] = UiNode.elementList(el, 'columns');
+    let cols: UiElement[] = UiNode.elementList(this.live(el), 'columns');
     if (index >= cols.length) {
       return TextAlign.Start;
     }
@@ -1509,7 +1541,7 @@ export struct GuncatUiView {
 
   // 列式数据 → 行数组
   private tableRows(el: UiElement): string[][] {
-    let cols: UiElement[] = UiNode.elementList(el, 'columns');
+    let cols: UiElement[] = UiNode.elementList(this.live(el), 'columns');
     let data: string[][] = [];
     let maxLen: number = 0;
     for (let i: number = 0; i < cols.length; i++) {
@@ -1532,12 +1564,12 @@ export struct GuncatUiView {
   }
 
   private colTexts(col: UiElement): string[] {
-    let raw: Object | null = UiNode.raw(col, 'data');
+    let raw: Object | null = UiNode.raw(this.live(col), 'data');
     let out: string[] = [];
     if (raw === null) {
       return out;
     }
-    let isNumber: boolean = UiNode.str(col, 'type', 'string') === 'number';
+    let isNumber: boolean = UiNode.str(this.live(col), 'type', 'string') === 'number';
     if (raw instanceof Array) {
       let arr: Object[] = raw as Object[];
       for (let i: number = 0; i < arr.length; i++) {
@@ -1557,10 +1589,10 @@ export struct GuncatUiView {
   @Builder
   buildSectionBlock(el: UiElement) {
     Column({ space: 8 }) {
-      ForEach(UiNode.elementList(el, 'sections'), (sec: UiElement, i: number) => {
+      ForEach(UiNode.elementList(this.live(el), 'sections'), (sec: UiElement, i: number) => {
         Column({ space: 8 }) {
           Row({ space: 6 }) {
-            Text(UiNode.str(sec, 'trigger', ''))
+            Text(UiNode.str(this.live(sec), 'trigger', ''))
               .fontSize(14)
               .fontWeight(FontWeight.Medium)
               .fontColor($r('app.color.text_primary'))
@@ -1583,7 +1615,7 @@ export struct GuncatUiView {
 
           if (!this.foldable(el) || this.isExpanded(el, this.sectionKey(sec, i), true)) {
             Column({ space: 12 }) {
-              this.buildElements(UiNode.elementList(sec, 'content'), false)
+              this.buildElements(UiNode.elementList(this.live(sec), 'content'), false)
             }
             .width('100%')
             .alignItems(HorizontalAlign.Start)
@@ -1602,12 +1634,12 @@ export struct GuncatUiView {
 
   // 分节的折叠键: 优先用 value, 缺省退回下标(不能把下标直接写进表达式, @Builder 里不允许局部变量)
   private sectionKey(sec: UiElement, index: number): string {
-    let value: string = UiNode.str(sec, 'value', '');
+    let value: string = UiNode.str(this.live(sec), 'value', '');
     return value === '' ? 'i' + index.toString() : value;
   }
 
   private foldable(el: UiElement): boolean {
-    return UiNode.bool(el, 'isFoldable', true);
+    return UiNode.bool(this.live(el), 'isFoldable', true);
   }
 
   @Builder
@@ -1615,8 +1647,8 @@ export struct GuncatUiView {
     Column({ space: 12 }) {
       Scroll() {
         Row({ space: 8 }) {
-          ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
-            Text(UiNode.str(item, 'trigger', ''))
+          ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
+            Text(UiNode.str(this.live(item), 'trigger', ''))
               .fontSize(13)
               .fontWeight(this.selectedIndexOf(el) === i ? FontWeight.Medium : FontWeight.Normal)
               .fontColor(this.selectedIndexOf(el) === i ? Color.White : $r('app.color.text_secondary'))
@@ -1635,9 +1667,9 @@ export struct GuncatUiView {
       .width('100%')
 
       Column({ space: 12 }) {
-        ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+        ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
           if (this.selectedIndexOf(el) === i) {
-            this.buildElements(UiNode.elementList(item, 'content'), false)
+            this.buildElements(UiNode.elementList(this.live(item), 'content'), false)
           }
         }, (item: UiElement, i: number) => 'tabc' + i.toString() + '_' + this.selectedIndexOf(el).toString())
       }
@@ -1666,28 +1698,28 @@ export struct GuncatUiView {
   @Builder
   buildAccordion(el: UiElement) {
     Column({ space: 8 }) {
-      ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+      ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
         Column({ space: 8 }) {
           Row({ space: 6 }) {
-            Text(UiNode.str(item, 'trigger', ''))
+            Text(UiNode.str(this.live(item), 'trigger', ''))
               .fontSize(14)
               .fontWeight(FontWeight.Medium)
               .fontColor($r('app.color.text_primary'))
               .layoutWeight(1)
             GuncatUiChevron({
-              up: this.isExpanded(el, UiNode.str(item, 'value', i.toString()), i === 0),
+              up: this.isExpanded(el, UiNode.str(this.live(item), 'value', i.toString()), i === 0),
               iconSize: 16
             })
           }
           .width('100%')
           .alignItems(VerticalAlign.Center)
           .onClick(() => {
-            this.toggleExpand(el, UiNode.str(item, 'value', i.toString()), i === 0);
+            this.toggleExpand(el, UiNode.str(this.live(item), 'value', i.toString()), i === 0);
           })
 
-          if (this.isExpanded(el, UiNode.str(item, 'value', i.toString()), i === 0)) {
+          if (this.isExpanded(el, UiNode.str(this.live(item), 'value', i.toString()), i === 0)) {
             Column({ space: 12 }) {
-              this.buildElements(UiNode.elementList(item, 'content'), false)
+              this.buildElements(UiNode.elementList(this.live(item), 'content'), false)
             }
             .width('100%')
             .alignItems(HorizontalAlign.Start)
@@ -1708,9 +1740,9 @@ export struct GuncatUiView {
   buildCarousel(el: UiElement, topLevel: boolean) {
     Scroll() {
       Row({ space: 10 }) {
-        ForEach(UiNode.elementList(el, 'children'), (child: UiElement, i: number) => {
+        ForEach(UiNode.elementList(this.live(el), 'children'), (child: UiElement, i: number) => {
           Column({ space: 10 }) {
-            this.renderNode(child, false)
+        this.renderNode(this.live(child), false)
           }
           .width(264)
           .padding(12)
@@ -1730,7 +1762,7 @@ export struct GuncatUiView {
   @Builder
   buildSteps(el: UiElement) {
     Column({ space: 0 }) {
-      ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+      ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
         Row({ space: 10 }) {
           Column() {
             Text((i + 1).toString())
@@ -1745,12 +1777,12 @@ export struct GuncatUiView {
           .justifyContent(FlexAlign.Center)
 
           Column({ space: 3 }) {
-            Text(UiNode.str(item, 'title', ''))
+            Text(UiNode.str(this.live(item), 'title', ''))
               .fontSize(13)
               .fontWeight(FontWeight.Medium)
               .fontColor($r('app.color.text_primary'))
               .width('100%')
-            Text(UiNode.str(item, 'details', ''))
+            Text(UiNode.str(this.live(item), 'details', ''))
               .fontSize(12)
               .lineHeight(19)
               .fontColor($r('app.color.text_secondary'))
@@ -1772,14 +1804,14 @@ export struct GuncatUiView {
   @Builder
   buildText(el: UiElement) {
     Column({ space: 3 }) {
-      Text(UiNode.str(el, 'value', ''))
+      Text(UiNode.str(this.live(el), 'value', ''))
         .fontSize(this.textSize(el))
-        .fontWeight(el.type === 'BoldText' || UiNode.str(el, 'variant', 'text') === 'number'
+        .fontWeight(el.type === 'BoldText' || UiNode.str(this.live(el), 'variant', 'text') === 'number'
           ? FontWeight.Bold : FontWeight.Normal)
         .fontColor($r('app.color.text_primary'))
         .width('100%')
-      if (UiNode.has(el, 'subtext')) {
-        Text(UiNode.str(el, 'subtext', ''))
+      if (UiNode.has(this.live(el), 'subtext')) {
+        Text(UiNode.str(this.live(el), 'subtext', ''))
           .fontSize(11)
           .fontColor($r('app.color.text_secondary'))
           .width('100%')
@@ -1790,7 +1822,7 @@ export struct GuncatUiView {
   }
 
   private textSize(el: UiElement): number {
-    let size: string = UiNode.str(el, 'size', 'md');
+    let size: string = UiNode.str(this.live(el), 'size', 'md');
     if (size === 'xs') {
       return 12;
     }
@@ -1811,20 +1843,20 @@ export struct GuncatUiView {
     // 的 flexShrink(0)/minWidth 双重约束后, 无论测量怎么抖动两者都不会重叠。
     Row() {
       GuncatUiIconBadge({
-        name: UiNode.element(el, 'icon') === null ? 'dot'
-          : UiNode.str(UiNode.element(el, 'icon') as UiElement, 'name', 'dot'),
+        name: UiNode.element(this.live(el), 'icon') === null ? 'dot'
+          : UiNode.str(UiNode.element(this.live(el), 'icon') as UiElement, 'name', 'dot'),
         badgeSize: 30
       })
       Column({ space: 2 }) {
-        Text(UiNode.str(el, 'title', ''))
+        Text(UiNode.str(this.live(el), 'title', ''))
           .fontSize(13)
-          .fontWeight(UiNode.bool(el, 'bold', false) ? FontWeight.Bold : FontWeight.Medium)
+          .fontWeight(UiNode.bool(this.live(el), 'bold', false) ? FontWeight.Bold : FontWeight.Medium)
           .fontColor($r('app.color.text_primary'))
           .width('100%')
           .maxLines(2)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-        if (UiNode.has(el, 'subtitle')) {
-          Text(UiNode.str(el, 'subtitle', ''))
+        if (UiNode.has(this.live(el), 'subtitle')) {
+          Text(UiNode.str(this.live(el), 'subtitle', ''))
             .fontSize(11)
             .fontColor($r('app.color.text_secondary'))
             .width('100%')
@@ -1844,8 +1876,8 @@ export struct GuncatUiView {
   buildImageText(el: UiElement) {
     // 与 IconText 同理: 固定尺寸缩略图 + 显式 margin, 避免"缩略图被压到 0 宽后与标题重叠"
     Row() {
-      if (this.isRemoteImage(UiNode.str(el, 'src', ''))) {
-        Image(UiNode.str(el, 'src', ''))
+      if (this.isRemoteImage(UiNode.str(this.live(el), 'src', ''))) {
+        Image(UiNode.str(this.live(el), 'src', ''))
           .width(40)
           .height(40)
           .borderRadius(10)
@@ -1865,15 +1897,15 @@ export struct GuncatUiView {
         .backgroundColor($r('app.color.surface_secondary'))
       }
       Column({ space: 2 }) {
-        Text(UiNode.str(el, 'title', ''))
+        Text(UiNode.str(this.live(el), 'title', ''))
           .fontSize(13)
-          .fontWeight(UiNode.bool(el, 'bold', false) ? FontWeight.Bold : FontWeight.Medium)
+          .fontWeight(UiNode.bool(this.live(el), 'bold', false) ? FontWeight.Bold : FontWeight.Medium)
           .fontColor($r('app.color.text_primary'))
           .width('100%')
           .maxLines(2)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-        if (UiNode.has(el, 'subtitle')) {
-          Text(UiNode.str(el, 'subtitle', ''))
+        if (UiNode.has(this.live(el), 'subtitle')) {
+          Text(UiNode.str(this.live(el), 'subtitle', ''))
             .fontSize(11)
             .fontColor($r('app.color.text_secondary'))
             .width('100%')
@@ -1892,12 +1924,12 @@ export struct GuncatUiView {
   @Builder
   buildMetric(el: UiElement) {
     Row({ space: 8 }) {
-      Text(UiNode.str(el, 'value', ''))
+      Text(UiNode.str(this.live(el), 'value', ''))
         .fontSize(17)
         .fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.text_primary'))
-      if (UiNode.has(el, 'previousValue')) {
-        Text(UiNode.str(el, 'previousValue', ''))
+      if (UiNode.has(this.live(el), 'previousValue')) {
+        Text(UiNode.str(this.live(el), 'previousValue', ''))
           .fontSize(12)
           .fontColor($r('app.color.text_tertiary'))
           .decoration({ type: TextDecorationType.LineThrough, color: $r('app.color.text_tertiary') })
@@ -1911,8 +1943,8 @@ export struct GuncatUiView {
           .borderRadius(6)
           .backgroundColor(this.trendUp(el) ? '#E3F7EC' : '#FDE8E6')
       }
-      if (UiNode.has(el, 'subtext')) {
-        Text(UiNode.str(el, 'subtext', ''))
+      if (UiNode.has(this.live(el), 'subtext')) {
+        Text(UiNode.str(this.live(el), 'subtext', ''))
           .fontSize(11)
           .fontColor($r('app.color.text_secondary'))
           .layoutWeight(1)
@@ -1925,7 +1957,7 @@ export struct GuncatUiView {
   }
 
   private trendText(el: UiElement): string {
-    let trend: Record<string, Object> | null = UiNode.obj(el, 'trend');
+    let trend: Record<string, Object> | null = UiNode.obj(this.live(el), 'trend');
     if (trend === null) {
       return '';
     }
@@ -1938,7 +1970,7 @@ export struct GuncatUiView {
   }
 
   private trendUp(el: UiElement): boolean {
-    let trend: Record<string, Object> | null = UiNode.obj(el, 'trend');
+    let trend: Record<string, Object> | null = UiNode.obj(this.live(el), 'trend');
     if (trend === null) {
       return true;
     }
@@ -1952,11 +1984,11 @@ export struct GuncatUiView {
       this.contextCard(el)
     } else {
       Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
-        ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+        ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
           Column() {
             this.contextCard(item)
           }
-          .width(UiNode.elementList(el, 'items').length <= 1 ? '100%' : '48%')
+          .width(UiNode.elementList(this.live(el), 'items').length <= 1 ? '100%' : '48%')
           .margin({ bottom: 8 })
         }, (item: UiElement, i: number) => 'cc' + i.toString())
       }
@@ -1967,13 +1999,13 @@ export struct GuncatUiView {
   @Builder
   contextCard(item: UiElement) {
     Column({ space: 4 }) {
-      Text(UiNode.str(item, 'title', ''))
+      Text(UiNode.str(this.live(item), 'title', ''))
         .fontSize(13)
         .fontWeight(FontWeight.Medium)
         .fontColor($r('app.color.text_primary'))
         .width('100%')
-      if (UiNode.has(item, 'body')) {
-        Text(UiNode.str(item, 'body', ''))
+      if (UiNode.has(this.live(item), 'body')) {
+        Text(UiNode.str(this.live(item), 'body', ''))
           .fontSize(12)
           .lineHeight(19)
           .fontColor($r('app.color.text_secondary'))
@@ -1993,11 +2025,11 @@ export struct GuncatUiView {
       this.overviewCard(el)
     } else {
       Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
-        ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+        ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
           Column() {
             this.overviewCard(item)
           }
-          .width(UiNode.elementList(el, 'items').length <= 1 ? '100%' : '48%')
+          .width(UiNode.elementList(this.live(el), 'items').length <= 1 ? '100%' : '48%')
           .margin({ bottom: 8 })
         }, (item: UiElement, i: number) => 'oc' + i.toString())
       }
@@ -2008,11 +2040,11 @@ export struct GuncatUiView {
   @Builder
   overviewCard(item: UiElement) {
     Column({ space: 8 }) {
-      if (UiNode.element(item, 'top') !== null) {
-        this.renderNode(UiNode.element(item, 'top') as UiElement, false)
+      if (UiNode.element(this.live(item), 'top') !== null) {
+        this.renderNode(UiNode.element(this.live(item), 'top') as UiElement, false)
       }
-      if (UiNode.element(item, 'bottom') !== null) {
-        this.renderNode(UiNode.element(item, 'bottom') as UiElement, false)
+      if (UiNode.element(this.live(item), 'bottom') !== null) {
+        this.renderNode(UiNode.element(this.live(item), 'bottom') as UiElement, false)
       }
     }
     .width('100%')
@@ -2028,7 +2060,7 @@ export struct GuncatUiView {
       this.snippetCard(el)
     } else {
       Column({ space: 8 }) {
-        ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+        ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
           this.snippetCard(item)
         }, (item: UiElement, i: number) => 'sc' + i.toString())
       }
@@ -2040,13 +2072,13 @@ export struct GuncatUiView {
   snippetCard(item: UiElement) {
     Row({ space: 8 }) {
       Column() {
-        if (UiNode.element(item, 'lhs') !== null) {
-          this.renderNode(UiNode.element(item, 'lhs') as UiElement, false)
+        if (UiNode.element(this.live(item), 'lhs') !== null) {
+          this.renderNode(UiNode.element(this.live(item), 'lhs') as UiElement, false)
         }
       }
       .layoutWeight(1)
-      if (UiNode.element(item, 'rhs') !== null) {
-        this.renderNode(UiNode.element(item, 'rhs') as UiElement, false)
+      if (UiNode.element(this.live(item), 'rhs') !== null) {
+        this.renderNode(UiNode.element(this.live(item), 'rhs') as UiElement, false)
       }
     }
     .width('100%')
@@ -2062,7 +2094,7 @@ export struct GuncatUiView {
       this.compositeCard(el)
     } else {
       Column({ space: 10 }) {
-        ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+        ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
           this.compositeCard(item)
         }, (item: UiElement, i: number) => 'mc' + i.toString())
       }
@@ -2073,18 +2105,18 @@ export struct GuncatUiView {
   @Builder
   compositeCard(item: UiElement) {
     Column({ space: 10 }) {
-      if (UiNode.element(item, 'header') !== null) {
-        this.renderNode(UiNode.element(item, 'header') as UiElement, false)
+      if (UiNode.element(this.live(item), 'header') !== null) {
+        this.renderNode(UiNode.element(this.live(item), 'header') as UiElement, false)
       }
       Column({ space: 8 }) {
-        this.buildElements(UiNode.elementList(item, 'body'), false)
+        this.buildElements(UiNode.elementList(this.live(item), 'body'), false)
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
-      if (UiNode.obj(item, 'footer') !== null) {
+      if (UiNode.obj(this.live(item), 'footer') !== null) {
         Row({ space: 10 }) {
-          if (UiNode.objStr(UiNode.obj(item, 'footer'), 'price', '') !== '') {
-            Text(UiNode.objStr(UiNode.obj(item, 'footer'), 'price', ''))
+          if (UiNode.objStr(UiNode.obj(this.live(item), 'footer'), 'price', '') !== '') {
+            Text(UiNode.objStr(UiNode.obj(this.live(item), 'footer'), 'price', ''))
               .fontSize(15)
               .fontWeight(FontWeight.Bold)
               .fontColor($r('app.color.text_primary'))
@@ -2110,7 +2142,7 @@ export struct GuncatUiView {
       this.visualCard(el)
     } else {
       Column({ space: 10 }) {
-        ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+        ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
           this.visualCard(item)
         }, (item: UiElement, i: number) => 'vc' + i.toString())
       }
@@ -2121,15 +2153,15 @@ export struct GuncatUiView {
   @Builder
   visualCard(item: UiElement) {
     Column({ space: 8 }) {
-      if (UiNode.element(item, 'tag') !== null) {
+      if (UiNode.element(this.live(item), 'tag') !== null) {
         Row() {
-          this.renderNode(UiNode.element(item, 'tag') as UiElement, false)
+          this.renderNode(UiNode.element(this.live(item), 'tag') as UiElement, false)
         }
         .width('100%')
         .justifyContent(FlexAlign.End)
       }
-      if (UiNode.element(item, 'body') !== null) {
-        this.renderNode(UiNode.element(item, 'body') as UiElement, false)
+      if (UiNode.element(this.live(item), 'body') !== null) {
+        this.renderNode(UiNode.element(this.live(item), 'body') as UiElement, false)
       }
     }
     .width('100%')
@@ -2142,12 +2174,12 @@ export struct GuncatUiView {
   // ===== 列表与追问 =====
   @Builder
   buildListBlock(el: UiElement) {
-    Column({ space: el.type === 'ListBlock' && UiNode.str(el, 'variant', 'number') === 'number' ? 0 : 8 }) {
-      ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
-        if (UiNode.str(el, 'variant', 'number') === 'image') {
+    Column({ space: el.type === 'ListBlock' && UiNode.str(this.live(el), 'variant', 'number') === 'number' ? 0 : 8 }) {
+      ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
+        if (UiNode.str(this.live(el), 'variant', 'number') === 'image') {
           Row() {
-            if (this.isRemoteImage(UiNode.objStr(UiNode.obj(item, 'image'), 'src', ''))) {
-              Image(UiNode.objStr(UiNode.obj(item, 'image'), 'src', ''))
+            if (this.isRemoteImage(UiNode.objStr(UiNode.obj(this.live(item), 'image'), 'src', ''))) {
+              Image(UiNode.objStr(UiNode.obj(this.live(item), 'image'), 'src', ''))
                 .width(44)
                 .height(44)
                 .borderRadius(10)
@@ -2156,13 +2188,13 @@ export struct GuncatUiView {
                 .flexShrink(0)
             }
             Column({ space: 2 }) {
-              Text(UiNode.str(item, 'title', ''))
+              Text(UiNode.str(this.live(item), 'title', ''))
                 .fontSize(13)
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('app.color.text_primary'))
                 .width('100%')
-              if (UiNode.has(item, 'subtitle')) {
-                Text(UiNode.str(item, 'subtitle', ''))
+              if (UiNode.has(this.live(item), 'subtitle')) {
+                Text(UiNode.str(this.live(item), 'subtitle', ''))
                   .fontSize(12)
                   .fontColor($r('app.color.text_secondary'))
                   .width('100%')
@@ -2192,12 +2224,12 @@ export struct GuncatUiView {
             .justifyContent(FlexAlign.Center)
 
             Column({ space: 2 }) {
-              Text(UiNode.str(item, 'title', ''))
+              Text(UiNode.str(this.live(item), 'title', ''))
                 .fontSize(13)
                 .fontColor($r('app.color.text_primary'))
                 .width('100%')
-              if (UiNode.has(item, 'subtitle')) {
-                Text(UiNode.str(item, 'subtitle', ''))
+              if (UiNode.has(this.live(item), 'subtitle')) {
+                Text(UiNode.str(this.live(item), 'subtitle', ''))
                   .fontSize(12)
                   .lineHeight(19)
                   .fontColor($r('app.color.text_secondary'))
@@ -2207,8 +2239,8 @@ export struct GuncatUiView {
             .layoutWeight(1)
             .alignItems(HorizontalAlign.Start)
 
-            if (UiNode.has(item, 'actionLabel')) {
-              Text(UiNode.str(item, 'actionLabel', ''))
+            if (UiNode.has(this.live(item), 'actionLabel')) {
+              Text(UiNode.str(this.live(item), 'actionLabel', ''))
                 .fontSize(12)
                 .fontColor($r('app.color.brand'))
                 .padding({ left: 10, right: 10, top: 5, bottom: 5 })
@@ -2233,12 +2265,12 @@ export struct GuncatUiView {
   @Builder
   buildListItem(el: UiElement, insideBlock: boolean) {
     Column({ space: 2 }) {
-      Text(UiNode.str(el, 'title', ''))
+      Text(UiNode.str(this.live(el), 'title', ''))
         .fontSize(13)
         .fontColor($r('app.color.text_primary'))
         .width('100%')
-      if (UiNode.has(el, 'subtitle')) {
-        Text(UiNode.str(el, 'subtitle', ''))
+      if (UiNode.has(this.live(el), 'subtitle')) {
+        Text(UiNode.str(this.live(el), 'subtitle', ''))
           .fontSize(12)
           .fontColor($r('app.color.text_secondary'))
           .width('100%')
@@ -2252,8 +2284,8 @@ export struct GuncatUiView {
   @Builder
   buildFollowUps(el: UiElement) {
     Flex({ wrap: FlexWrap.Wrap }) {
-      ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
-        Text(UiNode.str(item, 'text', ''))
+      ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
+        Text(UiNode.str(this.live(item), 'text', ''))
           .fontSize(12)
           .fontColor($r('app.color.brand'))
           .padding({ left: 12, right: 12, top: 7, bottom: 7 })
@@ -2262,7 +2294,7 @@ export struct GuncatUiView {
           .margin({ right: 8, bottom: 8 })
           .enabled(this.interactive())
           .onClick(() => {
-            this.emitAction(UiNode.str(item, 'text', ''));
+            this.emitAction(UiNode.str(this.live(item), 'text', ''));
           })
       }, (item: UiElement, i: number) => 'fu' + i.toString())
     }
@@ -2281,12 +2313,12 @@ export struct GuncatUiView {
   buildForm(el: UiElement) {
     Column({ space: 14 }) {
       Column({ space: 14 }) {
-        this.buildElements(UiNode.elementList(el, 'fields'), false)
+        this.buildElements(UiNode.elementList(this.live(el), 'fields'), false)
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
 
-      this.buildButtons(UiNode.element(el, 'buttons'), el)
+      this.buildButtons(UiNode.element(this.live(el), 'buttons'), el)
     }
     .width('100%')
     .padding(14)
@@ -2298,16 +2330,16 @@ export struct GuncatUiView {
   @Builder
   buildFormControl(el: UiElement) {
     Column({ space: 7 }) {
-      Text(UiNode.str(el, 'label', ''))
+      Text(UiNode.str(this.live(el), 'label', ''))
         .fontSize(13)
         .fontWeight(FontWeight.Medium)
         .fontColor($r('app.color.text_primary'))
         .width('100%')
-      if (UiNode.element(el, 'input') !== null) {
-        this.renderNode(UiNode.element(el, 'input') as UiElement, false)
+      if (UiNode.element(this.live(el), 'input') !== null) {
+        this.renderNode(UiNode.element(this.live(el), 'input') as UiElement, false)
       }
-      if (UiNode.has(el, 'hint')) {
-        Text(UiNode.str(el, 'hint', ''))
+      if (UiNode.has(this.live(el), 'hint')) {
+        Text(UiNode.str(this.live(el), 'hint', ''))
           .fontSize(11)
           .fontColor($r('app.color.text_tertiary'))
           .width('100%')
@@ -2348,10 +2380,10 @@ export struct GuncatUiView {
       if (multiline) {
         TextArea({
           text: this.bindStr(GuncatUiRuntime.stateKeyOf(el), ''),
-          placeholder: UiNode.str(el, 'placeholder', '')
+          placeholder: UiNode.str(this.live(el), 'placeholder', '')
         })
           .width('100%')
-          .height(Math.max(64, UiNode.num(el, 'rows', 3) * 22))
+          .height(Math.max(64, UiNode.num(this.live(el), 'rows', 3) * 22))
           .fontSize(14)
           .fontColor($r('app.color.text_primary'))
           .placeholderColor($r('app.color.text_quaternary'))
@@ -2367,7 +2399,7 @@ export struct GuncatUiView {
       } else {
         TextInput({
           text: this.bindStr(GuncatUiRuntime.stateKeyOf(el), ''),
-          placeholder: UiNode.str(el, 'placeholder', '')
+          placeholder: UiNode.str(this.live(el), 'placeholder', '')
         })
           .width('100%')
           .height(40)
@@ -2376,7 +2408,7 @@ export struct GuncatUiView {
           .placeholderColor($r('app.color.text_quaternary'))
           .backgroundColor($r('app.color.surface'))
           .borderRadius(10)
-          .type(this.inputType(UiNode.str(el, 'type', 'text')))
+          .type(this.inputType(UiNode.str(this.live(el), 'type', 'text')))
           .enabled(this.interactive())
           .onChange((value: string) => {
             this.state.set(GuncatUiRuntime.stateKeyOf(el), value);
@@ -2413,7 +2445,7 @@ export struct GuncatUiView {
   }
 
   private ruleText(el: UiElement): string {
-    let rules: Record<string, Object> | null = UiNode.obj(el, 'rules');
+    let rules: Record<string, Object> | null = UiNode.obj(this.live(el), 'rules');
     if (rules === null) {
       return '';
     }
@@ -2437,7 +2469,7 @@ export struct GuncatUiView {
   buildDatePicker(el: UiElement) {
     TextInput({
       text: this.bindStr(GuncatUiRuntime.stateKeyOf(el), ''),
-      placeholder: UiNode.str(el, 'mode', 'single') === 'range' ? '开始日期 ~ 结束日期' : 'YYYY-MM-DD'
+      placeholder: UiNode.str(this.live(el), 'mode', 'single') === 'range' ? '开始日期 ~ 结束日期' : 'YYYY-MM-DD'
     })
       .width('100%')
       .height(40)
@@ -2459,8 +2491,8 @@ export struct GuncatUiView {
   buildSlider(el: UiElement) {
     Column({ space: 4 }) {
       Row({ space: 8 }) {
-        if (UiNode.has(el, 'label')) {
-          Text(UiNode.str(el, 'label', ''))
+        if (UiNode.has(this.live(el), 'label')) {
+          Text(UiNode.str(this.live(el), 'label', ''))
             .fontSize(12)
             .fontColor($r('app.color.text_secondary'))
             .layoutWeight(1)
@@ -2479,8 +2511,8 @@ export struct GuncatUiView {
 
       Slider({
         value: this.bindNum(GuncatUiRuntime.stateKeyOf(el), GuncatUiRuntime.sliderDefault(el)),
-        min: UiNode.num(el, 'min', 0),
-        max: UiNode.num(el, 'max', 100),
+        min: UiNode.num(this.live(el), 'min', 0),
+        max: UiNode.num(this.live(el), 'max', 100),
         step: this.sliderStep(el),
         style: SliderStyle.OutSet
       })
@@ -2491,24 +2523,17 @@ export struct GuncatUiView {
         .enabled(this.interactive())
         .onChange((value: number, mode: SliderChangeMode) => {
           // 拖动期间的刷新策略:
-          //   旧实现是"拖动中完全不重新物化, 只在 End/Click 时整树重建", 有两个问题 ——
-          //   ① 拖动期间依赖 $amount 的指标卡/图表/文案全是死的("不实时重渲染");
-          //   ② 真机上 End 这个信号并不一定来, 于是松手后也不刷新(必须切走再切回)。
-          //   现在: 拖动一开始就把"自己到 root 这条链"的指纹快照下来(键与拖动前逐字节相同 →
-          //   这一项不会被重建 → 手势不丢), 同时按 80ms 节流重新物化 —— 指纹机制下只有"画出来
-          //   会不一样"的其他项会换键重建; 收尾统一走 finishDrag。
+          //   值节点全部靠 live() 在**自己重画时**从新树取值(见 live 的注释), 所以拖动中只要
+          //   重新物化 + 推进 sigTick, 界面就跟着变, 而且**不会重建任何一个 ForEach 项** ——
+          //   正在拖的 Slider 因此不会被销毁, 不需要任何"冻结/快照"机制。
+          //   收尾仍统一走 finishDrag: End/Click 是明确信号, 静默计时器兜底(真机上 End 不一定来)。
           if (mode === SliderChangeMode.Begin) {
-            // 快照必须在 state.set **之前**做: 它要和"上一次已渲染的键"一致
-            this.beginDrag(el);
+            this.dbgBegin++;
+            this.dbgKey = GuncatUiRuntime.stateKeyOf(el);
+            this.dragging = true;
           }
           if (mode === SliderChangeMode.Moving) {
             this.dbgMoving++;
-            // ⚠️ 只在"拖动链快照真的生效"时才唤醒(诊断行靠 sigTick 刷新)。
-            // 若把它挪到这个判断**之前**, 冻结没生效时每动一下都会触发重渲染 → 正在拖的滑块被
-            // 重建 → 真机表现就是"又拖不动了"。诊断代码也不能破坏被测对象。
-            if (this.dragFrozen()) {
-              this.sigTick++;
-            }
           }
           this.state.set(GuncatUiRuntime.stateKeyOf(el), value);
           if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
@@ -2525,11 +2550,7 @@ export struct GuncatUiView {
           // 派发, 真机表现是"只能点选、不跟手"(拖不起来)。用"一段时间没有新的 Moving"来判定
           // 松手最安全: 不碰触摸管线, 且 finishDrag 幂等。
           this.armDragIdleTimer();
-          // 链路没找到(树形超出预期)时**不做实时刷新**: 此时冻结没生效, 一重建就会把正在拖的
-          // Slider 销毁掉。宁可退回"松手再刷", 也不能把拖动弄坏。
-          if (!this.dragFrozen()) {
-            return;
-          }
+          // 节流刷新: 只换树 + 推进 sigTick(不重建任何项), 让值节点自己重画
           let now: number = Date.now();
           if (now - this.lastLiveTickMs >= 80) {
             this.lastLiveTickMs = now;
@@ -2553,25 +2574,25 @@ export struct GuncatUiView {
   }
 
   private sliderStep(el: UiElement): number {
-    let step: number = UiNode.num(el, 'step', 0);
+    let step: number = UiNode.num(this.live(el), 'step', 0);
     if (step > 0) {
       return step;
     }
-    return UiNode.str(el, 'variant', 'continuous') === 'discrete' ? 1 : 1;
+    return UiNode.str(this.live(el), 'variant', 'continuous') === 'discrete' ? 1 : 1;
   }
 
   @Builder
   buildSwitchGroup(el: UiElement) {
     Column({ space: 0 }) {
-      ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+      ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
         Row({ space: 10 }) {
           Column({ space: 2 }) {
-            Text(UiNode.str(item, 'label', UiNode.str(item, 'name', '')))
+            Text(UiNode.str(this.live(item), 'label', UiNode.str(this.live(item), 'name', '')))
               .fontSize(13)
               .fontColor($r('app.color.text_primary'))
               .width('100%')
-            if (UiNode.has(item, 'description')) {
-              Text(UiNode.str(item, 'description', ''))
+            if (UiNode.has(this.live(item), 'description')) {
+              Text(UiNode.str(this.live(item), 'description', ''))
                 .fontSize(11)
                 .fontColor($r('app.color.text_secondary'))
                 .width('100%')
@@ -2581,13 +2602,13 @@ export struct GuncatUiView {
           .alignItems(HorizontalAlign.Start)
           Toggle({
             type: ToggleType.Switch,
-            isOn: this.isSelected(el, UiNode.str(item, 'name', ''))
+            isOn: this.isSelected(el, UiNode.str(this.live(item), 'name', ''))
           })
             .flexShrink(0)
             .selectedColor($r('app.color.brand'))
             .enabled(this.interactive())
             .onChange((_isOn: boolean) => {
-              this.toggleChoice(el, UiNode.str(item, 'name', ''), false);
+              this.toggleChoice(el, UiNode.str(this.live(item), 'name', ''), false);
             })
         }
         .width('100%')
@@ -2602,16 +2623,16 @@ export struct GuncatUiView {
   @Builder
   buildPillGroup(el: UiElement, multi: boolean) {
     Flex({ wrap: FlexWrap.Wrap }) {
-      ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
-        if (UiNode.has(item, 'description')) {
+      ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
+        if (UiNode.has(this.live(item), 'description')) {
           Column({ space: 3 }) {
-            Text(UiNode.str(item, 'label', ''))
+            Text(UiNode.str(this.live(item), 'label', ''))
               .fontSize(13)
               .fontWeight(FontWeight.Medium)
               .fontColor(this.isSelected(el, this.itemValue(el, item)) && !multi
                 ? $r('app.color.brand') : $r('app.color.text_primary'))
               .width('100%')
-            Text(UiNode.str(item, 'description', ''))
+            Text(UiNode.str(this.live(item), 'description', ''))
               .fontSize(11)
               .fontColor($r('app.color.text_secondary'))
               .width('100%')
@@ -2635,7 +2656,7 @@ export struct GuncatUiView {
             this.toggleChoice(el, this.itemValue(el, item), multi);
           })
         } else {
-          Text(UiNode.str(item, 'label', ''))
+          Text(UiNode.str(this.live(item), 'label', ''))
             .fontSize(13)
             .fontColor(this.isSelected(el, this.itemValue(el, item))
               ? Color.White : $r('app.color.text_primary'))
@@ -2658,29 +2679,29 @@ export struct GuncatUiView {
   // 选项的值: RadioItem/ChipItem/OptionCard 用 value; CheckBoxItem 用 name
   private itemValue(group: UiElement, item: UiElement): string {
     if (group.type === 'CheckBoxGroup') {
-      return UiNode.str(item, 'name', '');
+      return UiNode.str(this.live(item), 'name', '');
     }
-    return UiNode.str(item, 'value', '');
+    return UiNode.str(this.live(item), 'value', '');
   }
 
   @Builder
   buildSelect(el: UiElement) {
     Column({ space: 6 }) {
       Flex({ wrap: FlexWrap.Wrap }) {
-        ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
-          Text(UiNode.str(item, 'label', ''))
+        ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
+          Text(UiNode.str(this.live(item), 'label', ''))
             .fontSize(13)
-            .fontColor(this.isSelected(el, UiNode.str(item, 'value', ''))
+            .fontColor(this.isSelected(el, UiNode.str(this.live(item), 'value', ''))
               ? Color.White : $r('app.color.text_primary'))
             .padding({ left: 14, right: 14, top: 9, bottom: 9 })
             .borderRadius(999)
-            .backgroundColor(this.isSelected(el, UiNode.str(item, 'value', ''))
+            .backgroundColor(this.isSelected(el, UiNode.str(this.live(item), 'value', ''))
               ? $r('app.color.brand') : $r('app.color.surface'))
             .border({ width: 1, color: $r('app.color.divider') })
             .margin({ right: 8, bottom: 8 })
             .enabled(this.interactive())
             .onClick(() => {
-              this.toggleChoice(el, UiNode.str(item, 'value', ''), false);
+              this.toggleChoice(el, UiNode.str(this.live(item), 'value', ''), false);
             })
         }, (item: UiElement, i: number) => 'sel' + i.toString() + item.key)
       }
@@ -2693,22 +2714,22 @@ export struct GuncatUiView {
   @Builder
   buildChips(el: UiElement) {
     Flex({ wrap: FlexWrap.Wrap }) {
-      ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
-        Text(UiNode.str(item, 'label', ''))
+      ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
+        Text(UiNode.str(this.live(item), 'label', ''))
           .fontSize(12)
-          .fontColor(this.isSelected(el, UiNode.str(item, 'value', ''))
+          .fontColor(this.isSelected(el, UiNode.str(this.live(item), 'value', ''))
             ? Color.White : $r('app.color.text_primary'))
           .padding({ left: 12, right: 12, top: 7, bottom: 7 })
           .borderRadius(999)
-          .backgroundColor(this.isSelected(el, UiNode.str(item, 'value', ''))
+          .backgroundColor(this.isSelected(el, UiNode.str(this.live(item), 'value', ''))
             ? $r('app.color.brand') : $r('app.color.surface'))
           .border({ width: 1, color: $r('app.color.divider') })
           .margin({ right: 8, bottom: 8 })
-          .opacity(UiNode.bool(item, 'disabled', false) ? 0.45 : 1)
-          .enabled(this.interactive() && !UiNode.bool(item, 'disabled', false))
+          .opacity(UiNode.bool(this.live(item), 'disabled', false) ? 0.45 : 1)
+          .enabled(this.interactive() && !UiNode.bool(this.live(item), 'disabled', false))
           .onClick(() => {
-            this.toggleChoice(el, UiNode.str(item, 'value', ''),
-              UiNode.str(el, 'type', 'single') === 'multiple');
+            this.toggleChoice(el, UiNode.str(this.live(item), 'value', ''),
+              UiNode.str(this.live(el), 'type', 'single') === 'multiple');
           })
       }, (item: UiElement, i: number) => 'ch' + i.toString() + item.key)
     }
@@ -2718,16 +2739,16 @@ export struct GuncatUiView {
   @Builder
   buildOptionCards(el: UiElement) {
     Column({ space: 8 }) {
-      ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+      ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
         Row({ space: 10 }) {
           Column({ space: 3 }) {
-            Text(UiNode.str(item, 'title', ''))
+            Text(UiNode.str(this.live(item), 'title', ''))
               .fontSize(14)
               .fontWeight(FontWeight.Medium)
               .fontColor($r('app.color.text_primary'))
               .width('100%')
-            if (UiNode.has(item, 'subtitle')) {
-              Text(UiNode.str(item, 'subtitle', ''))
+            if (UiNode.has(this.live(item), 'subtitle')) {
+              Text(UiNode.str(this.live(item), 'subtitle', ''))
                 .fontSize(12)
                 .fontColor($r('app.color.text_secondary'))
                 .width('100%')
@@ -2735,26 +2756,26 @@ export struct GuncatUiView {
           }
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start)
-          if (this.isSelected(el, UiNode.str(item, 'value', ''))) {
+          if (this.isSelected(el, UiNode.str(this.live(item), 'value', ''))) {
             GuncatUiIcon({ name: 'check', iconSize: 15, color: '#4176E6' })
           }
         }
         .width('100%')
         .padding(12)
         .borderRadius(12)
-        .backgroundColor(this.isSelected(el, UiNode.str(item, 'value', ''))
+        .backgroundColor(this.isSelected(el, UiNode.str(this.live(item), 'value', ''))
           ? $r('app.color.brand_light') : $r('app.color.surface'))
         .border({
           width: 1,
-          color: this.isSelected(el, UiNode.str(item, 'value', ''))
+          color: this.isSelected(el, UiNode.str(this.live(item), 'value', ''))
             ? $r('app.color.brand') : $r('app.color.divider')
         })
-        .opacity(UiNode.bool(item, 'disabled', false) ? 0.45 : 1)
+        .opacity(UiNode.bool(this.live(item), 'disabled', false) ? 0.45 : 1)
         .alignItems(VerticalAlign.Center)
-        .enabled(this.interactive() && !UiNode.bool(item, 'disabled', false))
+        .enabled(this.interactive() && !UiNode.bool(this.live(item), 'disabled', false))
         .onClick(() => {
-          this.toggleChoice(el, UiNode.str(item, 'value', ''),
-            UiNode.str(el, 'type', 'single') === 'multiple');
+          this.toggleChoice(el, UiNode.str(this.live(item), 'value', ''),
+            UiNode.str(this.live(el), 'type', 'single') === 'multiple');
         })
       }, (item: UiElement, i: number) => 'op' + i.toString() + item.key)
     }
@@ -2765,15 +2786,15 @@ export struct GuncatUiView {
   @Builder
   buildButtons(el: UiElement | null, form: UiElement | null) {
     if (el !== null) {
-      if (UiNode.str(el, 'direction', 'row') === 'column') {
+      if (UiNode.str(this.live(el), 'direction', 'row') === 'column') {
         Column({ space: 8 }) {
-          this.buildElements(UiNode.elementList(el, 'buttons'), false)
+          this.buildElements(UiNode.elementList(this.live(el), 'buttons'), false)
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
       } else {
         Row({ space: 10 }) {
-          ForEach(UiNode.elementList(el, 'buttons'), (btn: UiElement, i: number) => {
+          ForEach(UiNode.elementList(this.live(el), 'buttons'), (btn: UiElement, i: number) => {
             Column() {
               if (btn.type === 'IconButton') {
                 this.buildIconButton(btn, form)
@@ -2783,7 +2804,7 @@ export struct GuncatUiView {
             }
             // 单个按钮**不拉满整行**: 一整条彩色长条很难看(真机反馈"太难看"有一部分来自它),
             // 让它按内容宽度左对齐; 多个按钮才等分
-            .layoutWeight(UiNode.elementList(el, 'buttons').length > 1 ? 1 : 0)
+            .layoutWeight(UiNode.elementList(this.live(el), 'buttons').length > 1 ? 1 : 0)
           }, (btn: UiElement, i: number) => 'btn' + i.toString())
         }
         .width('100%')
@@ -2794,7 +2815,7 @@ export struct GuncatUiView {
 
   @Builder
   buildButton(el: UiElement, form: UiElement | null) {
-    Text(UiNode.str(el, 'label', '按钮'))
+    Text(UiNode.str(this.live(el), 'label', '按钮'))
       .fontSize(this.buttonFontSize(el))
       .fontWeight(FontWeight.Medium)
       .fontColor(this.buttonTextColor(el))
@@ -2813,7 +2834,7 @@ export struct GuncatUiView {
   }
 
   private buttonFontSize(el: UiElement): number {
-    let size: string = UiNode.str(el, 'size', 'medium');
+    let size: string = UiNode.str(this.live(el), 'size', 'medium');
     if (size === 'extra-small' || size === 'small') {
       return 12;
     }
@@ -2824,7 +2845,7 @@ export struct GuncatUiView {
   }
 
   private buttonHeight(el: UiElement): number {
-    let size: string = UiNode.str(el, 'size', 'medium');
+    let size: string = UiNode.str(this.live(el), 'size', 'medium');
     if (size === 'extra-small') {
       return 28;
     }
@@ -2844,10 +2865,10 @@ export struct GuncatUiView {
   //       危险按钮 = danger_light 底 + danger 字,
   //       三级按钮 = 透明底 + brand 字(保持原样)。
   private buttonBg(el: UiElement): ResourceColor {
-    if (UiNode.str(el, 'type', 'normal') === 'destructive') {
+    if (UiNode.str(this.live(el), 'type', 'normal') === 'destructive') {
       return $r('app.color.danger_light');
     }
-    let variant: string = UiNode.str(el, 'variant', 'primary');
+    let variant: string = UiNode.str(this.live(el), 'variant', 'primary');
     if (variant === 'primary') {
       return $r('app.color.brand_light');
     }
@@ -2859,18 +2880,18 @@ export struct GuncatUiView {
 
   // 次要按钮描边: 深色模式下 raised_surface 与卡片底色相同, 没有描边就"看不见按钮"
   private buttonBorderColor(el: UiElement): ResourceColor {
-    if (UiNode.str(el, 'type', 'normal') === 'destructive') {
+    if (UiNode.str(this.live(el), 'type', 'normal') === 'destructive') {
       return Color.Transparent;
     }
-    return UiNode.str(el, 'variant', 'primary') === 'secondary' ?
+    return UiNode.str(this.live(el), 'variant', 'primary') === 'secondary' ?
       $r('app.color.divider') : Color.Transparent;
   }
 
   private buttonTextColor(el: UiElement): ResourceColor {
-    if (UiNode.str(el, 'type', 'normal') === 'destructive') {
+    if (UiNode.str(this.live(el), 'type', 'normal') === 'destructive') {
       return $r('app.color.danger');
     }
-    let variant: string = UiNode.str(el, 'variant', 'primary');
+    let variant: string = UiNode.str(this.live(el), 'variant', 'primary');
     if (variant === 'primary' || variant === 'tertiary') {
       return $r('app.color.brand');
     }
@@ -2881,8 +2902,8 @@ export struct GuncatUiView {
   buildIconButton(el: UiElement, form: UiElement | null) {
     Row() {
       GuncatUiIcon({
-        name: UiNode.element(el, 'icon') === null ? 'dot'
-          : UiNode.str(UiNode.element(el, 'icon') as UiElement, 'name', 'dot'),
+        name: UiNode.element(this.live(el), 'icon') === null ? 'dot'
+          : UiNode.str(UiNode.element(this.live(el), 'icon') as UiElement, 'name', 'dot'),
         iconSize: 16,
         // 与按钮文字同色(浅底 + 彩字), 不再出现"实心深蓝底 + 白图标"
         color: this.buttonTextColor(el)
@@ -2890,7 +2911,7 @@ export struct GuncatUiView {
     }
     .width(this.buttonHeight(el))
     .height(this.buttonHeight(el))
-    .borderRadius(UiNode.str(el, 'shape', 'circle') === 'square' ? 10 : this.buttonHeight(el) / 2)
+    .borderRadius(UiNode.str(this.live(el), 'shape', 'circle') === 'square' ? 10 : this.buttonHeight(el) / 2)
     .backgroundColor(this.buttonBg(el))
     .justifyContent(FlexAlign.Center)
     .opacity(this.interactive() ? 1 : 0.5)
