@@ -895,7 +895,9 @@ assistant Message.content（含 ```guncat-ui 围栏）
 - **自动续写（JSON Output 优先）**：一轮结束时若最后一条消息里的界面块**仍未闭合**（输出被截断）**或已闭合但内容残缺**（模型只写了 `{"version": 1` 就闭合围栏、接着写正文——真机上出现过），主循环会先用 **JSON Output 专用请求**重做界面——`AgentLoopService.generateUiSpec()` 用 `response_format={'type':'json_object'}`（DeepSeek / OpenAI 兼容协议）或 `text.format`（Responses）单独要一份**紧凑单行**的界面 JSON，不带工具、`max_tokens` 给足（未配置时默认 `DEFAULT_JSON_OUTPUT_TOKENS=8000`），拿回后由 `GuncatUiSpecWriter` 序列化成规范的 ` ```guncat-ui ` 块追加为一条新消息（渲染路径完全复用）；JSON 模式失败时才回落到"文本续写"。最多自动重做 `UI_CONTINUE_MAX_ROUNDS = 2` 轮（防死循环），会话里分别留痕为「（界面已由 JSON 输出模式生成）」/「（界面输出被截断，已自动续写）」。
 - **原始输出随时可查**：卡片底部「查看原始输出」开关（有原文时始终可点开），解析失败时默认展开，并标注「模型原始输出 · N 字符」（强制按字符换行、可滚动），用户能直接看到模型到底写了什么、写了多少，便于自查与反馈。
 - **重建时机**：`WorkTurnView` / `ChatBubbleView` 在消息体含 ` ```guncat-ui ` 时才重建片段（普通消息零开销），重建源为流式 33ms flush 的 `visibleText`；`GuncatUiView` 用 `@Watch('onSpecChanged')` 只为**新出现的控件**补默认值，不覆盖用户已改的值。
-- **刷新机制（踩过的坑）**：片段切分结果必须用**数组型 `@State`（`uiSegs: GuncatUiSeg[]`）+ 整数组重赋值**保存。早前放在自定义类实例（`GuncatUiParts`）的字段里并用 `@State` 持有时，ArkUI 的浅层观察看不到嵌套数组变化，表现为"界面卡片停在骨架态、切走再切回会话（组件重建）才正常"。**维护须知：组件内派生的渲染数据一律用数组/基本类型 `@State` 整体赋值，不要放在自定义类的字段里。**
+- **刷新机制（踩过的坑）**：片段切分结果必须用**数组型 `@State`（`uiSegs: GuncatUiSeg[]`）+ 整数组重赋值**保存。早前放在自定义类实例（`GuncatUiParts`）的字段里并用 `@State` 持有时，ArkUI 的浅层观察看不到嵌套数组变化，表现为"界面卡片停在骨架态、切走再切回会话（组件重建）才正常"。
+- **收尾自愈**：即便如此，真机上"流式结束 → 组件按已结束语义重建"这一步仍可能不触发（`@Watch` / 父组件属性更新在真机时间线里不可靠）。因此两个视图各自带一个 `startUiSettleTimer()`：每 250ms 采样消息正文，连续两次一致即视为产出结束，就地按 `finalized` 重建界面片段（未闭合块转「未完成」），8 秒超时兜底强制重建一次，`aboutToDisappear` 清理。**组件自己负责收尾，不依赖任何外部通知。**
+- **维护须知**：组件内派生的渲染数据一律用数组/基本类型 `@State` 整体赋值，不要放在自定义类的字段里；能自愈的状态不要只依赖观察回调。
 - **界面归属**：交互模式走 `ChatPage.buildWorkTimeline()` → `WorkTurnView`（共享时间线，含思考/工具行），聊天模式走 `ChatBubbleView`，两条路径都接了 `GuncatUiView`。
 
 ### 5. 交互闭环（回传）

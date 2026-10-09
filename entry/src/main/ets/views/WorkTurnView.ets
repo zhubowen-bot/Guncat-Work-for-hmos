@@ -46,6 +46,11 @@ export struct WorkTurnView {
   // 避免流式期间每 33ms 无条件重建导致 LoadingProgress 动画永远停在第一帧(观感即"卡住")
   private lastCallsSig: string = '';
   private flushTimer: number = -1;
+  // 收尾自愈状态: uiBuildFinalized 记录当前 uiSegs 是否按"已结束"语义构建
+  private uiSettleTimer: number = -1;
+  private uiBuildFinalized: boolean = false;
+  private lastUiSeen: string = '';
+  private lastUiFinalized: boolean = false;
   // 思考跑马灯: 流式中在思考条右侧空白区滚动呈现最新思考内容
   private marqueeScroller: Scroller = new Scroller();
 
@@ -64,14 +69,86 @@ export struct WorkTurnView {
   // finalized = 本轮产出已结束(不再流式): 未闭合的界面块据此从"生成中"转为"未完成"静态展示。
   private refreshUiParts(): void {
     let content: string = this.isStreaming ? this.visibleText : this.message.content;
+    this.lastUiSeen = content;
+    this.lastUiFinalized = !this.isStreaming;
+    // 界面块是否可交互/是否未完成, 取决于构建时的 isStreaming; 这里留下指纹供自愈定时器比对
+    this.uiBuildFinalized = this.lastUiFinalized;
     if (content.indexOf(GuncatUiBlocks.OPEN) < 0) {
       if (this.uiSegs.length > 0) {
         this.uiSegs = [];
       }
       return;
     }
-    let parts: GuncatUiParts = GuncatUiParts.build(content, !this.isStreaming);
+    let parts: GuncatUiParts = GuncatUiParts.build(content, this.lastUiFinalized);
     // 重新赋值整个数组, 保证 UI 一定刷新(改内部字段不会被观察到)
+    let next: GuncatUiSeg[] = [];
+    for (let i: number = 0; i < parts.segments.length; i++) {
+      next.push(parts.segments[i]);
+    }
+    this.uiSegs = next;
+  }
+
+  // 收尾自愈: 一旦正文不再变化(本轮产出结束)且界面块还是按"流式中"构建的,
+  // 就地按 finalized 重建一次。不依赖 @Watch/父组件通知——真机上那些回调不可靠,
+  // 曾表现为"卡片停在骨架态, 切走再切回会话才正常"。
+  // 每 250ms 检查一次: 内容还在变就继续等, 连续两次采样一致即视为稳定, 立刻重建并停止。
+  private startUiSettleTimer(): void {
+    if (this.uiSettleTimer !== -1) {
+      return;
+    }
+    let waited: number = 0;
+    let stableSamples: number = 0;
+    let lastSample: string = this.message.content;
+    this.uiSettleTimer = setInterval((): void => {
+      waited += 250;
+      let content: string = this.message.content;
+      if (content.indexOf(GuncatUiBlocks.OPEN) < 0) {
+        // 没有界面块: 无需自愈, 或等超时后收工
+        if (waited >= 8000) {
+          this.stopUiSettleTimer();
+        }
+        return;
+      }
+      if (content !== lastSample) {
+        // 内容仍在增长(仍在流式/工具轮仍在追加)
+        lastSample = content;
+        stableSamples = 0;
+      } else {
+        stableSamples++;
+      }
+      // 已经按"结束态"构建过且内容稳定 → 无需再动
+      if (this.uiBuildFinalized && stableSamples >= 2) {
+        this.stopUiSettleTimer();
+        return;
+      }
+      // 内容稳定且尚未按结束态构建 → 就地重建
+      if (stableSamples >= 2) {
+        this.refreshUiPartsFinal();
+        this.stopUiSettleTimer();
+        return;
+      }
+      if (waited >= 8000) {
+        // 超时保护: 无论如何按结束态构建一次, 避免永久骨架
+        this.refreshUiPartsFinal();
+        this.stopUiSettleTimer();
+      }
+    }, 250);
+  }
+
+  private stopUiSettleTimer(): void {
+    if (this.uiSettleTimer !== -1) {
+      clearInterval(this.uiSettleTimer);
+      this.uiSettleTimer = -1;
+    }
+  }
+
+  // 按"已结束"语义重建一次界面片段
+  private refreshUiPartsFinal(): void {
+    let content: string = this.message.content;
+    this.lastUiSeen = content;
+    this.lastUiFinalized = true;
+    this.uiBuildFinalized = true;
+    let parts: GuncatUiParts = GuncatUiParts.build(content, true);
     let next: GuncatUiSeg[] = [];
     for (let i: number = 0; i < parts.segments.length; i++) {
       next.push(parts.segments[i]);
@@ -83,6 +160,8 @@ export struct WorkTurnView {
     this.visibleText = this.message.content;
     this.visibleReasoning = this.message.reasoning;
     this.refreshUiParts();
+    // 无论父组件是否通知"流式结束", 组件自己兜底完成收尾重建
+    this.startUiSettleTimer();
     if (this.isStreaming && this.flushTimer === -1) {
       this.flushTimer = setInterval(() => {
         if (this.isStreaming) {
@@ -122,6 +201,7 @@ export struct WorkTurnView {
       clearInterval(this.flushTimer);
       this.flushTimer = -1;
     }
+    this.stopUiSettleTimer();
   }
 
   // 工具行状态签名: 调用数 + 每个调用的参数量/准备态/启动态/耗时/结果量, 任一变化才触发行重建

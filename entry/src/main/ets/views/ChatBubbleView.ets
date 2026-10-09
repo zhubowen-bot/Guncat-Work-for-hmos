@@ -249,6 +249,10 @@ export struct ChatBubbleView {
   // "卡片停在骨架态, 切走再切回会话(组件重建)才正常"。这是本功能的关键坑, 勿改回。
   @State private uiSegs: GuncatUiSeg[] = [];
   private flushTimer: number = -1;
+  // 收尾自愈状态: uiBuildFinalized 记录当前 uiSegs 是否按"已结束"语义构建
+  private uiSettleTimer: number = -1;
+  private uiBuildFinalized: boolean = false;
+  private lastUiSeen: string = '';
   // 思考跑马灯: 流式中在思考条右侧空白区滚动呈现最新思考内容(对齐工作模式 WorkTurnView)
   private marqueeScroller: Scroller = new Scroller();
 
@@ -270,13 +274,15 @@ export struct ChatBubbleView {
   // finalized = 该条消息产出已结束: 未闭合的界面块据此从"生成中"转为"未完成"静态展示。
   private refreshUiParts(): void {
     let content: string = this.isStreaming ? this.visibleText : this.message.content;
+    this.lastUiSeen = content;
+    this.uiBuildFinalized = !this.isStreaming;
     if (content.indexOf(GuncatUiBlocks.OPEN) < 0) {
       if (this.uiSegs.length > 0) {
         this.uiSegs = [];
       }
       return;
     }
-    let parts: GuncatUiParts = GuncatUiParts.build(content, !this.isStreaming);
+    let parts: GuncatUiParts = GuncatUiParts.build(content, this.uiBuildFinalized);
     // 重新赋值整个数组(而不是改内部字段), 保证 UI 一定刷新
     let next: GuncatUiSeg[] = [];
     for (let i: number = 0; i < parts.segments.length; i++) {
@@ -285,10 +291,71 @@ export struct ChatBubbleView {
     this.uiSegs = next;
   }
 
+  // 按"已结束"语义重建一次界面片段
+  private refreshUiPartsFinal(): void {
+    let content: string = this.message.content;
+    this.lastUiSeen = content;
+    this.uiBuildFinalized = true;
+    let parts: GuncatUiParts = GuncatUiParts.build(content, true);
+    let next: GuncatUiSeg[] = [];
+    for (let i: number = 0; i < parts.segments.length; i++) {
+      next.push(parts.segments[i]);
+    }
+    this.uiSegs = next;
+  }
+
+  // 收尾自愈: 正文稳定后自己按"已结束"重建一次, 不依赖 @Watch/父组件通知(真机上不可靠,
+  // 曾表现为"卡片停在骨架态, 切走再切回会话才正常")。每 250ms 采样, 连续两次一致即重建。
+  private startUiSettleTimer(): void {
+    if (this.uiSettleTimer !== -1) {
+      return;
+    }
+    let waited: number = 0;
+    let stableSamples: number = 0;
+    let lastSample: string = this.message.content;
+    this.uiSettleTimer = setInterval((): void => {
+      waited += 250;
+      let content: string = this.message.content;
+      if (content.indexOf(GuncatUiBlocks.OPEN) < 0) {
+        if (waited >= 8000) {
+          this.stopUiSettleTimer();
+        }
+        return;
+      }
+      if (content !== lastSample) {
+        lastSample = content;
+        stableSamples = 0;
+      } else {
+        stableSamples++;
+      }
+      if (this.uiBuildFinalized && stableSamples >= 2) {
+        this.stopUiSettleTimer();
+        return;
+      }
+      if (stableSamples >= 2) {
+        this.refreshUiPartsFinal();
+        this.stopUiSettleTimer();
+        return;
+      }
+      if (waited >= 8000) {
+        this.refreshUiPartsFinal();
+        this.stopUiSettleTimer();
+      }
+    }, 250);
+  }
+
+  private stopUiSettleTimer(): void {
+    if (this.uiSettleTimer !== -1) {
+      clearInterval(this.uiSettleTimer);
+      this.uiSettleTimer = -1;
+    }
+  }
+
   aboutToAppear(): void {
     this.visibleText = this.message.content;
     this.visibleReasoning = this.message.reasoning;
     this.refreshUiParts();
+    this.startUiSettleTimer();
     if (this.isStreaming && this.flushTimer === -1) {
       this.flushTimer = setInterval(() => {
         if (this.isStreaming) {
@@ -326,6 +393,7 @@ export struct ChatBubbleView {
       clearInterval(this.flushTimer);
       this.flushTimer = -1;
     }
+    this.stopUiSettleTimer();
   }
 
   build() {
