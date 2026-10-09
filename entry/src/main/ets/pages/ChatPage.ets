@@ -1280,14 +1280,15 @@ struct ChatPage {
     .padding({ left: this.isWide ? 28 : 0, right: this.isWide ? 28 : 0 })
   }
 
-  // 工作模式时间线: 单容器 + 单一标识, 用户任务与各轮 思考→工具→正文 按发生顺序排列
+  // 工作模式 / 交互模式时间线: 单容器 + 单一标识, 用户任务与各轮 思考→工具→正文 按发生顺序排列
   @Builder
   buildWorkTimeline() {
     Column({ space: 14 }) {
       // 时间线头(全时间线唯一的标识, 不再逐轮出现头像)
       Row({ space: 10 }) {
-        // 机器人标识: 无背景底色, 放大显示
-        Image($r('app.media.ic_work'))
+        // 模式标识: 无背景底色, 放大显示。交互模式用的是自己的 ✦ 图标,
+        // 不能沿用工作模式的 🛠(两个模式共用这条时间线, 图标是唯一的模式区分).
+        Image(this.vm.interactiveMode ? $r('app.media.ic_interactive') : $r('app.media.ic_work'))
           .width(32)
           .height(32)
           .fillColor($r('app.color.brand'))
