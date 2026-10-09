@@ -1389,7 +1389,10 @@ export class ChatViewModel {
     this.executeWorkLoop(conv);
   }
 
-  // 绑定值随消息持久化(尾标记): 滚动/切会话/重启后用户填过的参数仍在
+  // 绑定值随消息持久化(尾标记): 滚动/切会话/重启后用户填过的参数仍在。
+  // 刻意**不调用 notifyUIChange()**: 本地调参不需要整页重渲染, 而重渲染会让正在操作的
+  // 界面所在列表重建、滚动位置跳动(真机反馈"在卡片里操作时突然置底")。
+  // 界面组件自己是这次交互的权威状态, 持久化只负责"下次回来还在"。
   private persistUiState(conv: Conversation, messageId: string, stateJson: string): void {
     for (let i: number = conv.messages.length - 1; i >= 0; i--) {
       let m: Message = conv.messages[i];
@@ -1402,7 +1405,6 @@ export class ChatViewModel {
       }
       m.content = next;
       this.persistConversations();
-      this.notifyUIChange();
       return;
     }
   }

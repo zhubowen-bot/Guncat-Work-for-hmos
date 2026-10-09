@@ -36,7 +36,7 @@ import {
   GuncatUiRadarChart,
   GuncatUiHorizontalBars
 } from './GuncatUiCharts';
-import { GuncatUiIcon } from './GuncatUiIcons';
+import { GuncatUiChevron, GuncatUiIcon } from './GuncatUiIcons';
 import { RichTextView } from './RichTextView';
 
 @Component
@@ -503,19 +503,20 @@ export struct GuncatUiView {
 
   // 渲染元素的子元素。
   //
-  // topLevel=true 表示这些元素直接挂在 root 的 Card 下 —— 只有这一层的"通栏组件"
-  // (表格/图表/图片墙/轮播)才允许用负外边距抵消根的内边距; 嵌套在卡片里的同款组件必须
-  // 老实待在自己的内边距里, 否则会溢出容器。
-  //
-  // 关于 key: 这里刻意**不把 rev 拼进 key**。ArkUI 的 ForEach 在父组件重渲染时会重新执行
-  // item builder 并更新属性, key 只决定"复用还是重建"; 把版本号拼进 key 会让整棵子树在
-  // 每次流式分片/拖动滑块时被销毁重建 —— 表现为界面闪烁、输入框失焦。
-  // key 只用元素自身的稳定标识(命名的语句用变量名, 匿名内联元素用位置)。
+  // ⚠️ key 里**必须带 rev**(页面版本号), 这是 ArkUI 的硬约束, 真机踩过:
+  //   ForEach 在父组件重渲染时会先比对新旧键值,**键值不变的项直接复用已有子组件,
+  //   连 item builder 都不会重新执行**。于是"绑定值变了 → 重新物化出新树"这件事
+  //   根本传不到界面上: 点 Chips / 单选 / 多选后选中态不变, 切到别的会话再切回来
+  //   (整棵组件被销毁重建)才显示正确。
+  //   把 rev 拼进 key 后, 每次重新物化都会重建这些子项, 选中态/表达式结果立刻刷新。
+  //   代价是重建开销 —— 用两个手段压住:
+  //     1) 流式期间控件本来就是禁用的, 重建只影响观感;
+  //     2) Slider 拖动中不重新物化(见 buildSlider), 松手才刷新, 避免把正在进行的拖拽手势销毁。
   @Builder
   buildElements(list: UiElement[], topLevel: boolean) {
     ForEach(list, (child: UiElement, index: number) => {
       this.renderNode(child, topLevel)
-    }, (child: UiElement, index: number) => child.key)
+    }, (child: UiElement, index: number) => child.key + '#' + this.rev.toString())
   }
 
   // 通用 children 容器
@@ -568,7 +569,7 @@ export struct GuncatUiView {
     } else if (el.type === 'Steps') {
       this.buildSteps(el)
     } else if (el.type === 'Table') {
-      this.buildTable(el, topLevel)
+      this.buildTable(el)
     } else if (this.isChart(el.type)) {
       this.buildChart(el, topLevel)
     } else if (el.type === 'Text' || el.type === 'BoldText') {
@@ -1204,8 +1205,10 @@ export struct GuncatUiView {
   }
 
   // ===== 表格 =====
+  // 表格刻意**不做通栏**: 表头底色与每列文字都从最左侧开始, 一旦比正文宽出去就显得"整块偏左"。
+  // 保持与正文同宽, 列多/列宽时靠横向滚动查看。
   @Builder
-  buildTable(el: UiElement, topLevel: boolean) {
+  buildTable(el: UiElement) {
     Column({ space: 0 }) {
       Scroll() {
         Column({ space: 0 }) {
@@ -1253,7 +1256,6 @@ export struct GuncatUiView {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-    .margin(this.bleed(topLevel))
   }
 
   private tableWidth(el: UiElement): number {
@@ -1333,14 +1335,14 @@ export struct GuncatUiView {
               .layoutWeight(1)
             // isFoldable=false 的分节始终展开, 不显示折叠箭头
             if (this.foldable(el)) {
-              GuncatUiIcon({
-                name: this.isExpanded(el, this.sectionKey(sec, i), true) ? 'chevron-up' : 'chevron-down',
-                iconSize: 11,
-                color: '#8F8F8F'
+              GuncatUiChevron({
+                up: this.isExpanded(el, this.sectionKey(sec, i), true),
+                iconSize: 16
               })
             }
           }
           .width('100%')
+          .alignItems(VerticalAlign.Center)
           .onClick(() => {
             if (this.foldable(el)) {
               this.toggleExpand(el, this.sectionKey(sec, i), true);
@@ -1440,14 +1442,13 @@ export struct GuncatUiView {
               .fontWeight(FontWeight.Medium)
               .fontColor($r('app.color.text_primary'))
               .layoutWeight(1)
-            GuncatUiIcon({
-              name: this.isExpanded(el, UiNode.str(item, 'value', i.toString()), i === 0)
-                ? 'chevron-up' : 'chevron-down',
-              iconSize: 11,
-              color: '#8F8F8F'
+            GuncatUiChevron({
+              up: this.isExpanded(el, UiNode.str(item, 'value', i.toString()), i === 0),
+              iconSize: 16
             })
           }
           .width('100%')
+          .alignItems(VerticalAlign.Center)
           .onClick(() => {
             this.toggleExpand(el, UiNode.str(item, 'value', i.toString()), i === 0);
           })
@@ -2253,12 +2254,12 @@ export struct GuncatUiView {
         .blockColor($r('app.color.surface'))
         .enabled(this.interactive())
         .onChange((value: number, mode: SliderChangeMode) => {
-          if (mode === SliderChangeMode.Moving || mode === SliderChangeMode.End ||
-            mode === SliderChangeMode.Click) {
-            this.state.set(GuncatUiRuntime.stateKeyOf(el), value);
-            this.rematerialize();
-          }
+          // 拖动过程中**只更新状态、不重新物化整棵树**: 重新物化会把正在拖的这个 Slider
+          // 组件销毁重建, 手势随之丢失(表现为"拖到一半卡住")。
+          // 松手(End)或点击轨道(Click)时再整棵树刷新 —— 此时标签数值、依赖它的图表一起更新。
+          this.state.set(GuncatUiRuntime.stateKeyOf(el), value);
           if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
+            this.rematerialize();
             this.emitState();
           }
         })

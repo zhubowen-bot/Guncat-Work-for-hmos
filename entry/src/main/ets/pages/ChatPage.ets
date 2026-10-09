@@ -1228,11 +1228,13 @@ struct ChatPage {
                   this.fillInputFromMessage(msg);
                 }
               },
-              // 聊天模式兜底: 消息体若含界面程序同样可交互
+              // 聊天模式兜底: 消息体若含界面程序同样可交互(同样只在 action 时刷新)
               uiLocked: this.vm.isStreaming,
               onUiInteract: (messageId: string, ev: GuncatUiEvent): void => {
                 this.vm.sendUiInteraction(messageId, ev);
-                this.refreshTick++;
+                if (ev.kind === 'action') {
+                  this.refreshTick++;
+                }
               }
             })
           }, (msg: Message) => msg.id)
@@ -1319,10 +1321,16 @@ struct ChatPage {
             // 交互模式: 仅最新一轮界面可交互, 历史界面块与执行中的界面置灰防重复提交
             uiLocked: this.vm.interactiveMode &&
               (msg.id !== this.vm.pendingUiMessageId || this.vm.isStreaming),
+            // 界面回传分两类:
+            //   action = 需要模型重算 → 会追加一条用户消息, 滚到底部让用户看到新一轮;
+            //   state  = 只是本地调参(拖动/勾选/填表) → **不动滚动位置、不整页刷新**,
+            //            否则用户在卡片里操作时页面会突然被拽到底部(真机反馈的问题)。
             onUiInteract: (messageId: string, ev: GuncatUiEvent): void => {
               this.vm.sendUiInteraction(messageId, ev);
-              this.refreshTick++;
-              this.scrollToBottomDelayed();
+              if (ev.kind === 'action') {
+                this.refreshTick++;
+                this.scrollToBottomDelayed();
+              }
             },
             onCopyPlain: (id: string) => {
               this.vm.copyMessagePlain(id);

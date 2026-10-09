@@ -1,3 +1,21 @@
+// 折叠/展开箭头。
+//
+// 这里刻意用系统的矢量图标(SymbolGlyph)而不是 Unicode 字形: `⌃` / `⌄` 这类字符在不同字体下
+// 大小、基线差异极大, 真机上表现为"右下角一个小小的尖、又没和标题对齐"。项目里
+// ChatBubbleView 的工具行已经在用 sys.symbol.chevron_up/down, 可用性有保证。
+@Component
+export struct GuncatUiChevron {
+  @Prop up: boolean = false;
+  @Prop iconSize: number = 14;
+  @Prop color: string = '#8F8F8F';
+
+  build() {
+    SymbolGlyph(this.up ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
+      .fontSize(this.iconSize)
+      .fontColor([this.color])
+  }
+}
+
 // 交互模式 (Intelligent UI) 图标。
 //
 // 用 Unicode 字形而不是系统 SymbolGlyph: SymbolGlyph 的名字在不同 ROM 上可用集合不一致,
