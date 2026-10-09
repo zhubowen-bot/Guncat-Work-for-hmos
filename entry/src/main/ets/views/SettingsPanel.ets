@@ -608,8 +608,9 @@ export struct SettingsPanel {
 
       if (this.searchOpen) {
         Column() {
-          Text('内置 search_web 工具：是否搜索由模型自行决定，手机本地直连搜索引擎/搜索 API，' +
-            '与"服务端联网搜索"开关互不影响、可同时存在。')
+          Text('内置 local_web_search 工具（本机兜底搜索）：手机本地直连搜索引擎/搜索 API，' +
+            '与"服务端联网搜索"开关互不影响、可同时存在。默认会优先走服务端搜索，' +
+            '本机通道只在服务端搜索不可用/无结果或你明确要求时才被调用。')
             .fontSize(11)
             .fontColor($r('app.color.text_secondary'))
             .width('100%')

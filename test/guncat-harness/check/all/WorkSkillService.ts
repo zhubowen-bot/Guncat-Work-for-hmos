@@ -359,7 +359,7 @@ export class WorkSkillService {
     cr4.desc = '生图策略/提示词/质检（完整原文，适配为 SVG 或用户供图）';
     let cr5: SkillFileInfo = new SkillFileInfo();
     cr5.file = 'references/common/internet-search.md';
-    cr5.desc = '联网判断/query 拆分/结果沉淀（完整原文，对应 search_web）';
+    cr5.desc = '联网判断/query 拆分/结果沉淀（完整原文，对应 local_web_search 本机兜底搜索）';
     let cr6: SkillFileInfo = new SkillFileInfo();
     cr6.file = 'references/common/output-standard.md';
     cr6.desc = '唯一通用排版 SSOT（完整原文）';

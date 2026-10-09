@@ -1286,6 +1286,8 @@ export class AgentLoopService {
   }
 
   // @deprecated 旧实现保留: 提示词已迁移到 PromptBuilder 分块构建; 此方法仅作兼容与回归对照。
+  // @deprecated 未被调用(活的系统提示词由 PromptBuilder 组装, 见 buildWorkSystemPrompt)。
+  // 保留仅为对照历史措辞 —— **不要在这里改提示词**, 改了不会生效, 只会让两份文本分叉。
   static buildWorkSystemPromptLegacy(): string {
     if (AgentLoopService.cachedWorkPrompt !== '') {
       return AgentLoopService.cachedWorkPrompt;

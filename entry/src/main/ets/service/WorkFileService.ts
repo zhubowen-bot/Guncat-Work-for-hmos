@@ -17,7 +17,8 @@ import { arrayBufferToBase64 } from '../common/Utils';
 import { ToolRegistry } from '../common/ToolRegistry';
 import { Constants } from '../common/Constants';
 import { LocalWebSearch, LocalSearchOutcome, LOCAL_SEARCH_TOOL_DESC_WORK, LOCAL_SEARCH_TOOL_DESC_WORK_FALLBACK,
-  LOCAL_SEARCH_QUERY_PROP_DESC } from './LocalWebSearch';
+  LOCAL_SEARCH_QUERY_PROP_DESC, LOCAL_SEARCH_TOOL_NAME, LOCAL_SEARCH_LEGACY_TOOL_NAME,
+  isLocalSearchToolName } from './LocalWebSearch';
 import { AbortSignal } from '../common/Types';
 
 const DOMAIN: number = 0x0000;
@@ -97,7 +98,7 @@ export class WorkFileService {
     return ['write_file', 'append_file', 'delete_file', 'create_dir', 'move_file',
       'write_docx', 'edit_docx', 'write_xlsx', 'edit_xlsx', 'write_pptx',
       'edit_ppt', 'write_csv', 'download_file', 'write_svg', 'todo_write', 'record_search',
-      'search_web', 'transform_file'];
+      LOCAL_SEARCH_TOOL_NAME, LOCAL_SEARCH_LEGACY_TOOL_NAME, 'transform_file'];
   }
 
   // ===== 路径基础 =====
@@ -580,7 +581,7 @@ export class WorkFileService {
       let sources: string = WorkFileService.strArg(args, 'sources', '');
       return WorkFileService.toolRecordSearch(root, query, summary, sources);
     }
-    if (name === 'search_web') {
+    if (isLocalSearchToolName(name)) {
       let query: string = WorkFileService.strArg(args, 'query', '');
       return await WorkFileService.toolSearchWeb(root, query);
     }
@@ -597,12 +598,24 @@ export class WorkFileService {
       if (loaded.startsWith('ERROR:')) {
         return WorkFileService.fail(loaded.substring(6).trim());
       }
-      return WorkFileService.ok(loaded);
+      // 技能正文里到处写着"用 `search_web` 联网核查"(那是旧工具名), 直接照做会让模型一路
+      // 走本机兜底搜索。这里在正文前面统一贴一条口径修正, 一处覆盖所有技能文档 ——
+      // 不然要改二十多处技能散文, 而且以后导入新技能又会带进旧写法。
+      return WorkFileService.ok(WorkFileService.LOAD_SKILL_SEARCH_NOTE + loaded);
     }
     // Guncat Work 6.1 新增工具(glob/grep/edit/str_replace_editor/web_fetch/
     // ask_user_question/schedule_*/goal_*/subagent/session_search)由 HarnessTools 兜底
     return await HarnessTools.dispatch(context, convId, name, args, root, abortSignal);
   }
+
+  // 加载技能正文时统一前置的"联网口径修正"。
+  // 技能散文是导入的外部内容, 里面普遍写着旧工具名 `search_web` 并让模型"用它核查"。
+  // 与其改二十多处散文(而且下次导入又会带进来), 不如在投喂给模型时补一条统一口径。
+  private static readonly LOAD_SKILL_SEARCH_NOTE: string =
+    '> 联网口径（本项目统一约定，优先于下文任何写法）：技能里提到的 `search_web` 即本项目的' +
+    '本机兜底搜索工具 `local_web_search`。需要联网核查时**优先使用服务端联网搜索**（服务商的 ' +
+    'web_search，在本次请求内直接执行）；只有服务端搜索不可用/报错/无结果，或用户明确要求本机搜索时，' +
+    '才调用 `local_web_search`。同一问题不要两种搜索各查一遍。用服务端搜索查到东西后用 record_search 登记。\n\n';
 
   // record_search: 把服务端联网搜索的结论落盘为 .searches.md, 留下可追溯记录
   // (服务端搜索不产生本地工具调用, 对话历史里查不到; 该文件不参与上下文压缩, 永远可查)
@@ -644,7 +657,7 @@ export class WorkFileService {
       block = block + '- [' + outcome.items[i].title + '](' + outcome.items[i].url + ')\n';
     }
     WorkFileService.toolWrite(root, '.searches.md', block, true);
-    let head: string = '【本地内置联网搜索】(手机直连 · ' + outcome.engineLabel +
+    let head: string = '【本地兜底联网搜索】(手机直连 · ' + outcome.engineLabel +
       ' · 结果已自动登记到 .searches.md)\n\n';
     return WorkFileService.ok(head + outcome.contentForAI);
   }
@@ -1473,12 +1486,12 @@ export class WorkFileService {
       '创建/更新当前任务的任务清单。复杂任务开始时先建立清单, 每完成一项立即更新状态; 简单任务(1-2步)不必建清单。todos 为 JSON 数组, status 取 pending/in_progress/completed。',
       WorkFileService.props1('todos', WorkFileService.strProp('任务清单 JSON 数组, 如 [{"content":"解析数据","status":"in_progress"},{"content":"生成报告","status":"pending"}]')),
       ['todos']));
-    defs.push(WorkFileService.makeTool('search_web',
+    defs.push(WorkFileService.makeTool(LOCAL_SEARCH_TOOL_NAME,
       webSearchEnabled ? LOCAL_SEARCH_TOOL_DESC_WORK_FALLBACK : LOCAL_SEARCH_TOOL_DESC_WORK,
       WorkFileService.props1('query', WorkFileService.strProp(LOCAL_SEARCH_QUERY_PROP_DESC)),
       ['query']));
     defs.push(WorkFileService.makeTool('record_search',
-      '保存一次服务端联网搜索的记录到工作区 .searches.md。服务端联网搜索由模型服务商在请求内完成, 不会在对话历史中留下任何工具调用记录, 因此每次你借助服务端联网搜索获得信息后, 必须立即调用本工具登记: 查询词 + 关键结论摘要(可选主要来源 URL, 多个用换行分隔)。注意: 本地内置搜索工具(search_web)的结果已自动登记到 .searches.md, 不要对它重复调用本工具。否则后续轮次(包括你自己)都无法追溯这次搜索。',
+      '保存一次服务端联网搜索的记录到工作区 .searches.md。服务端联网搜索由模型服务商在请求内完成, 不会在对话历史中留下任何工具调用记录, 因此每次你借助服务端联网搜索获得信息后, 必须立即调用本工具登记: 查询词 + 关键结论摘要(可选主要来源 URL, 多个用换行分隔)。这是一步就能完成的事, **不要为了省这一步而改用本地兜底搜索**。注意: 本地内置搜索工具(local_web_search)的结果已自动登记到 .searches.md, 不要对它重复调用本工具。否则后续轮次(包括你自己)都无法追溯这次搜索。',
       WorkFileService.props3(
         'query', WorkFileService.strProp('本次联网搜索使用的关键词/查询'),
         'summary', WorkFileService.strProp('本次搜索获得的关键结论或信息要点(简明扼要)'),

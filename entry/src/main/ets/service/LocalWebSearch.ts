@@ -1,7 +1,7 @@
 // LocalWebSearch: 本地内置联网搜索(手机直连搜索引擎/搜索 API, 不经过模型服务商)
 // 移植自参考项目 chatcube 的 WebSearchService(外部引擎 + Function Calling 路径):
 //   - 引擎注册表: Bing(本地 HTML 爬取, 无 Key)/Brave/Tavily/Exa/Metaso/Firecrawl
-//   - 统一 search_web function tool, 由模型决定是否调用; 服务端联网搜索(webSearchEnabled)完全独立并存
+//   - 统一 local_web_search function tool, 由模型决定是否调用; 服务端联网搜索(webSearchEnabled)完全独立并存
 //   - 结果统一格式化为带引用格式指引([title](url))的文本回传模型
 // 引擎 API Key/BaseUrl 持久化在 Preferences(LS_KEY_LOCAL_SEARCH_CONFIG), 启动与保存后 bind 注入运行时快照
 import { http } from '@kit.NetworkKit';
@@ -15,10 +15,24 @@ export const SEARCH_ENGINE_EXA: string = 'exa';
 export const SEARCH_ENGINE_METASO: string = 'metaso';
 export const SEARCH_ENGINE_FIRECRAWL: string = 'firecrawl';
 
-// search_web 工具名(三协议统一); 有意区别于服务端联网搜索的 web_search, 避免同名工具冲突
-export const LOCAL_SEARCH_TOOL_NAME: string = 'search_web';
+// 本地搜索工具名(三协议统一)。
+//
+// 为什么叫 local_web_search 而不是原来的 search_web:
+//   `search_web` 与服务端内置搜索的 `web_search` **只差一个词序**, 模型很容易把它当成
+//   "那个搜索工具"而优先调用它 —— 真机表现就是"AI 特别爱调本地联网搜索"。
+//   `local_` 前缀既点明"在手机上跑"(慢、要本机网络与密钥), 又不会被误认成服务端工具。
+export const LOCAL_SEARCH_TOOL_NAME: string = 'local_web_search';
 
-// search_web 的 query 参数描述(与 chatcube 措辞对齐)
+// 旧名兼容: 只用于**分发**(历史消息里模型自己写过的 search_web 调用、以及旧版插件/脚本)。
+// 不要再拿它去注册工具定义 —— 模型看到的工具名只有新的那个。
+export const LOCAL_SEARCH_LEGACY_TOOL_NAME: string = 'search_web';
+
+// 判断一个工具名是不是本地搜索(新旧都算)
+export function isLocalSearchToolName(name: string): boolean {
+  return name === LOCAL_SEARCH_TOOL_NAME || name === LOCAL_SEARCH_LEGACY_TOOL_NAME;
+}
+
+// local_web_search 的 query 参数描述(与 chatcube 措辞对齐)
 export const LOCAL_SEARCH_QUERY_PROP_DESC: string =
   '聚焦搜索关键词。用于搜索外部实时、特定或需要验证的信息, 不要传入整段用户问题。';
 
@@ -32,11 +46,13 @@ export const LOCAL_SEARCH_TOOL_DESC_CHAT: string =
 
 // 聊天模式工具描述(服务端联网搜索开启时的兜底版: 引导模型优先走服务端 web_search)
 export const LOCAL_SEARCH_TOOL_DESC_CHAT_FALLBACK: string =
-  'Fallback web search tool that runs locally on the phone (direct connection to search engines, ' +
-  'no server-side execution). PREFER the server-side web_search tool when it is available; ' +
-  'use this tool only when server-side search is unavailable, fails, or returns no results. ' +
-  'Generate focused keywords. Cite used sources as standard Markdown links like [title](url), ' +
-  'not bare [1] or [2] numbers.';
+  'FALLBACK search tool — do NOT use by default. It runs locally on the phone (direct connection to ' +
+  'search engines, needing the phone network and your own engine keys), which is slower and thinner ' +
+  'than the provider-side search. Server-side web_search IS ENABLED for this request: prefer it ' +
+  'whenever you need live information. Call this tool only if (a) server-side search errors out or is ' +
+  'unavailable, (b) it returned nothing relevant, or (c) the user explicitly asks for the built-in ' +
+  'local search. Never run both for the same question. Generate focused keywords. Cite used sources as ' +
+  'standard Markdown links like [title](url), not bare [1] or [2] numbers.';
 
 // 工作模式工具描述(说明是手机本地处理; 结果自动登记到 .searches.md)
 export const LOCAL_SEARCH_TOOL_DESC_WORK: string =
@@ -48,11 +64,14 @@ export const LOCAL_SEARCH_TOOL_DESC_WORK: string =
 
 // 工作模式工具描述(服务端联网搜索开启时的兜底版: 引导模型优先走服务端 web_search)
 export const LOCAL_SEARCH_TOOL_DESC_WORK_FALLBACK: string =
-  '利用手机本地网络直接联网搜索(手机直连搜索引擎/搜索 API, 不经过模型服务商的服务端工具)。' +
-  '【优先级】服务端联网搜索(web_search)可用时必须优先使用服务端搜索; ' +
-  '仅当服务端搜索不可用、报错或无结果时才退回本工具。' +
-  '每次搜索有真实成本: 生成聚焦的关键词, 证据不足才多次搜索。' +
-  '引用来源一律使用标准 Markdown 链接 [title](url), 不要写 [1]、[2] 编号。' +
+  '【兜底工具 · 默认不要调用】手机本地直连搜索引擎的备用搜索通道(要占用本机网络与你自己配的引擎密钥, ' +
+  '比服务端搜索慢、覆盖也更窄)。' +
+  '本次请求**已启用服务端联网搜索(web_search)**: 需要联网时请直接用它 —— 由服务商实时执行, 结果更新更全。' +
+  '只有以下情形才调用本工具: ① 服务端搜索报错或明确不可用; ② 服务端搜索已返回但为空/与问题无关; ' +
+  '③ 用户明确要求用手机内置搜索。' +
+  '同一个问题不要两种搜索各来一遍; 也不要因为"本地搜索会自动登记到 .searches.md"就优先选它 —— ' +
+  '服务端搜索的结果用一次 record_search 登记即可, 那只是一步, 不是选它的理由。' +
+  '调用时生成聚焦的关键词; 引用来源一律使用标准 Markdown 链接 [title](url), 不要写 [1]、[2] 编号; ' +
   '需要阅读某个网页全文时配合 web_fetch 使用。每次搜索的结果清单会自动登记到工作区 .searches.md。';
 
 // 引擎显示名

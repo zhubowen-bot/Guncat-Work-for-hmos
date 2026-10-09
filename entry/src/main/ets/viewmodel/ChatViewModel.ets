@@ -21,7 +21,8 @@ import { SessionLogAggregator } from '../common/SessionLogAggregator';
 import { AgentLoader } from '../service/AgentLoader';
 import { PluginHotLoader } from '../service/PluginHotLoader';
 import { ChatService, ChatStreamResult } from '../service/ChatService';
-import { LOCAL_SEARCH_TOOL_NAME, LocalWebSearch, SearchEngineSettings, LocalSearchOutcome } from '../service/LocalWebSearch';
+import { LOCAL_SEARCH_TOOL_NAME, LOCAL_SEARCH_LEGACY_TOOL_NAME, isLocalSearchToolName, LocalWebSearch,
+  SearchEngineSettings, LocalSearchOutcome } from '../service/LocalWebSearch';
 import { AgentLoopService, LoopError, LoopMessage, LoopTurnCallbacks, LoopTurnResult } from '../service/AgentLoopService';
 import { WorkFileService, WorkspaceFileInfo, ToolExecResult } from '../service/WorkFileService';
 import { WorkToolRunner } from '../service/WorkToolRunner';
@@ -3068,7 +3069,8 @@ if (this.abortSignal.aborted) {
           continue;
         }
         let execStart: number = Date.now();
-        if (call.name === LOCAL_SEARCH_TOOL_NAME) {
+        // 新旧工具名都认: 历史消息里模型自己写过的旧名调用仍要能执行(否则会被判为未知工具)
+        if (isLocalSearchToolName(call.name)) {
           let query: string = ChatViewModel.parseSearchQuery(call.argsJson);
           let outcome: LocalSearchOutcome = await ToolExecutionGuard.run(
             LocalWebSearch.searchWeb(query, this.abortSignal),

@@ -1662,6 +1662,25 @@ console.log('[组件库与提示词]');
   check('组件清单把 FollowUpBlock 标为不推荐',
     GuncatUiLibrary.promptSection().indexOf('**不推荐**') > 0 &&
     GuncatUiLibrary.promptSection().indexOf('需要下一步入口时优先 Buttons / OptionCards') > 0);
+  // 本地兜底联网搜索: 工具名从 search_web 改为 local_web_search(旧名与服务端 web_search
+  // 只差词序, 模型很容易误当成"那个搜索工具"而优先调用 —— 真机表现就是"AI 特别爱调本地搜索")。
+  // 同时提示词必须写成"默认不用本机兜底"。
+  const capabilityText = PromptBuilder.capability();
+  check('能力边界写明联网搜索优先级',
+    capabilityText.indexOf('联网搜索优先级') > 0 &&
+    capabilityText.indexOf('local_web_search') > 0 &&
+    capabilityText.indexOf('本机兜底通道') > 0 &&
+    capabilityText.indexOf('默认用服务端联网搜索') > 0);
+  check('能力边界不再出现旧工具名', capabilityText.indexOf('search_web') < 0);
+  const toolDirText = PromptBuilder.toolsDirectory();
+  check('工具目录列出 local_web_search 并标注兜底',
+    toolDirText.indexOf('local_web_search(query)') > 0 &&
+    toolDirText.indexOf('本机兜底搜索') > 0 &&
+    toolDirText.indexOf('唯一通道') > 0);
+  check('工具目录不再出现旧工具名', toolDirText.indexOf('search_web') < 0);
+  check('提示词对"未开启服务端搜索"也要给出正确口径',
+    capabilityText.indexOf('本轮没有开启服务端联网搜索') > 0 &&
+    toolDirText.indexOf('本轮没有开启服务端联网搜索') > 0);
 }
 
 console.log('');

@@ -1187,6 +1187,13 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
   - 另外**单个按钮不再拉满整行**（`layoutWeight` 只在 2 个以上按钮时才等分）—— 一整条彩色长条也是"难看"的一部分，现在按内容宽度左对齐。
   - 注意：**选中态**（Tabs / Chips / Select 选项）仍是实心 brand + 白字，这是"已选中"的强语义，与按钮不同层；`OptionCards` 用 `brand_light` + `brand` 描边。用户未对此提出异议，暂不统一。
 
+- **联网搜索：默认走服务端，本机工具降级为兜底（同日第十二次）**。原先本地工具叫 `search_web`，与服务端内置的 `web_search` **只差一个词序**，模型很容易把它当成"那个搜索工具"；加上技能文档里二十多处写着"用 `search_web` 核查"，实际使用中它成了首选。现在：
+  - **改名** `search_web` → `local_web_search`（`LOCAL_SEARCH_TOOL_NAME`），`local_` 前缀点明"在手机上跑、要占本机网络与自配密钥"，不再和服务端工具混淆。**旧名保留为分发别名**（`LOCAL_SEARCH_LEGACY_TOOL_NAME` + `isLocalSearchToolName()`）：历史消息里模型自己写过的旧调用、旧插件脚本都还能执行，不会变成"未知工具"。
+  - **描述降级**（切到服务端搜索开启时的兜底版，原文案改为"【兜底工具】…本次请求已启用服务端联网搜索…只有 ①②③ 才调用"）；并点掉一个隐藏动机：本地搜索会自动写 `.searches.md`，而服务端搜索需要额外一次 `record_search` —— 文案明确"那只是一步，不是选它的理由"。
+  - **提示词加硬规则**：`PromptBuilder.capability()` 新增「联网搜索优先级」、`toolsDirectory()` 新增 `local_web_search` 条目（含"未开启服务端搜索时它就是唯一通道"，因为系统提示词要保持逐字节稳定、不能按开关分叉）。
+  - **技能文档的口径修正做在投喂处**：技能散文是导入内容（20+ 处旧名），与其改散文、下次导入又带进来，不如在 `load_skill` 的返回前统一贴一条"联网口径"说明（`WorkFileService.LOAD_SKILL_SEARCH_NOTE`）。
+  - 顺带：时间线里这个工具显示为「Local Search」+ 圆圈放大镜（此前落在 default 分支、显示原始工具名）；`AgentLoopService.buildWorkSystemPromptLegacy()` 标注 `@deprecated 未被调用`（活的是 `PromptBuilder`，避免以后改错文件）。新增 5 条断言，单测 474 → 479 项。
+
 ## 6.3.0 更新（交互模式 · Intelligent UI）
 
 - 新增 **Agent 模式第三项：交互模式（Intelligent UI）**，与「工作模式」平行展示在侧边栏的「Agent模式」分组中。它共用同一套 Agent Loop、沙箱工作区与 42 个工具，但**回答不是纯文本，而是可交互的界面**：指标卡、进度条、表格、横向柱状图 / 折线图 / 环形占比，以及滑块 / 开关 / 下拉 / 输入框与选项按钮。

@@ -90,6 +90,11 @@ export class WorkStepFormat {
       case 'grep':
       case 'session_search':
         return $r('sys.symbol.magnifyingglass');
+      // 本地兜底联网搜索(含旧名 search_web): 用"圆圈放大镜"区分于普通搜索工具的放大镜
+      // (SDK 里没有 globe 这个符号, 用 magnifyingglass_circle —— 已确认存在于系统符号表)
+      case 'local_web_search':
+      case 'search_web':
+        return $r('sys.symbol.magnifyingglass_circle');
       case 'edit':
       case 'str_replace_editor':
         return $r('sys.symbol.pencil_tip');
@@ -159,6 +164,10 @@ export class WorkStepFormat {
       case 'search_pdf':
       case 'record_search':
         return 'Search';
+      // 本地兜底搜索(含旧名): 显示成 Local Search, 一眼能看出"这是在本机跑的兜底通道"
+      case 'local_web_search':
+      case 'search_web':
+        return 'Local Search';
       case 'glob':
         return 'Glob';
       case 'grep':
