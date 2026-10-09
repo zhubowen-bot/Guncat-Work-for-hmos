@@ -471,10 +471,12 @@ export struct GuncatUiView {
       // 组件的重渲染链路根本没通, 后面所有"换键重建"的推断都不成立。
       if (GuncatUiView.DEBUG_DRAG) {
         Text(this.debugDragText())
-          .fontSize(10)
+          .fontSize(11)
           .fontColor($r('app.color.danger'))
+          .backgroundColor('#FFF3F3')
           .width('100%')
-          .padding({ left: this.edge(), right: this.edge(), bottom: 6 })
+          .padding({ left: this.edge(), right: this.edge(), top: 6, bottom: 6 })
+          .margin({ bottom: 8 })
       }
       if (this.root === null) {
         this.buildEmpty()
@@ -486,6 +488,17 @@ export struct GuncatUiView {
         .width('100%')
         .alignItems(HorizontalAlign.Start)
         .padding({ left: this.edge(), right: this.edge() })
+      }
+      // ==== 临时诊断行(下): 故意再放一份 —— 长界面滚动到底部时顶部那行看不到, 而用户关注的
+      // 就是"拖完值没变"的现场, 所以底部也要有一份。定位完与上面那份一起删掉。 ====
+      if (GuncatUiView.DEBUG_DRAG) {
+        Text(this.debugDragText())
+          .fontSize(11)
+          .fontColor($r('app.color.danger'))
+          .backgroundColor('#FFF3F3')
+          .width('100%')
+          .padding({ left: this.edge(), right: this.edge(), top: 6, bottom: 6 })
+          .margin({ top: 8 })
       }
       // 以下"脚注区"(截断提示 / 诊断 / 原始输出)与正文左对齐, 所以同样加左右内边距
       if (this.truncated) {
@@ -2446,7 +2459,12 @@ export struct GuncatUiView {
           }
           if (mode === SliderChangeMode.Moving) {
             this.dbgMoving++;
-            this.sigTick++;   // 诊断: 让诊断行跟着 Moving 走
+            // ⚠️ 只在"拖动链快照真的生效"时才唤醒(诊断行靠 sigTick 刷新)。
+            // 若把它挪到这个判断**之前**, 冻结没生效时每动一下都会触发重渲染 → 正在拖的滑块被
+            // 重建 → 真机表现就是"又拖不动了"。诊断代码也不能破坏被测对象。
+            if (this.dragFrozen()) {
+              this.sigTick++;
+            }
           }
           this.state.set(GuncatUiRuntime.stateKeyOf(el), value);
           if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
