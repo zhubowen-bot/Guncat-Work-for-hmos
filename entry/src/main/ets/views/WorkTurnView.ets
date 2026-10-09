@@ -43,6 +43,9 @@ export struct WorkTurnView {
   private onExportWord: (id: string) => void = (_id: string): void => {};
   private onRegenerate: (id: string) => void = (_id: string): void => {};
   @State private reasoningExpanded: boolean = false;
+  // 合并折叠栏里"哪一轮的思考被展开"(默认空 = 全部收起, 想看哪轮点哪轮):
+  // 值是该轮消息 id, 同一时刻只展开一条
+  @State private expandedThinkingId: string = '';
   @State private expandedStepId: string = '';
   @State private stepsTick: number = 0;
   @State private visibleText: string = '';
@@ -712,23 +715,7 @@ export struct WorkTurnView {
       ForEach(this.priorMessages, (m: Message, i: number) => {
         Column({ space: 4 }) {
           if (m.reasoning !== '') {
-            Row({ space: 6 }) {
-              SymbolGlyph($r('sys.symbol.lightbulb'))
-                .fontSize(12)
-                .fontColor([$r('app.color.text_tertiary')])
-                .flexShrink(0)
-              Text('思考')
-                .fontSize(11)
-                .fontColor($r('app.color.text_tertiary'))
-                .flexShrink(0)
-            }
-            .width('100%')
-            .alignItems(VerticalAlign.Center)
-            Text(m.reasoning)
-              .fontSize(12)
-              .fontColor($r('app.color.text_secondary'))
-              .lineHeight(19)
-              .width('100%')
+            this.buildRoundThinking(m, m.id)
           }
           ForEach(m.toolCalls, (call: ToolCallRecord, k: number) => {
             Row({ space: 6 }) {
@@ -755,7 +742,49 @@ export struct WorkTurnView {
         .width('100%')
         .padding({ left: 12, right: 2 })
         .alignItems(HorizontalAlign.Start)
-      }, (m: Message, i: number) => 'pm' + m.id)
+        // 键里带上该轮思考的展开位: ArkUI 的 ForEach 键值不变就**直接复用子组件、连 item builder
+        // 都不执行**, 只靠 @State 依赖可能不刷新, 所以把展开状态编进键里强制重建
+      }, (m: Message, i: number) => 'pm' + m.id + '#' + (this.expandedThinkingId === m.id ? '1' : '0'))
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  // 一条"思考"折叠头(**默认收起**)。
+  // 合并后的折叠栏里每一轮的思考都收起来 —— 用户要的是"哪一轮想细看再点开",
+  // 而不是一展开就被四段思考文字糊满。key 用消息 id, 同一时刻只展开一条(手风琴)。
+  @Builder
+  private buildRoundThinking(m: Message, key: string) {
+    Column({ space: 4 }) {
+      Row({ space: 6 }) {
+        SymbolGlyph($r('sys.symbol.lightbulb'))
+          .fontSize(12)
+          .fontColor([$r('app.color.text_tertiary')])
+          .flexShrink(0)
+        Text('思考')
+          .fontSize(11)
+          .fontColor($r('app.color.text_tertiary'))
+          .flexShrink(0)
+        Blank()
+        SymbolGlyph(this.expandedThinkingId === key ?
+          $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
+          .fontSize(11)
+          .fontColor([$r('app.color.text_tertiary')])
+          .flexShrink(0)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .onClick(() => {
+        this.expandedThinkingId = this.expandedThinkingId === key ? '' : key;
+      })
+
+      if (this.expandedThinkingId === key) {
+        Text(m.reasoning)
+          .fontSize(12)
+          .fontColor($r('app.color.text_secondary'))
+          .lineHeight(19)
+          .width('100%')
+      }
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
@@ -773,6 +802,7 @@ export struct WorkTurnView {
           .fontSize(11)
           .fontColor($r('app.color.text_tertiary'))
           .flexShrink(0)
+        // 跑动中给最新一句跑马灯(只占一行, 不算"展开"); 结束后收起, 想看再点
         if (this.isStreaming && this.getMarqueeText() !== '') {
           Scroll(this.marqueeScroller) {
             Text(this.getMarqueeText())
@@ -789,12 +819,20 @@ export struct WorkTurnView {
         } else {
           Blank()
         }
+        SymbolGlyph(this.expandedThinkingId === this.message.id ?
+          $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
+          .fontSize(11)
+          .fontColor([$r('app.color.text_tertiary')])
+          .flexShrink(0)
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
+      .onClick(() => {
+        this.expandedThinkingId = this.expandedThinkingId === this.message.id ? '' : this.message.id;
+      })
 
-      if (!this.isStreaming && this.message.reasoning !== '') {
-        Text(this.message.reasoning)
+      if (this.expandedThinkingId === this.message.id && this.message.reasoning !== '') {
+        Text(this.isStreaming ? this.visibleReasoning : this.message.reasoning)
           .fontSize(12)
           .fontColor($r('app.color.text_secondary'))
           .lineHeight(19)
