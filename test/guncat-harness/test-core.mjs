@@ -1584,6 +1584,54 @@ console.log('[组件库与提示词]');
   check('补救提示词要求 root 第一行',
     GuncatUiPrompt.REPAIR_SYSTEM.indexOf('root = Card') > 0);
   check('组件清单列出 Card 签名', prompt.indexOf('Card(children: 组件[]') > 0);
+
+  // 丰富度: 提示词必须主动把模型推向"复杂组件组合", 而不是文字 + 表格的排列组合
+  check('提示词含丰富度专节',
+    prompt.indexOf('## 丰富度') > 0 &&
+    prompt.indexOf('不要用"文字 + 表格"排列组合') > 0);
+  check('丰富度给出组件选择优先级',
+    prompt.indexOf('### 选择优先级') > 0 &&
+    prompt.indexOf('不要退化成') > 0);
+  check('优先级把表格降级为逐行核对用途',
+    prompt.indexOf('表格只用于"需要逐行精确核对"') > 0);
+  check('优先级给出图表替代方案',
+    prompt.indexOf('LineChart') > 0 && prompt.indexOf('PieChart') > 0 &&
+    prompt.indexOf('HorizontalBarChart') > 0 && prompt.indexOf('RadialChart') > 0 &&
+    prompt.indexOf('SingleStackedBarChart') > 0 && prompt.indexOf('RadarChart') > 0);
+  check('优先级给出卡片块替代方案',
+    prompt.indexOf('ContextCardBlock') > 0 && prompt.indexOf('SnippetCardBlock') > 0 &&
+    prompt.indexOf('CompositeCardBlock') > 0 && prompt.indexOf('VisualCardBlock') > 0 &&
+    prompt.indexOf('ImageGallery') > 0 && prompt.indexOf('Carousel') > 0);
+  check('优先级给出结构类替代方案',
+    prompt.indexOf('Tabs') > 0 && prompt.indexOf('SectionBlock') > 0 &&
+    prompt.indexOf('Steps') > 0 && prompt.indexOf('TagBlock') > 0);
+  check('丰富度给出分层配方', prompt.indexOf('### 分层配方') > 0 &&
+    prompt.indexOf('抬头层') > 0 && prompt.indexOf('结论层') > 0 &&
+    prompt.indexOf('可视化层') > 0 && prompt.indexOf('明细层') > 0 &&
+    prompt.indexOf('操作层') > 0);
+  check('分层配方给出组件数量区间', prompt.indexOf('8~14 个组件是常态') > 0);
+  check('分层配方要求各层互补而非重复',
+    prompt.indexOf('原样说三遍') > 0);
+  check('丰富度含"不合格 vs 合格"对照示例',
+    prompt.indexOf('不合格(只有文字 + 表格') > 0 &&
+    prompt.indexOf('✅ 合格(分层') > 0);
+  check('反例含偷懒的文字+表格组合',
+    prompt.indexOf('偷懒的"文字 + 表格"组合') > 0);
+  check('反例含把指标塞进正文',
+    prompt.indexOf('把结构化内容塞进正文') > 0);
+  check('反例含为了丰富而重复数据',
+    prompt.indexOf('为了显得丰富而重复数据') > 0);
+  check('流式段不再要求"元素越少越好"',
+    GuncatUiPrompt.STREAMING.indexOf('组件数量不是越少越好') > 0 &&
+    GuncatUiPrompt.STREAMING.indexOf('6 个元素的界面写成 20 个元素') < 0);
+  check('职责段要求默认往丰富那一侧靠',
+    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('默认往"丰富"那一侧靠') > 0 &&
+    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('8~14 个组件是常态') > 0);
+  check('补救提示词也要求分层与图表',
+    GuncatUiPrompt.REPAIR_INSTRUCTION.indexOf('抬头 → 结论指标 → 可视化 → 明细 → 操作入口') > 0 &&
+    GuncatUiPrompt.REPAIR_INSTRUCTION.indexOf('不要只输出一段文字加一张表格') > 0);
+  check('补救系统提示要求层次',
+    GuncatUiPrompt.REPAIR_SYSTEM.indexOf('不要只输出一段文字加一张表格') > 0);
 }
 
 console.log('');

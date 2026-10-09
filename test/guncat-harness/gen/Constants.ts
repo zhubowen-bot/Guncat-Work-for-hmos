@@ -12,8 +12,11 @@ export class Constants {
   static readonly LS_KEY_THINKING_ENABLED: string = 'guncat_thinking_enabled';
   // 本地内置联网搜索配置(JSON: 引擎选择 + 各引擎 API Key/BaseUrl), 与服务端联网搜索开关独立
   static readonly LS_KEY_LOCAL_SEARCH_CONFIG: string = 'guncat_local_search_config';
-  // 推理强度('max' / 'high' / 'low'), 深度思考开启时作为 reasoning 强度参数下发
+  // 工作模式的推理强度('max' / 'high' / 'low'), 作为 reasoning 强度参数下发
   static readonly LS_KEY_REASONING_EFFORT: string = 'guncat_reasoning_effort';
+  // 交互模式的推理强度('high' / 'low' / 'off'): 与工作模式分开保存。
+  // 交互模式要"快", 所以去掉 极高(max)、多了 关闭(off); 两个模式各有各的档位, 互不影响。
+  static readonly LS_KEY_INTERACTIVE_EFFORT: string = 'guncat_interactive_effort';
   static readonly LS_KEY_WEB_SEARCH_ENABLED: string = 'guncat_web_search_enabled';
   static readonly LS_KEY_AUTO_READ_ENABLED: string = 'guncat_auto_read_enabled';
   static readonly LS_KEY_CURRENT_AGENT_ID: string = 'guncat_current_agent';

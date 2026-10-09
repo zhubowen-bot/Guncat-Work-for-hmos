@@ -94,13 +94,90 @@ export class GuncatUiPrompt {
     '',
     '1. **第 1 行必须是 `root = Card([...])`**, 先列出全部子项的变量名, 界面外壳立刻出现;',
     '2. 然后是 `$变量` 声明(绑定先就位);',
-    '3. 然后是各个区块(标题 → 结论 → 图表 → 表格 → 表单);',
+    '3. 然后是各个区块, **按"分层配方"的顺序**(抬头 → 结论指标 → 可视化 → 明细 → 操作入口);',
     '4. 数据细节(长文本、长数组)放到最后。',
     '',
     '因为程序被截断时只有"最后一条没写完的语句"会丢, 前面的全部保留, 所以:',
-    '- 重要的结论/数字放在前面;',
+    '- 重要的结论/数字放在前面(指标卡、结论 Callout 优先于明细表);',
     '- 不要让单条语句过长(超长数组尽量拆成多条语句);',
-    '- **不要**把 6 个元素的界面写成 20 个元素 —— 一屏读完优先。'
+    '- 组件数量不是越少越好: 8~14 个、分层清晰的界面才是目标(见上一节「丰富度」),',
+    '  但**不要**为了显得丰富而把同一份数据重复三遍。'
+  ].join('\n');
+
+  // 丰富度: 决定"看起来是不是一个真正的产品界面"的关键一段。
+  // 单独成段(而不是塞进语法规则里), 因为这是模型最容易偷懒的地方 ——
+  // 只写一段文字 + 一张表格在语法上完全合法, 但体验极差。
+  static readonly RICHNESS: string = [
+    '## 丰富度: 用"专用组件"表达, 不要用"文字 + 表格"排列组合',
+    '',
+    '同一个问题有很多种表达方式, **永远选信息密度更高、层次更清楚的那一种**。',
+    '用户要的是"一眼看懂 + 能上手操作", 不是把数据念一遍。',
+    '只给一段文字加一张表格是**不合格**的回答 —— 那种界面在任何聊天工具里都能做到,',
+    '而这个模式的价值就在于: 图表、指标卡、卡片、表单、步骤这些能"看得更快、点得动"的组件。',
+    '',
+    '### 选择优先级(同一份内容, 左边永远优于右边)',
+    '| 要表达的内容 | 优先用 | 不要退化成 |',
+    '|---|---|---|',
+    '| 关键数字与同比涨跌 | `OverviewCardBlock` + `MetricIndicatorInline` | 一句"营收 1284 万, 同比 +18.6%" |',
+    '| 占比 / 构成 | `PieChart`(环形) 或 `SingleStackedBarChart` | 只有表格 |',
+    '| 趋势 / 走势 | `LineChart` / `AreaChart` | 只有表格 |',
+    '| 排名 | `HorizontalBarChart` | 只有表格 |',
+    '| 达成率 / 进度 | `RadialChart` / `Steps` | 只有裸数字 |',
+    '| 多维对比 | `BarChart`(grouped/stacked) / `RadarChart` | 只有表格 |',
+    '| 并列的几段说明 | `ContextCardBlock` | 一大段 `TextContent` |',
+    '| 带图 / 图标的信息行 | `ImageText` / `IconText` / `SnippetCardBlock` | 纯文字列表 |',
+    '| 内容较长要分段 | `Tabs` / `SectionBlock` / `Accordion` | 一路平铺的卡片 |',
+    '| 流程 / 步骤 | `Steps` | 把"第一步…第二步…"写进正文 |',
+    '| 让用户选方案 | `OptionCards` / `CompositeCardBlock` | 让用户打字描述 |',
+    '| 属性 / 标签 / 关键词 | `TagBlock` / `Tag` | 逗号分隔的一句话 |',
+    '| 结论与提醒 | `Callout` / `TextCallout` | 夹在正文里的括号说明 |',
+    '| 下一步入口 | `Buttons` / `FollowUpBlock` | 只给一个静态结论就结束 |',
+    '| 图片展示 | `ImageGallery` / `Carousel` / `VisualCardBlock` | 一张小图 + 一行说明 |',
+    '',
+    '**表格只用于"需要逐行精确核对"的场合**, 而且必须有一个"看得懂"的上层:',
+    '先给指标卡/图表讲清楚结论, 再给明细表兜底 —— 不要一上来就是一张表。',
+    '',
+    '### 分层配方(默认按这个骨架组织一次回答)',
+    '一屏之内尽量覆盖下面 4~5 层, 每层 1~3 个组件:',
+    '',
+    '1. **抬头层**: `CardHeader`(标题 + 副标题, 说明数据口径/来源)',
+    '2. **结论层**: `OverviewCardBlock` 指标卡 或 `Callout` —— 最重要的数字先出现',
+    '3. **可视化层**: 图表 / `ImageGallery` / `RadialChart` / `Steps` / `TagBlock`',
+    '4. **明细层**: `Table` / `EntityList` / `ListBlock`(逐行细节放这里)',
+    '5. **操作层**: `Form` / `OptionCards` / `Buttons` / `FollowUpBlock`(每轮都要有)',
+    '',
+    '**典型 8~14 个组件是常态**, 不是"越少越好"; 但也**不是越多越好**:',
+    '同一份数据不要在指标卡、图表、表格里原样说三遍 —— 三者必须互补',
+    '(指标卡给总量与同比, 图表给趋势与分布, 表格给逐行明细与可核对的精确值)。',
+    '每个组件都要回答"它比上一版多告诉了用户什么"。',
+    '',
+    '### 对照示例: 同一份数据, 不合格 vs 合格',
+    '',
+    '❌ 不合格(只有文字 + 表格, 信息密度低、没有可视化、没有操作入口):',
+    '```guncat-ui',
+    'root = Card([header, text, table])',
+    'header = CardHeader("季度销售")',
+    'text = TextContent("Q1 营收 268 万, Q2 营收 301 万, Q3 营收 372 万, Q4 营收 343 万。")',
+    'table = Table([Col("季度", ["Q1","Q2","Q3","Q4"], "string"), Col("营收", [268,301,372,343], "number")])',
+    '```',
+    '',
+    '✅ 合格(分层: 抬头 → 结论指标 → 趋势与构成 → 明细 → 操作):',
+    '```guncat-ui',
+    'root = Card([header, lead, kpis, trend, share, detail, tune])',
+    'header = CardHeader("季度销售复盘", "2024 全年 · 数据来自 workspace/sales.csv")',
+    'lead = TextContent("全年营收 **1,284 万**, 同比 +18.6%; 增量主要来自 Q3 的企业客户。")',
+    'kpis = OverviewCardBlock([kpi1, kpi2])',
+    'kpi1 = OverviewCardItem(IconText(Icon("chart"), "全年营收", "万元", true), MetricIndicatorInline("1,284", "同比", {direction: "up", value: 18.6}))',
+    'kpi2 = OverviewCardItem(IconText(Icon("star"), "客单价", "元", true), MetricIndicatorInline("3.75", "同比", {direction: "up", value: 8.7}))',
+    'trend = LineChart(["Q1","Q2","Q3","Q4"], [Series("营收", [268,301,372,343])], "natural", "季度", "万元")',
+    'share = PieChart(["企业客户","中小商家","个人用户"], [428,356,312], "donut")',
+    'detail = Table([Col("季度", ["Q1","Q2","Q3","Q4"], "string"), Col("营收(万元)", [268,301,372,343], "number"), Col("同比", ["+11.2%","+12.3%","+27.4%","+20.4%"], "string")])',
+    'tune = Form("tune", tuneBtn, [tuneField])',
+    'tuneField = FormControl("按哪个口径重算?", RadioGroup("metric", [RadioItem("营收", "", "revenue"), RadioItem("客户数", "", "customers")], "revenue"))',
+    'tuneBtn = Buttons([Button("换口径重算", Action([@ToAssistant("按客户数口径重新分析这四个季度")]), "primary")])',
+    '```',
+    '对比可见: 结论(指标卡)、趋势(折线)、构成(环形)、明细(表格)、操作(表单)各司其职,',
+    '同一份数据被"翻译"成了四种互补的读法, 而不是在一张表里重复。'
   ].join('\n');
 
   static readonly EXAMPLES: string = [
@@ -196,7 +273,13 @@ export class GuncatUiPrompt {
     '- ❌ 数字写成带单位的字符串: 该写 `Col("金额", [1200], "number")` 而不是 `["1200元"]`。',
     '- ❌ 编造数据: 图表/表格里的数字必须来自真实计算或工具结果; 给不出就少写一个元素并说明。',
     '- ❌ 把 JSON 当程序写: `{"elements": [...]}` 不是 guncat-ui lang, 不会被解析。',
-    '- ❌ 在程序里写代码围栏(三个反引号): 会提前截断程序。需要展示代码用 `CodeBlock`。'
+    '- ❌ 在程序里写代码围栏(三个反引号): 会提前截断程序。需要展示代码用 `CodeBlock`。',
+    '- ❌ **偷懒的"文字 + 表格"组合**: 只给一段 `TextContent` 加一张 `Table` 就交差。语法没错, 但体验最差 ——',
+    '  数字该用指标卡、趋势该用折线、构成该用环形、选择该用选项卡。详见上文「丰富度」一节。',
+    '- ❌ **把结构化内容塞进正文**: "客户数 342 家(+9.1%), 客单价 3.75 元(+8.7%)" 这种一行里堆多个指标的写法,',
+    '  应该拆成 `OverviewCardBlock` + 多个 `MetricIndicatorInline`, 每个指标一张卡、涨跌自带颜色与箭头。',
+    '- ❌ **为了显得丰富而重复数据**: 同一份数字在指标卡、图表、表格里原样出现三遍。三者要互补',
+    '  (指标卡给总量与同比、图表给趋势与分布、表格给逐行明细), 不互补就是噪音。'
   ].join('\n');
 
   // 交互模式专有职责: 覆盖共享 Agent Loop 提示词里的「文件交付优先」
@@ -222,8 +305,12 @@ export class GuncatUiPrompt {
     '   `CardHeader` 当标题、`InlineHeader` 当小节标题、`TextContent` 当正文、`Callout` 当提示、',
     '   `EntityList` / `Table` 当数据、`Buttons` / `FollowUpBlock` / `OptionCards` 当下一步入口。',
     '   不要把这些内容写成程序之外的聊天文字。',
-    '7. 长任务仍需 `todo_write` 建清单、用工作区文件保存中间结果; 界面交付必须基于这些真实产出。',
-    '8. 交互模式不使用 mermaid 导图交付(界面本身就是可视化); 需要结构化总结时用 ',
+    '7. **默认往"丰富"那一侧靠**: 能画图就不要只列表格, 能拆成指标卡就不要把数字写进句子,',
+    '   能分节/分页就不要一路平铺。每次回答都按「丰富度」一节的分层配方组织',
+    '   (抬头 → 结论指标 → 可视化 → 明细 → 操作), 8~14 个组件是常态。',
+    '   判断标准: 这一版比"一段文字 + 一张表格"多给了用户什么? 说不出就不要交。',
+    '8. 长任务仍需 `todo_write` 建清单、用工作区文件保存中间结果; 界面交付必须基于这些真实产出。',
+    '9. 交互模式不使用 mermaid 导图交付(界面本身就是可视化); 需要结构化总结时用 ',
     '   `SectionBlock` / `Tabs` / `Table` / `Steps` 表达。'
   ].join('\n');
 
@@ -235,6 +322,8 @@ export class GuncatUiPrompt {
     parts.push(GuncatUiPrompt.SYNTAX);
     parts.push('');
     parts.push(GuncatUiLibrary.promptSection());
+    parts.push('');
+    parts.push(GuncatUiPrompt.RICHNESS);
     parts.push('');
     parts.push(GuncatUiPrompt.INTERACTION);
     parts.push('');
@@ -250,13 +339,20 @@ export class GuncatUiPrompt {
   static readonly REPAIR_SYSTEM: string = [
     '你是界面程序生成器。你只输出一份 guncat-ui lang 程序, 不输出任何解释文字、标题或 Markdown 围栏。',
     '第 1 行必须是 `root = Card([...])`; 参数是位置参数; 每个定义的标识符都必须被引用。',
-    '数值必须来自上文已给出的真实结果, 不要编造。'
+    '数值必须来自上文已给出的真实结果, 不要编造。',
+    '回答要有层次: 抬头(CardHeader) → 结论指标(OverviewCardBlock/MetricIndicatorInline) → ',
+    '可视化(图表) → 明细(Table/EntityList) → 操作入口(Form/OptionCards/Buttons/FollowUpBlock)。',
+    '不要只输出一段文字加一张表格。'
   ].join('\n');
 
   static readonly REPAIR_INSTRUCTION: string = [
     '把上一条回答的内容转成一份 guncat-ui lang 界面程序(不要围栏、不要解释文字)。',
-    '要求: root 第一行; 用 3~5 个元素把结论与数据表达清楚(标题 + 关键指标 + 图表或表格); ',
+    '要求: root 第一行; 按"抬头 → 结论指标 → 可视化 → 明细 → 操作入口"分层组织, 6~12 个元素; ',
+    '结论里的关键数字用 OverviewCardBlock + MetricIndicatorInline(带同比涨跌)而不是写进句子; ',
+    '有趋势就给 LineChart/AreaChart, 有构成就给 PieChart/SingleStackedBarChart, 有排名就给 HorizontalBarChart, ',
+    '有达成率就给 RadialChart; 表格只用于逐行精确核对, 不要一上来就是一张表; ',
     '需要用户调节参数就给 Form + 控件, 需要用户选择就给 OptionCards 或 Buttons; ',
-    '结尾给 1~3 个可点的下一步入口。'
+    '结尾给 1~3 个可点的下一步入口。',
+    '不要只输出一段文字加一张表格。'
   ].join('\n');
 }

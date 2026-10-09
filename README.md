@@ -261,7 +261,7 @@ entry/src/main/ets/
     ├── Constants.ts / Types.ts / Utils.ts / MarkdownSanitizer.ts
     ├── GuncatUiLang.ts              # 交互模式语言核心：guncat-ui lang 词法/语法/求值/围栏切分
     ├── GuncatUiLibrary.ts           # 交互模式组件库单一事实源（签名/描述/位置参数表 → 提示词）
-    ├── GuncatUiPrompt.ts            # 交互模式系统提示词（语法/交互/流式顺序/示例/反例/模式职责）
+    ├── GuncatUiPrompt.ts            # 交互模式系统提示词（语法/组件选择优先级与丰富度/交互/流式顺序/示例/反例/模式职责）
     ├── GuncatUiRuntime.ts           # 交互模式运行时：$绑定状态 / Action 执行 / 状态尾标记与回传文案
     ├── GuncatUiPaint.ts             # 交互模式图表几何与数值格式化（纯逻辑，可单测）
     └── GuncatUiParts.ts             # 消息体切分：Markdown 文本片段 + guncat-ui 界面程序片段
@@ -837,7 +837,16 @@ ChatViewModel.executeWorkLoop(conv)
       mode === 'work'        → buildWorkSystemPrompt()
 ```
 
-`buildInteractiveSystemPrompt()` = `GuncatUiPrompt.promptSection()`（guncat-ui lang 语法 + 组件清单 + 交互闭环 + 输出顺序纪律 + 示例 + 反例）+ 共享 Agent Loop 提示词（工具目录/技能目录/工作流，与工作模式逐字节同源）+ `GuncatUiPrompt.INTERACTIVE_DUTY`（交互模式职责，追加在末尾以覆盖共享提示词里的「交付格式」章节）。三段拼接后**整体静态**、进程内缓存一次，KV 缓存前缀与工作模式同样逐字节稳定。
+`buildInteractiveSystemPrompt()` = `GuncatUiPrompt.promptSection()`（guncat-ui lang 语法 + 组件清单 + **丰富度/组件选择优先级** + 交互闭环 + 输出顺序纪律 + 示例 + 反例）+ 共享 Agent Loop 提示词（工具目录/技能目录/工作流，与工作模式逐字节同源）+ `GuncatUiPrompt.INTERACTIVE_DUTY`（交互模式职责，追加在末尾以覆盖共享提示词里的「交付格式」章节）。三段拼接后**整体静态**、进程内缓存一次，KV 缓存前缀与工作模式同样逐字节稳定。
+
+**「丰富度」一节（`GuncatUiPrompt.RICHNESS`，约 3.3k 字符）是引导模型产出复杂界面的主要抓手**：只写"一段文字 + 一张表格"在语法上完全合法、但在体验上等于退回普通聊天，而这是模型最容易偷懒的地方，所以单独成段并给了强对照。它包含四块：
+
+1. **组件选择优先级表**：每行「要表达的内容 → 优先用 → 不要退化成」。例如关键数字与同比用 `OverviewCardBlock` + `MetricIndicatorInline` 而不是写进句子；构成用 `PieChart`/`SingleStackedBarChart`、趋势用 `LineChart`/`AreaChart`、排名用 `HorizontalBarChart`、达成率用 `RadialChart`、多维对比用 `BarChart`/`RadarChart`，表格只用于"需要逐行精确核对"的场合且必须有看得懂的上层。
+2. **分层配方**：抬头（`CardHeader`）→ 结论（指标卡/`Callout`）→ 可视化（图表/图片墙/`Steps`/`TagBlock`）→ 明细（`Table`/`EntityList`/`ListBlock`）→ 操作（`Form`/`OptionCards`/`Buttons`/`FollowUpBlock`），**典型 8~14 个组件是常态**。
+3. **防堆砌**：同一份数据不要原样说三遍——指标卡给总量与同比、图表给趋势与分布、表格给逐行明细，三者必须互补（这一条是为了避免"为了丰富而重复"走向另一个极端）。
+4. **同一份数据的「不合格 vs 合格」对照**：❌ 只有 `TextContent` + `Table`；✅ 抬头/指标卡/折线/环形/明细表/表单分层组织。
+
+配套改动：`STREAMING` 里原来的"不要 6 个元素写成 20 个元素"改成"组件数量不是越少越好，8~14 个分层清晰是目标"；`ANTI_PATTERNS` 增加三条（偷懒的文字+表格组合、把结构化指标塞进正文、为丰富而重复数据）；`INTERACTIVE_DUTY` 增加"默认往丰富那一侧靠"；`REPAIR_SYSTEM`/`REPAIR_INSTRUCTION`（主回答没产出程序时的补救）也从"3~5 个元素"改为要求分层与图表。**共 17 条提示词断言**在 `test/guncat-harness/test-core.mjs` 里守住这些内容，避免以后改提示词时被无声删掉。
 
 上下文压缩（`compactWorkHistoryIfNeeded`）在重建历史时会用**同一个 `loopMode`** 重新取系统提示词，因此压缩后不会串模式。
 
@@ -980,10 +989,10 @@ B. 回传助手（发一条消息, 触发新一轮回答）
 | --- | --- |
 | 新增组件 | `common/GuncatUiLibrary.ts` 的 `definitions()` 加一条（名字/分组/描述/位置参数表）→ `views/GuncatUiView.ets` 的 `renderNode()` 加一个分发分支 + 对应 `@Builder`。**提示词会自动跟着变**（组件清单由这张表生成） |
 | 调整语言语法 | `common/GuncatUiLang.ts`（`UiLexer` 词法 / `UiParser` 语法 / `GuncatUiMaterializer` 求值）+ `GuncatUiPrompt.SYNTAX`（给模型的语法说明），两者必须同步 |
-| 调整界面文案 / 引导语 | `GuncatUiPrompt` 的 `SYNTAX` / `INTERACTION` / `STREAMING` / `EXAMPLES` / `ANTI_PATTERNS` / `INTERACTIVE_DUTY` |
+| 调整界面文案 / 引导语 | `GuncatUiPrompt` 的 `SYNTAX` / `RICHNESS`（丰富度与组件选择优先级）/ `INTERACTION` / `STREAMING` / `EXAMPLES` / `ANTI_PATTERNS` / `INTERACTIVE_DUTY` |NTERACTIVE_DUTY` |
 | 新增图表 | `common/GuncatUiPaint.ts`（纯几何，可单测）+ `views/GuncatUiCharts.ets`（声明式 Shape/Path 或 Row/Column）→ 在 `GuncatUiLibrary` 登记并在 `GuncatUiView.buildChart()` 分发 |
 | 新增控件 | `GuncatUiLibrary` 登记 + `views/GuncatUiView.ets` 的 `isControl()` / `buildControl()`；绑定参数用 `bind()` 登记（解析器会记录变量名，渲染器据此读写状态） |
-| 新增图标 | `views/GuncatUiIcons.ets` 的 `glyph()` 映射表（**用 Unicode 字形而不是 SymbolGlyph**：SymbolGlyph 的名字在不同 ROM 上可用集合不一致，缺失时渲染成空白且静默失败） |
+| 新增图标 | `views/GuncatUiIcons.ets` 的 `glyph()` 映射表（**用 Unicode 字形而不是 SymbolGlyph**：SymbolGlyph 的名字在不同 ROM 上可用集合不一致，缺失时渲染成空白且静默失败）。唯一的例外是折叠箭头 `GuncatUiChevron`：`⌃`/`⌄` 这类字符在不同字体下大小与基线差异极大，真机上是"右下角一个小小的尖、又没对齐"，所以那里特意改用 `sys.symbol.chevron_up/down` |
 | 交互模式专属文案 | `ChatViewModel` 的 `loopModeTitle` / `loopModeHint` / `loopInputPlaceholder` / `loopEmptyDescription` / `loopToolLabel` |
 | 模式常量 | `Constants.INTERACTIVE_AGENT_ID` / `MODE_*` / `UI_BLOCK_LANG` / `UI_CONTINUE_MESSAGE` / `UI_CONTINUE_MAX_ROUNDS` |
 
@@ -1150,6 +1159,8 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 - **图表修正（同日第三次）**：按真机截图修掉三处图表渲染问题，**共同根因是 ArkUI 的 `Path.commands` 以物理像素 px 为单位，而组件宽高与 `strokeWidth` 以 vp 为单位**（同一组件里两套单位）。① **折线图太小、盒子又高又空**：按 vp 写坐标只画出 1/3 大小 → 改为 `onAreaChange` 量宽度 + `UiChartGeom.unit`（= `vp2px(1)`）在序列化时统一换算成 px，高度显式给 160vp 不再用 `aspectRatio`；② **饼图显示不全**（被裁成半圆）：`viewPort` 缩放内容但 `strokeWidth` 不缩放，`strokeWidth(100)` 画出的是 100vp 宽的巨型圆环 → 改为**实心扇形** `wedgeAt`；③ **径向图比例不对**（又小又粗的色块、数字被挤出圈外）：半径 28（vp 写法）= 28px 而环宽 8vp ≈ 26px，描边比半径还粗 → 改为绝对坐标 + 单位换算，环半径 28vp / 环宽 8vp，百分比放圈心。同时把"`commands` 是 px、其它是 vp"和"不用 `viewPort`"写成硬约定（见架构章节）。纯逻辑单测 443 → 448 项。
 
 - **思考强度分档（同日第四次）**：交互模式的「能力预设」由 极高(Max)/均衡(High)/快速(Low) 改为 **均衡(High)/快速(Low)/关闭(Off)** —— 去掉 `max`（交互模式的交付物是界面，不需要长思考）、新增关闭（响应更快）。两个模式的档位**各自持久化、互不影响**（`guncat_interactive_effort` 新增），工作模式仍是 极高/均衡/快速。「关闭」不改全局 `thinkingEnabled`，而由 `loopEffort` / `loopEffortForRequest` / `loopThinkingEnabled` 三个模式感知取值器在下发请求时生效，服务层无需改动；交互模式下的子代理与上下文压缩一并沿用该档位。
+
+- **提示词「丰富度」微调（同日第五次）**：新增 `GuncatUiPrompt.RICHNESS` 专节（约 3.3k 字符），把模型从"一段文字 + 一张表格的排列组合"推向更复杂的组件组合：**组件选择优先级表**（要表达的内容 → 优先用 → 不要退化成，覆盖图表/卡片块/结构类/操作类几十种替代方案）、**分层配方**（抬头 → 结论指标 → 可视化 → 明细 → 操作，典型 8~14 个组件）、**防堆砌**（同一份数据不许原样说三遍，指标卡/图表/表格必须互补）、**同一份数据的「不合格 vs 合格」对照示例**。同步调整：`STREAMING` 取消"元素越少越好"、`ANTI_PATTERNS` 新增三条（偷懒的文字+表格组合 / 把结构化指标塞进正文 / 为丰富而重复数据）、`INTERACTIVE_DUTY` 新增"默认往丰富那一侧靠"、`REPAIR_*` 从"3~5 个元素"改为要求分层与图表。新增 17 条提示词断言，单测 448 → 465 项。
 
 ## 6.3.0 更新（交互模式 · Intelligent UI）
 
