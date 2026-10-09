@@ -13,6 +13,36 @@ export struct GuncatUiChevron {
     SymbolGlyph(this.up ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
       .fontSize(this.iconSize)
       .fontColor([this.color])
+      // 真机事故: Row 里"固定尺寸图标 + layoutWeight 文本"时, 图标的布局宽度偶尔会被压到 0,
+      // 于是文本左移、和图标叠在一起(截图上就是"图标压在标题第一个字上")。
+      // flexShrink(0) + 最小尺寸约束保证图标永远占住自己的位置。
+      .flexShrink(0)
+      .constraintSize({ minWidth: this.iconSize, minHeight: this.iconSize })
+  }
+}
+
+// 圆形图标底托(图标 + 浅色圆底)。
+//
+// 单独抽成一个组件是为了把"固定尺寸"这件事锁死: `Stack` 单子节点天然居中, 再加
+// flexShrink(0) 与 minWidth/minHeight 双重约束, 避免上面的挤压问题。
+@Component
+export struct GuncatUiIconBadge {
+  @Prop name: string = 'dot';
+  // 不能叫 size: CustomComponent 已内置 size(value: SizeOptions)
+  @Prop badgeSize: number = 30;
+  @Prop color: string = '#4176E6';
+  @Prop bg: string = '#E4EDFD';
+
+  build() {
+    Stack() {
+      GuncatUiIcon({ name: this.name, iconSize: this.badgeSize * 0.5, color: this.color })
+    }
+    .width(this.badgeSize)
+    .height(this.badgeSize)
+    .constraintSize({ minWidth: this.badgeSize, minHeight: this.badgeSize })
+    .flexShrink(0)
+    .borderRadius(this.badgeSize / 2)
+    .backgroundColor(this.bg)
   }
 }
 
@@ -35,6 +65,9 @@ export struct GuncatUiIcon {
       .fontWeight(FontWeight.Medium)
       .textAlign(TextAlign.Center)
       .includeFontPadding(false)
+      // 同 GuncatUiChevron: 图标在 Row 里绝不能被挤压(挤压会让它和相邻文本重叠)
+      .flexShrink(0)
+      .constraintSize({ minWidth: this.iconSize, minHeight: this.iconSize })
   }
 
   static glyph(name: string): string {

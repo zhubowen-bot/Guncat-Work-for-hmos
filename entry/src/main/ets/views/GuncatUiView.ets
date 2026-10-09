@@ -36,7 +36,7 @@ import {
   GuncatUiRadarChart,
   GuncatUiHorizontalBars
 } from './GuncatUiCharts';
-import { GuncatUiChevron, GuncatUiIcon } from './GuncatUiIcons';
+import { GuncatUiChevron, GuncatUiIcon, GuncatUiIconBadge } from './GuncatUiIcons';
 import { RichTextView } from './RichTextView';
 
 @Component
@@ -805,7 +805,7 @@ export struct GuncatUiView {
 
   @Builder
   buildCallout(el: UiElement) {
-    Row({ space: 9 }) {
+    Row() {
       GuncatUiIcon({
         name: this.toneIcon(UiNode.str(el, 'variant', 'info')),
         iconSize: 15,
@@ -828,6 +828,7 @@ export struct GuncatUiView {
         }
       }
       .layoutWeight(1)
+      .margin({ left: 9 })
       .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
@@ -1090,6 +1091,7 @@ export struct GuncatUiView {
         .fontSize(emphasize ? 12 : 13)
         .fontWeight(FontWeight.Medium)
         .fontColor($r('app.color.text_primary'))
+        .flexShrink(0)
     }
     .width('100%')
     .padding({ left: 12, right: 12, top: 9, bottom: 9 })
@@ -1573,8 +1575,16 @@ export struct GuncatUiView {
 
   @Builder
   buildIconText(el: UiElement) {
-    Row({ space: 9 }) {
-      this.iconBadge(UiNode.element(el, 'icon'))
+    // 布局说明: 不再用 Row({space}) 让"间距"隐式产生, 而是给文本列显式 margin-left。
+    // 真机事故: Row 里"固定尺寸图标 + layoutWeight 文本"时, 图标的布局宽度偶尔被测成 0,
+    // 文本于是左移到图标下面(截图表现为"图标压在标题第一个字上")。显式 margin + 图标自身
+    // 的 flexShrink(0)/minWidth 双重约束后, 无论测量怎么抖动两者都不会重叠。
+    Row() {
+      GuncatUiIconBadge({
+        name: UiNode.element(el, 'icon') === null ? 'dot'
+          : UiNode.str(UiNode.element(el, 'icon') as UiElement, 'name', 'dot'),
+        badgeSize: 30
+      })
       Column({ space: 2 }) {
         Text(UiNode.str(el, 'title', ''))
           .fontSize(13)
@@ -1593,6 +1603,7 @@ export struct GuncatUiView {
         }
       }
       .layoutWeight(1)
+      .margin({ left: 10 })
       .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
@@ -1600,24 +1611,9 @@ export struct GuncatUiView {
   }
 
   @Builder
-  iconBadge(icon: UiElement | null) {
-    Column() {
-      GuncatUiIcon({
-        name: icon === null ? 'dot' : UiNode.str(icon, 'name', 'dot'),
-        iconSize: 15,
-        color: '#4176E6'
-      })
-    }
-    .width(30)
-    .height(30)
-    .borderRadius(15)
-    .backgroundColor($r('app.color.brand_light'))
-    .justifyContent(FlexAlign.Center)
-  }
-
-  @Builder
   buildImageText(el: UiElement) {
-    Row({ space: 9 }) {
+    // 与 IconText 同理: 固定尺寸缩略图 + 显式 margin, 避免"缩略图被压到 0 宽后与标题重叠"
+    Row() {
       if (this.isRemoteImage(UiNode.str(el, 'src', ''))) {
         Image(UiNode.str(el, 'src', ''))
           .width(40)
@@ -1625,15 +1621,18 @@ export struct GuncatUiView {
           .borderRadius(10)
           .objectFit(ImageFit.Cover)
           .interpolation(ImageInterpolation.High)
+          .constraintSize({ minWidth: 40, minHeight: 40 })
+          .flexShrink(0)
       } else {
-        Column() {
+        Stack() {
           GuncatUiIcon({ name: 'image', iconSize: 15, color: '#8F8F8F' })
         }
         .width(40)
         .height(40)
+        .constraintSize({ minWidth: 40, minHeight: 40 })
+        .flexShrink(0)
         .borderRadius(10)
         .backgroundColor($r('app.color.surface_secondary'))
-        .justifyContent(FlexAlign.Center)
       }
       Column({ space: 2 }) {
         Text(UiNode.str(el, 'title', ''))
@@ -1653,6 +1652,7 @@ export struct GuncatUiView {
         }
       }
       .layoutWeight(1)
+      .margin({ left: 10 })
       .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
@@ -1915,13 +1915,15 @@ export struct GuncatUiView {
     Column({ space: el.type === 'ListBlock' && UiNode.str(el, 'variant', 'number') === 'number' ? 0 : 8 }) {
       ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
         if (UiNode.str(el, 'variant', 'number') === 'image') {
-          Row({ space: 10 }) {
+          Row() {
             if (this.isRemoteImage(UiNode.objStr(UiNode.obj(item, 'image'), 'src', ''))) {
               Image(UiNode.objStr(UiNode.obj(item, 'image'), 'src', ''))
                 .width(44)
                 .height(44)
                 .borderRadius(10)
                 .objectFit(ImageFit.Cover)
+                .constraintSize({ minWidth: 44, minHeight: 44 })
+                .flexShrink(0)
             }
             Column({ space: 2 }) {
               Text(UiNode.str(item, 'title', ''))
@@ -1937,6 +1939,7 @@ export struct GuncatUiView {
               }
             }
             .layoutWeight(1)
+            .margin({ left: 10 })
             .alignItems(HorizontalAlign.Start)
           }
           .width('100%')
@@ -1952,6 +1955,8 @@ export struct GuncatUiView {
             }
             .width(20)
             .height(20)
+            .constraintSize({ minWidth: 20, minHeight: 20 })
+            .flexShrink(0)
             .borderRadius(10)
             .backgroundColor($r('app.color.brand_light'))
             .justifyContent(FlexAlign.Center)
@@ -2238,6 +2243,7 @@ export struct GuncatUiView {
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.brand'))
+          .flexShrink(0)
       }
       .width('100%')
 
@@ -2299,6 +2305,7 @@ export struct GuncatUiView {
             type: ToggleType.Switch,
             isOn: this.isSelected(el, UiNode.str(item, 'name', ''))
           })
+            .flexShrink(0)
             .selectedColor($r('app.color.brand'))
             .enabled(this.interactive())
             .onChange((_isOn: boolean) => {
