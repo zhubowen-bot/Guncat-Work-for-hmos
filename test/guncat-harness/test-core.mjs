@@ -1632,6 +1632,32 @@ console.log('[组件库与提示词]');
     GuncatUiPrompt.REPAIR_INSTRUCTION.indexOf('不要只输出一段文字加一张表格') > 0);
   check('补救系统提示要求层次',
     GuncatUiPrompt.REPAIR_SYSTEM.indexOf('不要只输出一段文字加一张表格') > 0);
+
+  // 追问建议(FollowUpBlock): 用户明确表示不喜欢"卡片末尾的 q1/q2/q3", 提示词必须持续压制它
+  check('语法段不再推荐 FollowUpBlock',
+    GuncatUiPrompt.INTERACTION.indexOf('FollowUpBlock') > 0 &&
+    GuncatUiPrompt.INTERACTION.indexOf('`FollowUpBlock` 那类"追问建议"默认**不要用**') > 0);
+  check('丰富度优先级把下一步入口收敛到 Buttons/OptionCards',
+    GuncatUiPrompt.RICHNESS.indexOf('`Buttons` / `OptionCards`(具体动作)') > 0 &&
+    GuncatUiPrompt.RICHNESS.indexOf('| 下一步入口 | `Buttons` / `FollowUpBlock` |') < 0);
+  check('分层配方不再列 FollowUpBlock',
+    GuncatUiPrompt.RICHNESS.indexOf('`Form` / `OptionCards` / `Buttons`(每轮都要有') > 0 &&
+    GuncatUiPrompt.RICHNESS.indexOf('`Form` / `OptionCards` / `Buttons` / `FollowUpBlock`') < 0);
+  check('反例点名不要堆追问建议',
+    GuncatUiPrompt.ANTI_PATTERNS.indexOf('在卡片末尾堆一组"你可能还想问"的追问建议') > 0 &&
+    GuncatUiPrompt.ANTI_PATTERNS.indexOf('1~2 条就够, 不要凑三条') > 0);
+  check('职责段要求入口具体且不堆追问',
+    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('但入口必须具体') > 0 &&
+    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('很像模板, 用户很反感') > 0);
+  check('示例不再使用 FollowUpBlock',
+    GuncatUiPrompt.EXAMPLES.indexOf('FollowUpBlock') < 0 &&
+    GuncatUiPrompt.EXAMPLES.indexOf('FollowUpItem') < 0);
+  check('补救提示词不再推荐 FollowUpBlock',
+    GuncatUiPrompt.REPAIR_SYSTEM.indexOf('FollowUpBlock') < 0 &&
+    GuncatUiPrompt.REPAIR_SYSTEM.indexOf('追问建议') > 0);
+  check('组件清单把 FollowUpBlock 标为不推荐',
+    GuncatUiLibrary.promptSection().indexOf('**不推荐**') > 0 &&
+    GuncatUiLibrary.promptSection().indexOf('需要下一步入口时优先 Buttons / OptionCards') > 0);
 }
 
 console.log('');

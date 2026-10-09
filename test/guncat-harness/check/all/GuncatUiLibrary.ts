@@ -292,9 +292,11 @@ export class GuncatUiLibrary {
       '列表项: title + subtitle; 可选 image {"src","alt"}、actionLabel + action 做行内按钮。',
       [s('title', true), sOpt('subtitle'), obj('image', false), sOpt('actionLabel'), act('action', false)]));
     out.push(new UiComp('FollowUpBlock', g7,
-      '追问建议(点一下就把该文本发给助手)。items 传 FollowUpItem。',
+      '追问建议(点一下就把该文本发给助手)。items 传 FollowUpItem。' +
+      '**不推荐**: 每个界面末尾都挂三条猜出来的问题很像模板, 默认不要用; ' +
+      '需要下一步入口时优先 Buttons / OptionCards 给具体动作。',
       [els('items', true)]));
-    out.push(new UiComp('FollowUpItem', g7, '追问项: 一句话问题。',
+    out.push(new UiComp('FollowUpItem', g7, '追问项: 一句话问题(配合 FollowUpBlock, 不推荐默认使用)。',
       [s('text', true)]));
 
     // ===== 表单 =====
