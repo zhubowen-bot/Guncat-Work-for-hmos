@@ -326,18 +326,36 @@ export struct GuncatUiView {
   }
 
   // ===== 根 =====
+  //
+  // 宽度约定: 界面内容整体左右各留 EDGE 的内边距, 使**文字**与同一条消息里的正文
+  // (RichTextView 的 16vp 内边距)左右对齐 —— 否则界面的文字行宽会比正文更宽, 看起来"溢出去了"。
+  // 只有"天然需要更宽"的组件(表格 / 图表 / 图片 / 图片墙 / 轮播)用 bleed() 反向抵消这层内边距。
+  private edge(): number {
+    return 16;
+  }
+
+  // 通栏组件在顶层时抵消根的内边距, 拿到整屏宽度; 嵌套在卡片里时不动(否则会溢出容器)。
+  private bleed(topLevel: boolean): Margin {
+    if (topLevel) {
+      return { left: -this.edge(), right: -this.edge() };
+    }
+    return { left: 0, right: 0 };
+  }
+
   build() {
     Column({ space: 0 }) {
       if (this.root === null) {
         this.buildEmpty()
       } else {
         Column({ space: 16 }) {
-          this.buildChildren(this.root)
+          this.buildChildren(this.root, true)
           this.buildSources(this.root)
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
+        .padding({ left: this.edge(), right: this.edge() })
       }
+      // 以下"脚注区"(截断提示 / 诊断 / 原始输出)与正文左对齐, 所以同样加左右内边距
       if (this.truncated) {
         Row({ space: 6 }) {
           GuncatUiIcon({ name: 'warning', iconSize: 12, color: '#F59E0B' })
@@ -347,6 +365,7 @@ export struct GuncatUiView {
             .layoutWeight(1)
         }
         .width('100%')
+        .padding({ left: this.edge(), right: this.edge() })
         .margin({ top: 10 })
       }
 
@@ -357,6 +376,7 @@ export struct GuncatUiView {
             .fontColor($r('app.color.text_quaternary'))
         }
         .width('100%')
+        .padding({ left: this.edge(), right: this.edge() })
         .margin({ top: 8 })
         .onClick(() => {
           this.showErrors = !this.showErrors;
@@ -374,6 +394,7 @@ export struct GuncatUiView {
           .padding(8)
           .backgroundColor($r('app.color.surface_secondary'))
           .borderRadius(8)
+          .margin({ left: this.edge(), right: this.edge() })
         }
       }
 
@@ -384,6 +405,7 @@ export struct GuncatUiView {
             .fontColor($r('app.color.text_quaternary'))
         }
         .width('100%')
+        .padding({ left: this.edge(), right: this.edge() })
         .margin({ top: 8 })
         .onClick(() => {
           this.showRaw = !this.showRaw;
@@ -404,6 +426,7 @@ export struct GuncatUiView {
           .padding(10)
           .backgroundColor($r('app.color.surface_secondary'))
           .borderRadius(8)
+          .margin({ left: this.edge(), right: this.edge() })
         }
       }
     }
@@ -478,31 +501,35 @@ export struct GuncatUiView {
     return out;
   }
 
-  // 渲染元素的子元素(elements 型属性统一走这里)
+  // 渲染元素的子元素。
+  //
+  // topLevel=true 表示这些元素直接挂在 root 的 Card 下 —— 只有这一层的"通栏组件"
+  // (表格/图表/图片墙/轮播)才允许用负外边距抵消根的内边距; 嵌套在卡片里的同款组件必须
+  // 老实待在自己的内边距里, 否则会溢出容器。
   //
   // 关于 key: 这里刻意**不把 rev 拼进 key**。ArkUI 的 ForEach 在父组件重渲染时会重新执行
   // item builder 并更新属性, key 只决定"复用还是重建"; 把版本号拼进 key 会让整棵子树在
   // 每次流式分片/拖动滑块时被销毁重建 —— 表现为界面闪烁、输入框失焦。
   // key 只用元素自身的稳定标识(命名的语句用变量名, 匿名内联元素用位置)。
   @Builder
-  buildElements(list: UiElement[]) {
+  buildElements(list: UiElement[], topLevel: boolean) {
     ForEach(list, (child: UiElement, index: number) => {
-      this.renderNode(child)
+      this.renderNode(child, topLevel)
     }, (child: UiElement, index: number) => child.key)
   }
 
   // 通用 children 容器
   @Builder
-  buildChildren(el: UiElement) {
-    this.buildElements(UiNode.elementList(el, 'children'))
+  buildChildren(el: UiElement, topLevel: boolean) {
+    this.buildElements(UiNode.elementList(el, 'children'), topLevel)
   }
 
   // ===== 元素分发 =====
   @Builder
-  renderNode(el: UiElement) {
+  renderNode(el: UiElement, topLevel: boolean) {
     if (el.type === 'Card') {
       Column({ space: 16 }) {
-        this.buildChildren(el)
+        this.buildChildren(el, false)
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
@@ -519,11 +546,11 @@ export struct GuncatUiView {
     } else if (el.type === 'Separator') {
       this.buildSeparator(el)
     } else if (el.type === 'Image') {
-      this.buildImage(el, false)
+      this.buildImage(el, false, topLevel)
     } else if (el.type === 'ImageBlock') {
-      this.buildImage(el, true)
+      this.buildImage(el, true, topLevel)
     } else if (el.type === 'ImageGallery') {
-      this.buildGallery(el)
+      this.buildGallery(el, topLevel)
     } else if (el.type === 'CodeBlock') {
       this.buildCodeBlock(el)
     } else if (el.type === 'TagBlock' || el.type === 'Tag') {
@@ -537,13 +564,13 @@ export struct GuncatUiView {
     } else if (el.type === 'Accordion') {
       this.buildAccordion(el)
     } else if (el.type === 'Carousel') {
-      this.buildCarousel(el)
+      this.buildCarousel(el, topLevel)
     } else if (el.type === 'Steps') {
       this.buildSteps(el)
     } else if (el.type === 'Table') {
-      this.buildTable(el)
+      this.buildTable(el, topLevel)
     } else if (this.isChart(el.type)) {
-      this.buildChart(el)
+      this.buildChart(el, topLevel)
     } else if (el.type === 'Text' || el.type === 'BoldText') {
       this.buildText(el)
     } else if (el.type === 'IconText') {
@@ -859,7 +886,7 @@ export struct GuncatUiView {
   }
 
   @Builder
-  buildImage(el: UiElement, block: boolean) {
+  buildImage(el: UiElement, block: boolean, topLevel: boolean) {
     Column() {
       if (this.isRemoteImage(this.imageSrc(el))) {
         Image(this.imageSrc(el))
@@ -887,6 +914,7 @@ export struct GuncatUiView {
       }
     }
     .width('100%')
+    .margin(this.bleed(topLevel))
   }
 
   private isRemoteImage(src: string): boolean {
@@ -897,7 +925,7 @@ export struct GuncatUiView {
   }
 
   @Builder
-  buildGallery(el: UiElement) {
+  buildGallery(el: UiElement, topLevel: boolean) {
     Row({ space: 8 }) {
       ForEach(UiNode.objList(el, 'images'), (img: Record<string, Object>, i: number) => {
         Column() {
@@ -933,6 +961,7 @@ export struct GuncatUiView {
     }
     .width('100%')
     .alignItems(VerticalAlign.Top)
+    .margin(this.bleed(topLevel))
   }
 
   @Builder
@@ -1074,7 +1103,7 @@ export struct GuncatUiView {
   }
 
   @Builder
-  buildChart(el: UiElement) {
+  buildChart(el: UiElement, topLevel: boolean) {
     Column({ space: 10 }) {
       // 图表标题用邻近的 InlineHeader 承载, 这里不再重复
       if (el.type === 'BarChart') {
@@ -1129,6 +1158,7 @@ export struct GuncatUiView {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
+    .margin(this.bleed(topLevel))
   }
 
   private seriesNames(el: UiElement): string[] {
@@ -1175,7 +1205,7 @@ export struct GuncatUiView {
 
   // ===== 表格 =====
   @Builder
-  buildTable(el: UiElement) {
+  buildTable(el: UiElement, topLevel: boolean) {
     Column({ space: 0 }) {
       Scroll() {
         Column({ space: 0 }) {
@@ -1223,6 +1253,7 @@ export struct GuncatUiView {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
+    .margin(this.bleed(topLevel))
   }
 
   private tableWidth(el: UiElement): number {
@@ -1318,7 +1349,7 @@ export struct GuncatUiView {
 
           if (!this.foldable(el) || this.isExpanded(el, this.sectionKey(sec, i), true)) {
             Column({ space: 12 }) {
-              this.buildElements(UiNode.elementList(sec, 'content'))
+              this.buildElements(UiNode.elementList(sec, 'content'), false)
             }
             .width('100%')
             .alignItems(HorizontalAlign.Start)
@@ -1372,7 +1403,7 @@ export struct GuncatUiView {
       Column({ space: 12 }) {
         ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
           if (this.selectedIndexOf(el) === i) {
-            this.buildElements(UiNode.elementList(item, 'content'))
+            this.buildElements(UiNode.elementList(item, 'content'), false)
           }
         }, (item: UiElement, i: number) => 'tabc' + i.toString() + '_' + this.selectedIndexOf(el).toString())
       }
@@ -1423,7 +1454,7 @@ export struct GuncatUiView {
 
           if (this.isExpanded(el, UiNode.str(item, 'value', i.toString()), i === 0)) {
             Column({ space: 12 }) {
-              this.buildElements(UiNode.elementList(item, 'content'))
+              this.buildElements(UiNode.elementList(item, 'content'), false)
             }
             .width('100%')
             .alignItems(HorizontalAlign.Start)
@@ -1441,12 +1472,12 @@ export struct GuncatUiView {
   }
 
   @Builder
-  buildCarousel(el: UiElement) {
+  buildCarousel(el: UiElement, topLevel: boolean) {
     Scroll() {
       Row({ space: 10 }) {
         ForEach(UiNode.elementList(el, 'children'), (child: UiElement, i: number) => {
           Column({ space: 10 }) {
-            this.renderNode(child)
+            this.renderNode(child, false)
           }
           .width(264)
           .padding(12)
@@ -1460,6 +1491,7 @@ export struct GuncatUiView {
     .scrollBar(BarState.Off)
     .width('100%')
     .align(Alignment.TopStart)
+    .margin(this.bleed(topLevel))
   }
 
   @Builder
@@ -1746,10 +1778,10 @@ export struct GuncatUiView {
   overviewCard(item: UiElement) {
     Column({ space: 8 }) {
       if (UiNode.element(item, 'top') !== null) {
-        this.renderNode(UiNode.element(item, 'top') as UiElement)
+        this.renderNode(UiNode.element(item, 'top') as UiElement, false)
       }
       if (UiNode.element(item, 'bottom') !== null) {
-        this.renderNode(UiNode.element(item, 'bottom') as UiElement)
+        this.renderNode(UiNode.element(item, 'bottom') as UiElement, false)
       }
     }
     .width('100%')
@@ -1778,12 +1810,12 @@ export struct GuncatUiView {
     Row({ space: 8 }) {
       Column() {
         if (UiNode.element(item, 'lhs') !== null) {
-          this.renderNode(UiNode.element(item, 'lhs') as UiElement)
+          this.renderNode(UiNode.element(item, 'lhs') as UiElement, false)
         }
       }
       .layoutWeight(1)
       if (UiNode.element(item, 'rhs') !== null) {
-        this.renderNode(UiNode.element(item, 'rhs') as UiElement)
+        this.renderNode(UiNode.element(item, 'rhs') as UiElement, false)
       }
     }
     .width('100%')
@@ -1811,10 +1843,10 @@ export struct GuncatUiView {
   compositeCard(item: UiElement) {
     Column({ space: 10 }) {
       if (UiNode.element(item, 'header') !== null) {
-        this.renderNode(UiNode.element(item, 'header') as UiElement)
+        this.renderNode(UiNode.element(item, 'header') as UiElement, false)
       }
       Column({ space: 8 }) {
-        this.buildElements(UiNode.elementList(item, 'body'))
+        this.buildElements(UiNode.elementList(item, 'body'), false)
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
@@ -1860,13 +1892,13 @@ export struct GuncatUiView {
     Column({ space: 8 }) {
       if (UiNode.element(item, 'tag') !== null) {
         Row() {
-          this.renderNode(UiNode.element(item, 'tag') as UiElement)
+          this.renderNode(UiNode.element(item, 'tag') as UiElement, false)
         }
         .width('100%')
         .justifyContent(FlexAlign.End)
       }
       if (UiNode.element(item, 'body') !== null) {
-        this.renderNode(UiNode.element(item, 'body') as UiElement)
+        this.renderNode(UiNode.element(item, 'body') as UiElement, false)
       }
     }
     .width('100%')
@@ -2013,7 +2045,7 @@ export struct GuncatUiView {
   buildForm(el: UiElement) {
     Column({ space: 14 }) {
       Column({ space: 14 }) {
-        this.buildElements(UiNode.elementList(el, 'fields'))
+        this.buildElements(UiNode.elementList(el, 'fields'), false)
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
@@ -2036,7 +2068,7 @@ export struct GuncatUiView {
         .fontColor($r('app.color.text_primary'))
         .width('100%')
       if (UiNode.element(el, 'input') !== null) {
-        this.renderNode(UiNode.element(el, 'input') as UiElement)
+        this.renderNode(UiNode.element(el, 'input') as UiElement, false)
       }
       if (UiNode.has(el, 'hint')) {
         Text(UiNode.str(el, 'hint', ''))
@@ -2449,7 +2481,7 @@ export struct GuncatUiView {
     if (el !== null) {
       if (UiNode.str(el, 'direction', 'row') === 'column') {
         Column({ space: 8 }) {
-          this.buildElements(UiNode.elementList(el, 'buttons'))
+          this.buildElements(UiNode.elementList(el, 'buttons'), false)
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)

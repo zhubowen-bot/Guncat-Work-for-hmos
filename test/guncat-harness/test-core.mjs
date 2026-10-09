@@ -1538,6 +1538,15 @@ console.log('[组件库与提示词]');
   check('提示词含交互闭环', prompt.indexOf('## 交互闭环') > 0);
   check('提示词含反例', prompt.indexOf('## 最常见的错误') > 0);
   check('提示词含位置参数警告', prompt.indexOf('位置参数') > 0);
+  check('提示词要求程序之外不写正文',
+    prompt.indexOf('程序之外不要写任何文字') > 0 &&
+    prompt.indexOf('在程序之外写正文') > 0);
+  check('提示词给出"只要程序"的正反例对照',
+    prompt.indexOf('## 输出形态: 只要程序, 不要正文') > 0 &&
+    prompt.indexOf('❌ 错误') > 0 && prompt.indexOf('✅ 正确') > 0);
+  check('职责段要求不写聊天文字',
+    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('程序之外不写任何文字') > 0 &&
+    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('不要开场白、不要过渡句') > 0);
   check('职责段覆盖文件优先', GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('覆盖上文') > 0);
   check('补救提示词要求 root 第一行',
     GuncatUiPrompt.REPAIR_SYSTEM.indexOf('root = Card') > 0);
