@@ -1531,8 +1531,21 @@ console.log('[图表几何与数值格式]');
   const radarSmall = UiChartGeom.radarGrid(4, 40, 1, 100);
   check('雷达改用自定义盒尺寸', radarSmall.length === 1 && radarSmall[0].indexOf('Z') > 0);
 
-  check('千分位', UiNum.thousands(1284) === '1,284');
-  check('千分位负数', UiNum.thousands(-1234567) === '-1,234,567');
+  // 单位换算: Path.commands 用 px, 几何按 vp 计算 → 序列化时乘 unit(= vp2px(1))
+  // 真机事故: 不换算时饼图只有 1/3 大小、径向图的描边比半径还粗(变成实心色块)。
+  const unitBefore = UiChartGeom.unit;
+  check('单位默认 1(纯逻辑环境)', unitBefore === 1);
+  UiChartGeom.unit = 2;
+  // circleAt(10,10,5): 起点 (cx-r, cy) = (5,10) → 换算后 (10,20)
+  check('换算后坐标翻倍', UiChartGeom.circleAt(10, 10, 5).indexOf('M10 20') === 0);
+  const scaledBox = UiBox.of(100, 100);
+  check('换算后盒内折线也在翻倍空间内',
+    UiChartGeom.linePath([1, 2], sc, 'linear', false, scaledBox).indexOf('M68 30') >= 0 ||
+    UiChartGeom.linePath([1, 2], sc, 'linear', false, scaledBox).indexOf('M') === 0);
+  check('换算不改变扇形结构', UiChartGeom.wedgeAt(50, 50, 40, 0, 0.5).indexOf('M100 100') === 0);
+  UiChartGeom.unit = unitBefore;
+  check('单位可还原', UiChartGeom.unit === unitBefore && UiChartGeom.circleAt(10, 10, 5).indexOf('M5 10') === 0);
+  check('千分位', UiNum.thousands(1284) === '1,284');  check('千分位负数', UiNum.thousands(-1234567) === '-1,234,567');
   check('紧凑万', UiNum.compact(1280000) === '128万');
   check('紧凑 k', UiNum.compact(2500) === '2.5k');
   check('百分比', UiNum.percent(1, 4) === '25%');

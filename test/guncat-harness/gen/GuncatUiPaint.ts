@@ -169,12 +169,12 @@ export class UiScale {
 
 // 绘图盒(绝对坐标, 单位 vp)。
 //
-// 为什么需要它: ArkUI 的 `Shape` + `viewPort` 会把 viewport 坐标系缩放到组件尺寸, 而
-// **`strokeWidth` 不参与这个缩放**(它按 vp 解释)。真机后果:
-//   - 饼图用 strokeWidth(100) 想把扇形填满, 实际画出一条 100vp 宽的巨型圆环 → 被容器裁掉;
-//   - 刻度/网格只落在 viewport 映射出的一小块区域里。
-// 因此除了"宽度自适应"的折线/面积图(先量出真实宽度再按 vp 画), 其余图表一律**不用 viewPort**:
-// 直接在真实 vp 坐标里画, 尺寸与描边宽度语义一致。
+// 为什么需要它: ArkUI 的 `Shape` 里"布局按 vp、绘制按 px", 而 `Path.commands` 又是 px ——
+// 三者混在一起时, 唯一能保证比例正确的做法是**在真实尺寸的坐标系里画**, 再由
+// `UiChartGeom.unit` 统一换算成 px 输出。历史教训:
+//   - 用 `viewPort` 缩放内容能让图形大小对, 但 `strokeWidth` 不跟着缩放 → 饼图画出巨型圆环被裁;
+//   - 不用 `viewPort` 而按 vp 写坐标 → 图形只有 1/3 大小缩在左上角。
+// 详见 `UiChartGeom.n()` 的注释。
 export class UiBox {
   w: number = UiChartGeom.LINE_W;
   h: number = UiChartGeom.LINE_H;
@@ -447,10 +447,22 @@ export class UiChartGeom {
   }
 
   // 数字 → 路径文本(最多 1 位小数, 保证路径字符串短)
+  //
+  // ⚠️ 单位陷阱(必须理解, 否则图表比例全错):
+  //   ArkUI 的 `Path.commands` **以物理像素 px 为单位**, 而组件的宽高、strokeWidth 等属性
+  //   以 vp 为单位。也就是说同一个 Shape 里"布局按 vp、绘制按 px", 两者相差一个屏幕密度
+  //   (通常 3~3.5 倍)。真机后果(全部踩过):
+  //     - 折线图/饼图按 vp 写坐标 → 只画了 1/3 大小, 缩在左上角, 盒子剩下大片空白;
+  //     - 径向图半径 28(vp 写法)= 28px, 而环宽 8vp = 26px → 描边比半径还粗, 变成一个实心色块;
+  //     - 用 viewPort 缩放虽然能把图形放大回去, 但 strokeWidth 不跟着缩放 → 巨型圆环被裁。
+  //   所以: 这里所有坐标统一按 vp 计算(几何代码可读、可单测), 只在**序列化成路径字符串**时
+  //   乘上 `unit`(px/vp, 由 vp2px(1) 给出)。strokeWidth 等属性保持 vp 原值, 不要乘。
+  static unit: number = 1;
+
   static n(v: number): string {
     if (!isFinite(v) || isNaN(v)) {
       return '0';
     }
-    return String(Math.round(v * 10) / 10);
+    return String(Math.round(v * UiChartGeom.unit * 10) / 10);
   }
 }

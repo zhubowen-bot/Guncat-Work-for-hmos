@@ -15,6 +15,46 @@ import {
   UiScale
 } from '../common/GuncatUiPaint';
 
+// 图表单位初始化。
+//
+// `Path.commands` 用物理像素 px, 而组件宽高/strokeWidth 用 vp, 两者相差一个屏幕密度。
+// 几何代码统一按 vp 计算, 只在序列化路径时乘 `UiChartGeom.unit`(= vp2px(1))。
+// 每个图表在 aboutToAppear 里调一次 ensure(), 这样图表组件可以被单独复用而不依赖调用方。
+export class GuncatUiChartUnit {
+  private static applied: boolean = false;
+
+  static ensure(): void {
+    if (GuncatUiChartUnit.applied) {
+      return;
+    }
+    GuncatUiChartUnit.applied = true;
+    UiChartGeom.unit = vp2px(1);
+  }
+
+  // 由 Area 报告值反推 px/vp 比例: height 是已知的 vp 布局高度, 比值即单位比例。
+  // 这样无论 Area 报的是 vp 还是 px 都能算对(实测为 vp, 这里保留自校准以免依赖未文档化的行为)。
+  static ratioFromArea(areaHeight: Object, layoutHeightVp: number): number {
+    let h: number = GuncatUiChartUnit.len(areaHeight, 0);
+    if (h <= 0 || layoutHeightVp <= 0) {
+      return 1;
+    }
+    let k: number = h / layoutHeightVp;
+    return k > 0.5 ? k : 1;
+  }
+
+  // Area.width/height 的类型是 Length(string|number|Resource), 统一转成数值
+  static len(value: Object, fallback: number): number {
+    if (typeof value === 'number') {
+      return value as number;
+    }
+    if (typeof value === 'string') {
+      let n: number = parseFloat(value as string);
+      return isNaN(n) ? fallback : n;
+    }
+    return fallback;
+  }
+}
+
 // ===== 图例 =====
 @Component
 export struct GuncatUiLegend {
@@ -244,6 +284,10 @@ export struct GuncatUiLineChart {
   // 实测宽度(vp): 首帧用默认值, onAreaChange 后修正
   @State private boxW: number = 300;
 
+  aboutToAppear(): void {
+    GuncatUiChartUnit.ensure();
+  }
+
   build() {
     Column({ space: 6 }) {
       Shape() {
@@ -289,9 +333,11 @@ export struct GuncatUiLineChart {
       .width('100%')
       .height(this.chartHeight)
       .onAreaChange((_old: Area, next: Area) => {
+        // 用"实测高度 / 已知 vp 高度"反推单位比例, 再换算宽度 —— 不依赖 Area 报的是 vp 还是 px
+        let k: number = GuncatUiChartUnit.ratioFromArea(next.height, this.chartHeight);
+        let w: number = GuncatUiChartUnit.len(next.width, this.boxW) / k;
         // 只在宽度真的变化时重算, 避免 onAreaChange → 重绘 → onAreaChange 抖动
-        let w: number = GuncatUiLineChart.len(next.width, this.boxW);
-        if (Math.abs(w - this.boxW) > 1) {
+        if (w > 40 && Math.abs(w - this.boxW) > 1) {
           this.boxW = w;
         }
       })
@@ -314,18 +360,6 @@ export struct GuncatUiLineChart {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-  }
-
-  // Area.width 是 Length(string|number|Resource), 统一转成 vp 数值
-  private static len(value: Object, fallback: number): number {
-    if (typeof value === 'number') {
-      return value as number;
-    }
-    if (typeof value === 'string') {
-      let n: number = parseFloat(value as string);
-      return isNaN(n) ? fallback : n;
-    }
-    return fallback;
   }
 
   private box(): UiBox {
@@ -394,6 +428,10 @@ export struct GuncatUiPieChart {
   static readonly OUTER: number = 58;
   static readonly INNER: number = 34;
   static readonly RING: number = 24;
+
+  aboutToAppear(): void {
+    GuncatUiChartUnit.ensure();
+  }
 
   @Prop labels: string[] = [];
   @Prop values: number[] = [];
@@ -542,6 +580,10 @@ export struct GuncatUiRadialChart {
   static readonly BOX: number = 72;
   static readonly RING_R: number = 28;
   static readonly RING_W: number = 8;
+
+  aboutToAppear(): void {
+    GuncatUiChartUnit.ensure();
+  }
 
   @Prop labels: string[] = [];
   @Prop values: number[] = [];
@@ -694,6 +736,10 @@ export struct GuncatUiRadarChart {
   static readonly BOX: number = 220;
   static readonly R: number = 84;
   static readonly RINGS: number = 4;
+
+  aboutToAppear(): void {
+    GuncatUiChartUnit.ensure();
+  }
 
   @Prop labels: string[] = [];
   @Prop seriesNames: string[] = [];
