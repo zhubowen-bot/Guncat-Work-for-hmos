@@ -79,8 +79,12 @@ export class ChatViewModel {
   currentConversationId: string = '';
   isStreaming: boolean = false;
   thinkingEnabled: boolean = false;
-  // 推理强度('max' / 'high' / 'low'), 深度思考开启时作为 reasoning 强度参数下发
+  // 工作模式的推理强度('max' / 'high' / 'low'), Agent Loop 每轮请求都带上。
+  // 注意: 工作模式与交互模式都强制开启深度思考(工具行不显示开关), 档位在模型弹层里选。
   reasoningEffort: string = 'high';
+  // 交互模式的推理强度('high' / 'low' / 'off'), 与工作模式分开保存:
+  // 交互模式的交付物是界面、追求响应快, 所以不给 极高(max)、多了 关闭(off)。
+  interactiveEffort: string = 'high';
   webSearchEnabled: boolean = true;
   autoReadEnabled: boolean = false;
   pendingFiles: FileItem[] = [];
@@ -262,6 +266,10 @@ export class ChatViewModel {
     let savedEffort: string = await StorageManager.loadString(
       this.context, Constants.LS_KEY_REASONING_EFFORT, 'high');
     this.reasoningEffort = (savedEffort === 'max' || savedEffort === 'low') ? savedEffort : 'high';
+    let savedInteractiveEffort: string = await StorageManager.loadString(
+      this.context, Constants.LS_KEY_INTERACTIVE_EFFORT, 'high');
+    this.interactiveEffort = (savedInteractiveEffort === 'off' || savedInteractiveEffort === 'low') ?
+      savedInteractiveEffort : 'high';
     this.webSearchEnabled = await StorageManager.loadBoolean(this.context, Constants.LS_KEY_WEB_SEARCH_ENABLED, true);
     this.autoReadEnabled = await StorageManager.loadBoolean(
       this.context, Constants.LS_KEY_AUTO_READ_ENABLED, false);
@@ -416,7 +424,10 @@ export class ChatViewModel {
     if (conv.messages.length === 0) {
       await this.applyAgentThinkingDefault();
     }
-    // Agent Loop 会话(工作/交互模式): 深度思考保持开启并刷新工作区文件列表
+    // Agent Loop 会话(工作/交互模式): 深度思考保持开启并刷新工作区文件列表。
+    // 说明: 这里强制的是**全局** thinkingEnabled(Agent Loop 不显示深度思考开关);
+    // 交互模式选「关闭」时不改这个全局值, 而是下发请求时由 loopThinkingEnabled 覆盖为 false,
+    // 所以"关闭"只影响交互模式本身, 不会把工作模式或聊天模式的深度思考一起关掉。
     if (conv.mode === Constants.MODE_WORK || conv.mode === Constants.MODE_INTERACTIVE) {
       if (!this.thinkingEnabled) {
         await this.setThinkingEnabled(true);
@@ -450,7 +461,8 @@ export class ChatViewModel {
     this.persistConversations();
     if (mode === Constants.MODE_WORK || mode === Constants.MODE_INTERACTIVE) {
       this.workspaceJustAdded = [];
-      // Agent Loop 模式默认强制开启深度思考(工具行不再显示该开关)
+      // Agent Loop 模式默认强制开启深度思考(工具行不再显示该开关);
+      // 交互模式的档位(含「关闭」)另存在 interactiveEffort, 由 loopThinkingEnabled 在下发时生效
       await this.setThinkingEnabled(true);
       await this.refreshWorkspace();
     } else {
@@ -533,8 +545,20 @@ export class ChatViewModel {
     }
   }
 
-  // 推理强度选择('max' / 'high' / 'low', 含持久化): 深度思考开启时生效
+  // 推理强度选择: 两个模式各有各的档位集合, 校验后写入对应字段并各自持久化。
+  //   工作模式: 'max' / 'high' / 'low'
+  //   交互模式: 'high' / 'low' / 'off'(关闭)
   async setReasoningEffort(effort: string): Promise<void> {
+    if (this.interactiveMode) {
+      if (effort !== 'high' && effort !== 'low' && effort !== 'off') {
+        return;
+      }
+      this.interactiveEffort = effort;
+      if (this.context !== null) {
+        await StorageManager.saveString(this.context, Constants.LS_KEY_INTERACTIVE_EFFORT, effort);
+      }
+      return;
+    }
     if (effort !== 'max' && effort !== 'high' && effort !== 'low') {
       return;
     }
@@ -542,6 +566,29 @@ export class ChatViewModel {
     if (this.context !== null) {
       await StorageManager.saveString(this.context, Constants.LS_KEY_REASONING_EFFORT, effort);
     }
+  }
+
+  // ===== Agent Loop 的思考参数(按模式取值) =====
+  // 弹层里当前该高亮哪一档
+  get loopEffort(): string {
+    return this.interactiveMode ? this.interactiveEffort : this.reasoningEffort;
+  }
+
+  // 下发请求的强度值: 交互模式选「关闭」时思考已经关掉了, 强度退回 'low'
+  // (部分服务端即使 thinking=disabled 也会校验 reasoning_effort 的取值合法性)
+  get loopEffortForRequest(): string {
+    if (this.interactiveMode) {
+      return this.interactiveEffort === 'off' ? 'low' : this.interactiveEffort;
+    }
+    return this.reasoningEffort;
+  }
+
+  // 下发请求的思考开关: 两个模式都强制开启, 只有交互模式选「关闭」时才是 false
+  get loopThinkingEnabled(): boolean {
+    if (this.interactiveMode) {
+      return this.interactiveEffort !== 'off';
+    }
+    return this.thinkingEnabled;
   }
 
   // 智能体深度思考默认值：按名称匹配（效率模式默认关、轻简模式默认关、专家模式默认开）。
@@ -1652,7 +1699,7 @@ export class ChatViewModel {
     this.workSteerQueue = [];
     this.pendingAsk = null;
     if (this.context !== null) {
-      SubagentService.bind(this.apiConfig, this.thinkingEnabled, this.reasoningEffort,
+      SubagentService.bind(this.apiConfig, this.loopThinkingEnabled, this.loopEffortForRequest,
         (ctx: common.UIAbilityContext, cid: string, name: string, argsJson: string,
           abortSignal?: AbortSignal | null): Promise<ToolExecResult> => {
           let signal: AbortSignal | null =
@@ -2126,7 +2173,7 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
     this.workSteerQueue = [];
     this.pendingAsk = null;
     if (this.context !== null) {
-      SubagentService.bind(this.apiConfig, this.thinkingEnabled, this.reasoningEffort,
+      SubagentService.bind(this.apiConfig, this.loopThinkingEnabled, this.loopEffortForRequest,
         (ctx: common.UIAbilityContext, cid: string, name: string, argsJson: string,
           abortSignal?: AbortSignal | null): Promise<ToolExecResult> => {
           let signal: AbortSignal | null =
@@ -2695,8 +2742,8 @@ if (this.abortSignal.aborted) {
     onForcedRetry: () => void): Promise<LoopTurnResult> {
     try {
       return await AgentLoopService.runTurnWithRetry(
-        this.apiConfig, messages, this.thinkingEnabled, this.reasoningEffort, this.webSearchEnabled,
-        callbacks, this.abortSignal);
+        this.apiConfig, messages, this.loopThinkingEnabled, this.loopEffortForRequest,
+        this.webSearchEnabled, callbacks, this.abortSignal);
     } catch (e) {
       let err: Error = e as Error;
       if (LoopDecisions.shouldForceCompactOnOverflow(this.abortSignal.aborted,
@@ -2709,7 +2756,7 @@ if (this.abortSignal.aborted) {
           // 压缩改写了历史, 末尾快照可能已随旧历史被移除, 重试前重新补快照
           await this.appendRuntimeSnapshotIfNeeded(messages, ctx, convId);
           return await AgentLoopService.runTurnWithRetry(
-            this.apiConfig, messages, this.thinkingEnabled, this.reasoningEffort, this.webSearchEnabled,
+            this.apiConfig, messages, this.loopThinkingEnabled, this.loopEffortForRequest, this.webSearchEnabled,
             callbacks, this.abortSignal);
         }
       }
@@ -2784,7 +2831,7 @@ if (this.abortSignal.aborted) {
       let summary: string = '';
       try {
         summary = await AgentLoopService.summarizeHistory(
-          this.apiConfig, messages, this.thinkingEnabled, this.reasoningEffort, this.webSearchEnabled,
+          this.apiConfig, messages, this.loopThinkingEnabled, this.loopEffortForRequest, this.webSearchEnabled,
           this.abortSignal);
       } catch (e) {
         // 压缩失败(网络/中断) → 回退为整条裁剪

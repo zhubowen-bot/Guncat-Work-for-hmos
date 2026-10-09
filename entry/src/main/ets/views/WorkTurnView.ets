@@ -25,6 +25,9 @@ export struct WorkTurnView {
   @ObjectLink message: Message;
   @Prop @Watch('onStreamChanged') isStreaming: boolean = false;
   @Prop isLastAssistant: boolean = false;
+  // 本轮是否会产出思考内容: 交互模式选「关闭」思考时为 false,
+  // 用于避免流式期间挂一条永远不填内容的"思考中"条
+  @Prop thinkingExpected: boolean = true;
   private onCopyPlain: (id: string) => void = (_id: string): void => {};
   private onCopyMarkdown: (id: string) => void = (_id: string): void => {};
   private onExportWord: (id: string) => void = (_id: string): void => {};
@@ -312,8 +315,11 @@ export struct WorkTurnView {
 
   build() {
     Column({ space: 8 }) {
-      // 思考(折叠条, 默认收起)
-      if (this.isStreaming || this.message.reasoning !== '') {
+      // 思考(折叠条, 默认收起)。
+      // thinkingExpected: 本轮是否会产出思考内容(交互模式选「关闭」时为 false)。
+      // 之前只看 isStreaming, 关掉思考后仍会挂一条永远不填内容的"思考中"条, 看起来像卡住。
+      if (this.message.reasoning !== '' ||
+        (this.isStreaming && this.thinkingExpected)) {
         this.buildThinking()
       }
       // 正文: 本轮叙述/结论, 按发生时序渲染在工具行之前

@@ -1319,6 +1319,8 @@ struct ChatPage {
               msg === this.vm.currentMessages[this.vm.currentMessages.length - 1],
             isLastAssistant: msg === this.vm.currentMessages[this.vm.currentMessages.length - 1] &&
               msg.role === 'assistant',
+            // 交互模式选「关闭」思考时不再挂空的"思考中"条(历史消息有思考内容仍会显示)
+            thinkingExpected: this.vm.loopThinkingEnabled,
             // 交互模式: 仅最新一轮界面可交互, 历史界面块与执行中的界面置灰防重复提交
             uiLocked: this.vm.interactiveMode &&
               (msg.id !== this.vm.pendingUiMessageId || this.vm.isStreaming),
@@ -1599,33 +1601,39 @@ struct ChatPage {
         Row({ space: 6 }) {
           // 档位胶囊直接内联(选中高亮随 vm.reasoningEffort 实时变化);
           // 勿改回带参 @Builder: 按值传参的 @Builder 子树不随状态刷新
-          Text('极高(Max)')
-            .fontSize(12)
-            .fontWeight(this.vm.reasoningEffort === 'max' ? FontWeight.Medium : FontWeight.Normal)
-            .fontColor(this.vm.reasoningEffort === 'max' ?
-              $r('app.color.brand') : $r('app.color.text_secondary'))
-            .textAlign(TextAlign.Center)
-            .maxLines(1)
-            .height(30)
-            .layoutWeight(1)
-            .borderRadius(15)
-            .backgroundColor(this.vm.reasoningEffort === 'max' ?
-              $r('app.color.brand_light') : $r('app.color.raised_surface'))
-            .onClick(() => {
-              this.vm.setReasoningEffort('max');
-              this.refreshTick++;
-            })
+          //
+          // 档位按模式分叉(两个模式各有各的字段与持久化 key, 互不影响):
+          //   工作模式: 极高(Max) / 均衡(High) / 快速(Low)  —— 长程工具任务, 保留 max
+          //   交互模式: 均衡(High) / 快速(Low) / 关闭(Off)  —— 交付物是界面, 追求响应快, 去掉 max、多了关闭
+          if (!this.vm.interactiveMode) {
+            Text('极高(Max)')
+              .fontSize(12)
+              .fontWeight(this.vm.reasoningEffort === 'max' ? FontWeight.Medium : FontWeight.Normal)
+              .fontColor(this.vm.reasoningEffort === 'max' ?
+                $r('app.color.brand') : $r('app.color.text_secondary'))
+              .textAlign(TextAlign.Center)
+              .maxLines(1)
+              .height(30)
+              .layoutWeight(1)
+              .borderRadius(15)
+              .backgroundColor(this.vm.reasoningEffort === 'max' ?
+                $r('app.color.brand_light') : $r('app.color.raised_surface'))
+              .onClick(() => {
+                this.vm.setReasoningEffort('max');
+                this.refreshTick++;
+              })
+          }
           Text('均衡(High)')
             .fontSize(12)
-            .fontWeight(this.vm.reasoningEffort === 'high' ? FontWeight.Medium : FontWeight.Normal)
-            .fontColor(this.vm.reasoningEffort === 'high' ?
+            .fontWeight(this.vm.loopEffort === 'high' ? FontWeight.Medium : FontWeight.Normal)
+            .fontColor(this.vm.loopEffort === 'high' ?
               $r('app.color.brand') : $r('app.color.text_secondary'))
             .textAlign(TextAlign.Center)
             .maxLines(1)
             .height(30)
             .layoutWeight(1)
             .borderRadius(15)
-            .backgroundColor(this.vm.reasoningEffort === 'high' ?
+            .backgroundColor(this.vm.loopEffort === 'high' ?
               $r('app.color.brand_light') : $r('app.color.raised_surface'))
             .onClick(() => {
               this.vm.setReasoningEffort('high');
@@ -1633,20 +1641,40 @@ struct ChatPage {
             })
           Text('快速(Low)')
             .fontSize(12)
-            .fontWeight(this.vm.reasoningEffort === 'low' ? FontWeight.Medium : FontWeight.Normal)
-            .fontColor(this.vm.reasoningEffort === 'low' ?
+            .fontWeight(this.vm.loopEffort === 'low' ? FontWeight.Medium : FontWeight.Normal)
+            .fontColor(this.vm.loopEffort === 'low' ?
               $r('app.color.brand') : $r('app.color.text_secondary'))
             .textAlign(TextAlign.Center)
             .maxLines(1)
             .height(30)
             .layoutWeight(1)
             .borderRadius(15)
-            .backgroundColor(this.vm.reasoningEffort === 'low' ?
+            .backgroundColor(this.vm.loopEffort === 'low' ?
               $r('app.color.brand_light') : $r('app.color.raised_surface'))
             .onClick(() => {
               this.vm.setReasoningEffort('low');
               this.refreshTick++;
             })
+          // 「关闭」只在交互模式出现: 关掉思考后响应更快, 界面这类产出通常不需要长思考
+          if (this.vm.interactiveMode) {
+            Text('关闭(Off)')
+              .fontSize(12)
+              .fontWeight(this.vm.interactiveEffort === 'off' ?
+                FontWeight.Medium : FontWeight.Normal)
+              .fontColor(this.vm.interactiveEffort === 'off' ?
+                $r('app.color.brand') : $r('app.color.text_secondary'))
+              .textAlign(TextAlign.Center)
+              .maxLines(1)
+              .height(30)
+              .layoutWeight(1)
+              .borderRadius(15)
+              .backgroundColor(this.vm.interactiveEffort === 'off' ?
+                $r('app.color.brand_light') : $r('app.color.raised_surface'))
+              .onClick(() => {
+                this.vm.setReasoningEffort('off');
+                this.refreshTick++;
+              })
+          }
         }
         .width('100%')
         .padding({ left: 6, right: 6, bottom: 2 })
