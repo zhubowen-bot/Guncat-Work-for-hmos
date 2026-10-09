@@ -1268,15 +1268,34 @@ export class GuncatUiLang {
   }
 
   // 从 el 出发找到 key 对应元素, 返回**从 el 到它的链**(含两端); 找不到返回空数组。
-  //
-  // 拖动期间要冻的不是"一个控件", 而是"它到根的整条链": 祖先项的指纹里含子树, 只要链上任何
-  // 一个节点画出来会变(比如同级的指标卡跟着 $amount 变了), 祖先项就会换键重建, 把正在拖的
-  // Slider 一起销毁。渲染层在拖动开始时用本方法拿到这条链, 把链上每个元素当时的指纹快照下来。
   static pathToKey(el: UiElement | null, key: string): UiElement[] {
-    if (el === null || key === '') {
+    return GuncatUiLang.pathToMatch(el, key, null);
+  }
+
+  // 按**对象身份**找(比按 key 可靠: key 可能是匿名元素的占位值、甚至为空, 也可能在不同列表
+  // 里重名)。渲染层拖动时手里拿的就是树里那个实例, 所以身份匹配是首选; 失败再退回 key。
+  static pathToElement(el: UiElement | null, target: UiElement | null): UiElement[] {
+    if (target === null) {
       return [];
     }
-    if (el.key === key) {
+    let byId: UiElement[] = GuncatUiLang.pathToMatch(el, '', target);
+    if (byId.length > 0) {
+      return byId;
+    }
+    return GuncatUiLang.pathToMatch(el, target.key, null);
+  }
+
+  // 遍历规则(真机踩过: 只认 props 里的 UiElement 和数组是不够的):
+  //   UiElement → 递归; 数组 → 逐项看; **普通对象(Record) → 也要进去看** ——
+  //   有些参数是把子元素包在对象里(如 {content: [...]}) 的, 漏了这种形状就整条链找不到,
+  //   表现为拖动时"冻结快照 0 条"(实时刷新被安全检查挡掉)。
+  private static pathToMatch(el: UiElement | null, key: string, target: UiElement | null):
+    UiElement[] {
+    if (el === null) {
+      return [];
+    }
+    let hit: boolean = target !== null ? el === target : (key !== '' && el.key === key);
+    if (hit) {
       return [el];
     }
     let props: Record<string, Object> = el.props;
@@ -1286,29 +1305,45 @@ export class GuncatUiLang {
       if (v === undefined || v === null) {
         continue;
       }
-      if (v instanceof UiElement) {
-        let sub: UiElement[] = GuncatUiLang.pathToKey(v as UiElement, key);
-        if (sub.length > 0) {
-          let out: UiElement[] = [el];
-          for (let k: number = 0; k < sub.length; k++) {
-            out.push(sub[k]);
-          }
-          return out;
+      let sub: UiElement[] = GuncatUiLang.pathInValue(v, key, target);
+      if (sub.length > 0) {
+        let out: UiElement[] = [el];
+        for (let k: number = 0; k < sub.length; k++) {
+          out.push(sub[k]);
         }
-      } else if (v instanceof Array) {
-        let arr: Object[] = v as Object[];
-        for (let j: number = 0; j < arr.length; j++) {
-          if (!(arr[j] instanceof UiElement)) {
-            continue;
-          }
-          let sub2: UiElement[] = GuncatUiLang.pathToKey(arr[j] as UiElement, key);
-          if (sub2.length > 0) {
-            let out2: UiElement[] = [el];
-            for (let k2: number = 0; k2 < sub2.length; k2++) {
-              out2.push(sub2[k2]);
-            }
-            return out2;
-          }
+        return out;
+      }
+    }
+    return [];
+  }
+
+  // 在一个属性值里找(值可能是 UiElement / 数组 / 普通对象)
+  private static pathInValue(v: Object, key: string, target: UiElement | null): UiElement[] {
+    if (v instanceof UiElement) {
+      return GuncatUiLang.pathToMatch(v as UiElement, key, target);
+    }
+    if (v instanceof Array) {
+      let arr: Object[] = v as Object[];
+      for (let j: number = 0; j < arr.length; j++) {
+        let r: UiElement[] = GuncatUiLang.pathInValue(arr[j], key, target);
+        if (r.length > 0) {
+          return r;
+        }
+      }
+      return [];
+    }
+    if (typeof v === 'object') {
+      // 普通对象: 只看它自己的值(不递归纯标量); 深度有限, 不会有环
+      let rec: Record<string, Object> = v as Record<string, Object>;
+      let ks: string[] = Object.keys(rec);
+      for (let i: number = 0; i < ks.length; i++) {
+        let inner: Object | undefined = rec[ks[i]];
+        if (inner === undefined || inner === null || typeof inner !== 'object') {
+          continue;
+        }
+        let r2: UiElement[] = GuncatUiLang.pathInValue(inner, key, target);
+        if (r2.length > 0) {
+          return r2;
         }
       }
     }

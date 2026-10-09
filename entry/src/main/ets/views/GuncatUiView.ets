@@ -160,7 +160,7 @@ export struct GuncatUiView {
     this.dbgBegin++;
     this.dbgKey = GuncatUiRuntime.stateKeyOf(el);
     this.dragging = true;
-    let chain: UiElement[] = GuncatUiLang.pathToKey(this.root, el.key);
+    let chain: UiElement[] = GuncatUiLang.pathToElement(this.root, el);
     let frozen: Record<string, string> = {};
     for (let i: number = 0; i < chain.length; i++) {
       frozen[chain[i].key] = GuncatUiLang.elementSignature(chain[i], this.state.values);
