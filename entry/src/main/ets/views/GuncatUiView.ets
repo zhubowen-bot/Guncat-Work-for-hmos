@@ -134,6 +134,14 @@ export struct GuncatUiView {
     this.rev++;
   }
 
+  // 拖动中的实时刷新: 同样重新物化, 但**只动 sigTick、不动 rev**。
+  // 为什么要分开: rev 被 .id() 读到(重渲染触发器), 拖动期间每 80ms 变一次 id 没必要也不稳妥;
+  // sigTick 只影响各子项的指纹重算 —— 冻结链上的键来自快照(不变), 其它项的键随新值变化 → 重建。
+  private revalue(): void {
+    this.root = GuncatUiLang.render(this.program, this.state.values);
+    this.sigTick++;
+  }
+
   // 开始拖动: 把"从 root 到该控件"整条链的**当前指纹**快照下来(见 dragFreeze)。
   // 必须在 `state.set` **之前**调用 —— 快照要和"上一次已渲染出来的键"完全一致, 否则快照本身
   // 就成了一次键变化, 照样重建。
@@ -512,10 +520,13 @@ export struct GuncatUiView {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-    // 这里从前是 `.id('guncat-ui-r' + rev)` —— 靠"id 每次变化"来触发重渲染。现在唤醒改由
-    // itemKey / wake() 里的 rev+sigTick 读取承担(见那两处注释), id 保持恒定: 一个每次都变的
-    // id 有可能让整棵子树被当成新节点重建, 会把正在拖动的 Slider 一起干掉。
-    .id('guncat-ui')
+    // ⚠️ 这一行是**重渲染的触发器**, 不是普通样式: rev 必须在一个**构建期直接求值的属性表达式**
+    // 里被读到, ArkUI 才会把本组件登记成 rev 的依赖 —— 绑定值变化后 build() 才会重跑, 内层
+    // ForEach 才有机会重算各子项的键(指纹)。真机踩过: 把 rev 的读取挪进 itemKey()/wake() 这类
+    // **方法内部**之后, 依赖没登记上, 于是"拖动松手后数值/指标卡/图表全都不刷新", 而拖动本身
+    // 还是好的 —— 就是这个原因。
+    // (真机已验证: 每次变化 id 并不会破坏正在拖动的 Slider; 护手势真正靠的是 dragFreeze 快照。)
+    .id('guncat-ui-r' + this.rev.toString())
   }
 
   @Builder
@@ -595,8 +606,10 @@ export struct GuncatUiView {
   //   这样它和它的祖先在这一期间都不会被重建, 手势不会断。
   // 这里读一下 rev/sigTick 只是给框架**登记依赖**(键值本身不含它们): 值变了要靠 @State 变化把
   // ForEach 重跑一遍, 重跑时才会重新计算每个子项的指纹。
-  private itemKey(child: UiElement): string {
-    let wake: number = this.rev + this.sigTick;
+  //
+  // ⚠️ 依赖必须**在键箭头里当场读到**(所以 wake 是参数而不是方法内的局部读): 真机踩过 —— 把读取
+  // 藏进方法内部时依赖没登记上, ForEach 不会重跑, 表现就是"松手后什么都不刷新"。
+  private itemKey(child: UiElement, wake: number): string {
     // 拖动期间: 冻结链上的元素直接用快照指纹 → 与拖动前的键逐字节相同 → 不重建、手势不断
     let snapped: string | undefined = this.dragFreeze[child.key];
     let sig: string = snapped !== undefined ? snapped
@@ -604,11 +617,9 @@ export struct GuncatUiView {
     return child.key + '#' + sig + (wake < 0 ? '#w' : '');
   }
 
-  // 读一下 rev/sigTick 再原样返回列表: 读 @State 就给 ForEach 登记了依赖(见 itemKey),
-  // 它们变化 → 本组件重渲染 → ForEach 重跑 → 各子项指纹重算。列表本身不变。
-  private wake(list: UiElement[]): UiElement[] {
-    let tick: number = this.rev + this.sigTick;
-    if (tick === -1) {
+  // 原样返回列表, 参数只为把 rev/sigTick 的读取放在构建期表达式里(见 itemKey 的说明)。
+  private wake(list: UiElement[], wake: number): UiElement[] {
+    if (wake < 0) {
       return [];
     }
     return list;
@@ -616,9 +627,9 @@ export struct GuncatUiView {
 
   @Builder
   buildElements(list: UiElement[], topLevel: boolean) {
-    ForEach(this.wake(list), (child: UiElement, index: number) => {
+    ForEach(this.wake(list, this.rev + this.sigTick), (child: UiElement, index: number) => {
       this.renderNode(child, topLevel)
-    }, (child: UiElement, index: number) => this.itemKey(child))
+    }, (child: UiElement, index: number) => this.itemKey(child, this.rev + this.sigTick))
   }
 
   // 通用 children 容器
@@ -2407,8 +2418,7 @@ export struct GuncatUiView {
           let now: number = Date.now();
           if (now - this.lastLiveTickMs >= 80) {
             this.lastLiveTickMs = now;
-            this.rematerialize();
-            this.sigTick++;
+            this.revalue();
           }
         })
     }
