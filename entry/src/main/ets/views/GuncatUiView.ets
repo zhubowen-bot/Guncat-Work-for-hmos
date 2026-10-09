@@ -41,6 +41,10 @@ import { RichTextView } from './RichTextView';
 
 @Component
 export struct GuncatUiView {
+  // 拖动"静默"判定阈值(ms): 拖动中每次 Moving 重新起表, 超过它没有新的 Moving 就当作松手。
+  // 比手指移动的间隔(通常 16~32ms)宽得多, 又比人反应过来"我松手了"短得多。
+  private static readonly DRAG_IDLE_MS: number = 220;
+
   // 程序源码。传字符串而不是对象: ArkUI 里字符串 @Prop 的变更通知最可靠,
   // 而嵌套对象经 @Prop 深拷贝后既慢又容易丢状态。
   @Prop @Watch('onProgramChanged') programText: string = '';
@@ -78,6 +82,8 @@ export struct GuncatUiView {
   private dragging: boolean = false;
   // 拖动中实时刷新的节流时间戳(80ms 一次, 不必每帧都重新物化)
   private lastLiveTickMs: number = 0;
+  // 拖动"静默"计时器: 拖动中每次 Moving 重新起表, 超时即当作松手(见 armDragIdleTimer)
+  private dragIdleTimer: number = -1;
 
   private program: UiProgram = new UiProgram();
   private root: UiElement | null = null;
@@ -88,6 +94,13 @@ export struct GuncatUiView {
   aboutToAppear(): void {
     GuncatUiLibrary.init();
     this.rebuild();
+  }
+
+  // 组件销毁时清掉拖动静默计时器, 避免回调打到已销毁的实例上
+  aboutToDisappear(): void {
+    this.disarmDragIdleTimer();
+    this.dragging = false;
+    this.dragFreeze = {};
   }
 
   // 程序文本变化(流式/最终): 重新解析并保持用户已改的绑定值
@@ -137,17 +150,40 @@ export struct GuncatUiView {
   // 结束一次拖动/点选: 丢掉冻结快照 + 整树重新物化(拖动期间被压住的变化一次全部刷出来) +
   // 回传状态。
   //
-  // 为什么要三种信号一起收: Slider 的 `End` 在真机上**不一定来**(用户反馈"松手后也不刷新,
-  // 必须切走再切回"就是这个原因), 所以再用触摸抬起兜底。explicit = 这次调用来自 End/Click
-  // 这种明确信号; 触摸抬起跟在 End 后面时不该重复回传, 用 dragging 去重保证一次手势只回传一次。
+  // explicit = 这次调用来自 End/Click 这种明确信号; 静默计时器跟在 End 后面时不该重复回传,
+  // 用 dragging 去重保证一次手势只回传一次。
   private finishDrag(explicit: boolean): void {
     let wasDragging: boolean = this.dragging;
+    this.disarmDragIdleTimer();
     this.dragging = false;
     this.dragFreeze = {};
     this.rematerialize();
     this.sigTick++;
     if (explicit || wasDragging) {
       this.emitState();
+    }
+  }
+
+  // 拖动链是否真的冻住了(见 buildSlider 里的安全检查): 链上一个元素都没快照到, 就说明这次
+  // 拖动没有保护, 此时**不能**做实时刷新 —— 一重建就会把正在拖的 Slider 销毁。
+  private dragFrozen(): boolean {
+    return this.dragging && Object.keys(this.dragFreeze).length > 0;
+  }
+
+  // "静默计时器": 拖动中每次 Moving 重新起表, 一段时间没有新的 Moving 就当作松手。
+  // 为什么不给 Slider 挂 .onTouch: 那会插手它的触摸派发, 真机上表现为"只能点选、不跟手"。
+  private armDragIdleTimer(): void {
+    this.disarmDragIdleTimer();
+    this.dragIdleTimer = setTimeout(() => {
+      this.dragIdleTimer = -1;
+      this.finishDrag(false);
+    }, GuncatUiView.DRAG_IDLE_MS);
+  }
+
+  private disarmDragIdleTimer(): void {
+    if (this.dragIdleTimer !== -1) {
+      clearTimeout(this.dragIdleTimer);
+      this.dragIdleTimer = -1;
     }
   }
 
@@ -2342,13 +2378,13 @@ export struct GuncatUiView {
         .blockColor($r('app.color.surface'))
         .enabled(this.interactive())
         .onChange((value: number, mode: SliderChangeMode) => {
-          // 拖动期间的刷新策略(本版核心):
+          // 拖动期间的刷新策略:
           //   旧实现是"拖动中完全不重新物化, 只在 End/Click 时整树重建", 有两个问题 ——
-          //   ① 拖动期间依赖 $amount 的指标卡/图表/文案全是死的(用户看到的"不实时重渲染");
+          //   ① 拖动期间依赖 $amount 的指标卡/图表/文案全是死的("不实时重渲染");
           //   ② 真机上 End 这个信号并不一定来, 于是松手后也不刷新(必须切走再切回)。
           //   现在: 拖动一开始就把"自己到 root 这条链"的指纹快照下来(键与拖动前逐字节相同 →
           //   这一项不会被重建 → 手势不丢), 同时按 80ms 节流重新物化 —— 指纹机制下只有"画出来
-          //   会不一样"的其他项会换键重建; 收尾统一走 finishDrag(End/Click + 触摸抬起兜底)。
+          //   会不一样"的其他项会换键重建; 收尾统一走 finishDrag。
           if (mode === SliderChangeMode.Begin) {
             // 快照必须在 state.set **之前**做: 它要和"上一次已渲染的键"一致
             this.beginDrag(el);
@@ -2358,17 +2394,21 @@ export struct GuncatUiView {
             this.finishDrag(true);
             return;
           }
+          // 拖动中: 每次收到 Moving 就重新起一个"静默计时器"。真机上 End 可能不来(用户反馈
+          // 松手后不刷新), 而**不要**用 .onTouch 兜底 —— 给 Slider 挂 onTouch 会插手它的触摸
+          // 派发, 真机表现是"只能点选、不跟手"(拖不起来)。用"一段时间没有新的 Moving"来判定
+          // 松手最安全: 不碰触摸管线, 且 finishDrag 幂等。
+          this.armDragIdleTimer();
+          // 链路没找到(树形超出预期)时**不做实时刷新**: 此时冻结没生效, 一重建就会把正在拖的
+          // Slider 销毁掉。宁可退回"松手再刷", 也不能把拖动弄坏。
+          if (!this.dragFrozen()) {
+            return;
+          }
           let now: number = Date.now();
           if (now - this.lastLiveTickMs >= 80) {
             this.lastLiveTickMs = now;
             this.rematerialize();
             this.sigTick++;
-          }
-        })
-        // End 信号在真机上不一定来, 用触摸抬起兜底(finishDrag 幂等, 不会重复回传)
-        .onTouch((e: TouchEvent) => {
-          if (e.type === TouchType.Up || e.type === TouchType.Cancel) {
-            this.finishDrag(false);
           }
         })
     }
