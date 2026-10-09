@@ -266,7 +266,10 @@ export struct GuncatUiView {
       return '这段界面输出没有写完（模型输出被截断或中断），已按已生成的部分展示。发一句"继续"或让它重新生成即可。';
     }
     if (this.complete) {
-      return '这段内容没有生成可交互的元素（JSON 结构不被识别），已按原始输出展示。';
+      let chars: number = this.rawFallback.trim().length;
+      let detail: string = chars > 0 ? '（模型在这段里只写了 ' + chars.toString() + ' 个字符）' : '';
+      return '这段界面内容不完整，无法渲染成可交互组件' + detail +
+        '。发一句"重新生成界面"即可，或直接说清你想要的图表/表单。';
     }
     return '界面生成中…';
   }
@@ -359,23 +362,38 @@ export struct GuncatUiView {
           .fontColor($r('app.color.warning'))
           .width('100%')
       }
-      // 原始输出(自查用): 解析失败时默认展开, 其余情况折叠
+      // 原始输出(自查用): 解析失败时默认展开, 其余情况折叠。
+      // 强制按字符换行 + 加大高度上限 + 显示字符数: JSON 常是超长单行, 不换行会被裁掉看不见。
       if (this.rawFallback.trim() !== '' && (this.showRaw || (!this.hasContent() && this.complete))) {
-        Scroll() {
-          Text(this.rawFallback)
-            .fontSize(10)
-            .fontColor($r('app.color.text_tertiary'))
-            .fontFamily('monospace')
-            .width('100%')
+        Column({ space: 4 }) {
+          Row() {
+            Text('模型原始输出 · ' + this.rawFallback.trim().length.toString() + ' 字符')
+              .fontSize(10)
+              .fontColor($r('app.color.text_tertiary'))
+              .layoutWeight(1)
+          }
+          .width('100%')
+
+          Scroll() {
+            Text(this.rawFallback)
+              .fontSize(10)
+              .fontColor($r('app.color.text_tertiary'))
+              .fontFamily('monospace')
+              .width('100%')
+              .wordBreak(WordBreak.BREAK_ALL)
+              .textAlign(TextAlign.Start)
+          }
+          .scrollable(ScrollDirection.Vertical)
+          .scrollBar(BarState.Auto)
+          .constraintSize({ maxHeight: 300 })
+          .width('100%')
+          .align(Alignment.TopStart)
         }
-        .scrollable(ScrollDirection.Vertical)
-        .scrollBar(BarState.Off)
-        .constraintSize({ maxHeight: 180 })
         .width('100%')
         .padding(10)
         .backgroundColor($r('app.color.surface_secondary'))
         .borderRadius(10)
-        .align(Alignment.TopStart)
+        .alignItems(HorizontalAlign.Start)
       }
       // 「查看原始输出」开关: 有任何原文时都可点开核对
       if (this.rawFallback.trim() !== '' && !(!this.hasContent() && this.complete)) {

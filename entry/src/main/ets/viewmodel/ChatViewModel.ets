@@ -1289,20 +1289,27 @@ export class ChatViewModel {
     });
   }
 
-  // 交互模式: 最后一条 assistant 消息里的界面块是否被截断(块没闭合)。
-  // 这是"输出顶到上限"的信号——用它触发一次自动续写, 把界面块写完。
+  // 交互模式: 最后一条 assistant 消息里的界面是否需要"用 JSON 模式重做"。
+  // 两种情形都算:
+  //   a) 块未闭合(输出被截断);
+  //   b) 块已闭合但内容残缺(例如只写了 {"version": 1 就闭合了围栏) —— 真机上出现过,
+  //      此时卡片"有块没内容", 必须同样触发重做。
   private needsUiContinuation(conv: Conversation): boolean {
     if (conv.mode !== Constants.MODE_INTERACTIVE) {
       return false;
     }
     for (let i: number = conv.messages.length - 1; i >= 0; i--) {
       let m: Message = conv.messages[i];
-      if (m.role === 'assistant') {
-        if (m.content.indexOf('```' + Constants.UI_BLOCK_LANG) < 0) {
-          return false;
-        }
-        return GuncatUiBlocks.lastPartial(m.content) !== '';
+      if (m.role !== 'assistant') {
+        continue;
       }
+      if (m.content.indexOf('```' + Constants.UI_BLOCK_LANG) < 0) {
+        return false;
+      }
+      if (GuncatUiBlocks.lastPartial(m.content) !== '') {
+        return true;
+      }
+      return GuncatUiBlocks.isDegenerate(m.content, 1);
     }
     return false;
   }

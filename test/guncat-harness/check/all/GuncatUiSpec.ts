@@ -1389,6 +1389,37 @@ export class GuncatUiBlocks {
     return GuncatUiBlocks.OPEN + '\n' + body + '\n' + GuncatUiBlocks.FENCE;
   }
 
+  // 已闭合但内容残缺: 块闭合了, 但 JSON 里能救出的元素少于 minElements。
+  // 真实事故: 模型写出 {"version": 1 后就直接闭合围栏并继续写正文 → 卡片看起来"有块但没内容"。
+  // 这类情况必须也能触发"用 JSON 模式重新生成界面", 而不是当成正常块渲染。
+  static isDegenerate(text: string, minElements: number = 1): boolean {
+    let fragments: GuncatUiFragment[] = GuncatUiBlocks.split(text);
+    for (let i: number = 0; i < fragments.length; i++) {
+      let f: GuncatUiFragment = fragments[i];
+      if (!f.fence || !f.complete) {
+        continue;
+      }
+      let r: GuncatUiParseResult = GuncatUiBlocks.parseComplete(f.text);
+      let count: number = r.spec !== null ? r.spec.elements.length : 0;
+      if (count < minElements) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // 取第一个已闭合块内原文的简短摘要(用于诊断: 让用户直接看到模型到底写了几个字符)
+  static firstClosedBody(text: string): string {
+    let fragments: GuncatUiFragment[] = GuncatUiBlocks.split(text);
+    for (let i: number = 0; i < fragments.length; i++) {
+      let f: GuncatUiFragment = fragments[i];
+      if (f.fence && f.complete) {
+        return f.text.trim();
+      }
+    }
+    return '';
+  }
+
   // 提取全部已闭合的 guncat-ui 文档
   static extract(text: string): GuncatUiSpec[] {
     let specs: GuncatUiSpec[] = [];
@@ -1466,7 +1497,7 @@ export class GuncatUiSpecWriter {
       elements.push(GuncatUiSpecWriter.elementToJson(spec.elements[i]));
     }
     obj['elements'] = elements;
-    return JSON.stringify(obj, null, 2);
+    return JSON.stringify(obj);
   }
 
   private static elementToJson(el: GuncatUiElement): Record<string, Object> {
@@ -1633,19 +1664,15 @@ export class GuncatUiPrompt {
     '',
     '## 输出骨架（照抄结构，替换内容）',
     '```guncat-ui',
-    '{',
-    '  "version": 1,',
-    '  "title": "界面标题（≤20 字）",',
-    '  "subtitle": "一句话补充说明",',
-    '  "controls": [',
-    '    {"name": "amount", "type": "slider", "label": "金额", "min": 0, "max": 100, "step": 1, "default": 30, "unit": "万"}',
-    '  ],',
-    '  "elements": [',
-    '    {"kind": "metrics", "items": [{"label": "年化收益", "value": 4.8, "unit": "%", "delta": "+0.3"}]},',
-    '    {"kind": "chart", "chart": "bar", "title": "收益对比", "labels": ["方案A", "方案B"], "values": [4.8, 3.9], "series": ["年化"]},',
-    '    {"kind": "form", "title": "调整参数", "controls": ["amount"], "action": {"id": "recalc", "label": "重新计算", "style": "primary", "confirm": "按新的金额重新测算。"}}',
-    '  ]',
-    '}',
+    '{"version":1,"title":"界面标题（≤20 字）","subtitle":"一句话补充说明",',
+    ' "elements":[',
+    '  {"kind":"metrics","items":[{"label":"年化收益","value":4.8,"unit":"%","delta":"+0.3"}]},',
+    '  {"kind":"chart","chart":"bar","title":"收益对比","labels":["方案A","方案B"],"values":[4.8,3.9],"series":["年化"]},',
+    '  {"kind":"form","title":"调整参数","controls":["amount"],"action":{"id":"recalc","label":"重新计算","confirm":"按新的金额重新测算。"}}',
+    ' ],',
+    ' "controls":[',
+    '  {"name":"amount","type":"slider","label":"金额","min":0,"max":100,"step":1,"default":30,"unit":"万"}',
+    ' ]}',
     '```',
     '',
     '## 元素清单（kind 只能取以下 11 种）',
@@ -1684,6 +1711,8 @@ export class GuncatUiPrompt {
     '> **篇幅纪律（最重要）**：界面 JSON 写太长会被模型的输出上限截断，从而整块作废。因此**默认只写 2~4 个元素**，',
     '> 最多不超过 6 个；controls 最多 3 个；table rows 不超过 8 行、chart 不超过 8 个数据点；',
     '> 每条文案 ≤60 字、title ≤20 字；能 3 个元素说清的事绝不写 6 个。要展示更多内容时分两轮给（先说结论，再按需展开）。',
+    '> 另外**块内 JSON 必须紧凑**：不要换行缩进（缩进会白白吃掉输出额度），单行写完即可——',
+    '> 书写顺序务必是 `title` → `subtitle` → `elements` → `controls`，因为一旦被截断，先写出来的部分才救得回来。',
     '- 界面块之外可以写文字，但必须简短；**禁止在正文里重复界面已经表达的数据**。',
     '- 数值必须真实可核对：来自计算或工具结果的数值直接写；给不出数据的字段不要编造，改用 note 说明。',
     '- 图表 values 与 labels 数量必须一致；bar/line 的 values 默认 1 条序列与 labels 一一对应（多序列才用 series）。',

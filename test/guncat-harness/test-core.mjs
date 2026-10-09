@@ -1419,6 +1419,16 @@ console.log('[GuncatUiSpec]');
     rt.elements[5].action.confirm === '按新参数重算' && rt.elements[5].controls.length === 2);
   check('往返: 选项动作', rt.elements[6].options.length === 2 && rt.elements[6].action.id === 'pick');
   check('往返: 嵌套子元素', rt.elements[7].kind === 'layout' && rt.elements[7].children.length === 1);
+
+  // ===== 已闭合但内容残缺(真机事故三: 只写了 {"version": 1 就闭合围栏并继续写正文) =====
+  const degenerate = '引导文字。\n```guncat-ui\n{"version": 1\n```\n后面的正文。';
+  check('残缺块被判定为 degenerate', GuncatUiBlocks.isDegenerate(degenerate, 1) === true);
+  check('残缺块原文可取出', GuncatUiBlocks.firstClosedBody(degenerate).indexOf('"version"') >= 0);
+  check('正常块不误判 degenerate',
+    GuncatUiBlocks.isDegenerate('```guncat-ui\n{"title":"T","elements":[{"kind":"card","text":"x"}]}\n```', 1) === false);
+  check('无块不算 degenerate', GuncatUiBlocks.isDegenerate('纯文本回答', 1) === false);
+  check('未闭合块不算 degenerate(走截断路径)',
+    GuncatUiBlocks.isDegenerate('```guncat-ui\n{"title":"T","elements":[{"kind":"card"', 1) === false);
 }
 
 console.log('');
