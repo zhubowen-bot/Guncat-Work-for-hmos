@@ -97,7 +97,14 @@ export struct GuncatUiView {
   private dragIdleTimer: number = -1;
 
   private program: UiProgram = new UiProgram();
-  private root: UiElement | null = null;
+  // ⚠️ 必须是 @State, 不能是普通字段!! 真机踩透的坑:
+  //   绑定值变化 → rematerialize() 重新物化出**新树**并赋给这里; 但 ForEach 的数据表达式是
+  //   `this.wake(list, …)` 里的 `list`, 而 list 是**上一次构建时闭包捕获的旧数组** ——
+  //   即使 ForEach 重跑, 它拿到的还是旧元素, 各子项的渲染指纹按**旧元素**算, 自然不变 →
+  //   一项都不会重建。表现就是"拖动时数值/指标卡/图表全都不动, 切走再回来才变"。
+  //   放进 @State 后, 顶层 ForEach 的数据表达式当场读 `this.root`(见 buildRootTree), 树一换
+  //   它就是新树 → 指纹按新元素重算 → 依赖绑定值的子项换键重建。
+  @State private root: UiElement | null = null;
   private state: GuncatUiState = new GuncatUiState();
   private lastText: string = '';
   private booted: boolean = false;
@@ -503,7 +510,7 @@ export struct GuncatUiView {
           this.buildEmpty()
         } else {
           Column({ space: 16 }) {
-            this.buildChildren(this.root, true)
+            this.buildRootTree(this.root, this.rev + this.sigTick)
             this.buildSources(this.root)
           }
           .width('100%')
@@ -705,6 +712,25 @@ export struct GuncatUiView {
     ForEach(this.wake(list, this.rev + this.sigTick), (child: UiElement, index: number) => {
       this.renderNode(child, topLevel)
     }, (child: UiElement, index: number) => this.itemKey(child, this.rev + this.sigTick))
+  }
+
+  // 顶层: **数据当场从 @State 的树里取**。
+  // 与 buildElements 的区别就在这里: buildElements 收的是闭包捕获的旧列表(嵌套层用它没问题 ——
+  // 只要子树里有东西变了, 祖先的指纹就会变、祖先项会重建, 于是嵌套层拿到的是新元素), 但顶层
+  // 没有任何祖先帮它重建, 必须自己拿新树, 否则永远按旧元素算指纹(真机症状: 绑定值改了界面不动)。
+  @Builder
+  buildRootTree(tree: UiElement | null, epoch: number) {
+    ForEach(this.rootKids(tree, epoch), (child: UiElement, index: number) => {
+      this.renderNode(child, true)
+    }, (child: UiElement, index: number) => this.itemKey(child, epoch))
+  }
+
+  // 顶层子元素列表: 参数 tree/epoch 由**数据表达式当场传入**(构建期读 @State, 才会被登记成依赖)
+  private rootKids(tree: UiElement | null, epoch: number): UiElement[] {
+    if (tree === null || epoch < 0) {
+      return [];
+    }
+    return UiNode.elementList(tree, 'children')
   }
 
   // 通用 children 容器
