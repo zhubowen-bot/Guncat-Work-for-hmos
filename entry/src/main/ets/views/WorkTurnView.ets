@@ -79,29 +79,64 @@ export struct WorkTurnView {
   // finalized = 本轮产出已结束(不再流式): 未闭合的界面块据此从"生成中"转为"未完成"静态展示。
   private refreshUiParts(): void {
     let content: string = this.isStreaming ? this.visibleText : this.message.content;
-    // [诊断] 埋点: 记录本次重建看到的正文长度与 finalized, 供卡片底部显示
     this.uiSeenLen = content.length;
     this.lastUiSeen = content;
     this.lastUiFinalized = !this.isStreaming;
-    // 界面块是否可交互/是否未完成, 取决于构建时的 isStreaming; 这里留下指纹供自愈定时器比对
     this.uiBuildFinalized = this.lastUiFinalized;
     if (content.indexOf(GuncatUiBlocks.OPEN) < 0) {
       if (this.uiSegs.length > 0) {
-        this.uiSegs = [];
+        let empty: GuncatUiSeg[] = [];
+        this.applyUiSegs(empty);
       }
       return;
     }
     let parts: GuncatUiParts = GuncatUiParts.build(content, this.lastUiFinalized);
-    // 重新赋值整个数组, 保证 UI 一定刷新(改内部字段不会被观察到);
-    // 同时递增 uiRenderKey, 让 ForEach 的 key 变化 → ArkUI 强制重建该子组件,
-    // 这是绕开"观察链不生效"的硬手段(真机上曾出现赋值后卡片纹丝不动)。
     let next: GuncatUiSeg[] = [];
     for (let i: number = 0; i < parts.segments.length; i++) {
       next.push(parts.segments[i]);
     }
+    this.applyUiSegs(next);
+  }
+
+  // 按"已结束"语义重建一次界面片段
+  private refreshUiPartsFinal(): void {
+    let content: string = this.message.content;
+    this.uiSeenLen = content.length;
+    this.lastUiSeen = content;
+    this.lastUiFinalized = true;
+    this.uiBuildFinalized = true;
+    let parts: GuncatUiParts = GuncatUiParts.build(content, true);
+    let next: GuncatUiSeg[] = [];
+    for (let i: number = 0; i < parts.segments.length; i++) {
+      next.push(parts.segments[i]);
+    }
+    this.applyUiSegs(next);
+  }
+
+  // 应用新的片段数组。**渲染 key 只在语义变化时递增**(闭环/未完成状态或片段数量变化),
+  // 绝不在流式期间每次刷新都递增 —— 那等于每 33ms 销毁重建整张卡片, 表现为"疯狂闪烁"。
+  private applyUiSegs(next: GuncatUiSeg[]): void {
+    let oldShape: string = this.uiSegsShape();
     this.uiSegs = next;
+    let newShape: string = this.uiSegsShape();
     this.uiContentRev++;
-    this.uiRenderKey++;
+    if (oldShape !== newShape) {
+      this.uiRenderKey++;
+    }
+  }
+
+  // 片段数组的"语义指纹": 每段类型 + 是否闭合 + 是否未完成
+  private uiSegsShape(): string {
+    let shape: string = '';
+    for (let i: number = 0; i < this.uiSegs.length; i++) {
+      let seg: GuncatUiSeg = this.uiSegs[i];
+      if (seg.type !== GuncatUiSegType.UI) {
+        shape = shape + 't';
+        continue;
+      }
+      shape = shape + 'u' + (seg.complete ? 'C' : 'c') + (seg.truncated ? 'T' : 'n');
+    }
+    return shape;
   }
 
   // 收尾自愈: 一旦正文不再变化(本轮产出结束)且界面块还是按"流式中"构建的,
@@ -156,23 +191,6 @@ export struct WorkTurnView {
       clearInterval(this.uiSettleTimer);
       this.uiSettleTimer = -1;
     }
-  }
-
-  // 按"已结束"语义重建一次界面片段
-  private refreshUiPartsFinal(): void {
-    let content: string = this.message.content;
-    this.uiSeenLen = content.length;
-    this.lastUiSeen = content;
-    this.lastUiFinalized = true;
-    this.uiBuildFinalized = true;
-    let parts: GuncatUiParts = GuncatUiParts.build(content, true);
-    let next: GuncatUiSeg[] = [];
-    for (let i: number = 0; i < parts.segments.length; i++) {
-      next.push(parts.segments[i]);
-    }
-    this.uiSegs = next;
-    this.uiContentRev++;
-    this.uiRenderKey++;
   }
 
   aboutToAppear(): void {

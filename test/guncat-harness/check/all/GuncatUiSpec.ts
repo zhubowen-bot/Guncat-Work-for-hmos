@@ -1357,17 +1357,22 @@ export class GuncatUiBlocks {
     return '';
   }
 
+  // 直接对一个块内正文做渐进解析(供 isDegenerate 等判断"截断后还能不能救出元素")
+  static progressFromBody(body: string): GuncatUiProgress {
+    let r: GuncatUiParseResult = GuncatUiSpecParser.parseStreaming(body);
+    let progress: GuncatUiProgress = new GuncatUiProgress();
+    progress.spec = r.spec;
+    progress.error = r.error;
+    return progress;
+  }
+
   // 流式中: 取最后一个未完成块的渐进解析结果(边生成边成形); 无未完成块时返回 null
   static progress(text: string): GuncatUiProgress {
     let fragments: GuncatUiFragment[] = GuncatUiBlocks.split(text);
     for (let i: number = fragments.length - 1; i >= 0; i--) {
       let f: GuncatUiFragment = fragments[i];
       if (f.fence && !f.complete) {
-        let r: GuncatUiParseResult = GuncatUiSpecParser.parseStreaming(f.text);
-        let progress: GuncatUiProgress = new GuncatUiProgress();
-        progress.spec = r.spec;
-        progress.error = r.error;
-        return progress;
+        return GuncatUiBlocks.progressFromBody(f.text);
       }
     }
     return null;
@@ -1398,6 +1403,15 @@ export class GuncatUiBlocks {
       let f: GuncatUiFragment = fragments[i];
       if (!f.fence || !f.complete) {
         continue;
+      }
+      // 先按"截断救助"语义解析: 被截断但救得出元素的块用渐进渲染兜住即可, 不必重做。
+      // 只有"内容为空 / 清洗补括号后连一个元素都拿不到"才算残缺 → 值得用 JSON 模式重做一次。
+      let progress: GuncatUiProgress | null = GuncatUiBlocks.progressFromBody(f.text);
+      if (progress !== null && progress.spec !== null) {
+        let salvaged: number = progress.spec.elements.length;
+        if (salvaged >= minElements || salvaged > 0) {
+          return false;
+        }
       }
       let r: GuncatUiParseResult = GuncatUiBlocks.parseComplete(f.text);
       let count: number = r.spec !== null ? r.spec.elements.length : 0;

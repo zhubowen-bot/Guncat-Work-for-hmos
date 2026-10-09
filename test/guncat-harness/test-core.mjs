@@ -1429,6 +1429,13 @@ console.log('[GuncatUiSpec]');
   check('无块不算 degenerate', GuncatUiBlocks.isDegenerate('纯文本回答', 1) === false);
   check('未闭合块不算 degenerate(走截断路径)',
     GuncatUiBlocks.isDegenerate('```guncat-ui\n{"title":"T","elements":[{"kind":"card"', 1) === false);
+  // 真机事故四: 被截断但"救得回来"的块不该触发重做(否则会白跑一次 JSON 重做 + 闪烁)
+  const salvaged = '```guncat-ui\n{"title":"T","elements":[{"kind":"note","text":"是豆薯(凉薯)。"}]';
+  const salvagedProg = GuncatUiBlocks.progress(salvaged);
+  check('截断但可救出的块能取出元素', salvagedProg !== null && salvagedProg.spec !== null &&
+    salvagedProg.spec.elements.length === 1);
+  check('截断但可救出的块不算 degenerate',
+    GuncatUiBlocks.isDegenerate(salvaged, 1) === false);
 }
 
 console.log('');

@@ -286,19 +286,17 @@ export struct ChatBubbleView {
     this.uiBuildFinalized = !this.isStreaming;
     if (content.indexOf(GuncatUiBlocks.OPEN) < 0) {
       if (this.uiSegs.length > 0) {
-        this.uiSegs = [];
+        let empty: GuncatUiSeg[] = [];
+        this.applyUiSegs(empty);
       }
       return;
     }
     let parts: GuncatUiParts = GuncatUiParts.build(content, this.uiBuildFinalized);
-    // 重新赋值整个数组(而不是改内部字段), 保证 UI 一定刷新
     let next: GuncatUiSeg[] = [];
     for (let i: number = 0; i < parts.segments.length; i++) {
       next.push(parts.segments[i]);
     }
-    this.uiSegs = next;
-    this.uiContentRev++;
-    this.uiRenderKey++;
+    this.applyUiSegs(next);
   }
 
   // 按"已结束"语义重建一次界面片段
@@ -311,9 +309,33 @@ export struct ChatBubbleView {
     for (let i: number = 0; i < parts.segments.length; i++) {
       next.push(parts.segments[i]);
     }
+    this.applyUiSegs(next);
+  }
+
+  // 应用新的片段数组。**渲染 key 只在语义变化时递增**(闭环/未完成状态或片段数量变化),
+  // 绝不在流式期间每次刷新都递增 —— 那等于每 33ms 销毁重建整张卡片, 表现为"疯狂闪烁"。
+  private applyUiSegs(next: GuncatUiSeg[]): void {
+    let oldShape: string = this.uiSegsShape();
     this.uiSegs = next;
+    let newShape: string = this.uiSegsShape();
     this.uiContentRev++;
-    this.uiRenderKey++;
+    if (oldShape !== newShape) {
+      this.uiRenderKey++;
+    }
+  }
+
+  // 片段数组的"语义指纹": 每段类型 + 是否闭合 + 是否未完成
+  private uiSegsShape(): string {
+    let shape: string = '';
+    for (let i: number = 0; i < this.uiSegs.length; i++) {
+      let seg: GuncatUiSeg = this.uiSegs[i];
+      if (seg.type !== GuncatUiSegType.UI) {
+        shape = shape + 't';
+        continue;
+      }
+      shape = shape + 'u' + (seg.complete ? 'C' : 'c') + (seg.truncated ? 'T' : 'n');
+    }
+    return shape;
   }
 
   // 收尾自愈: 正文稳定后自己按"已结束"重建一次, 不依赖 @Watch/父组件通知(真机上不可靠,
