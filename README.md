@@ -2,9 +2,9 @@
 
 > 中文 | [English](README_EN.md)
 
-鸿蒙掌上 Codex / DeepSeek Harness：ArkTS 与 ArkUI 从零构建的原生 HarmonyOS AI 客户端，模块化 Agent Loop 内核 + 三协议流式对话 + 42 个本地工具 + 32个深度定制skill + 文件沙箱工作区，端侧直出精美 PPT / Word / Excel / Svg 图片，支持执行js代码等，完整对标PC端Agent。
+鸿蒙掌上 Codex / DeepSeek Harness：ArkTS 与 ArkUI 从零构建的原生 HarmonyOS AI 客户端，模块化 Agent Loop 内核 + 三协议流式对话 + 45 个本地工具 + 32个深度定制skill + 文件沙箱工作区，端侧直出精美 PPT / Word / Excel / Svg 图片，支持执行js代码等，完整对标PC端Agent。
 
-Guncat Work 支持完整丰富的客户端功能：聊天模式内置通用、论文转换、法律 / 研究 / 筛滤检索与 LLM 评测等智能体；支持Chat/Response/Anthropic API三种主流协议接入、原生 Markdown（含 LaTeX 公式与 Mermaid 图表）、图片文档直传、CoreSpeechKit 朗读和原生语音输入等扩展C端功能。工作模式带沙箱工作区与工具调用能力，包含42 个内置工具，覆盖文件增删改查与模式匹配搜索、任务清单、图片查看、网络下载、PDF 解析、Office 生成与读写编辑（PPT / Word / Excel 各自基于 JSON 中间层，可无损读回、算子式编辑）、数据管道清洗转换与格式互转，以及基于 JSVM-API 的 JS 执行沙箱 run_js。内置32 个技能（5 个主 Skill 路由 + 7 个格式分支）把 PPT 设计规范、Doc JSON 语法、数据清洗配方等领域知识按需加载给模型。Office 文档与 PDF 全部本地解析，不消耗多模态配额。
+Guncat Work 支持完整丰富的客户端功能：聊天模式内置通用、论文转换、法律 / 研究 / 筛滤检索与 LLM 评测等智能体；支持Chat/Response/Anthropic API三种主流协议接入、原生 Markdown（含 LaTeX 公式与 Mermaid 图表）、图片文档直传、CoreSpeechKit 朗读和原生语音输入等扩展C端功能。工作模式带沙箱工作区与工具调用能力，包含 45 个内置工具，覆盖文件增删改查与模式匹配搜索、任务清单、图片查看、网络下载、PDF 解析、Office 生成与读写编辑（PPT / Word / Excel 各自基于 JSON 中间层，可无损读回、算子式编辑）、数据管道清洗转换与格式互转，以及基于 JSVM-API 的 JS 执行沙箱 run_js。内置32 个技能（5 个主 Skill 路由 + 7 个格式分支）把 PPT 设计规范、Doc JSON 语法、数据清洗配方等领域知识按需加载给模型。Office 文档与 PDF 全部本地解析，不消耗多模态配额。
 
 界面在手机与桌面之间自适应：宽屏（≥700vp）展开「左侧栏 / 会话列 / 工作区详情列」三栏布局，窄屏回退单列加抽屉。工作区文件可原地预览、一键分享，生成与改动附行级 diff，对话历史、配置与朗读偏好均本地持久化。
 
@@ -117,7 +117,7 @@ Guncat Work 支持完整丰富的客户端功能：聊天模式内置通用、�
 
 ### 交互模式（Intelligent UI）
 
-交互模式是 **Agent 循环的第二种交付形态**（侧边栏「Agent模式」分组中紧随「工作模式」的 ✦「交互模式」项）：它与工作模式**共用同一套 Agent Loop、沙箱工作区与 42 个工具**，唯一区别是**回答不再是纯文本，而是一份界面程序**——应用把它渲染成原生可操作界面：标题/正文、图表（柱状 / 折线 / 面积 / 横向条 / 饼环 / 径向 / 雷达 / 堆叠条）、表格、指标卡、图片墙、选项卡 / 折叠面板 / 步骤条 / 卡片块、以及整套表单控件（滑块 / 开关 / 单选 / 多选 / 下拉 / 标签选择 / 选项卡 / 输入框 / 文本域）。对齐 GPT-6 的 Intelligent UI：说一句话，拿到一个能拖、能点、能改参数并即时重算的仪表盘。
+交互模式是 **Agent 循环的第二种交付形态**（侧边栏「Agent模式」分组中紧随「工作模式」的 ✦「交互模式」项）：它与工作模式**共用同一套 Agent Loop、沙箱工作区与 45 个工具**，唯一区别是**回答不再是纯文本，而是一份界面程序**——应用把它渲染成原生可操作界面：标题/正文、图表（柱状 / 折线 / 面积 / 横向条 / 饼环 / 径向 / 雷达 / 堆叠条）、表格、指标卡、图片墙、选项卡 / 折叠面板 / 步骤条 / 卡片块、以及整套表单控件（滑块 / 开关 / 单选 / 多选 / 下拉 / 标签选择 / 选项卡 / 输入框 / 文本域）。对齐 GPT-6 的 Intelligent UI：说一句话，拿到一个能拖、能点、能改参数并即时重算的仪表盘。
 
 - **交付形态**：模型输出 **guncat-ui lang**（参考 [open-intelligent-ui](https://github.com/thesysdev/openui) 的 OpenUI Lang 设计）——一种按行书写的声明式界面语言：`root = Card([...])` 是入口、参数按位置传递、可前向引用。**一轮回答就是这份程序本身**：提示词明确要求程序之外不写任何文字（不要开场白 / 过渡句 / 总结），要说的内容全部用 `CardHeader` / `TextContent` / `Callout` 等组件放进界面里；只有纯提问（"这是什么意思"）或确实给不出界面时才用文字回答。程序写进 ` ```guncat-ui ` 围栏也照样接受。
 - **结构先行、边生成边成形**：程序按行输出，客户端**边收边渲染**——第一行的 `root = Card([...])` 就让外壳出现，后面的语句一条条把内容补齐。因为每条语句独立，**输出被截断时只有最后一条没写完的语句会丢**，已写完的全部保留（这是相对"输出一大段 JSON"最根本的改进：JSON 一旦截断就整块作废）。
@@ -143,7 +143,7 @@ Guncat Work 支持完整丰富的客户端功能：聊天模式内置通用、�
 工作模式是**与聊天智能体平行的独立身份**（侧边栏「聊天模式」标题上方的「Agent模式」分组中的 🛠「工作模式」项），进入后进入一个具备本地沙箱工作区与工具调用能力的 Agent 循环，可自主完成多步骤长程任务。完整架构见下文「[工作模式架构与维护指南](#工作模式架构与维护指南)」。
 
 - **沙箱工作区**：每个工作会话对应 `filesDir/workspaces/<convId>/` 目录，支持上传文件、导出 `.zip` 打包、清空；全程应用沙箱内读写 + 系统安全组件选/存文件，无新增权限。
-- **42 个本地工具**：文件 CRUD（list/read/write/append/delete/create_dir/move/search，search_files 支持 glob 文件名过滤）、任务清单（todo_write）、图片查看（view_image，走主模型多模态）、网络下载（download_file，把链接文件拉进工作区）、PDF 解析（parse_document + read_file 自动路由）、Office 生成（write_docx / write_xlsx / write_csv）、数据管道（transform_file，大文件本地清洗/转换/互转，数据不经模型上下文）、PPT 读写编辑（write_pptx / read_ppt / edit_ppt，基于 Deck JSON 中间层）、Word 读写编辑（write_docx / read_docx / edit_docx，基于 Doc JSON 中间层）、Excel 读写编辑（write_xlsx / read_xlsx / edit_xlsx，基于 Workbook JSON 中间层）、SVG 生图（write_svg，矢量出图 + PNG 预览）、技能系统（list_skills / load_skill，按需加载领域操作指南）。6.1 新增（DeepSeek Harness 移植）：glob / grep（模式找文件与正则搜索）、edit / str_replace_editor（逐字符精确编辑 + diff 卡片）、web_fetch（抓取网页/接口原文）、ask_user_question（向用户提问并等待作答）、schedule_create/list/delete（会话内定时提醒）、goal_create/get/update（会话自主目标）、subagent（子代理委派）、session_search（会话事件日志检索）。**run_js（JSVM-API 沙箱）**：无 shell 环境下唯一的"执行代码"能力，详见下文"run_js：设备内 JS 执行沙箱"。
+- **45 个本地工具**：文件 CRUD（list/read/write/append/delete/create_dir/move/search，search_files 支持 glob 文件名过滤）、任务清单（todo_write）、图片查看（view_image，走主模型多模态）、网络下载（download_file，把链接文件拉进工作区）、PDF 解析（parse_document + read_file 自动路由）、Office 生成（write_docx / write_xlsx / write_csv）、数据管道（transform_file，大文件本地清洗/转换/互转，数据不经模型上下文）、PPT 读写编辑（write_pptx / read_ppt / edit_ppt，基于 Deck JSON 中间层）、Word 读写编辑（write_docx / read_docx / edit_docx，基于 Doc JSON 中间层）、Excel 读写编辑（write_xlsx / read_xlsx / edit_xlsx，基于 Workbook JSON 中间层）、SVG 生图（write_svg，矢量出图 + PNG 预览）、技能系统（list_skills / load_skill，按需加载领域操作指南）。6.1 新增（DeepSeek Harness 移植）：glob / grep（模式找文件与正则搜索）、edit / str_replace_editor（逐字符精确编辑 + diff 卡片）、web_fetch（抓取网页/接口原文）、ask_user_question（向用户提问并等待作答）、schedule_create/list/delete（会话内定时提醒）、goal_create/get/update（会话自主目标）、subagent（子代理委派）、session_search（会话事件日志检索）。**run_js（JSVM-API 沙箱）**：无 shell 环境下唯一的"执行代码"能力，详见下文"run_js：设备内 JS 执行沙箱"。
 - **技能系统**：领域操作指南打包在 `rawfile/skills/`（主 Skill 在顶层、分支 Skill 位于主 Skill 子目录；SKILL.md + reference/*.md），系统提示词技能库默认 full_index 并注入「技能使用铁律」（命中第一步必须 `load_skill`、不确定先 `list_skills`、技能正文优先），模型通过 `list_skills`/`load_skill` 渐进式加载。内置 `ppt` 技能（Deck JSON 语法、设计规范、内容纪律、主题、常见演示文稿蓝图、自检清单）、`docx` 技能（Doc JSON 语法、排版规范、文档形态选型、常见 Word 文档蓝图、专业文书规范）、`xlsx` 技能（Workbook JSON 语法、公式优先、数字格式规范、数据分析链路、常见报表蓝图、数据分析玩法）、`svg` 技能（SVG 绘制规范、"生成→预览→修正"工作流、可视化类型选择、信息图蓝图、图标/流程图/柱状图/时间轴配方）与 `data` 技能（transform_file 管道 ops 与表达式完整语法、数据质量检查、清洗/提取/互转配方、能力边界）。**当前共 32 个技能**：除上述 10 个核心技能（另含 `paper`/`law`/`research`/`sift`/`llm-eval`）外，新增 22 个从四大主流 AI 工作平台移植并适配的领域技能——`humanizer`（去 AI 味/可读性）、`prompt-engineering`（提示词工程）、`pdf`（PDF 读取/搜索/扫描件阅读）、`translation`（法律/医学翻译与术语一致性）、`questionnaire`（问卷/深访/原声打标/定量分析）、`content-rewrite`（多平台内容改写分发）、`html`（单页 HTML 开发）、`paper-reviewer`（学术论文审稿）、`review-agent`（代码评审）、`paper-rebuttal`（审稿意见 rebuttal 回复）、`research-lineage-map`（研究谱系演进图）、`marketing-plan`（营销策划方案）、`reference-audit`（参考文献审计）、`paper-close-reading`（论文精读）、`khazix-writer`（公众号长文写作）、`newmedia-writing`（小红书/公众号/短视频新媒体写作）、`marketing-material-review`（营销素材审核）、`patent-drafting`（专利申请文件撰写）、`sentiment-tracker`（舆情追踪与溯源）、`journal-format`（学术论文 DOCX 格式排版）、`research-proposal`（学术立项书/基金申请撰写）、`industry-analysis`（行业深度研究）。**结构重组（6.2.0）**：25 个内容/学术/法律/AI 类分支技能已物理归入 5 个主 Skill 子目录（`research-intelligence` 7 个 / `academic-publishing` 7 个 / `content-writing` 5 个 / `legal-ip` 4 个 / `ai-tooling` 2 个），7 个格式分支（`docx`/`xlsx`/`ppt`/`svg`/`html`/`pdf`/`data`）保持顶层直连；`list_skills` 只暴露 12 个可见技能，分支由主 Skill 路由后按原 id 加载（物理路径经 `WorkSkillService.skillPath()` 映射）。
 - **本地解析引擎**：`.docx/.xlsx/.pptx/.pdf` 全部在设备本地抽取文本，不依赖多模态解析 API、不消耗配额。
 - **任务清单纪律**：复杂任务先 `todo_write` 建清单，清单与工作区状态经「运行时上下文」快照注入对话尾部，逐项推进、完成后更新。
@@ -177,7 +177,7 @@ Guncat Work 支持完整丰富的客户端功能：聊天模式内置通用、�
 | 检索专家-研究  | 检索智能体 | 基于 Guncat Srch-Research：跨领域信息检索与多源交叉验证                     |
 | 检索专家-筛滤  | 检索智能体 | 基于 Guncat Srch-Sift：官方溯源与 AI 内容过滤                          |
 | 评估专家-LLM | 评估智能体 | 基于 Guncat Eval-LLM：最大减少幻觉地评估 LLM 模型的性能                     |
-| 工作模式（虚拟） | Agent 模式 | Guncat Harness：本地沙箱工作区 + 42 个工具 + 多轮 Agent Loop，自主完成长程任务并产出文件 |
+| 工作模式（虚拟） | Agent 模式 | Guncat Harness：本地沙箱工作区 + 45 个工具 + 多轮 Agent Loop，自主完成长程任务并产出文件 |
 | 交互模式（虚拟） | Agent 模式 | Intelligent UI：同一套 Agent Loop，但回答交付为可操作的原生界面（图表 / 表格 / 卡片 / 表单），调参即时重算、点按钮让助手重算 |
 
 ## 持久化与主题系统
@@ -432,7 +432,7 @@ for step in 1..WORK_MAX_STEPS(200, 防失控保险):
 
 每轮改动与验证记录在 `ITERATION_LOG.md`；当前待办见 `BACKLOG.md`；dsh 移植对照见 `PORT_NOTES.md`。
 
-### 3. 工具系统（42 个）
+### 3. 工具系统（45 个）
 
 分发链：`ChatViewModel` → `WorkToolRunner.execute()`（.ets 入口）→ Office 生成/parse_document/PPT/transform_file 就地实现，其余委托 `WorkFileService.executeTool()`（.ts），6.1 新增工具由 `HarnessTools.dispatch()`（.ts）兜底。
 
@@ -447,6 +447,7 @@ for step in 1..WORK_MAX_STEPS(200, 防失控保险):
 | `view_image`                                            | WorkFileService.toolViewImage                                               | 图片→dataUrl（≤8MB），由循环注入下一条多模态消息                                                                                                                                                                     |
 | `download_file`                                         | WorkToolRunner.toolDownloadFile                                             | http(s) 文件下载进工作区（≤20MB；类型嗅探 + html 告警；自动命名或指定 path）                                                                                                                                                |
 | `parse_document`                                        | WorkToolRunner.toolParseDocument                                            | PDF 完整文本（本地，3 倍输出上限）                                                                                                                                                                               |
+| `search_pdf` / `pdf_to_images`                          | WorkToolRunner.toolSearchPdf / toolPdfToImages                              | PDF 文字层关键词搜索（页码 + 摘录，≤50 处）；扫描件/纯图片 PDF 按页渲染成图片存入 `pdf_images/<文件名>/`，再交给 `view_image` 逐张查看                                                                                                  |
 | `write_docx`                                            | WorkToolRunner.toolWriteDocx → DocxBuilder.buildFromMarkdown/buildDocxBytes | **Doc JSON / doc 文件 / Markdown → Word**（详见下节；可带 title/style；图片走工作区/data URL/http，svg 自动栅格化）                                                                                                        |
 | `read_docx`                                             | WorkToolRunner.toolReadDocx → DocxImporter.import                           | .docx → Doc JSON 源（自家文件无损还原，外来近似导入；word/media 图片抽取到 docx_images/）                                                                                                                                  |
 | `edit_docx`                                             | WorkToolRunner.toolEditDocx → DocxImporter + DocOps + DocxBuilder           | 读回→应用操作（改标题/改样式/增删改移块/全文替换）→重建（外来文件先备份）                                                                                                                                                            |
@@ -465,6 +466,7 @@ for step in 1..WORK_MAX_STEPS(200, 防失控保险):
 | `edit`                                                  | HarnessTools.toolEdit → DiffUtil                                            | 逐字符唯一匹配替换（多处匹配拒绝，`replace_all` 全替）；结果附行级 diff hunks（meta 随会话持久化，UI 渲染 diff 卡片）                                                                                                                     |
 | `str_replace_editor`                                    | HarnessTools.toolEdit                                                       | view/create/str_replace/insert 四命令编辑器（view 复用 read_file 行分页；insert 在指定行后插入）                                                                                                                        |
 | `web_fetch`                                             | HarnessTools.toolWebFetch → WebFetchService                                 | GET ≤2MB 抓取网页/接口原文；HTML 剥离为可读文本（去 script/style/注释、块级标签转行、实体解码），JSON/文本原样返回（超长截断标注）                                                                                                                 |
+| `local_web_search` / `record_search`                    | WorkFileService.toolSearchWeb → LocalWebSearch / toolRecordSearch           | **本机兜底联网搜索**（手机直连搜索引擎；默认走服务端 `web_search`，仅服务端不可用/无结果/用户要求时调用，旧名 `search_web` 仍可分发）+ 把服务端搜索的结论登记进 `.searches.md` 以便追溯                                                                         |
 | `ask_user_question`                                     | HarnessTools.toolAskUser → AskUserBridge                                    | 暂停执行等待用户作答；UI 问题卡片（单选/多选 + 文字补充，统一由「提交」发送）；5 分钟未答按取消收场，循环中断即全部落定                                                                                                                                   |
 | `schedule_create` / `schedule_list` / `schedule_delete` | HarnessTools → ScheduleService                                              | 会话内定时提醒（`.schedule.json` 持久化；一次性 `after_seconds` 或循环 `every_seconds`≥300 秒）；到期注入用户消息自动唤醒，任务执行中走插话通道                                                                                                |
 | `goal_create` / `goal_get` / `goal_update`              | HarnessTools → GoalService                                                  | 会话自主目标（`.goal.json`），随运行时快照注入；`bump_round` 计轮，达轮次上限自动暂停                                                                                                                                            |
@@ -847,7 +849,7 @@ ChatViewModel.executeWorkLoop(conv)
 **「丰富度」一节（`GuncatUiPrompt.RICHNESS`，约 3.3k 字符）是引导模型产出复杂界面的主要抓手**：只写"一段文字 + 一张表格"在语法上完全合法、但在体验上等于退回普通聊天，而这是模型最容易偷懒的地方，所以单独成段并给了强对照。它包含四块：
 
 1. **组件选择优先级表**：每行「要表达的内容 → 优先用 → 不要退化成」。例如关键数字与同比用 `OverviewCardBlock` + `MetricIndicatorInline` 而不是写进句子；构成用 `PieChart`/`SingleStackedBarChart`、趋势用 `LineChart`/`AreaChart`、排名用 `HorizontalBarChart`、达成率用 `RadialChart`、多维对比用 `BarChart`/`RadarChart`，表格只用于"需要逐行精确核对"的场合且必须有看得懂的上层。
-2. **分层配方**：抬头（`CardHeader`）→ 结论（指标卡/`Callout`）→ 可视化（图表/图片墙/`Steps`/`TagBlock`）→ 明细（`Table`/`EntityList`/`ListBlock`）→ 操作（`Form`/`OptionCards`/`Buttons`/`FollowUpBlock`），**典型 8~14 个组件是常态**。
+2. **分层配方**：抬头（`CardHeader`）→ 结论（指标卡/`Callout`）→ 可视化（图表/图片墙/`Steps`/`TagBlock`）→ 明细（`Table`/`EntityList`/`ListBlock`）→ 操作（`Form`/`OptionCards`/`Buttons`），**典型 8~14 个组件是常态**。
 3. **防堆砌**：同一份数据不要原样说三遍——指标卡给总量与同比、图表给趋势与分布、表格给逐行明细，三者必须互补（这一条是为了避免"为了丰富而重复"走向另一个极端）。
 4. **同一份数据的「不合格 vs 合格」对照**：❌ 只有 `TextContent` + `Table`；✅ 抬头/指标卡/折线/环形/明细表/表单分层组织。
 
@@ -996,7 +998,7 @@ B. 回传助手（发一条消息, 触发新一轮回答）
 | --- | --- |
 | 新增组件 | `common/GuncatUiLibrary.ts` 的 `definitions()` 加一条（名字/分组/描述/位置参数表）→ `views/GuncatUiView.ets` 的 `renderNode()` 加一个分发分支 + 对应 `@Builder`。**提示词会自动跟着变**（组件清单由这张表生成） |
 | 调整语言语法 | `common/GuncatUiLang.ts`（`UiLexer` 词法 / `UiParser` 语法 / `GuncatUiMaterializer` 求值）+ `GuncatUiPrompt.SYNTAX`（给模型的语法说明），两者必须同步 |
-| 调整界面文案 / 引导语 | `GuncatUiPrompt` 的 `SYNTAX` / `RICHNESS`（丰富度与组件选择优先级）/ `INTERACTION` / `STREAMING` / `EXAMPLES` / `ANTI_PATTERNS` / `INTERACTIVE_DUTY` |NTERACTIVE_DUTY` |
+| 调整界面文案 / 引导语 | `GuncatUiPrompt` 的 `SYNTAX` / `RICHNESS`（丰富度与组件选择优先级）/ `INTERACTION` / `STREAMING` / `EXAMPLES` / `ANTI_PATTERNS` / `INTERACTIVE_DUTY` |
 | 新增图表 | `common/GuncatUiPaint.ts`（纯几何，可单测）+ `views/GuncatUiCharts.ets`（声明式 Shape/Path 或 Row/Column）→ 在 `GuncatUiLibrary` 登记并在 `GuncatUiView.buildChart()` 分发 |
 | 新增控件 | `GuncatUiLibrary` 登记 + `views/GuncatUiView.ets` 的 `isControl()` / `buildControl()`；绑定参数用 `bind()` 登记（解析器会记录变量名，渲染器据此读写状态） |
 | 新增图标 | `views/GuncatUiIcons.ets` 的 `glyph()` 映射表（**用 Unicode 字形而不是 SymbolGlyph**：SymbolGlyph 的名字在不同 ROM 上可用集合不一致，缺失时渲染成空白且静默失败）。唯一的例外是折叠箭头 `GuncatUiChevron`：`⌃`/`⌄` 这类字符在不同字体下大小与基线差异极大，真机上是"右下角一个小小的尖、又没对齐"，所以那里特意改用 `sys.symbol.chevron_up/down` |
@@ -1004,7 +1006,7 @@ B. 回传助手（发一条消息, 触发新一轮回答）
 | 模式常量 | `Constants.INTERACTIVE_AGENT_ID` / `MODE_*` / `UI_BLOCK_LANG` / `UI_CONTINUE_MESSAGE` / `UI_CONTINUE_MAX_ROUNDS` |
 
 > **回归护栏（三层，缺一不可）**
-> 1. 纯逻辑单测：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`（430 项，含 guncat-ui lang 的词法/语法/前向引用/流式补齐/绑定重算/`@Each`/内置函数/`Action`/片段切分/状态序列化/图表几何/组件库与提示词）。
+> 1. 纯逻辑单测：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`（479 项，含 guncat-ui lang 的词法/语法/前向引用/流式补齐/绑定重算/`@Each`/内置函数/`Action`/片段切分/状态序列化/图表几何/组件库与提示词）。
 > 2. 服务层类型检查：`node check-setup.mjs && npx tsc -p check/tsconfig.json`。
 > 3. **真实 ArkTS 编译**：`powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`（调用 DevEco 自带的 hvigor）。
 > 第 3 层不能省：ArkUI 有一批**只有编译器才知道**的规则——`@Builder` 方法体内不允许声明局部变量、自定义组件属性名不能与内置属性同名（`size` / `scale`）、`@Prop` 的 null 需要显式联合类型。这些在 node 侧 harness 里全都测不出来（harness 只覆盖 `common/**` 与 `service/**` 的纯 TS，不解析 `.ets`）。
@@ -1098,15 +1100,15 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 
 1. 侧边栏「Agent模式」分组点击 ✦「交互模式」进入（就在「工作模式」下方）。
 2. 顶部的模型胶囊可切换模型，并在「能力预设」里选择**思考强度**：均衡(High) / 快速(Low) / 关闭(Off)。交互模式没有 极高(Max)（交付物是界面，长思考收益低），选择「关闭」可让回答更快；该档位与工作模式的档位各自保存、互不影响。
-2. 像平时一样提问即可，例如「帮我算一下 30 万房贷在不同利率下的月供」「对比这三个方案的收益并让我调参数」「把这段数据做成能筛选的表格」。
-3. Agent 不做长篇文字回答，而是**输出一份界面程序**，应用把它渲染成原生界面：标题/正文、图表（柱状 / 折线 / 面积 / 横向条 / 饼环 / 径向 / 雷达 / 堆叠条）、表格、指标卡、图片墙、选项卡 / 折叠面板 / 步骤条、以及整套表单控件。
-4. **本地交互即时生效**：拖动滑块、切换开关、点选项、填输入框——表达式里的 `$变量` 会立刻用新值重算，界面（含图表与数值文案）随之刷新，**不发请求、不等模型**。
-5. **需要重算时点按钮**：形如「换口径重算」的按钮会把你的设置 + 诉求打包成一条消息回传，Agent 立即产出**更新后的完整界面**；表单提交会把全部字段值一起带上。
-6. 界面在生成过程中**渐进成形**（第一行的 `root = Card([...])` 就让外壳出现，后面的语句逐条补齐），未写完时控件置灰；输出被截断时已写完的部分照常渲染，底部标注「界面未写完」。
-7. 只有最新一条界面可交互（历史界面自动置灰归档），避免改到旧参数上；你调过的参数会随消息保存，滚动、切会话、重启后仍在，并在下一轮告诉模型。
-8. 需要材料时和工作模式一样：通过胶囊的「交互界面」面板上传文件（进入沙箱工作区），Agent 可以用同一套 42 个工具读取、计算、再画进界面。
-9. 需要正式文件（Word / Excel / PPT）时直接说，Agent 会照常落盘产出——交互模式并不取消文件能力。
-10. 想排查模型到底写了什么：界面底部「查看原始输出」可展开源码；有解析诊断时会显示「诊断 · N 条」。
+3. 像平时一样提问即可，例如「帮我算一下 30 万房贷在不同利率下的月供」「对比这三个方案的收益并让我调参数」「把这段数据做成能筛选的表格」。
+4. Agent 不做长篇文字回答，而是**输出一份界面程序**，应用把它渲染成原生界面：标题/正文、图表（柱状 / 折线 / 面积 / 横向条 / 饼环 / 径向 / 雷达 / 堆叠条）、表格、指标卡、图片墙、选项卡 / 折叠面板 / 步骤条、以及整套表单控件。
+5. **本地交互即时生效**：拖动滑块、切换开关、点选项、填输入框——表达式里的 `$变量` 会立刻用新值重算，界面（含图表与数值文案）随之刷新，**不发请求、不等模型**。
+6. **需要重算时点按钮**：形如「换口径重算」的按钮会把你的设置 + 诉求打包成一条消息回传，Agent 立即产出**更新后的完整界面**；表单提交会把全部字段值一起带上。
+7. 界面在生成过程中**渐进成形**（第一行的 `root = Card([...])` 就让外壳出现，后面的语句逐条补齐），未写完时控件置灰；输出被截断时已写完的部分照常渲染，底部标注「界面未写完」。
+8. 只有最新一条界面可交互（历史界面自动置灰归档），避免改到旧参数上；你调过的参数会随消息保存，滚动、切会话、重启后仍在，并在下一轮告诉模型。
+9. 需要材料时和工作模式一样：通过胶囊的「交互界面」面板上传文件（进入沙箱工作区），Agent 可以用同一套 45 个工具读取、计算、再画进界面。
+10. 需要正式文件（Word / Excel / PPT）时直接说，Agent 会照常落盘产出——交互模式并不取消文件能力。
+11. 想排查模型到底写了什么：界面底部「查看原始输出」可展开源码；有解析诊断时会显示「诊断 · N 条」。
 
 ### 朗读
 
@@ -1200,7 +1202,7 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 
 ### 初版：JSON DSL（交互模式上线）
 
-- 新增 **Agent 模式第三项：交互模式（Intelligent UI）**，与「工作模式」平行展示在侧边栏的「Agent模式」分组中。它共用同一套 Agent Loop、沙箱工作区与 42 个工具，但**回答不是纯文本，而是可交互的界面**：指标卡、进度条、表格、横向柱状图 / 折线图 / 环形占比，以及滑块 / 开关 / 下拉 / 输入框与选项按钮。
+- 新增 **Agent 模式第三项：交互模式（Intelligent UI）**，与「工作模式」平行展示在侧边栏的「Agent模式」分组中。它共用同一套 Agent Loop、沙箱工作区与 45 个工具，但**回答不是纯文本，而是可交互的界面**：指标卡、进度条、表格、横向柱状图 / 折线图 / 环形占比，以及滑块 / 开关 / 下拉 / 输入框与选项按钮。
 - **交互闭环**：在界面上拖动参数、切换开关、选择选项后点「提交」，全部取值会打包成一条消息回传，模型随即**重算并重出更新后的界面**——界面成为可反复操作的仪表盘，而不是一张死图；也支持点选项即回传（无需提交）。
 - **原生渲染、零额外依赖**：` ```guncat-ui ` 围栏里的严格 JSON 由 `GuncatUiSpec` 解析、`GuncatUiView` 渲染为原生 ArkUI 组件；折线图与环形占比用 Shape + Path 现场绘制，不引入图表库、不产生图片文件。
 - **流式成形与容错**：界面在生成过程中就按已解析出的部分渐进渲染（未完成时显示「生成中…」并禁用交互）；JSON 非法或块未闭合时**原文照旧交给 Markdown 渲染**，绝不出现内容消失；未知元素类型丢弃降级，元素/行列/柱条数量均有上限，畸形输出不会撑爆界面。
@@ -1386,7 +1388,7 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 
 - **界面在写的过程中就成形**：第一行 `root = Card([...])` 先渲染外壳，后面的语句逐条补齐，所以"看起来还没出来"通常只是刚开始写。
 - **显示「界面未写完，以上为已生成的部分」**：模型输出被截断或中断，**已写完的语句全部照常渲染**（这是按行语句相对单块 JSON 的核心优势）。多数情况不用你处理——若模型压根没产出可用界面，应用会自动单独请求一次（会话里会出现「（界面已重新生成）」）。仍不完整时回一句「继续」或「重新生成一版更简短的界面」；反复被截断说明单次输出太长，可以让它少放几个组件、或分两轮给。
-- **界面是空的（只有「这段界面未能渲染成可交互组件」）**：点开底部的「查看原始输出」看模型到底写了什么；若有「诊断 · N 条」面板，点开能看到具体原因，最常见的是**用了组件清单以外的组件名**（未知组件会被丢弃，避免渲染成莫名空卡片）。
+- **界面是空的（只有「这段界面没能渲染成可交互组件，可以让我重新生成一次。」）**：点开底部的「查看原始输出」看模型到底写了什么；若有「诊断 · N 条」面板，点开能看到具体原因，最常见的是**用了组件清单以外的组件名**（未知组件会被丢弃，避免渲染成莫名空卡片）。
 - **常见的写法错误**（会出现在诊断里）：忘了第一行 `root = Card([...])`；参数写成键值 `CardHeader(title: "x")`（必须是位置参数）；定义了变量却忘了放进 `root` 的子项数组（未引用的语句不会渲染）；组件名不在清单里。
 - **控件点了没反应**：只有**最新一条**界面可交互（历史界面自动置灰归档），且界面没写完时控件也是灰的；此外「回传模型」的动作只在交互模式下生效（聊天模式里出现的界面只能本地调参）。
 - **参数调了但数字没变**：只有绑定了 `$变量` 的控件才会实时重算（`Slider(..., $amount)`），且表达式里要真的引用它（`"金额 " + $amount`）。让模型"把这个数值也做成可调的"即可。
