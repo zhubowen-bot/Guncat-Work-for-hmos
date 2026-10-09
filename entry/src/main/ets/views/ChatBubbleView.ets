@@ -253,6 +253,14 @@ export struct ChatBubbleView {
   private uiSettleTimer: number = -1;
   private uiBuildFinalized: boolean = false;
   private lastUiSeen: string = '';
+  // 诊断仪表: 实例号(重建计数) + 内容修订号(收到更新的次数) + 已挂载秒数
+  private static uiInstanceSeq: number = 0;
+  private uiRenderId: number = 0;
+  @State private uiContentRev: number = 0;
+  @State private uiMountedSec: number = 0;
+  private uiMountTick: number = -1;
+  // 界面片段渲染 key 版本: 变化即让 ForEach key 变化 → 强制重建子组件(绕开失效的观察链)
+  @State private uiRenderKey: number = 0;
   // 思考跑马灯: 流式中在思考条右侧空白区滚动呈现最新思考内容(对齐工作模式 WorkTurnView)
   private marqueeScroller: Scroller = new Scroller();
 
@@ -289,6 +297,8 @@ export struct ChatBubbleView {
       next.push(parts.segments[i]);
     }
     this.uiSegs = next;
+    this.uiContentRev++;
+    this.uiRenderKey++;
   }
 
   // 按"已结束"语义重建一次界面片段
@@ -302,6 +312,8 @@ export struct ChatBubbleView {
       next.push(parts.segments[i]);
     }
     this.uiSegs = next;
+    this.uiContentRev++;
+    this.uiRenderKey++;
   }
 
   // 收尾自愈: 正文稳定后自己按"已结束"重建一次, 不依赖 @Watch/父组件通知(真机上不可靠,
@@ -354,6 +366,15 @@ export struct ChatBubbleView {
   aboutToAppear(): void {
     this.visibleText = this.message.content;
     this.visibleReasoning = this.message.reasoning;
+    ChatBubbleView.uiInstanceSeq++;
+    this.uiRenderId = ChatBubbleView.uiInstanceSeq;
+    this.uiContentRev = 0;
+    this.uiMountedSec = 0;
+    if (this.uiMountTick === -1) {
+      this.uiMountTick = setInterval((): void => {
+        this.uiMountedSec++;
+      }, 1000);
+    }
     this.refreshUiParts();
     this.startUiSettleTimer();
     if (this.isStreaming && this.flushTimer === -1) {
@@ -392,6 +413,10 @@ export struct ChatBubbleView {
     if (this.flushTimer !== -1) {
       clearInterval(this.flushTimer);
       this.flushTimer = -1;
+    }
+    if (this.uiMountTick !== -1) {
+      clearInterval(this.uiMountTick);
+      this.uiMountTick = -1;
     }
     this.stopUiSettleTimer();
   }
@@ -534,6 +559,10 @@ export struct ChatBubbleView {
               truncated: seg.truncated,
               locked: this.uiLocked,
               rawFallback: seg.raw,
+              renderId: this.uiRenderId,
+              contentRev: this.uiContentRev,
+              mountedSec: this.uiMountedSec,
+              seenLen: this.message.content.length,
               onInteract: (payload: GuncatUiPayload): void => {
                 this.onUiInteract(this.message.id, payload);
               }
@@ -561,7 +590,8 @@ export struct ChatBubbleView {
         } else if (seg.text.trim() !== '') {
           RichTextView({ content: seg.text })
         }
-      }, (seg: GuncatUiSeg, index: number) => 'seg' + index + '_' + (seg.type === GuncatUiSegType.UI ? 'ui' : 'tx'))
+      }, (seg: GuncatUiSeg, index: number) => 'seg' + index + '_' +
+        (seg.type === GuncatUiSegType.UI ? 'ui' : 'tx') + '_k' + this.uiRenderKey.toString())
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)

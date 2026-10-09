@@ -32,6 +32,14 @@ export struct GuncatUiView {
   @Prop locked: boolean = false;
   // 解析失败时块内原文: 非空则卡片展示「原始输出」而不是空盒子(spec 为 null 或解析不出元素时)
   @Prop rawFallback: string = '';
+  // ===== 诊断仪表(排查"卡片不刷新"用): 组件实例号 + 内容修订号 + 已挂载秒数 =====
+  // 实例号变化 = 组件被重建; 内容修订号变化 = 同一实例收到了新内容。
+  // 两者都不动而屏幕不变 → 该组件没有收到任何更新(观察链路问题)。
+  @Prop renderId: number = 0;
+  @Prop contentRev: number = 0;
+  @Prop mountedSec: number = 0;
+  // 父组件构建本卡片时看到的正文长度(诊断用: 若与卡片原文长度不一致, 说明渲染落在旧数据上)
+  @Prop seenLen: number = 0;
   // 交互回传(父组件转成 user 消息交给 Agent Loop)
   private onInteract: (payload: GuncatUiPayload) => void = (_payload: GuncatUiPayload): void => {};
 
@@ -410,9 +418,15 @@ export struct GuncatUiView {
           this.showRaw = !this.showRaw;
         })
       }
-      // 构建指纹: 用于确认设备上跑的是哪一版交互界面渲染器(排查问题时按此对齐)
-      Row() {
-        Text('交互界面 v5 · 收尾自愈')
+      // 构建指纹 + 诊断仪表: 用于确认设备上跑的是哪一版, 以及判断"是否收到更新"
+      Row({ space: 8 }) {
+        Text('v6')
+          .fontSize(9)
+          .fontColor($r('app.color.text_quaternary'))
+        Text('#' + this.renderId.toString() + ' r' + this.contentRev.toString() +
+          ' ' + this.mountedSec.toString() + 's' +
+          ' 源' + this.seenLen.toString() + ' 原文' + this.rawFallback.trim().length.toString() +
+          (this.complete ? ' 闭环' : (this.truncated ? ' 未完成' : ' 生成中')))
           .fontSize(9)
           .fontColor($r('app.color.text_quaternary'))
       }
