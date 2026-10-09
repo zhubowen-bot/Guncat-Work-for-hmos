@@ -43,7 +43,16 @@ import { StorageManager } from '../data/StorageManager';
 import { Constants } from '../common/Constants';
 import { generateMessageId } from '../common/Utils';
 import { arrayBufferToBase64 } from '../common/Utils';
-import { GuncatUiPayload, GuncatUiMessageBuilder, GuncatUiBlocks, GuncatUiSpec, GuncatUiSpecWriter } from '../common/GuncatUiSpec';
+import {
+  GuncatUiParts
+} from '../common/GuncatUiParts';
+import {
+  GuncatUiEvent,
+  GuncatUiRuntime,
+  GuncatUiSplit,
+  GuncatUiTrailer
+} from '../common/GuncatUiRuntime';
+import { GuncatUiLang, UiProgram } from '../common/GuncatUiLang';
 import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { common, Want, wantConstant } from '@kit.AbilityKit';
@@ -202,18 +211,19 @@ export class ChatViewModel {
 
   get loopModeHint(): string {
     if (this.interactiveMode) {
-      return this.isStreaming ? '正在生成交互界面…' : 'Intelligent UI 就绪, 说出你的问题或上传数据';
+      return this.isStreaming ? '正在生成界面…' : 'Intelligent UI 就绪 · 问它问题，或让它在工作区里算给你看';
     }
     return this.isStreaming ? '任务执行中...' : 'Agent 就绪, 描述任务或上传文件';
   }
 
   get loopInputPlaceholder(): string {
-    return this.interactiveMode ? '描述你想看到/操作的界面…' : '描述任务...';
+    return this.interactiveMode ? '描述你想要的界面或问题…' : '描述任务...';
   }
 
   get loopEmptyDescription(): string {
     if (this.interactiveMode) {
-      return 'Intelligent UI：回答不是一段文字，而是可以拖参数、点选项、看图表更新的交互界面——调一下，它重算给你看。';
+      return 'Intelligent UI：回答不再是"一段文字"，而是一个能操作的原生界面——图表、表格、卡片、表单都在其中。' +
+        '拖动滑块/点选选项会立刻重算；需要换数据或换算法时点按钮，助手会重新给一份更新后的界面。';
     }
     return 'Guncat Harness：自主调度数十种工具，直接读写工作区文件，单次任务可连续运行上百轮会话，独立完成编程级复杂度的长程任务。';
   }
@@ -578,7 +588,8 @@ export class ChatViewModel {
   // 交互模式虚拟智能体(Intelligent UI): 与工作模式共用 Agent Loop, 但回答交付为可交互界面
   private buildInteractiveAgent(): Agent {
     let agent: Agent = Agent.of(Constants.INTERACTIVE_AGENT_ID, '交互模式',
-      'Intelligent UI 交互台: 回答不是纯文本, 而是图表 / 表单 / 表格等可操作界面, 调参即重算', '系统', '', '');
+      'Intelligent UI 交互台: 每一轮回答都交付成一个原生可操作界面——图表 / 表格 / 卡片 / 表单, ' +
+      '拖动参数即时重算, 需要换算法时点按钮让助手重新生成', '系统', '', '');
     agent.shortDescription = 'Intelligent UI「新」';
     agent.icon = '';
     return agent;
@@ -1289,11 +1300,9 @@ export class ChatViewModel {
     });
   }
 
-  // 交互模式: 最后一条 assistant 消息里的界面是否需要"用 JSON 模式重做"。
-  // 两种情形都算:
-  //   a) 块未闭合(输出被截断);
-  //   b) 块已闭合但内容残缺(例如只写了 {"version": 1 就闭合了围栏) —— 真机上出现过,
-  //      此时卡片"有块没内容", 必须同样触发重做。
+  // 交互模式: 最后一条 assistant 消息里的界面是否需要重做一次。
+  // guncat-ui lang 是按行语句, 截断本身不会让整块作废(已写完的语句照样渲染),
+  // 所以这里只在"**完全没有可渲染的界面**"时才补救 —— 也就是模型根本没写出可用程序。
   private needsUiContinuation(conv: Conversation): boolean {
     if (conv.mode !== Constants.MODE_INTERACTIVE) {
       return false;
@@ -1303,26 +1312,55 @@ export class ChatViewModel {
       if (m.role !== 'assistant') {
         continue;
       }
-      if (m.content.indexOf('```' + Constants.UI_BLOCK_LANG) < 0) {
-        return false;
-      }
-      if (GuncatUiBlocks.lastPartial(m.content) !== '') {
-        return true;
-      }
-      return GuncatUiBlocks.isDegenerate(m.content, 1);
+      return GuncatUiParts.needsRepair(m.content);
     }
     return false;
   }
 
-  // ===== 交互模式 (Intelligent UI): 界面回传 =====  // 用户在交互界面上的操作(表单提交 / 选项点击)转化为一条 user 消息:
-  // - 循环空闲: 立即触发下一轮 Agent Loop(模型据新参数重出界面, 形成闭环);
-  // - 循环进行中: 走插话通道, 由主循环在本轮工具执行结束后注入(对齐 steer 语义)。
-  sendUiInteraction(messageId: string, payload: GuncatUiPayload): void {
+  // 交互模式: 把消息里携带的界面绑定值翻译成一句模型能读懂的话。
+  // 对齐参考项目把 `]]>openui:context` 改写成 "(User's edits to this route: …)" 的做法:
+  // 状态尾标记本身对模型是噪音, 必须换成自然语言; 界面程序源码保持原样。
+  private assistantLoopContent(m: Message): string {
+    if (m.content === '') {
+      return m.content;
+    }
+    let split: GuncatUiSplit = GuncatUiTrailer.split(m.content);
+    let body: string = split.body.trim();
+    if (!split.hasState) {
+      return body;
+    }
+    // 有状态时才解析程序(为了拿到"金额"这类用户可见标签)
+    let program: UiProgram | null = null;
+    if (GuncatUiParts.hasProgram(body)) {
+      program = GuncatUiLang.parse(body);
+    }
+    let sentence: string = GuncatUiRuntime.describeStateForModel(program, split.stateJson);
+    if (sentence === '') {
+      return body;
+    }
+    return body + '\n\n' + sentence;
+  }
+
+  // ===== 交互模式 (Intelligent UI): 界面回传 =====
+  // 用户在交互界面上的操作有两种语义:
+  //   kind='action' —— 需要模型重新计算(例如"按新口径重算"), 转成一条 user 消息走 Agent Loop;
+  //   kind='state'  —— 只是本地调参(拖动滑块/勾选项), 只更新随消息持久化的绑定值, 不发请求。
+  // 历史界面块视为已归档: 只允许操作最后一条 assistant 消息上的界面。
+  sendUiInteraction(messageId: string, ev: GuncatUiEvent): void {
     let conv: Conversation | null = this.currentConversation;
-    if (conv === null || conv.mode !== Constants.MODE_INTERACTIVE) {
+    if (conv === null) {
       return;
     }
-    // 只允许与最后一条 assistant 消息上的界面交互(历史界面块视为已归档)
+    // 本地调参(拖动/勾选)在任何模式下都允许: 它只改随消息保存的绑定值, 不发请求
+    if (ev.kind === 'state') {
+      this.persistUiState(conv, messageId, ev.stateJson);
+      return;
+    }
+    // 需要模型重算的动作只在交互模式下有意义(其他模式没有对应的提示词与回传链路)
+    if (conv.mode !== Constants.MODE_INTERACTIVE) {
+      promptAction.showToast({ message: '该界面交互需在「交互模式」下使用', duration: 2000 });
+      return;
+    }
     let lastAssistantId: string = '';
     for (let i: number = conv.messages.length - 1; i >= 0; i--) {
       if (conv.messages[i].role === 'assistant') {
@@ -1334,8 +1372,10 @@ export class ChatViewModel {
       promptAction.showToast({ message: '该界面已归档，请在最新界面中操作', duration: 2000 });
       return;
     }
-    let text: string = GuncatUiMessageBuilder.toUserText(payload);
-    if (text.trim() === '') {
+    // 先把最新绑定值写回消息, 再追加用户消息 —— 模型看到的是"设置 + 诉求"
+    this.persistUiState(conv, messageId, ev.stateJson);
+    let text: string = ev.message.trim();
+    if (text === '') {
       return;
     }
     let userMsg: Message = Message.ofUser(generateMessageId(), text, text, []);
@@ -1349,7 +1389,25 @@ export class ChatViewModel {
     this.executeWorkLoop(conv);
   }
 
-  // 当前是否有可交互的界面(最后一条 assistant 消息含 guncat-ui 块), 供 UI 判定置灰
+  // 绑定值随消息持久化(尾标记): 滚动/切会话/重启后用户填过的参数仍在
+  private persistUiState(conv: Conversation, messageId: string, stateJson: string): void {
+    for (let i: number = conv.messages.length - 1; i >= 0; i--) {
+      let m: Message = conv.messages[i];
+      if (m.id !== messageId || m.role !== 'assistant') {
+        continue;
+      }
+      let next: string = GuncatUiTrailer.append(m.content, stateJson);
+      if (next === m.content) {
+        return;
+      }
+      m.content = next;
+      this.persistConversations();
+      this.notifyUIChange();
+      return;
+    }
+  }
+
+  // 当前是否有可交互的界面(最后一条 assistant 消息含界面程序), 供 UI 判定置灰
   get pendingUiMessageId(): string {
     let conv: Conversation | null = this.currentConversation;
     if (conv === null || conv.mode !== Constants.MODE_INTERACTIVE) {
@@ -1358,7 +1416,7 @@ export class ChatViewModel {
     for (let i: number = conv.messages.length - 1; i >= 0; i--) {
       let m: Message = conv.messages[i];
       if (m.role === 'assistant') {
-        return m.content.indexOf('```' + Constants.UI_BLOCK_LANG) >= 0 ? m.id : '';
+        return GuncatUiParts.hasProgram(m.content) ? m.id : '';
       }
     }
     return '';
@@ -1624,7 +1682,8 @@ export class ChatViewModel {
               }
             }
           }
-          messages.push(LoopMessage.assistant(m.content, calls));
+          // 交互模式的界面程序里携带的绑定值要用自然语言告诉模型(尾标记本身对模型是噪音)
+          messages.push(LoopMessage.assistant(this.assistantLoopContent(m), calls));
         }
       }
 
@@ -1777,7 +1836,7 @@ export class ChatViewModel {
           if (LoopDecisions.shouldBreakOnMaxTokens(turn.finishReason)) {
             metrics.recordMaxTokens();
             let tailNote: string = this.needsUiContinuation(conv) ?
-              ' 本轮输出达到模型上限(max tokens), 界面块未写完, 正在自动续写…' :
+              ' 本轮输出达到模型上限(max tokens), 界面还没成形, 正在自动重新生成…' :
               ' 本轮输出达到模型上限(max tokens), 已自动收尾。发送"继续"接着输出。';
             this.appendTurnNote(turnMsg, tailNote);
             turnEndStatus = 'max_tokens';
@@ -2097,7 +2156,8 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
               }
             }
           }
-          messages.push(LoopMessage.assistant(m.content, calls));
+          // 交互模式的界面程序里携带的绑定值要用自然语言告诉模型(尾标记本身对模型是噪音)
+          messages.push(LoopMessage.assistant(this.assistantLoopContent(m), calls));
         }
       }
 
@@ -2143,22 +2203,23 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
         if (this.context !== null) {
           SessionLogService.append(this.context, conv.id, 'ui_continue', { 'round': continueRounds });
         }
-        // 首选: 用 JSON Output 模式单独请求一份界面 JSON(response_format=json_object +
-        // 充足 max_tokens), 从根本上绕开"聊天输出里写长 JSON 被截断"的问题。
-        let spec: GuncatUiSpec | null = null;
+        // 首选: 单独请求一份界面程序(不带工具、低推理档), 从根本上绕开
+        // "聊天输出里写长程序被截断/模型忘了写 root"的问题。
+        let programText: string = '';
         try {
-          spec = await AgentLoopService.generateUiSpec(this.apiConfig, messages, this.abortSignal);
+          programText = await AgentLoopService.generateUiProgram(
+            this.apiConfig, messages, this.abortSignal);
         } catch (e) {
-          spec = null;
+          programText = '';
         }
         if (this.abortSignal.aborted) {
           break;
         }
         let uiMsgId: string = generateMessageId();
-        if (spec !== null) {
-          let blockText: string = GuncatUiSpecWriter.toBlock(spec);
+        if (programText !== '') {
+          let blockText: string = '```' + GuncatUiLang.FENCE_LANG + '\n' + programText + '\n```';
           let uiMsg: Message = Message.ofAssistant(uiMsgId, blockText);
-          uiMsg.displayContent = '（界面已由 JSON 输出模式生成）';
+          uiMsg.displayContent = '（界面已重新生成）';
           conv.messages.push(uiMsg);
           this.persistConversations();
           this.notifyUIChange();
@@ -2166,7 +2227,7 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
           messages.push(LoopMessage.assistant(blockText, []));
           break;
         }
-        // 兜底: JSON 模式失败, 退回"文本续写"路径(让模型接着把界面块写完)
+        // 兜底: 单独生成也失败, 退回"文本续写"路径(让模型接着把界面写完)
         let continueText: string = Constants.UI_CONTINUE_MESSAGE;
         let continueMsg: Message = Message.ofUser(uiMsgId, continueText,
           '（界面输出被截断，已自动续写）', []);
@@ -2408,7 +2469,7 @@ if (this.abortSignal.aborted) {
           if (LoopDecisions.shouldBreakOnMaxTokens(turn.finishReason)) {
             metrics.recordMaxTokens();
             let tailNote: string = this.needsUiContinuation(conv) ?
-              ' 本轮输出达到模型上限(max tokens), 界面块未写完, 正在自动续写…' :
+              ' 本轮输出达到模型上限(max tokens), 界面还没成形, 正在自动重新生成…' :
               ' 本轮输出达到模型上限(max tokens), 已自动收尾。发送"继续"接着输出。';
             this.appendTurnNote(turnMsg, tailNote);
             state.turnEndStatus = 'max_tokens';
@@ -3230,8 +3291,8 @@ if (this.abortSignal.aborted) {
     let regenUserMsg: Message = Message.ofUser(generateMessageId(), regenContent, regenDisplay, regenAttachments);
     conv.messages.push(regenUserMsg);
 
-    // 工作模式: 重新执行任务循环(重走 Agent Loop)
-    if (conv.mode === 'work') {
+    // 工作/交互模式: 重新执行任务循环(重走 Agent Loop)
+    if (conv.mode === Constants.MODE_WORK || conv.mode === Constants.MODE_INTERACTIVE) {
       this.persistConversations();
       await this.executeWorkLoop(conv);
       return;
@@ -3352,7 +3413,11 @@ if (this.abortSignal.aborted) {
 }
 
 function stripMarkdown(md: string): string {
-  let text: string = md;
+  // 先抽掉界面程序(否则整份程序源码会被当成"正文"复制出去)
+  let text: string = GuncatUiParts.plainSummary(md);
+  if (text.trim() === '') {
+    text = md;
+  }
   text = text.replace(/```[\s\S]*?```/g, '');
   text = text.replace(/`([^`]+)`/g, '$1');
   text = text.replace(/!\[[^\]]*\]\([^)]*\)/g, '');

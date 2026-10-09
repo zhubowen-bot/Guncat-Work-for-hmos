@@ -35,12 +35,20 @@ import { ToolCallRecord } from './gen/ToolCallRecord.ts';
 import { AbortSignal } from './gen/Types.ts';
 import { SubagentIsolation } from './gen/SubagentIsolation.ts';
 import {
-  GuncatUiBlocks,
-  GuncatUiPayload,
-  GuncatUiMessageBuilder,
-  GuncatUiSpecWriter
-} from './gen/GuncatUiSpec.ts';
+  GuncatUiLang,
+  UiNode,
+  GuncatUiFences,
+  GuncatUiMaterializer
+} from './gen/GuncatUiLang.ts';
+import { GuncatUiLibrary } from './gen/GuncatUiLibrary.ts';
+import {
+  GuncatUiState,
+  GuncatUiRuntime,
+  GuncatUiTrailer
+} from './gen/GuncatUiRuntime.ts';
 import { GuncatUiParts, GuncatUiSegType } from './gen/GuncatUiParts.ts';
+import { UiChartGeom, UiNum, UiPalette, UiPoint, UiScale } from './gen/GuncatUiPaint.ts';
+import { GuncatUiPrompt } from './gen/GuncatUiPrompt.ts';
 
 let passed = 0;
 let failed = 0;
@@ -1210,268 +1218,330 @@ console.log('[LoopError]');
   check('上下文默认提示', overflow.contextOverflowMessage().indexOf('上下文窗口超限') === 0);
 }
 
-// ===== GuncatUiSpec / GuncatUiParts（交互模式 Intelligent UI DSL）=====
-console.log('[GuncatUiSpec]');
+// ===== 交互模式 (Intelligent UI): guncat-ui lang + 片段切分 + 绑定回传 =====
+console.log('[GuncatUi]');
 
+GuncatUiLibrary.init();
+
+console.log('[parse 基础]');
 {
-  const sample = [
-    '引导文字。',
-    '```guncat-ui',
-    '{',
-    '  "version": 1,',
-    '  "title": "贷款测算",',
-    '  "subtitle": "拖动金额查看月供",',
-    '  "controls": [',
-    '    {"name": "amount", "type": "slider", "label": "金额", "min": 0, "max": 100, "step": 5, "default": 30, "unit": "万"},',
-    '    {"name": "vip", "type": "toggle", "label": "会员", "default": true}',
-    '  ],',
-    '  "elements": [',
-    '    {"kind": "metrics", "items": [{"label": "月供", "value": 1234.5, "unit": "元", "delta": "-12"}]},',
-    '    {"kind": "chart", "chart": "bar", "title": "对比", "labels": ["A","B"], "values": [4.8, 3.9], "series": ["年化"]},',
-    '    {"kind": "table", "headers": ["项", "值"], "rows": [["利率", "4.2%"]]},',
-    '    {"kind": "form", "title": "调整", "controls": ["amount","vip"], "action": {"id": "recalc", "label": "重算", "confirm": "按新参数重算"}}',
-    '  ]',
-    '}',
-    '```',
-    '结尾文字。'
+  const src = [
+    'root = Card([header, chart])',
+    'header = CardHeader("销售复盘", "2024 Q1-Q4")',
+    'chart = BarChart(["Q1","Q2"], [s1], "grouped")',
+    's1 = Series("2024", [10, 20])'
   ].join('\n');
+  const p = GuncatUiLang.parse(src);
+  check('root 存在', p.root !== null);
+  check('root 类型 Card', p.root && p.root.type === 'Card');
+  const children = UiNode.elementList(p.root, 'children');
+  check('children 数量 2', children.length === 2);
+  check('第一个是 CardHeader', children[0].type === 'CardHeader');
+  check('CardHeader title', UiNode.str(children[0], 'title', '') === '销售复盘');
+  check('CardHeader subtitle', UiNode.str(children[0], 'subtitle', '') === '2024 Q1-Q4');
+  const series = UiNode.elementList(children[1], 'series');
+  check('series 1 条', series.length === 1);
+  check('Series category', UiNode.str(series[0], 'category', '') === '2024');
+  check('Series values', UiNode.numList(series[0], 'values').join(',') === '10,20');
+  check('labels 字符串数组', UiNode.strList(children[1], 'labels').join(',') === 'Q1,Q2');
+  check('无错误', p.errors.length === 0);
+}
 
-  const frags = GuncatUiBlocks.split(sample);
-  check('分词 3 段', frags.length === 3);
-  check('围栏段已闭合', frags[1].fence === true && frags[1].complete === true);
-  const specs = GuncatUiBlocks.extract(sample);
-  check('提取 1 个界面文档', specs.length === 1);
-  const s = specs[0];
-  check('标题/副标题解析', s.title === '贷款测算' && s.subtitle === '拖动金额查看月供');
-  check('滑块默认值与单位', s.controls[0].defNum === 30 && s.controls[0].unit === '万');
-  check('开关默认值', s.controls[1].defBool === true);
-  check('元素 4 个', s.elements.length === 4);
-  check('metrics items 解析', s.elements[0].items.length === 1 && s.elements[0].items[0].value === 1234.5);
-  check('chart 解析', s.elements[1].chart === 'bar' && s.elements[1].values[1] === 3.9);
-  check('table 行解析', s.elements[2].rows[0][1] === '4.2%');
-  check('form 引用控件与动作', s.elements[3].controls.length === 2 && s.elements[3].action.id === 'recalc');
-  check('findControl 命中/未命中', s.findControl('vip') !== null && s.findControl('nope') === null);
+console.log('[语句数量 / 未引用]');
+{
+  const p = GuncatUiLang.parse('root = Card([a])\na = TextContent("hello")\nb = TextContent("unused")');
+  check('statementCount 3', p.statementCount === 3);
+  const kids = UiNode.elementList(p.root, 'children');
+  check('只渲染被引用的一项', kids.length === 1 && UiNode.str(kids[0], 'text', '') === 'hello');
+}
 
-  // 流式: 未闭合时渐进解析
-  const streamed = '```guncat-ui\n{\n "title": "T",\n "elements": [\n  {"kind":"card","title":"A"},\n  {"kind":"card","title":"B"}\n ';
-  const prog = GuncatUiBlocks.progress(streamed);
-  check('流式 progress 有 spec', prog !== null && prog.spec !== null);
-  check('流式已解析 2 个元素', prog !== null && prog.spec !== null && prog.spec.elements.length === 2);
-  check('未闭合块不计入 extract', GuncatUiBlocks.extract(streamed).length === 0);
+console.log('[绑定与重算]');
+{
+  const src = [
+    'root = Card([label, slider])',
+    '$amount = 30',
+    'label = Text("number", "金额 " + $amount + " 万")',
+    'slider = Slider("amount", "discrete", 0, 200, 5, [30], "金额", $amount)'
+  ].join('\n');
+  const p = GuncatUiLang.parse(src);
+  check('默认值 30', p.state['$amount'] === 30);
+  let kids = UiNode.elementList(p.root, 'children');
+  check('表达式用默认值', UiNode.str(kids[0], 'value', '') === '金额 30 万');
+  check('Slider 记录绑定', UiNode.bindOf(kids[1], 'value') === '$amount');
+  // 用户改成 45 → 重新物化
+  const preset = {};
+  preset['$amount'] = 45;
+  const root2 = GuncatUiLang.render(p, preset);
+  check('重算后 root 存在', root2 !== null);
+  kids = UiNode.elementList(root2, 'children');
+  check('表达式用新值', UiNode.str(kids[0], 'value', '') === '金额 45 万');
+  check('绑定值仍是 45', p.state['$amount'] === 45);
+}
 
-  // 非法 / 未知 kind / 限额
-  check('非法 JSON 不抛出且不可提取', GuncatUiBlocks.extract('```guncat-ui\n{ "kind": nope }\n```').length === 0);
-  const unknown = GuncatUiBlocks.extract(
-    '```guncat-ui\n{"version":1,"elements":[{"kind":"hologram"},{"kind":"note","text":"ok"}]}\n```');
-  check('未知 kind 被丢弃', unknown.length === 1 && unknown[0].elements.length === 1);
-  const many = { version: 1, elements: [] };
-  for (let i = 0; i < 200; i++) { many.elements.push({ kind: 'note', text: 'x' + i }); }
-  check('元素数量封顶 60',
-    GuncatUiBlocks.extract('```guncat-ui\n' + JSON.stringify(many) + '\n```')[0].elements.length === 60);
+console.log('[Action]');
+{
+  const src = [
+    'root = Card([b1, b2])',
+    'b1 = Button("重算", Action([@Set($range, "30d"), @ToAssistant("换成 30 天")]), "primary")',
+    'b2 = Button("查看详情")'
+  ].join('\n');
+  const p = GuncatUiLang.parse(src);
+  const kids = UiNode.elementList(p.root, 'children');
+  const steps = UiNode.actionSteps(kids[0], 'action');
+  check('两个步骤', steps.length === 2);
+  check('步骤1 set', steps[0].kind === 'set' && steps[0].target === '$range' && steps[0].value === '30d');
+  check('步骤2 toAssistant', steps[1].kind === 'toAssistant' && steps[1].text === '换成 30 天');
+  check('消息收集', GuncatUiRuntime.collectMessages(steps).join('|') === '换成 30 天');
+  check('无 action 按钮回退到 label', GuncatUiRuntime.buttonMessage(kids[1]) === '查看详情');
+}
 
-  // 回传消息组装
-  const payload = new GuncatUiPayload();
-  payload.kind = 'form';
-  payload.title = '贷款测算';
-  payload.names = ['amount'];
-  payload.labels = ['金额'];
-  payload.values = ['45'];
-  payload.confirm = '按新的金额重新测算。';
-  const text = GuncatUiMessageBuilder.toUserText(payload);
-  check('回传含标题/取值/确认语',
-    text.indexOf('【交互界面回传】贷款测算') === 0 && text.indexOf('- 金额 = 45') > 0 &&
-    text.indexOf('按新的金额重新测算。') > 0);
-  const action = new GuncatUiPayload();
-  action.kind = 'action';
-  action.label = '方案B';
-  action.value = '方案B';
-  check('动作回传含选择结果', GuncatUiMessageBuilder.toUserText(action).indexOf('选择结果：方案B') > 0);
-  check('控件取值文本(含单位)',
-    GuncatUiMessageBuilder.controlValueText(s.controls[0], {}) === '30万' &&
-    GuncatUiMessageBuilder.controlValueText(s.controls[0], { amount: 45 }) === '45万');
-  check('开关取值文本',
-    GuncatUiMessageBuilder.controlValueText(s.controls[1], { vip: false }) === '关闭');
+console.log('[@Each]');
+{
+  const src = [
+    'root = Card([items])',
+    'items = ListBlock(@Each(rows, "r", ListItem(r.name, r.sub)), "number")',
+    'rows = [{"name":"甲","sub":"1"},{"name":"乙","sub":"2"}]'
+  ].join('\n');
+  const p = GuncatUiLang.parse(src);
+  check('解析无致命错误', p.root !== null);
+  const list = UiNode.elementList(p.root, 'children');
+  const block = list.length > 0 ? list[0] : null;
+  const its = block === null ? [] : UiNode.elementList(block, 'items');
+  check('@Each 展开 2 项', its.length === 2);
+  check('第一项 title 甲', its.length === 2 && UiNode.str(its[0], 'title', '') === '甲');
+  check('第二项 subtitle 2', its.length === 2 && UiNode.str(its[1], 'subtitle', '') === '2');
+}
 
-  // 片段切分(渲染层): 文本片段保留原文, 界面片段带 spec
-  const parts = GuncatUiParts.build(sample);
-  check('片段: 文本+界面+文本', parts.segments.length === 3 && parts.hasUi === true);
-  check('片段类型正确', parts.segments[0].type === GuncatUiSegType.TEXT &&
-    parts.segments[1].type === GuncatUiSegType.UI && parts.segments[2].type === GuncatUiSegType.TEXT);
-  check('界面片段携带 spec', parts.segments[1].spec !== null && parts.segments[1].complete === true);
-  const badParts = GuncatUiParts.build('```guncat-ui\n{oops}\n```');
-  // 非法块也渲染成卡片(带原始输出), 不再交给 Markdown 变成代码块
-  check('非法块走卡片而非代码块', badParts.segments.length === 1 &&
-    badParts.segments[0].type === GuncatUiSegType.UI &&
-    badParts.segments[0].raw.indexOf('{oops}') >= 0);
-  const plainParts = GuncatUiParts.build('普通回答, 无界面块');
-  check('无界面块时单文本片段', plainParts.segments.length === 1 && plainParts.hasUi === false);
+console.log('[内置函数与表达式]');
+{
+  const p = GuncatUiLang.parse([
+    'root = Card([a, b, c])',
+    'a = Text("text", "共 " + @Count([1,2,3]) + " 条")',
+    'b = Text("number", "" + @Sum([1,2,3.5]))',
+    'c = Text("text", @Round(@Avg([10, 20, 33]), 1))'
+  ].join('\n'));
+  const kids = UiNode.elementList(p.root, 'children');
+  check('@Count', UiNode.str(kids[0], 'value', '') === '共 3 条');
+  check('@Sum', UiNode.str(kids[1], 'value', '') === '6.5');
+  check('@Avg+@Round', UiNode.str(kids[2], 'value', '') === '21');
+}
 
-  // ===== 真实模型输出的容错(首页截图事故: 卡片渲染成空壳) =====
-  // 事故根因: elements 缺失/写法不对 → 解析失败 → 界面片段 spec=null → 裸骨架空盒。
-  // 以下每一条都是模型真实写过的形态, 必须都能渲染出元素。
-  const tolerant = [
-    ['单元素漏写 elements', '{"kind":"card","title":"地瓜","text":"红薯"}', 1],
-    ['elements 写成对象', '{"title":"T","elements":{"kind":"card","text":"x"}}', 1],
-    ['用 items 代替 elements', '{"title":"T","items":[{"kind":"card","text":"x"}]}', 1],
-    ['kind 大小写', '{"title":"T","elements":[{"kind":"Card","text":"x"}]}', 1],
-    ['kind 近义词 kv', '{"title":"T","elements":[{"kind":"kv","kv":[["a","1"]]}]}', 1],
-    ['kind 近义词 list', '{"title":"T","elements":[{"kind":"list","items":[{"kind":"note","text":"x"}]}]}', 1],
-    ['JSON 带注释', '{\n// 说明\n"title":"T","elements":[{"kind":"card"}]\n}', 1],
-    ['JSON 带尾随逗号', '{"title":"T","elements":[{"kind":"card"},]}', 1],
-    ['JSON 带全角引号', '｛"title":"T","elements":[{"kind":"card","text":"x"}]｝', 1],
-    ['字符串内嵌代码围栏', '{"title":"T","elements":[{"kind":"markdown","text":"示例:\\n```js\\n1\\n```"}]}', 1],
-    ['只有控件没有元素', '{"title":"T","controls":[{"name":"a","type":"slider"}],"elements":[]}', 1],
-    ['数字写进 title/text', '{"title":123,"elements":[{"kind":"note","text":456}]}', 1]
-  ];
-  for (const [name, body, minElems] of tolerant) {
-    const one = GuncatUiBlocks.extract('```guncat-ui\n' + body + '\n```');
-    check('容错渲染: ' + name,
-      one.length === 1 && one[0].elements.length >= minElems);
+console.log('[流式与容错]');
+{
+  const partial = 'root = Card([header, chart])\nheader = CardHeader("标题"\nchart = BarChart(['; 
+  const p = GuncatUiLang.parse(partial);
+  check('未闭合也能解析出 root', p.root !== null);
+  check('incomplete 标记', p.incomplete === true);
+  const kids = UiNode.elementList(p.root, 'children');
+  check('已写完的 header 保留', kids.length >= 1 && kids[0].type === 'CardHeader');
+
+  const one = GuncatUiLang.parse('root = Card([');
+  check('只有 root 行也能出 root(空)', one.root !== null && UiNode.elementList(one.root, 'children').length === 0);
+
+  const bad = GuncatUiLang.parse('这不是程序, 只是一段中文。');
+  check('非程序不产生 root', bad.root === null && bad.hasStatements === false);
+
+  const unknown = GuncatUiLang.parse('root = Card([x])\nx = NotAComponent("a")');
+  check('未知组件被丢弃', UiNode.elementList(unknown.root, 'children').length === 0);
+  check('未知组件有提示', unknown.errors.length > 0);
+
+  const dup = GuncatUiLang.parse('root = Card([a])\na = TextContent("1")\na = TextContent("2")');
+  const dk = UiNode.elementList(dup.root, 'children');
+  check('重名语句后者覆盖', dk.length === 1 && UiNode.str(dk[0], 'text', '') === '2');
+
+  const comments = GuncatUiLang.parse('// 说明\nroot = Card([a])\n# 注释\na = TextContent("x")');
+  check('注释被剔除', comments.root !== null && UiNode.elementList(comments.root, 'children').length === 1);
+
+  const fenced = GuncatUiLang.parse('```guncat-ui\nroot = Card([a])\na = TextContent("fenced")\n```');
+  check('围栏内程序可解析', fenced.root !== null &&
+    UiNode.str(UiNode.elementList(fenced.root, 'children')[0], 'text', '') === 'fenced');
+
+  const missing = GuncatUiLang.parse('root = Card([a])\na = Tag()');
+  check('缺必需参数仍渲染(不丢弃)', UiNode.elementList(missing.root, 'children').length === 1);
+  check('缺必需参数产生提示', missing.errors.length > 0);
+
+  const optional = GuncatUiLang.parse('root = Card([a])\na = Image("alt")');
+  check('缺可选参数不报错', optional.errors.length === 0);
+
+  const numCoerce = GuncatUiLang.parse('root = Card([c])\nc = Col("金额", ["1200","800"], "number")');
+  const cols = UiNode.elementList(numCoerce.root, 'children');
+  check('字符串数字可强转', UiNode.raw(cols[0], 'data') instanceof Array);
+
+  const mess = GuncatUiLang.parse('root = Card([a, b, c])\na = TextContent("1")\n乱七八糟的一行\nb = TextContent("2")\n!!!\nc = TextContent("3")');
+  check('夹杂垃圾行仍解析 3 项', mess.root !== null && UiNode.elementList(mess.root, 'children').length === 3);
+}
+
+console.log('[isDegenerate / needsRepair]');
+{
+  check('正常程序不算残缺', GuncatUiLang.isDegenerate('root = Card([a])\na = TextContent("x")') === false);
+  check('只有散文不算残缺', GuncatUiLang.isDegenerate('这是一段普通回答') === false);
+  check('无 root 时回退首个组件(仍可渲染)', GuncatUiLang.isDegenerate('a = TextContent("x")\nb = TextContent("y")') === false);
+  check('全是未知组件算残缺', GuncatUiLang.isDegenerate('a = Nope("x")\nb = Nope2("y")') === true);
+  check('只有变量声明算残缺', GuncatUiLang.isDegenerate('$x = 1\n$y = "a"') === true);
+}
+
+console.log('[GuncatUiParts 切分]');
+{
+  const plain = GuncatUiParts.build('普通回答, 没有界面。', true);
+  check('纯文本产出一个文本片段', plain.segments.length === 1 && plain.segments[0].type === GuncatUiSegType.TEXT);
+  check('纯文本 hasUi=false', plain.hasUi === false);
+  check('textOnly 正确', plain.textOnly.indexOf('普通回答') >= 0);
+
+  const unfenced = GuncatUiParts.build('这是引导语。\nroot = Card([a])\na = TextContent("正文")', true);
+  check('非围栏程序被识别', unfenced.hasUi === true);
+  check('非围栏切出 2 段', unfenced.segments.length === 2);
+  check('第一段是引导语', unfenced.segments[0].type === GuncatUiSegType.TEXT &&
+    unfenced.segments[0].text.indexOf('引导语') >= 0);
+  check('第二段是界面', unfenced.segments[1].type === GuncatUiSegType.UI);
+  check('界面标题为空时不报错', unfenced.segments[1].title === '');
+
+  const fenced2 = GuncatUiParts.build('前文\n```guncat-ui\nroot = Card([h])\nh = CardHeader("标题A")\n```\n后文', true);
+  check('围栏切出 3 段', fenced2.segments.length === 3);
+  check('中间是界面', fenced2.segments[1].type === GuncatUiSegType.UI);
+  check('界面标题取自 CardHeader', fenced2.segments[1].title === '标题A');
+  check('围栏文本与界面分离', fenced2.textOnly.indexOf('前文') >= 0 && fenced2.textOnly.indexOf('后文') >= 0);
+
+  const otherFence = GuncatUiParts.build('看代码:\n```python\nprint(1)\n```', true);
+  check('其它语言围栏不进界面', otherFence.hasUiSeg === false);
+  check('其它语言围栏保留原文', otherFence.segments[0].text.indexOf('print(1)') >= 0);
+
+  const streaming = 'root = Card([a])\na = TextContent("第一';
+  const sp = GuncatUiParts.build(streaming, false);
+  check('流式中间态有界面片段', sp.hasUiSeg === true);
+  check('流式片段未完成', sp.segments[0].complete === false);
+  const spFinal = GuncatUiParts.build(streaming, true);
+  check('产出结束后标记 truncatd', spFinal.segments[0].truncated === true);
+
+  const withState = GuncatUiTrailer.append('root = Card([a])\na = TextContent("x")', '{"$k":7}');
+  const wp = GuncatUiParts.build(withState, true);
+  check('状态被拆出', wp.stateJson === '{"$k":7}');
+  check('正文不含尾标记', wp.segments[0].raw.indexOf(']]>') < 0);
+  check('界面片段带上状态', wp.segments[0].stateJson === '{"$k":7}');
+
+  check('hasProgram 判定', GuncatUiParts.hasProgram('root = Card([') === true &&
+    GuncatUiParts.hasProgram('随便一段话') === false);
+  check('needsRepair 判定', GuncatUiParts.needsRepair('root = Card([') === false &&
+    GuncatUiParts.needsRepair('a = Nope("x")\nb = Nope2("y")') === true &&
+    GuncatUiParts.needsRepair('a = TextContent("x")\nb = TextContent("y")') === false &&
+    GuncatUiParts.needsRepair('普通文字') === false);
+}
+
+console.log('[状态序列化与回传]');
+{
+  const st = new GuncatUiState();
+  st.defaults['$a'] = 1;
+  st.values['$a'] = 45;
+  st.values['$b'] = 'hello';
+  st.values['$c'] = true;
+  const json = st.toJson();
+  const back = GuncatUiState.fromJson(json);
+  check('状态往返 $a', back['$a'] === 45);
+  check('状态往返 $b', back['$b'] === 'hello');
+  check('状态往返 $c', back['$c'] === true);
+
+  const program = GuncatUiLang.parse([
+    'root = Card([f])',
+    '$metric = "revenue"',
+    'f = FormControl("口径", RadioGroup("metric", [RadioItem("营收","","revenue"), RadioItem("客户数","","customers")], "revenue", $metric))'
+  ].join('\n'));
+  const state = GuncatUiState.of(program, {});
+  const form = program.root;
+  check('表单标题标签收集', GuncatUiRuntime.bindingLabels(program)['$metric'] === '口径');
+  ack: {
+    // 直接构造 Form 场景
+    const p2 = GuncatUiLang.parse([
+      'root = Card([form])',
+      '$metric = "revenue"',
+      'form = Form("f", btns, [fc])',
+      'fc = FormControl("口径", RadioGroup("metric", [RadioItem("营收","","revenue")], "revenue", $metric))',
+      'btns = Buttons([Button("提交", Action([@ToAssistant("按新口径重算")]))])'
+    ].join('\n'));
+    const st2 = GuncatUiState.of(p2, {});
+    const formEl = UiNode.elementList(p2.root, 'children')[0];
+    st2.set('$metric', 'customers');
+    const msg = GuncatUiRuntime.formMessage(formEl, st2);
+    check('表单回传含字段', msg.indexOf('口径 = customers') >= 0);
+    const text = GuncatUiRuntime.interactionText('界面标题', msg);
+    check('回传消息带前缀', text.indexOf('【交互界面回传】界面标题') === 0);
+    const desc = GuncatUiRuntime.describeStateForModel(p2, st2.toJson());
+    check('状态句子含标签', desc.indexOf('口径=customers') >= 0);
+    check('未绑定时用 name 作键', GuncatUiRuntime.stateKeyOf(
+      UiNode.element(UiNode.elementList(formEl, 'fields')[0], 'input')) === '$metric');
   }
-  // 内嵌围栏不得截断 JSON: 必须吃满到真正的闭合围栏
-  const fenceBody = '{"title":"T","elements":[{"kind":"markdown","text":"```js\\n1\\n```"}]}';
-  const fenceFrags = GuncatUiBlocks.split('a\n```guncat-ui\n' + fenceBody + '\n```\nb');
-  check('内嵌围栏不截断 JSON', fenceFrags.length === 3 && fenceFrags[1].complete === true &&
-    fenceFrags[1].text.trim() === fenceBody && fenceFrags[2].text.indexOf('b') >= 0);
-  // 解析失败的块: **不再退回普通代码块** —— guncat-ui 块永远渲染成卡片
-  // (退回代码块等于把一条长 JSON 贴在聊天里, 又被截断又难读; 真机事故: 完整 JSON 也这样显示了)
-  const badSeg = GuncatUiParts.build('```guncat-ui\n{ 完全不是 JSON }\n```');
-  const badUi = badSeg.segments.find((s) => s.type === GuncatUiSegType.UI);
-  check('解析失败的块仍渲染成卡片(不退回代码块)', badSeg.hasUi === true &&
-    badUi !== undefined && badUi.spec !== null && badUi.raw.indexOf('完全不是 JSON') >= 0 &&
-    badUi.truncated === true);
-  check('解析失败的块不产生 Markdown 代码块片段',
-    badSeg.segments.every((s) => s.type !== GuncatUiSegType.TEXT || s.text.indexOf('```') < 0));
-  // 只有控件的文档兜底为表单, 而不是空卡片
-  const controlOnly = GuncatUiBlocks.extract(
-    '```guncat-ui\n{"title":"T","controls":[{"name":"a","type":"slider","label":"A"}],"elements":[]}\n```');
-  check('控件兜底成表单', controlOnly.length === 1 && controlOnly[0].elements.length === 1 &&
-    controlOnly[0].elements[0].kind === 'form' && controlOnly[0].elements[0].controls[0] === 'a');
-  // 流式未闭合且尚无元素时: 界面片段必须带原文, 供卡片兜底展示(而不是空盒)
-  const openSeg = GuncatUiParts.build('说明\n```guncat-ui\n{');
-  const openUi = openSeg.segments.find((s) => s.type === GuncatUiSegType.UI);
-  check('未闭合片段带原文兜底', openUi !== undefined && openUi.complete === false &&
-    openUi.raw.indexOf('{') >= 0);
-  // ===== 输出被截断(未闭合)的界面块: 不得永远停在"生成中" =====
-  const truncDoc = '{"version":1,"title":"红薯","elements":[{"kind":"card","text":"结论A"},' +
-    '{"kind":"table","headers":["地区","叫法"],"rows":[["北方","红薯"]]},{"kind":"note","text":"还没写完';
-  const truncText = '前言\n```guncat-ui\n' + truncDoc;
-  const truncProg = GuncatUiBlocks.progress(truncText);
-  check('截断文档能救出已写完的元素', truncProg !== null && truncProg.spec !== null &&
-    truncProg.spec.elements.length >= 1 && truncProg.spec.title === '红薯');
-  const streamingSeg = GuncatUiParts.build(truncText, false).segments.find((s) => s.type === GuncatUiSegType.UI);
-  check('流式中未闭合 → 生成中(truncated=false)', streamingSeg !== undefined &&
-    streamingSeg.complete === false && streamingSeg.truncated === false &&
-    streamingSeg.spec !== null && streamingSeg.spec.elements.length >= 1);
-  const endedSeg = GuncatUiParts.build(truncText, true).segments.find((s) => s.type === GuncatUiSegType.UI);
-  check('产出结束后未闭合 → 未完成(truncated=true)', endedSeg !== undefined &&
-    endedSeg.complete === false && endedSeg.truncated === true &&
-    endedSeg.raw.indexOf('还没写完') >= 0);
-  // 极端截断: 连一个元素都没有时, 也要救出标题与已出现的控件, 拼成可用表单
-  const rescueText = '```guncat-ui\n{"version":1,"title":"参数面板","controls":[' +
-    '{"name":"amount","type":"slider","label":"金额"},{"name":"vip","type":"toggle","label":"会员"}';
-  const rescueProg = GuncatUiBlocks.progress(rescueText);
-  check('极端截断救出标题与控件', rescueProg !== null && rescueProg.spec !== null &&
-    rescueProg.spec.title === '参数面板' && rescueProg.spec.controls.length === 2 &&
-    rescueProg.spec.elements.length === 1 && rescueProg.spec.elements[0].kind === 'form' &&
-    rescueProg.spec.elements[0].controls.length === 2);
-  // 完全空白的开头(标题都没写出来): 仍返回可用 spec(标题空, 无元素), 由渲染层显示"未完成"而非空骨架
-  const emptyProg = GuncatUiBlocks.progress('```guncat-ui\n{"ver');
-  check('刚开栏不抛出且返回骨架', emptyProg !== null && emptyProg.spec !== null &&
-    emptyProg.spec.elements.length === 0);
+}
 
-  // ===== JSON Output 模式产出的界面: 序列化 → 重新解析 必须无损往返 =====
-  const roundTrip = [
-    '{',
-    ' "title":"往返测试","subtitle":"writer/parser 一致性",',
-    ' "controls":[{"name":"amount","type":"slider","label":"金额","min":0,"max":100,"step":5,"default":35,"unit":"万"},',
-    '  {"name":"vip","type":"toggle","label":"会员","default":true},',
-    '  {"name":"region","type":"select","label":"地区","options":["A","B"],"default":"A"}],',
-    ' "elements":[',
-    '  {"kind":"metrics","items":[{"label":"月供","value":1234.5,"unit":"元","delta":"-12"}]},',
-    '  {"kind":"chart","chart":"bar","title":"对比","labels":["A","B"],"values":[4.8,3.9],"series":["年化"],"unit":"%"},',
-    '  {"kind":"table","headers":["项","值"],"rows":[["利率","4.2%"]]},',
-    '  {"kind":"note","tone":"warn","text":"注意"},',
-    '  {"kind":"progress","title":"进度","value":30,"total":100,"unit":"%"},',
-    '  {"kind":"form","title":"调整","controls":["amount","vip"],"action":{"id":"recalc","label":"重算","confirm":"按新参数重算"}},',
-    '  {"kind":"choice","title":"继续?","options":["是","否"],"action":{"id":"pick","label":"选择"}},',
-    '  {"kind":"layout","layout":"grid","children":[{"kind":"card","text":"子项"}]}',
-    ' ]',
-    '}'
-  ].join('\n');
-  const parsedSpec = GuncatUiBlocks.parseComplete(roundTrip).spec;
-  check('往返前置: 解析成功', parsedSpec !== null && parsedSpec.elements.length === 8);
-  const block = GuncatUiSpecWriter.toBlock(parsedSpec);
-  check('序列化产出带围栏的块', block.indexOf('```guncat-ui') === 0 &&
-    block.lastIndexOf('```') > block.indexOf('```guncat-ui'));
-  const reparsed = GuncatUiBlocks.extract(block);
-  check('序列化后可被 extract 解析', reparsed.length === 1);
-  const rt = reparsed[0];
-  check('往返: 标题与副标题', rt.title === '往返测试' && rt.subtitle === 'writer/parser 一致性');
-  check('往返: 控件数量与取值', rt.controls.length === 3 &&
-    rt.controls[0].defNum === 35 && rt.controls[0].unit === '万' &&
-    rt.controls[1].defBool === true &&
-    rt.controls[2].defText === 'A' && rt.controls[2].options.length === 2);
-  check('往返: 元素数量与种类', rt.elements.length === 8 &&
-    rt.elements[0].items.length === 1 && rt.elements[0].items[0].value === 1234.5);
-  check('往返: 图表数值与标签', rt.elements[1].labels.length === 2 && rt.elements[1].values[1] === 3.9);
-  check('往返: 表格行', rt.elements[2].rows.length === 1 && rt.elements[2].rows[0][1] === '4.2%');
-  check('往返: 提示条语气', rt.elements[3].tone === 'warn');
-  check('往返: 进度条', rt.elements[4].value === 30 && rt.elements[4].total === 100);
-  check('往返: 表单动作与引用', rt.elements[5].action.id === 'recalc' &&
-    rt.elements[5].action.confirm === '按新参数重算' && rt.elements[5].controls.length === 2);
-  check('往返: 选项动作', rt.elements[6].options.length === 2 && rt.elements[6].action.id === 'pick');
-  check('往返: 嵌套子元素', rt.elements[7].kind === 'layout' && rt.elements[7].children.length === 1);
+console.log('[图表几何与数值格式]');
+{
+  const sc = UiScale.of([10, 40, 25]);
+  check('数值轴含 0', sc.min === 0 && sc.max === 40);
+  check('归一化下限', sc.norm(0) === 0);
+  check('归一化上限', sc.norm(40) === 1);
+  check('归一化截断', sc.norm(-5) === 0 && sc.norm(99) === 1);
+  check('刻度数量', sc.ticks(4).length === 5);
+  const negScale = UiScale.of([-5, 15]);
+  check('含负数时下界不为 0', negScale.min === -5 && negScale.max === 15);
+  const flat = UiScale.of([7, 7]);
+  check('全等值不除零', flat.max > flat.min);
 
-  // ===== 已闭合但内容残缺(真机事故三: 只写了 {"version": 1 就闭合围栏并继续写正文) =====
-  const degenerate = '引导文字。\n```guncat-ui\n{"version": 1\n```\n后面的正文。';
-  check('残缺块被判定为 degenerate', GuncatUiBlocks.isDegenerate(degenerate, 1) === true);
-  check('残缺块原文可取出', GuncatUiBlocks.firstClosedBody(degenerate).indexOf('"version"') >= 0);
-  check('正常块不误判 degenerate',
-    GuncatUiBlocks.isDegenerate('```guncat-ui\n{"title":"T","elements":[{"kind":"card","text":"x"}]}\n```', 1) === false);
-  check('无块不算 degenerate', GuncatUiBlocks.isDegenerate('纯文本回答', 1) === false);
-  check('未闭合块不算 degenerate(走截断路径)',
-    GuncatUiBlocks.isDegenerate('```guncat-ui\n{"title":"T","elements":[{"kind":"card"', 1) === false);
-  // 真机事故四: 被截断但"救得回来"的块不该触发重做(否则会白跑一次 JSON 重做 + 闪烁)
-  const salvaged = '```guncat-ui\n{"title":"T","elements":[{"kind":"note","text":"是豆薯(凉薯)。"}]';
-  const salvagedProg = GuncatUiBlocks.progress(salvaged);
-  check('截断但可救出的块能取出元素', salvagedProg !== null && salvagedProg.spec !== null &&
-    salvagedProg.spec.elements.length === 1);
-  check('截断但可救出的块不算 degenerate',
-    GuncatUiBlocks.isDegenerate(salvaged, 1) === false);
-  // 真机事故五: 紧凑单行 JSON 被砍在键名中间("subtitl), 且块已闭合 → 解析整块失败。
-  // 结构化回退必须逐字段救回内容, 让卡片仍能渲染(而不是退回普通代码块)。
-  const compactTruncated = '引导\n```guncat-ui\n{"version":1,"title":"地瓜 vs 红薯","subtitl\n```\n后续正文';
-  const compactSalvaged = GuncatUiBlocks.salvageBlockBody(
-    GuncatUiBlocks.firstClosedBody(compactTruncated));
-  check('单行 JSON 砍在键名中间也能救出内容', compactSalvaged.spec !== null &&
-    compactSalvaged.spec.title === '地瓜 vs 红薯' && compactSalvaged.spec.salvaged === true);
-  const compactParts = GuncatUiParts.build(compactTruncated, true);
-  const compactUi = compactParts.segments.find((s) => s.type === GuncatUiSegType.UI);
-  check('该块仍渲染成卡片而不是代码块', compactParts.hasUi === true &&
-    compactUi !== undefined && compactUi.spec !== null && compactUi.raw.length > 0);
-  check('该块标记为不完整', compactUi !== undefined && compactUi.truncated === true);
-  // 无内容可救时也仍然是卡片(带原始输出), 只是没有标题/元素
-  const hopelessBlock = '```guncat-ui\n{ 完全不是 JSON }\n```';
-  const hopelessSpec = GuncatUiBlocks.salvageBlockBody(GuncatUiBlocks.firstClosedBody(hopelessBlock));
-  check('无内容可救时给出空文档(仍走卡片)', hopelessSpec.spec !== null &&
-    hopelessSpec.spec.elements.length === 0 && hopelessSpec.spec.salvaged === true);
+  const line = UiChartGeom.linePath([1, 5, 3], sc, 'linear', false);
+  check('折线路径以 M 开头', line.indexOf('M') === 0 && line.indexOf('L') > 0);
+  const smooth = UiChartGeom.linePath([1, 5, 3, 8], sc, 'natural', false);
+  check('自然曲线含三次贝塞尔', smooth.indexOf('C') > 0);
+  const step = UiChartGeom.linePath([1, 5, 3], sc, 'step', false);
+  check('阶梯曲线含两段', step.split('L').length >= 4);
+  const area = UiChartGeom.areaPath([1, 5, 3], sc, 'linear');
+  check('面积路径闭合', area.endsWith('Z'));
+  check('网格线条数', UiChartGeom.gridPaths(sc, 4).length === 5);
+  check('数据点圆路径闭合', UiChartGeom.dotPath(new UiPoint(10, 20), 3).endsWith('Z'));
+  check('数据点圆心偏移正确', UiChartGeom.dotPath(new UiPoint(10, 20), 3).indexOf('M7 20') === 0);
+  check('空折线返回空串', UiChartGeom.linePath([], sc, 'linear', false) === '');
+  check('坐标点为有限数', UiChartGeom.n(1 / 3) === '0.3' && UiChartGeom.n(NaN) === '0');
 
-  // 真机事故六: 截断发生在 elements 中段时, **坏元素之后的完整元素不能被丢掉**。
-  // 截图里 table / choice 就这样消失了(只救出第一个 note)。
-  const midTruncated = '{"version":1,"title":"地瓜是不是红薯","elements":[' +
-    '{"kind":"note","tone":"success","text":"北方: 地瓜 = 红薯"},' +
-    '{"kind":"table","headers":["对比项","红薯"],"rows":[["学名","甘薯 Ipomo' +  // 中段被砍
-    '{"kind":"choice","options":["北方","川渝"],"action":{"id":"region","label":"看我这儿的叫法"}}' +
-    '],"controls":[]}';
-  const midSpec = GuncatUiBlocks.salvageBlockBody(midTruncated);
-  check('截断后仍合并出坏元素之后的完整元素', midSpec.spec !== null &&
-    midSpec.spec.elements.length === 2 &&
-    midSpec.spec.elements[0].kind === 'note' &&
-    midSpec.spec.elements[1].kind === 'choice' &&
-    midSpec.spec.salvaged === true);
-  check('声明元素数可用于判定丢失', GuncatUiBlocks.declaredElementCount(midTruncated) === 3 &&
-    midSpec.spec.elements.length < 3);
+  const ratios = UiChartGeom.ratios([1, 3, 0]);
+  check('占比计算忽略 0', ratios[0] === 0.25 && ratios[1] === 0.75 && ratios[2] === 0);
+  check('起始占比累加', UiChartGeom.startRatios(ratios).join(',') === '0,0.25,1');
+  const arc = UiChartGeom.arcPath(0, 0.5, 50);
+  check('圆弧为 A 指令', arc.indexOf('A50 50') > 0);
+  check('整圈留缺口不退化', UiChartGeom.arcPath(0, 1, 50).length > 0);
+  check('零占比不画', UiChartGeom.arcPath(0, 0, 50) === '');
+
+  const poly = UiChartGeom.polygonPath(UiChartGeom.radarPoints([0.5, 0.5, 0.5, 0.5], 50));
+  check('雷达多边形闭合', poly.indexOf('Z') > 0);
+  check('雷达网格圈数', UiChartGeom.radarGrid(5, 50, 4).length === 4);
+  check('雷达轴线条数', UiChartGeom.radarSpokes(5, 50).length === 5);
+  check('径向弧闭合圈不退化', UiChartGeom.radialArc(1, 40, true).length > 0);
+
+  check('千分位', UiNum.thousands(1284) === '1,284');
+  check('千分位负数', UiNum.thousands(-1234567) === '-1,234,567');
+  check('紧凑万', UiNum.compact(1280000) === '128万');
+  check('紧凑 k', UiNum.compact(2500) === '2.5k');
+  check('百分比', UiNum.percent(1, 4) === '25%');
+  check('百分比除零', UiNum.percent(1, 0) === '0%');
+  check('调色板循环', UiPalette.series(UiPalette.SERIES.length) === UiPalette.SERIES[0]);
+}
+
+console.log('[组件库与提示词]');
+{
+  const names = GuncatUiLibrary.names();
+  check('组件数 >= 65', names.length >= 65);
+  check('Card 已登记', GuncatUiLibrary.isKnown('Card'));
+  check('未知组件未登记', !GuncatUiLibrary.isKnown('NoSuchComp'));
+  check('Card 是容器', GuncatUiLibrary.isContainer('Card'));
+  check('TextContent 非容器', !GuncatUiLibrary.isContainer('TextContent'));
+  const sig = GuncatUiLibrary.signature('CardHeader');
+  check('签名带位置参数', sig === 'CardHeader(title?: string, subtitle?: string)');
+  check('绑定参数标注为 $变量', GuncatUiLibrary.signature('Slider').indexOf('$变量') > 0);
+  const prompt = GuncatUiPrompt.promptSection();
+  check('提示词含组件清单', prompt.indexOf('## 组件清单') > 0);
+  check('提示词含语法规则', prompt.indexOf('## 语法规则') > 0);
+  check('提示词含 root 必须第一行', prompt.indexOf('root = Card([...])') > 0);
+  check('提示词含交互闭环', prompt.indexOf('## 交互闭环') > 0);
+  check('提示词含反例', prompt.indexOf('## 最常见的错误') > 0);
+  check('提示词含位置参数警告', prompt.indexOf('位置参数') > 0);
+  check('职责段覆盖文件优先', GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('覆盖上文') > 0);
+  check('补救提示词要求 root 第一行',
+    GuncatUiPrompt.REPAIR_SYSTEM.indexOf('root = Card') > 0);
+  check('组件清单列出 Card 签名', prompt.indexOf('Card(children: 组件[]') > 0);
 }
 
 console.log('');

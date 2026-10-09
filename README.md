@@ -117,12 +117,14 @@ Guncat Work 支持完整丰富的客户端功能：聊天模式内置通用、�
 
 ### 交互模式（Intelligent UI）
 
-交互模式是 **Agent 循环的第二种交付形态**（侧边栏「Agent模式」分组中紧随「工作模式」的 ✦「交互模式」项）：它与工作模式**共用同一套 Agent Loop、沙箱工作区与 42 个工具**，唯一区别是**回答不再是纯文本**，而是由模型现场生成的、可以直接上手操作的界面——指标卡、进度条、表格、横向柱状图 / 折线图 / 环形占比、滑块 / 开关 / 下拉 / 输入框、选项按钮。对齐 GPT-6 的 Intelligent UI：说一句话，拿到一个能拖、能点、能改参数并即时重算的仪表盘。
+交互模式是 **Agent 循环的第二种交付形态**（侧边栏「Agent模式」分组中紧随「工作模式」的 ✦「交互模式」项）：它与工作模式**共用同一套 Agent Loop、沙箱工作区与 42 个工具**，唯一区别是**回答不再是纯文本，而是一份界面程序**——应用把它渲染成原生可操作界面：标题/正文、图表（柱状 / 折线 / 面积 / 横向条 / 饼环 / 径向 / 雷达 / 堆叠条）、表格、指标卡、图片墙、选项卡 / 折叠面板 / 步骤条 / 卡片块、以及整套表单控件（滑块 / 开关 / 单选 / 多选 / 下拉 / 标签选择 / 选项卡 / 输入框 / 文本域）。对齐 GPT-6 的 Intelligent UI：说一句话，拿到一个能拖、能点、能改参数并即时重算的仪表盘。
 
-- **交付形态**：模型用 ` ```guncat-ui ` 围栏输出一段严格 JSON（或调用 `render_ui` 工具），应用把它解析成原生 ArkUI 组件渲染在对话流里；围栏块之外的文字仍按 Markdown 渲染。
-- **交互闭环**：拖动滑块 / 切换开关 / 下拉选择会在卡片内实时刷新数值预览；点「提交」或某个选项后，界面上的全部取值被打包成一条用户消息回传（形如「【交互界面回传】- 金额 = 45万 / 按新的金额重新测算。」），模型据此**重新生成更新后的界面**——界面因此成为可反复操作的仪表盘，而不是一张死图。
-- **流式成形**：界面块在生成过程中就按已解析出的部分渐进渲染（未闭合时显示「生成中…」并禁用交互），不需要等整段 JSON 输出完。
-- **容错优先**：JSON 非法或块未闭合时**原文照旧渲染**（交给 Markdown 库），绝不出现"内容凭空消失"；未知 `kind` / 控件类型被丢弃，元素数量、表格行列、柱状条数均有上限，畸形输出不会撑爆渲染。
+- **交付形态**：模型输出 **guncat-ui lang**（参考 [open-intelligent-ui](https://github.com/thesysdev/openui) 的 OpenUI Lang 设计）——一种按行书写的声明式界面语言：`root = Card([...])` 是入口、参数按位置传递、可前向引用。整条回答就是这份程序（也可以写在 ` ```guncat-ui ` 围栏里），程序之外的文字仍按 Markdown 渲染；纯提问（"这是什么意思"）时模型直接用文字回答。
+- **结构先行、边生成边成形**：程序按行输出，客户端**边收边渲染**——第一行的 `root = Card([...])` 就让外壳出现，后面的语句一条条把内容补齐。因为每条语句独立，**输出被截断时只有最后一条没写完的语句会丢**，已写完的全部保留（这是相对"输出一大段 JSON"最根本的改进：JSON 一旦截断就整块作废）。
+- **双向绑定的交互**：程序里的 `$变量` 是响应式绑定。把控件绑到它（`Slider("amount", "discrete", 0, 200, 5, [30], "金额", $amount)`），用户拖动/输入/勾选后**界面立即用新值重算**（`"金额 " + $amount + " 万"` 这类表达式会重新求值）——不发请求、不等模型。
+- **回传闭环**：需要模型换数据/换算法时用 `Action([@ToAssistant("按 30 天口径重算")])`；**不写 action 的按钮**等价于把按钮文字发给助手。表单提交会把全部字段值 + 提交按钮的诉求一起打包成一条用户消息（形如「【交互界面回传】季度销售复盘 / - 口径 = customers / 换口径重算」），模型据此**产出更新后的完整界面**。历史界面会置灰（只允许操作最新一轮）。
+- **状态随消息持久化**：用户调过的参数以 `]]>guncat-ui:state` 尾标记保存在该条消息里，滚动、切会话、重启后仍在；下一轮请求前这段标记会被翻译成一句人话（"(用户在当前交互界面上的设置: 金额=45; 口径=customers。)"）交给模型，因此模型始终知道界面当前的状态。
+- **容错优先**：未闭合的括号/字符串会自动补齐，所以流式中间态也能解析；未定义的引用只是暂时为空（等定义流进来再出现）；**未知组件名会被丢弃并给出诊断**，但必需参数缺失或类型不符**不会丢弃组件**（用安全默认值渲染）——聊天场景里"少一个字段"远好于"整块消失"。
 - **与工作模式的关系**：两者共用 `executeWorkLoop` 主循环与全部工具面，系统提示词按会话模式选择（`AgentLoopService.buildWorkSystemPromptFor(mode)`），压缩重建历史时同样按模式重建提示词。完整维护说明见下文「[交互模式架构（Intelligent UI）](#交互模式架构intelligent-ui)」。
 
 ### 工作模式（Agent Loop）
@@ -165,7 +167,7 @@ Guncat Work 支持完整丰富的客户端功能：聊天模式内置通用、�
 | 检索专家-筛滤  | 检索智能体 | 基于 Guncat Srch-Sift：官方溯源与 AI 内容过滤                          |
 | 评估专家-LLM | 评估智能体 | 基于 Guncat Eval-LLM：最大减少幻觉地评估 LLM 模型的性能                     |
 | 工作模式（虚拟） | Agent 模式 | Guncat Harness：本地沙箱工作区 + 42 个工具 + 多轮 Agent Loop，自主完成长程任务并产出文件 |
-| 交互模式（虚拟） | Agent 模式 | Intelligent UI：同一套 Agent Loop，但回答交付为图表 / 表单 / 表格等可操作界面，调参即重算 |
+| 交互模式（虚拟） | Agent 模式 | Intelligent UI：同一套 Agent Loop，但回答交付为可操作的原生界面（图表 / 表格 / 卡片 / 表单），调参即时重算、点按钮让助手重算 |
 
 ## 持久化与主题系统
 
@@ -194,7 +196,9 @@ entry/src/main/ets/
 ├── views/
 │   ├── ChatBubbleView.ets          # 聊天气泡（含深度思考条 / 工具步骤时间线 / WorkStepFormat）
 │   ├── WorkTurnView.ets            # Agent 模式时间线的单轮渲染（思考→工具→正文，无头像）
-│   ├── GuncatUiView.ets            # 交互模式渲染器：把 guncat-ui 文档渲染为原生可交互组件
+│   ├── GuncatUiView.ets            # 交互模式渲染器：把 guncat-ui lang 程序渲染为原生可交互组件
+│   ├── GuncatUiCharts.ets          # 交互模式图表（柱/折线/面积/横向条/饼环/径向/雷达/堆叠条）
+│   ├── GuncatUiIcons.ets           # 交互模式图标（Unicode 字形，避免 SymbolGlyph 名字缺失时静默空白）
 │   ├── WorkspaceBar.ets            # Agent 模式工作区面板（文件列表/上传/导出/清空）
 │   ├── RichTextView.ets
 │   ├── MessageInputView.ets
@@ -249,8 +253,12 @@ entry/src/main/ets/
 │   └── Agent.ts / ApiConfig.ts / ApiProfile.ts / MultimodalConfig.ts
 └── common/
     ├── Constants.ts / Types.ts / Utils.ts / MarkdownSanitizer.ts
-    ├── GuncatUiSpec.ts              # 交互模式单一事实源：DSL 模型/解析器/流式分词/回传载荷/系统提示词
-    └── GuncatUiParts.ts             # 消息体切分：Markdown 文本片段 + guncat-ui 界面片段
+    ├── GuncatUiLang.ts              # 交互模式语言核心：guncat-ui lang 词法/语法/求值/围栏切分
+    ├── GuncatUiLibrary.ts           # 交互模式组件库单一事实源（签名/描述/位置参数表 → 提示词）
+    ├── GuncatUiPrompt.ts            # 交互模式系统提示词（语法/交互/流式顺序/示例/反例/模式职责）
+    ├── GuncatUiRuntime.ts           # 交互模式运行时：$绑定状态 / Action 执行 / 状态尾标记与回传文案
+    ├── GuncatUiPaint.ts             # 交互模式图表几何与数值格式化（纯逻辑，可单测）
+    └── GuncatUiParts.ts             # 消息体切分：Markdown 文本片段 + guncat-ui 界面程序片段
 
 entry/src/main/resources/rawfile/
 ├── agents.json + *_prompt*.md      # 聊天智能体定义与提示词
@@ -823,113 +831,147 @@ ChatViewModel.executeWorkLoop(conv)
       mode === 'work'        → buildWorkSystemPrompt()
 ```
 
-`buildInteractiveSystemPrompt()` = `GuncatUiPrompt.promptSection()`（DSL 契约 + 反例）+ 共享 Agent Loop 提示词（工具目录/技能目录/工作流，与工作模式逐字节同源）+ `GuncatUiPrompt.INTERACTIVE_DUTY`（交互模式职责，追加在末尾以覆盖共享提示词里的「交付格式」章节）。三段拼接后**整体静态**、进程内缓存一次，KV 缓存前缀与工作模式同样逐字节稳定。
+`buildInteractiveSystemPrompt()` = `GuncatUiPrompt.promptSection()`（guncat-ui lang 语法 + 组件清单 + 交互闭环 + 输出顺序纪律 + 示例 + 反例）+ 共享 Agent Loop 提示词（工具目录/技能目录/工作流，与工作模式逐字节同源）+ `GuncatUiPrompt.INTERACTIVE_DUTY`（交互模式职责，追加在末尾以覆盖共享提示词里的「交付格式」章节）。三段拼接后**整体静态**、进程内缓存一次，KV 缓存前缀与工作模式同样逐字节稳定。
 
 上下文压缩（`compactWorkHistoryIfNeeded`）在重建历史时会用**同一个 `loopMode`** 重新取系统提示词，因此压缩后不会串模式。
 
-### 3. DSL：模型看到的契约 = 我们解析的契约
+### 3. 语言：guncat-ui lang（模型看到的契约 = 我们解析的契约）
 
-`common/GuncatUiSpec.ts` 是**唯一事实源**，同时承载四件事：模型类（`GuncatUiSpec` / `GuncatUiElement` / `GuncatUiInput` / `GuncatUiAction`）、解析器（容错 + 限额 + 流式渐进）、围栏分词器（`GuncatUiBlocks`）、系统提示词正文（`GuncatUiPrompt`）。**改 DSL 只需改这一个文件**，提示词文档与解析行为不会漂移。
+`common/GuncatUiLang.ts` 是**语言核心**（词法 → 语法 → 求值 → 围栏切分），`common/GuncatUiLibrary.ts` 是**组件库单一事实源**（组件名 / 分组 / 描述 / **位置参数表**）。同一张组件表同时驱动三件事：**系统提示词里的组件清单**、**解析阶段的参数映射与类型转换**、**渲染阶段的合法性判断**。三者共用一张表，「模型看到的」才等于「我们解析的」也等于「我们能画的」。
 
-```json
-{
-  "version": 1,
-  "title": "贷款测算",
-  "subtitle": "拖动金额查看月供",
-  "controls": [
-    {"name": "amount", "type": "slider", "label": "金额", "min": 0, "max": 100, "step": 5, "default": 30, "unit": "万"}
-  ],
-  "elements": [
-    {"kind": "metrics", "items": [{"label": "月供", "value": 1234.5, "unit": "元", "delta": "-12"}]},
-    {"kind": "chart", "chart": "bar", "title": "收益对比", "labels": ["方案A", "方案B"], "values": [4.8, 3.9], "series": ["年化"]},
-    {"kind": "form", "title": "调整参数", "controls": ["amount"], "action": {"id": "recalc", "label": "重新计算", "confirm": "按新的金额重新测算。"}}
-  ]
-}
+设计对齐参考项目 [open-intelligent-ui](https://github.com/thesysdev/openui) 的 OpenUI Lang（见 `docs/reference/openui-lang-spec.md`）：**按行语句 + 位置参数 + 可前向引用**。
+
+```text
+root = Card([header, lead, kpis, chart, detail, tune])      ← 第 1 行: 外壳先出现
+header = CardHeader("季度销售复盘", "2024 Q1–Q4")
+$metric = "revenue"                                          ← $变量 = 响应式绑定
+lead = TextContent("全年营收 **1,284 万**, 同比增长 18.6%。")
+kpis = OverviewCardBlock([kpi1, kpi2])                       ← 可前向引用: kpi1 下面才定义
+chart = BarChart(["Q1","Q2"], [s1, s2], "grouped", "季度")
+s1 = Series("2023", [241, 268])
+tune = Form("tune", tuneBtn, [tuneField])
+tuneField = FormControl("按哪个口径看?", RadioGroup("metric", [RadioItem("营收","","revenue")], "revenue", $metric))
+tuneBtn = Buttons([Button("换口径重算", Action([@ToAssistant("按客户数口径重新分析")]), "primary")])
 ```
 
-| 元素 kind | 渲染形态 |
+**语法规则**（提示词里逐条给出，模型照抄）
+
+| 规则 | 说明 |
 | --- | --- |
-| `card` / `layout` | 卡片容器（`layout` 支持 list / grid 两列 / row 等分）与嵌套子元素 |
-| `note` | 语气提示条（info / success / warn / danger，左侧语义色竖条） |
-| `metric` / `metrics` | 大号数值 + 单位 + 增减量，指标组自动 1–3 列 |
-| `progress` | 百分比进度条（可绑数值控件，拖动即刷新） |
-| `table` | 表头 + 交错行表格，超宽横向滚动（列宽 92vp） |
-| `chart` | `bar` 横向柱状图（手机竖屏最易读）/ `line` 原生 Shape+Path 折线 / `pie` Path 圆弧环形 + 图例百分比 |
-| `form` | 控件集合 + 提交按钮（未改动时次要样式，改动后转主色） |
-| `choice` | 选项按钮组，点击即回传；可带 `action2` 次要动作 |
-| `markdown` | 需要 Markdown 排版的正文段落（走 RichTextView） |
+| 语句 | 每行 `标识符 = 表达式`；`root = Card([...])` 必须存在且写在第一行 |
+| 参数 | **位置参数**（顺序即签名顺序）。写 `CardHeader("标题")`，**不能**写 `CardHeader(title: "标题")` |
+| 表达式 | 字符串 / 数字 / `true`·`false` / `null` / 数组 `[...]` / 对象 `{键: 值}` / 组件调用 / 引用 |
+| 引用 | 可前向引用（hoisting）；**每个定义出的标识符都必须被引用**，否则不会渲染 |
+| 运算 | `+ - * / %`、`== != > < >= <=`、`&& \|\| !`、三元 `a ? b : c`、成员 `obj.f`、下标 `arr[0]` |
+| 绑定 | `$变量 = 默认值`；把 `$变量` 传给控件的绑定参数即可双向绑定 |
+| 内置函数 | `@Count @Sum @Avg @Min @Max @Round @Abs @Floor @Ceil @Len @Join @Upper @Lower @Pct @Coalesce @Filter @Sort`，以及 `@Each(arr, "item", 模板)` 逐项展开 |
+| 动作 | `Action([@ToAssistant("文本"), @Set($x, 值), @Reset($x), @OpenUrl("https://…")])` |
+| 注释 | `//` 或 `#` 行注释（会被剔除） |
 
-控件类型 `slider` / `toggle` / `select` / `text` 由 `GuncatUiView` 渲染为 Slider / Toggle(Switch) / Select / TextInput；**未被任何 form 引用的控件**会自动成为独立卡片并附带默认提交按钮（避免模型漏写 form 时控件不可用）。
+组件库共 **70 个组件**，分 9 组：根与内容 / 布局 / 表格与数据 / 图表 / 指标与文本 / 卡片块 / 列表与追问 / 表单 / 按钮与图标。渲染器为每个组件都给出原生 ArkUI 实现：
 
-**容错与限额**（`GuncatUiLimits`）：控件 ≤12、元素 ≤60、表格 ≤60×8、柱状条 ≤24（渲染前 12）、选项 ≤24、提示/文本行 ≤24。
+| 组 | 组件 |
+| --- | --- |
+| 根与内容 | `Card` `CardHeader` `TextContent` `MarkDownRenderer` `Callout` `TextCallout` `Image` `ImageBlock` `ImageGallery` `CodeBlock` `Separator` `InlineHeader` `TagBlock` `Tag` `EntityList` |
+| 布局 | `SectionBlock` `SectionItem` `Tabs` `TabItem` `Accordion` `AccordionItem` `Carousel` `Steps` `StepsItem` |
+| 表格与数据 | `Table` `Col`（列式：每列自带一列数据） |
+| 图表 | `BarChart` `LineChart` `AreaChart` `HorizontalBarChart` `PieChart` `RadialChart` `SingleStackedBarChart` `Series` `RadarChart` |
+| 指标与文本 | `Text` `BoldText` `IconText` `ImageText` `MetricIndicatorInline` `MetricIndicatorWithStrikethrough` |
+| 卡片块 | `SnippetCardBlock` `OverviewCardBlock` `ContextCardBlock` `CompositeCardBlock` `VisualCardBlock`（及各自 Item） |
+| 列表与追问 | `ListBlock` `ListItem` `FollowUpBlock` `FollowUpItem` |
+| 表单 | `Form` `FormControl` `Input` `TextArea` `Select` `SelectItem` `DatePicker` `Slider` `RadioGroup` `RadioItem` `CheckBoxGroup` `CheckBoxItem` `SwitchGroup` `SwitchItem` `Chips` `ChipItem` `OptionCards` `OptionCard` |
+| 按钮与图标 | `Button` `Buttons` `IconButton` `Icon` |
 
-解析器刻意"迁就"模型的小毛病（这些都是真机上真实出现过的写法，曾导致卡片渲染成空壳）：
+**容错与限额**（`UiLimits`）：源码 ≤200k 字符、语句 ≤400、表达式嵌套 ≤24、数组 ≤600、子元素 ≤200、文案 ≤4000 字符、绑定 ≤64 个。
+
+刻意"迁就"模型的写法（都是实践中真实出现的，曾导致卡片空壳或整块消失）：
 
 | 模型写法 | 处理 |
 | --- | --- |
-| `{"kind":"card","text":"…"}`（单个元素当顶层文档） | 视为 `elements: [该元素]` |
-| 用 `items` / `blocks` / `children` / `content` / `sections` 代替 `elements` | 等价接受 |
-| `elements` 写成了单个对象 | 包成单元素数组 |
-| `kind` 写 `kv` / `list` / `panel` / `kpi` / `stats` / `Card` 等近义或大小写变体 | `GuncatUiKind.normalize` 归一化；**只有完全无法识别才丢弃** |
-| JSON 带 `//` `/* */` 注释、尾随逗号、中文全角引号 | 严格解析失败后清洗重试 |
-| 表格写成 `kv` / `pairs` / `data` 键值对 | 转成两列 rows |
-| `title` / `text` / `label` / `delta` 写成数字 | 按文本接受 |
-| 只给了 `controls` 没给元素 | 兜底生成一张表单，而不是空白卡片 |
-| 字符串里嵌了 Markdown 代码围栏 | 分词器用**括号闭合性**判定真正的闭合围栏，不再被截断 |
-| 彻底解析不出来 | 原文交还 Markdown 渲染；流式中间态则在卡片上展示**原始输出**（`GuncatUiSeg.raw` → `rawFallback`），绝不出现空盒子 |
+| 输出被截断（最后一行没写完） | 未闭合的括号/字符串**自动补齐**（`UiAutoClose`），未写完的那条语句丢弃，**已写完的全部保留** |
+| 引用了还没定义的变量 | 该值暂时为空，等定义流进来再出现（不报错、不中断） |
+| 忘了写 `root` | 退回"第一个组件语句"当入口；**一个组件语句都没有**才判定为"界面残缺"并触发一次重新生成 |
+| 参数写成键值 `CardHeader(title: "x")` | 位置参数才是契约；键值写法不被支持，模型会被提示词与反例清单纠正 |
+| 用了没登记的组件名（`Chart` / `markdown` / `Card2`） | **丢弃该组件并记录诊断**（保留会渲染成莫名空卡片，更难排查）；界面底部可展开「诊断」看到具体名字 |
+| 必需参数缺失 / 类型不符 | **不丢弃组件**：数字串转数字、单值包成数组、缺必需参数用安全默认值，并在诊断里记录（聊天场景里"少一个字段"远好于"整块消失"） |
+| 语句里混入散文或垃圾行 | 不是 `标识符 = 表达式` 形态的行被静默跳过，其余语句照常渲染 |
+| 同名语句写了两遍 | 后者覆盖前者（对齐参考实现） |
+| 把程序写在 ` ```guncat-ui ` 或 ` ```openui-lang ` 围栏里 | 同样接受；其它语言的围栏（` ```json ` / ` ```python `）按普通 Markdown 代码块渲染 |
 
-> **不要把这些容错当成"可以随便写"**：系统提示词里的反例清单仍明确要求 `elements` 必填、不要把代码围栏写进 JSON、不要编造 `kind`；容错只是保证模型偶发失误时用户仍能看到内容。
+> 与参考实现的一处**有意偏离**：参考实现在必需参数缺失时**丢弃整个组件**（借 validation error 逼模型写对）。聊天场景里这会让用户直接看不到内容，所以这里改成"用安全默认值渲染 + 记录诊断"。
 
 ### 4. 渲染与流式成形
 
 ```text
-assistant Message.content（含 ```guncat-ui 围栏）
-  → GuncatUiParts.build(content)                  // common/GuncatUiParts.ts
+assistant Message.content（整段界面程序，或 ```guncat-ui 围栏 + 前后正文）
+  → GuncatUiParts.build(content, finalized)        // common/GuncatUiParts.ts
       ├─ TEXT 片段 → RichTextView（Markdown 渲染）
-      └─ UI 片段   → GuncatUiView（@Prop spec + complete + locked + onInteract）
+      └─ UI 片段   → GuncatUiView（@Prop programText + complete + truncated + locked + stateJson + onInteract）
 ```
 
-- **闭合块**：`GuncatUiBlocks.extract/parseComplete` 解析成功才从 Markdown 正文中移除并原生渲染；**解析失败则原文（含围栏）照旧交给 Markdown 库**——用户永远看得到模型的真实输出，不会"内容凭空消失"。
-- **未闭合块**（流式中）：`GuncatUiBlocks.progress` → `GuncatUiSpecParser.parseStreaming` 用「补括号修复 → 退化逐元素扫描 → 骨架文档」三级容错给出中间态，界面**边生成边成形**，此时 `complete=false` 显示「生成中…」并禁用全部交互与提交。
-- **卡片永不为空**（真机事故后加固）：卡片头部（✦ + 标题 + 状态徽标）**始终渲染**，没有标题时至少显示状态徽标（`可交互` / `生成中…` / `已提交` / `无内容` / `未完成`）。
-- **输出被截断也能收场**（真机第二次事故）：界面块被当作"随时可能被模型输出上限砍断的流"来处理——`GuncatUiParts.build(content, finalized)` 用 `finalized`（来自 `!isStreaming`）区分"还在写"与"写完了但没闭合"：前者显示 `生成中…`，后者标记 `truncated` 并显示 **`未完成`** + 已生成部分，绝不会永久转圈。救助链为「清洗+补括号 → 逐元素扫描 → `salvageTruncated`（砍最后一行/尾部 5%·15%·30%/二分）→ `rescue`（文本级扫出标题与已出现的控件，拼成可提交表单）」，补括号解析成功后还会用 `mergeRescued` 从原文补回被截掉的 title/subtitle/controls。
-- **自动续写（JSON Output 优先）**：一轮结束时若最后一条消息里的界面块**仍未闭合**（输出被截断）**或已闭合但内容残缺**（模型只写了 `{"version": 1` 就闭合围栏、接着写正文——真机上出现过），主循环会先用 **JSON Output 专用请求**重做界面——`AgentLoopService.generateUiSpec()` 用 `response_format={'type':'json_object'}`（DeepSeek / OpenAI 兼容协议）或 `text.format`（Responses）单独要一份**紧凑单行**的界面 JSON，不带工具、`max_tokens` 给足（未配置时默认 `DEFAULT_JSON_OUTPUT_TOKENS=8000`），拿回后由 `GuncatUiSpecWriter` 序列化成规范的 ` ```guncat-ui ` 块追加为一条新消息（渲染路径完全复用）；JSON 模式失败时才回落到"文本续写"。最多自动重做 `UI_CONTINUE_MAX_ROUNDS = 2` 轮（防死循环），会话里分别留痕为「（界面已由 JSON 输出模式生成）」/「（界面输出被截断，已自动续写）」。
-- **原始输出随时可查**：卡片底部「查看原始输出」开关（有原文时始终可点开），解析失败时默认展开，并标注「模型原始输出 · N 字符」（强制按字符换行、可滚动），用户能直接看到模型到底写了什么、写了多少，便于自查与反馈。
-- **重建时机**：`WorkTurnView` / `ChatBubbleView` 在消息体含 ` ```guncat-ui ` 时才重建片段（普通消息零开销），重建源为流式 33ms flush 的 `visibleText`；`GuncatUiView` 用 `@Watch('onSpecChanged')` 只为**新出现的控件**补默认值，不覆盖用户已改的值。
-- **刷新机制（踩过的坑）**：片段切分结果必须用**数组型 `@State`（`uiSegs: GuncatUiSeg[]`）+ 整数组重赋值**保存。早前放在自定义类实例（`GuncatUiParts`）的字段里并用 `@State` 持有时，ArkUI 的浅层观察看不到嵌套数组变化，表现为"界面卡片停在骨架态、切走再切回会话（组件重建）才正常"。
-- **收尾自愈 + 文本重建**：即便如此，真机上"流式结束 → 组件按已结束语义重建"这一步仍可能不触发（`@Watch` / 父组件属性更新在真机时间线里不可靠）。因此两个视图各自带一个 `startUiSettleTimer()`：每 250ms 采样消息正文，连续两次一致即视为产出结束，就地按 `finalized` 重建界面片段（未闭合块转「未完成」），8 秒超时兜底强制重建一次，`aboutToDisappear` 清理。**组件自己负责收尾，不依赖任何外部通知。**
+- **从「一个 JSON 块」到「一段程序」**：旧实现用 ` ```guncat-ui ` + 严格 JSON 交付，一旦被输出上限截断就**整块作废**（只能靠额外的 JSON Output 请求重做）。改成按行语句后，截断只损失最后一条没写完的语句，**界面主体照常渲染**——"自动续写/重做"从主路径降级成兜底。
+- **渐进渲染**：客户端的 `GuncatUiParts.build()` 每次拿到新文本就重新解析并物化整棵树；`root = Card([...])` 第一行就让外壳出现，后续语句逐一补齐。未写完时 `complete=false`，控件置灰。
+- **文本与非围栏程序共存**：`GuncatUiParts` 会先用组件库判断一段正文是不是"界面程序"（要求至少 2 行 `标识符 = 组件名(...)` 语句，或 1 行且形如 `root = ...`），是则把程序**之前**的引导语留作文本片段。这样"模型写了 1~2 句引导语 + 一段程序"和"整条消息就是程序"两种形态都能正确渲染。
+- **普通回答必须照常显示**（历史事故）：`ChatBubbleView.buildAIContent()` 早期版本在"消息里没有 guncat-ui 围栏"时直接跳过整段渲染，导致聊天模式下**不含界面的回答正文一个字都不显示**。现在两个视图都保证：`GuncatUiParts.build()` **永远至少产出一个文本片段**，视图侧保留 `uiSegs.length === 0 → RichTextView` 的兜底分支。
+- **输出被截断也能收场**：`GuncatUiParts.build(content, finalized)` 用 `finalized`（来自 `!isStreaming`）区分"还在写"与"写完了但没断开"：后者标记 `truncated`，界面底部显示「界面未写完，以上为已生成的部分」，不会永久转圈。
+- **补救（兜底）**：一轮结束时若最后一条 assistant 消息**完全没有可渲染的界面**（`GuncatUiParts.needsRepair` = 文本像程序但 `root` 为空），主循环用 `AgentLoopService.generateUiProgram()` 发一次**不带工具、低推理档**的补救请求，要求模型重新输出一份完整程序；拿到后校验可用（`isUsableProgram`）再作为一条新消息追加（标注「（界面已重新生成）」）。最多 `UI_CONTINUE_MAX_ROUNDS = 2` 轮；补救也失败才回落到"文本续写"。**注意补救请求不再使用 `response_format: json_object`** —— JSON 模式会把模型逼进"一个 JSON 对象"的思维，反而写不出多语句结构。
+- **原始输出与诊断随时可查**：界面底部有「查看原始输出」开关（有源码时始终可点开，强制按字符换行 + 可滚动）；解析产生过诊断（未知组件 / 缺参数）时额外给出「诊断 · N 条」折叠面板。用户能直接看到模型到底写了什么。
+- **重建时机**：`WorkTurnView` / `ChatBubbleView` 在正文变化时才重建片段（内容相同直接返回，避免 33ms 空转）；`GuncatUiView` 用 `@Prop @Watch('onProgramChanged') programText` 接收源码——**传字符串而不是嵌套对象**（ArkUI 里字符串 @Prop 的变更通知最可靠，嵌套对象经 @Prop 深拷贝既慢又容易丢状态）。
 - **两类 key，两种刷新节奏**（都踩过坑）：
-  - **文本片段**（卡片前/后的正文）内容变化时递增它自己的 `renderKey` → 强制重建那个 `RichTextView`。否则真机上会出现"卡片后面的正文只显示一两个字，刷新后才完整"（渲染库复用了同一实例、没有按新内容重新排版）。判定方式是按片段下标记账 + 比较文本是否相同：相同则沿用旧 key（不重建），不同才递增。
-  - **界面片段**的 key 只在**语义变化**时递增（`uiSegsShape()` = 每段类型 + 闭合 + 未完成）。若每次刷新都递增，等于流式期间每 33ms 销毁重建整张卡片 → **疯狂闪烁**。
-- **维护须知**：组件内派生的渲染数据一律用数组/基本类型 `@State` 整体赋值，不要放在自定义类的字段里；需要"强制重新渲染某个子组件"时用 key 变化，但**key 必须绑定语义而不是刷新次数**。
-- **界面归属**：交互模式走 `ChatPage.buildWorkTimeline()` → `WorkTurnView`（共享时间线，含思考/工具行），聊天模式走 `ChatBubbleView`，两条路径都接了 `GuncatUiView`。
+  - **文本片段**（卡片前/后的正文）内容变化时递增它自己的 `renderKey` → 强制重建那个 `RichTextView`。否则真机上会出现"卡片后面的正文只显示一两个字，刷新后才完整"（渲染库复用了同一实例、没有按新内容重新排版）。
+  - **界面片段的 key 不含程序文本**，只含语义（`uiSegsShape()` = 每段类型 + 闭合 + 未完成）。若把源码拼进 key，等于流式期间每 33ms 销毁重建整块界面 → 闪烁 + 输入框失焦。同理，`GuncatUiView` 内部的 `ForEach` key 只用**元素自身的稳定标识**（命名语句用变量名、匿名内联元素用位置），**不把刷新版本号拼进 key**。
+- **绑定值变化靠 `rev` 驱动重渲染**：物化后的元素树存在普通字段 `this.root`（不是可观察状态），绑定值变化后通过给 `@State rev` 赋值把重渲染打起来；`rev` 只在一个无害的 `.id()` 上被读取。
+- **收尾自愈**：真机上"流式结束 → 组件按已结束语义重建"这一步可能不触发（`@Watch` / 父组件属性更新在真机时间线里不可靠）。因此两个视图各自带一个 `startUiSettleTimer()`：每 250ms 采样消息正文，连续两次一致即视为产出结束，就地按 `finalized` 重建片段，8 秒超时兜底，`aboutToDisappear` 清理。**组件自己负责收尾，不依赖任何外部通知。**
+- **维护须知**：组件内派生的渲染数据一律用数组/基本类型 `@State` 整体赋值；需要"强制重新渲染某个子组件"时用 key 变化，但 **key 必须绑定语义而不是刷新次数**。
+- **界面归属**：交互模式走 `ChatPage.buildWorkTimeline()` → `WorkTurnView`（共享时间线，含思考/工具行），聊天模式走 `ChatBubbleView`，两条路径都接了 `GuncatUiView`（聊天模式下界面可本地调参，但"回传模型"的动作会提示需切到交互模式）。
 
-### 5. 交互闭环（回传）
+### 5. 交互闭环（本地重算 + 回传模型）
+
+界面上的交互分两类，这是整个功能的核心设计：
 
 ```text
-用户在界面拖动/输入 → GuncatUiView.values（组件内 @State，不落盘、不膨胀会话）
-点击提交/选项 → GuncatUiPayload{kind, actionId, names/labels/values | value, confirm}
-  → ChatBubbleView/WorkTurnView.onUiInteract(messageId, payload)
-  → ChatViewModel.sendUiInteraction(messageId, payload)
-      ├─ 校验 messageId === 最后一条 assistant 消息（历史界面已归档, 仅提示不发送）
-      ├─ GuncatUiMessageBuilder.toUserText(payload) → 中文用户消息（【交互界面回传】… + 逐项取值 + confirm）
-      ├─ 循环空闲 → executeWorkLoop(conv) 立即重算并重出界面
-      └─ 循环进行中 → 推入 workSteerQueue, 本轮工具结束后作为「用户补充」注入
+A. 本地交互（不发请求, 界面立即重算）
+   声明 $变量 → 把控件绑到它 → 用户拖动/点选
+   → GuncatUiState.set() → GuncatUiLang.render(program, bindings) 重新物化整棵树
+   → 表达式里的 $变量用新值重算（"金额 " + $amount + " 万" 立即更新）
+   → GuncatUiEvent{kind:'state'} → 仅持久化绑定值, 不触发新一轮
+
+B. 回传助手（发一条消息, 触发新一轮回答）
+   Button/Action([@ToAssistant("按 30 天口径重算")]) 或表单提交
+   → GuncatUiEvent{kind:'action', message, stateJson}
+   → ChatBubbleView/WorkTurnView.onUiInteract(messageId, ev)
+   → ChatViewModel.sendUiInteraction(messageId, ev)
+       ├─ 先把最新绑定值写回该条消息（尾标记）——模型看到的是"设置 + 诉求"
+       ├─ 校验 messageId === 最后一条 assistant 消息（历史界面已归档, 仅提示不发送）
+       ├─ 循环空闲 → executeWorkLoop(conv) 立即重算并重出界面
+       └─ 循环进行中 → 推入 workSteerQueue, 本轮工具结束后作为「用户补充」注入
 ```
 
-置灰规则：`vm.pendingUiMessageId` 给出「当前可交互的那条消息 id」，其余界面（历史轮次、执行中的中间态）`locked=true`，防止重复提交。
+- **表单提交**：`GuncatUiRuntime.formMessage()` 把每个 `FormControl` 的标签与当前值拼成逐项清单，套上「【交互界面回传】<界面标题>」前缀；提交按钮自己的 `@ToAssistant` 文本会接在后面（形如「… / - 口径 = customers / 换口径重算」）。
+- **不写 action 的按钮**等价于把按钮文字发给助手（对齐参考实现）。
+- **状态键的选择**：控件有绑定（`value` 传了 `$x`）就用 `$x` 作状态键，没有绑定则退回控件自身的 `name`；`GuncatUiRuntime.stateKeyOf()` 统一这个规则。
+- **状态随消息持久化**：绑定值以 `]]>guncat-ui:state` + 一行 JSON 追加在消息正文末尾（对齐参考实现的 `]]>openui:context`）。`GuncatUiParts` / `plainSummary` 都会先把它拆掉，用户看不到它。
+- **下一轮把它翻译成人话**：`ChatViewModel.assistantLoopContent()` 在拼装循环历史时把尾标记换成 `(用户在当前交互界面上的设置: 金额=45; 口径=customers。)`（标签取自 `FormControl.label` / `Slider.label`，所以模型看到的是用户看到的词）。**同时清掉尾标记本身**——它对模型是噪音。
+- **置灰规则**：`vm.pendingUiMessageId` 给出「当前可交互的那条消息 id」，其余界面（历史轮次、执行中的中间态）`locked=true`；`GuncatUiView.interactive() = complete && !locked`，所有控件与按钮统一用它。
 
 ### 6. 扩展与维护入口
 
 | 想改什么 | 改哪里 |
 | --- | --- |
-| 新增元素种类 / 控件类型 | `common/GuncatUiSpec.ts`（常量 + `isAllowed` + `parseElement`/`parseInput` + 提示词表格）→ `views/GuncatUiView.ets`（`buildElement` 分发 + 新 `@Builder`） |
-| 调整界面文案 / 引导语 | `GuncatUiPrompt.RULES`（DSL 契约）与 `GuncatUiPrompt.INTERACTIVE_DUTY`（模式职责） |
-| 新增整块消息渲染路径 | 参照 `ChatBubbleView.buildAIContent()` / `WorkTurnView.buildTurnContent()`，接入 `GuncatUiParts.build()` + `GuncatUiView` |
-| 交互模式专属文案 | `ChatViewModel` 的 `loopModeTitle` / `loopModeHint` / `loopModeInputPlaceholder` / `loopModeEmptyDescription` / `loopToolLabel` |
-| 模式常量 | `Constants.INTERACTIVE_AGENT_ID` / `MODE_*` / `UI_BLOCK_LANG` / `UI_MAX_BLOCKS_PER_MESSAGE` |
+| 新增组件 | `common/GuncatUiLibrary.ts` 的 `definitions()` 加一条（名字/分组/描述/位置参数表）→ `views/GuncatUiView.ets` 的 `renderNode()` 加一个分发分支 + 对应 `@Builder`。**提示词会自动跟着变**（组件清单由这张表生成） |
+| 调整语言语法 | `common/GuncatUiLang.ts`（`UiLexer` 词法 / `UiParser` 语法 / `GuncatUiMaterializer` 求值）+ `GuncatUiPrompt.SYNTAX`（给模型的语法说明），两者必须同步 |
+| 调整界面文案 / 引导语 | `GuncatUiPrompt` 的 `SYNTAX` / `INTERACTION` / `STREAMING` / `EXAMPLES` / `ANTI_PATTERNS` / `INTERACTIVE_DUTY` |
+| 新增图表 | `common/GuncatUiPaint.ts`（纯几何，可单测）+ `views/GuncatUiCharts.ets`（声明式 Shape/Path 或 Row/Column）→ 在 `GuncatUiLibrary` 登记并在 `GuncatUiView.buildChart()` 分发 |
+| 新增控件 | `GuncatUiLibrary` 登记 + `views/GuncatUiView.ets` 的 `isControl()` / `buildControl()`；绑定参数用 `bind()` 登记（解析器会记录变量名，渲染器据此读写状态） |
+| 新增图标 | `views/GuncatUiIcons.ets` 的 `glyph()` 映射表（**用 Unicode 字形而不是 SymbolGlyph**：SymbolGlyph 的名字在不同 ROM 上可用集合不一致，缺失时渲染成空白且静默失败） |
+| 交互模式专属文案 | `ChatViewModel` 的 `loopModeTitle` / `loopModeHint` / `loopInputPlaceholder` / `loopEmptyDescription` / `loopToolLabel` |
+| 模式常量 | `Constants.INTERACTIVE_AGENT_ID` / `MODE_*` / `UI_BLOCK_LANG` / `UI_CONTINUE_MESSAGE` / `UI_CONTINUE_MAX_ROUNDS` |
 
-> 回归护栏：`common/GuncatUiSpec.ts` 与 `common/GuncatUiParts.ts` 已纳入 `test/guncat-harness`（纯逻辑用例含分词、渐进解析、非法 JSON 保留原文、未知 kind 丢弃、限额封顶、回传消息组装），改完跑 `node setup.mjs && node test-core.mjs`。
+> **回归护栏（三层，缺一不可）**
+> 1. 纯逻辑单测：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`（430 项，含 guncat-ui lang 的词法/语法/前向引用/流式补齐/绑定重算/`@Each`/内置函数/`Action`/片段切分/状态序列化/图表几何/组件库与提示词）。
+> 2. 服务层类型检查：`node check-setup.mjs && npx tsc -p check/tsconfig.json`。
+> 3. **真实 ArkTS 编译**：`powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`（调用 DevEco 自带的 hvigor）。
+> 第 3 层不能省：ArkUI 有一批**只有编译器才知道**的规则——`@Builder` 方法体内不允许声明局部变量、自定义组件属性名不能与内置属性同名（`size` / `scale`）、`@Prop` 的 null 需要显式联合类型。这些在 node 侧 harness 里全都测不出来（harness 只覆盖 `common/**` 与 `service/**` 的纯 TS，不解析 `.ets`）。
 
 ## 构建要求
 
@@ -1020,12 +1062,14 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 
 1. 侧边栏「Agent模式」分组点击 ✦「交互模式」进入（就在「工作模式」下方）。
 2. 像平时一样提问即可，例如「帮我算一下 30 万房贷在不同利率下的月供」「对比这三个方案的收益并让我调参数」「把这段数据做成能筛选的表格」。
-3. Agent 不做长篇文字回答，而是给出**可操作的界面**：指标卡、图表、表格，以及滑块 / 开关 / 下拉 / 输入框。
-4. 直接拖动滑块、切换开关、选择下拉项——卡片内的数值会随之刷新。
-5. 点「提交」或某个选项，你的操作会作为一条消息回传，Agent 立即按新参数**重新生成界面**；反复调参就是反复重算。
-6. 需要材料时和工作模式一样：通过胶囊的「交互界面」面板上传文件（进入沙箱工作区），Agent 可以用同一套 42 个工具读取、计算、再画进界面。
-7. 只有最新一条界面可交互（历史界面自动置灰归档），避免改到旧参数上；界面在生成过程中会渐进成形，未完成时显示「生成中…」。
-8. 需要正式文件（Word / Excel / PPT）时直接说，Agent 会照常落盘产出——交互模式并不取消文件能力。
+3. Agent 不做长篇文字回答，而是**输出一份界面程序**，应用把它渲染成原生界面：标题/正文、图表（柱状 / 折线 / 面积 / 横向条 / 饼环 / 径向 / 雷达 / 堆叠条）、表格、指标卡、图片墙、选项卡 / 折叠面板 / 步骤条、以及整套表单控件。
+4. **本地交互即时生效**：拖动滑块、切换开关、点选项、填输入框——表达式里的 `$变量` 会立刻用新值重算，界面（含图表与数值文案）随之刷新，**不发请求、不等模型**。
+5. **需要重算时点按钮**：形如「换口径重算」的按钮会把你的设置 + 诉求打包成一条消息回传，Agent 立即产出**更新后的完整界面**；表单提交会把全部字段值一起带上。
+6. 界面在生成过程中**渐进成形**（第一行的 `root = Card([...])` 就让外壳出现，后面的语句逐条补齐），未写完时控件置灰；输出被截断时已写完的部分照常渲染，底部标注「界面未写完」。
+7. 只有最新一条界面可交互（历史界面自动置灰归档），避免改到旧参数上；你调过的参数会随消息保存，滚动、切会话、重启后仍在，并在下一轮告诉模型。
+8. 需要材料时和工作模式一样：通过胶囊的「交互界面」面板上传文件（进入沙箱工作区），Agent 可以用同一套 42 个工具读取、计算、再画进界面。
+9. 需要正式文件（Word / Excel / PPT）时直接说，Agent 会照常落盘产出——交互模式并不取消文件能力。
+10. 想排查模型到底写了什么：界面底部「查看原始输出」可展开源码；有解析诊断时会显示「诊断 · N 条」。
 
 ### 朗读
 
@@ -1061,6 +1105,25 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 - 从系统分享接收的内容不会自动发送，必须由用户主动点击发送。
 - 原始附件不会作为永久文件复制到应用数据中。
 - 网络请求使用 HTTPS，实际数据处理政策以所配置的模型服务商为准。
+
+## 6.4.0 更新（交互模式全面重写 · guncat-ui lang）
+
+> 本次把交互模式的交付格式从「一个严格 JSON 对象」**彻底重写**为一种声明式界面语言（`guncat-ui lang`，对齐参考项目 [open-intelligent-ui](https://github.com/thesysdev/openui) 的 OpenUI Lang 设计），并把渲染器从 11 种元素扩展到 70 个原生组件。旧的 `common/GuncatUiSpec.ts`（JSON DSL + 解析器 + 救助链 + JSON Output 补救）已整体删除。
+
+- **交付格式：JSON → 按行语句**。旧格式是一大段严格 JSON，被输出上限截断就**整块作废**（只能靠额外的 `response_format: json_object` 请求重做一次）。新格式每条语句独立成行：`root = Card([header, chart])` / `header = CardHeader("标题")` / `chart = BarChart([...], [s1], "grouped")`。截断只损失**最后一条没写完的语句**，前面的全部保留并照常渲染——"补救"从主路径降级成兜底。
+- **70 个原生组件**（9 组）：`Card` `CardHeader` `TextContent` `MarkDownRenderer` `Callout` `Image` `ImageGallery` `CodeBlock` `TagBlock` `EntityList` / `SectionBlock` `Tabs` `Accordion` `Carousel` `Steps` / `Table`+`Col` / 8 种图表（柱状·折线·面积·横向条·饼环·径向·雷达·堆叠条）/ 指标与文本 / 5 类卡片块 / 列表与追问 / 全套表单控件 / 按钮与图标。图表全部用声明式 `Shape`+`Path` 与 `Row`/`Column` 现画，不引入图表库、不产生图片文件。
+- **双向绑定（`$变量`）——"能调"的关键**：把控件绑到一个 `$变量`，用户拖动/勾选后界面**立即用新值重新求值整棵树**（`"金额 " + $amount + " 万"` 会变），不发请求、不等模型。需要模型换数据/换算法时点按钮（`Action([@ToAssistant("…")])`）或提交表单，把设置 + 诉求打包回传，模型产出**更新后的完整界面**。
+- **状态随消息持久化**：用户调过的参数以 `]]>guncat-ui:state` 尾标记保存在消息里（滚动 / 切会话 / 重启后仍在），下一轮请求前被翻译成一句人话（`(用户在当前交互界面上的设置: 金额=45; 口径=customers。)`）交给模型——对齐参考项目改写 `]]>openui:context` 的做法。
+- **回答不再有"卡片外壳"**：旧实现在界面外面套了一层带边框、阴影和状态徽标（`可交互`/`生成中…`）的卡片，观感像"嵌在聊天里的小部件"。现在 `Card` 只是一个 16 间距的纵向容器，节奏来自间距与各组件自身的内边距——这是本次改动最直观的观感提升。
+- **组件库单一事实源**：`common/GuncatUiLibrary.ts` 一张表同时生成**系统提示词里的组件清单**、**解析期的参数映射与类型转换**、**渲染期的合法性判断**，三者不会再漂移。
+- **提示词重写**：`common/GuncatUiPrompt.ts` 给出语法规则、组件清单、交互闭环（本地交互 vs 回传模型的区别）、**输出顺序纪律**（`root` 第一行 → `$变量` → 区块 → 数据细节，因为顺序决定流式观感）、3 个完整示例与常见错误清单。
+- **容错策略调整（有意偏离参考实现）**：未闭合的括号/字符串自动补齐；引用了未定义的变量只是暂时为空；**未知组件名丢弃并给出诊断**；但**必需参数缺失/类型不符不再丢弃组件**（用安全默认值渲染 + 记录诊断）——聊天场景里"少一个字段"远好于"整块消失"。
+- **顺手修掉的三个既有缺陷**：
+  1. `ChatBubbleView.buildAIContent()` 在"消息里没有 guncat-ui 围栏"时直接跳过整段渲染，导致**聊天模式下不含界面的回答正文一个字都不显示**（现补上 `uiSegs.length === 0 → RichTextView` 兜底，并保证 `GuncatUiParts` 永远至少产出一个文本片段）；
+  2. 界面绑定值以前只存在组件内、**不落盘**（滚动/切会话即丢），现在随消息持久化并回传模型；
+  3. 「重新回答」用字符串字面量 `conv.mode === 'work'` 判断模式，导致交互模式下不走 Agent Loop；同时**会话标题生成**、**复制为纯文本**、**导出 Word** 三处都会把界面源码原样带出去，现统一改用 `GuncatUiParts.plainSummary()`（正文 + 界面里用户可见的文字，Table 还原成 Markdown 表格）。
+- **新增第三层回归护栏**：`tools/build-check.ps1` 调用 DevEco 自带的 hvigor 做**真实 ArkTS 编译**。node 侧 harness 只覆盖 `common/**` 与 `service/**` 的纯 TS，测不出 ArkUI 的编译期规则（`@Builder` 体内不能声明局部变量、自定义组件属性名不能与内置属性同名如 `size`/`scale`、`@Prop` 的 null 需要显式联合类型）——本次就是靠它拦下了 8 个编译错误。纯逻辑单测从 376 项增至 **430 项**。
+- 参考项目与语言的两份实现级规格存于 `docs/reference/`（`open-intelligent-ui-spec.md`、`openui-lang-spec.md`）。
 
 ## 6.3.0 更新（交互模式 · Intelligent UI）
 
@@ -1246,17 +1309,14 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 - 确认安装的是包含 Share Kit UTD 声明的最新 HAP。
 - 更新安装后重新打开图库分享面板，让系统刷新分享目标。
 
-### 交互模式的卡片是空的 / 一直显示「生成中…」/ 显示「未完成」
+### 交互模式的界面没出来 / 只出了一部分 / 显示「界面未写完」
 
-- 状态徽标就是诊断信息：`生成中…` = 界面块正在写；`未完成` = **模型输出被截断或中断**，块没有闭合（此时卡片会尽量渲染已经写完的部分，底部「查看原始输出」可看到模型的原文）；`无内容` = 输出的 JSON 里确实没有可识别的元素。
-- 出现 `未完成` 时的处理：多数情况不用你做——应用会自动追补一轮把界面块写完（会话里会出现「（界面输出被截断，已自动续写）」）。若续写后仍显示 `未完成`，回一句「继续」或说「重新生成一版更短的界面」；如果反复被截断，说明单次输出太长（模型输出上限），可以让它少放几个元素、或按你给的清单分两次生成。
-- 卡片内会直接展示模型的**原始输出**（解析失败时默认展开，其他情况点「查看原始输出」），据此可以看出是哪种写法出错（常见：元素没放进 `elements` 数组、`kind` 用了未登记的名字、JSON 带注释或尾随逗号）。
-- 解析器已对常见写法与截断做了多层容错（近义 `kind` 归一化、`items/blocks/…` 等价字段、注释与尾随逗号与全角引号清洗、逐级砍尾救助、只剩控件时拼成可提交表单），仍无法解析的块会按原文渲染，不会留空白。
-
-#其余保持原状（对外行为不变）：
-- **篇幅纪律**（提示词）成硬约束：默认 2–4 个元素、上限 6 个，controls ≤3、table ≤8 行、chart ≤8 点、单条文案 ≤60 字——界面 JSON 越短越不容易被输出上限截断；要展开更多内容就分两轮给。
-- 界面块的 `kind/type/chart/tone` 只认清单内取值（近义词会被归一化，完全不认识才丢弃）；JSON 里不要写颜色/坐标/注释/代码围栏。
-- 「查看原始输出」开关在交互模式的所有卡片上可用（有原文时），排查问题时能直接看到模型写了什么。
+- **界面在写的过程中就成形**：第一行 `root = Card([...])` 先渲染外壳，后面的语句逐条补齐，所以"看起来还没出来"通常只是刚开始写。
+- **显示「界面未写完，以上为已生成的部分」**：模型输出被截断或中断，**已写完的语句全部照常渲染**（这是按行语句相对单块 JSON 的核心优势）。多数情况不用你处理——若模型压根没产出可用界面，应用会自动单独请求一次（会话里会出现「（界面已重新生成）」）。仍不完整时回一句「继续」或「重新生成一版更简短的界面」；反复被截断说明单次输出太长，可以让它少放几个组件、或分两轮给。
+- **界面是空的（只有「这段界面未能渲染成可交互组件」）**：点开底部的「查看原始输出」看模型到底写了什么；若有「诊断 · N 条」面板，点开能看到具体原因，最常见的是**用了组件清单以外的组件名**（未知组件会被丢弃，避免渲染成莫名空卡片）。
+- **常见的写法错误**（会出现在诊断里）：忘了第一行 `root = Card([...])`；参数写成键值 `CardHeader(title: "x")`（必须是位置参数）；定义了变量却忘了放进 `root` 的子项数组（未引用的语句不会渲染）；组件名不在清单里。
+- **控件点了没反应**：只有**最新一条**界面可交互（历史界面自动置灰归档），且界面没写完时控件也是灰的；此外「回传模型」的动作只在交互模式下生效（聊天模式里出现的界面只能本地调参）。
+- **参数调了但数字没变**：只有绑定了 `$变量` 的控件才会实时重算（`Slider(..., $amount)`），且表达式里要真的引用它（`"金额 " + $amount`）。让模型"把这个数值也做成可调的"即可。
 
 ## 后台朗读停止
 

@@ -12,7 +12,7 @@ import { WorkStepFormat } from './ChatBubbleView';
 import { FileDiff } from '../common/DiffUtil';
 import { GuncatUiView } from './GuncatUiView';
 import { GuncatUiParts, GuncatUiSeg, GuncatUiSegType } from '../common/GuncatUiParts';
-import { GuncatUiBlocks, GuncatUiSpec, GuncatUiPayload } from '../common/GuncatUiSpec';
+import { GuncatUiEvent } from '../common/GuncatUiRuntime';
 
 // diff 卡片行模型
 class DiffRow {
@@ -40,8 +40,8 @@ export struct WorkTurnView {
   @State private uiSegs: GuncatUiSeg[] = [];
   // 该轮界面是否已回传(仅最新一轮可交互)
   @Prop uiLocked: boolean = false;
-  private onUiInteract: (messageId: string, payload: GuncatUiPayload) => void =
-    (_messageId: string, _payload: GuncatUiPayload): void => {};
+  private onUiInteract: (messageId: string, ev: GuncatUiEvent) => void =
+    (_messageId: string, _ev: GuncatUiEvent): void => {};
   // 上一次工具行状态签名(数量/参数量/执行态): 变化才递增 stepsTick 触发行重建,
   // 避免流式期间每 33ms 无条件重建导致 LoadingProgress 动画永远停在第一帧(观感即"卡住")
   private lastCallsSig: string = '';
@@ -69,20 +69,18 @@ export struct WorkTurnView {
     }
   }
 
-  // 交互界面块切分(仅正文含 guncat-ui 标记时重建, 工作模式零开销)。
-  // finalized = 本轮产出已结束(不再流式): 未闭合的界面块据此从"生成中"转为"未完成"静态展示。
+  // 正文切分(文本片段 + 界面程序片段)。
+  // 注意: 这里**不能**再用"正文里有没有 guncat-ui 围栏"当开关 —— 交互模式的主形态是
+  // 非围栏的整段界面程序, 而且普通回答也必须照样走文本片段渲染。
+  // finalized = 本轮产出已结束(不再流式): 未写完的界面据此从"生成中"转为"未完成"静态展示。
   private refreshUiParts(): void {
     let content: string = this.isStreaming ? this.visibleText : this.message.content;
+    if (content === this.lastUiSeen && this.lastUiFinalized === !this.isStreaming) {
+      return;
+    }
     this.lastUiSeen = content;
     this.lastUiFinalized = !this.isStreaming;
     this.uiBuildFinalized = this.lastUiFinalized;
-    if (content.indexOf(GuncatUiBlocks.OPEN) < 0) {
-      if (this.uiSegs.length > 0) {
-        let empty: GuncatUiSeg[] = [];
-        this.applyUiSegs(empty);
-      }
-      return;
-    }
     let parts: GuncatUiParts = GuncatUiParts.build(content, this.lastUiFinalized);
     let next: GuncatUiSeg[] = [];
     for (let i: number = 0; i < parts.segments.length; i++) {
@@ -91,7 +89,7 @@ export struct WorkTurnView {
     this.applyUiSegs(next);
   }
 
-  // 按"已结束"语义重建一次界面片段
+  // 按"已结束"语义重建一次正文片段
   private refreshUiPartsFinal(): void {
     let content: string = this.message.content;
     this.lastUiSeen = content;
@@ -162,8 +160,8 @@ export struct WorkTurnView {
     this.uiSettleTimer = setInterval((): void => {
       waited += 250;
       let content: string = this.message.content;
-      if (content.indexOf(GuncatUiBlocks.OPEN) < 0) {
-        // 没有界面块: 无需自愈, 或等超时后收工
+      if (!GuncatUiParts.hasProgram(content)) {
+        // 正文里没有界面程序: 无需自愈, 或等超时后收工
         if (waited >= 8000) {
           this.stopUiSettleTimer();
         }
@@ -275,8 +273,9 @@ export struct WorkTurnView {
     return call.preparing ? '生成调用中…' : '等待中…';
   }
 
-  // 正文渲染: 普通文本片段走 Markdown; 交互模式下内嵌的 guncat-ui 块走原生交互渲染。
-  // 未命中界面块时与旧实现完全一致(单个 RichTextView), 工作模式行为不变。
+  // 正文渲染: 文本片段走 Markdown; 界面程序片段走原生交互渲染。
+  // 界面片段的 key **不含程序文本**: 流式期间每来一段新文本只更新 @Prop, 由 GuncatUiView
+  // 自己重新解析并重绘; 若把文本放进 key, 每 33ms 就会销毁重建整块界面(闪烁 + 掉交互状态)。
   @Builder
   buildTurnContent() {
     if (this.uiSegs.length === 0) {
@@ -288,36 +287,17 @@ export struct WorkTurnView {
       Column({ space: 8 }) {
         ForEach(this.uiSegs, (seg: GuncatUiSeg, index: number) => {
           if (seg.type === GuncatUiSegType.UI) {
-            if (seg.spec !== null) {
-              GuncatUiView({
-                spec: seg.spec as GuncatUiSpec,
-                complete: seg.complete,
-                truncated: seg.truncated,
-                locked: this.uiLocked,
-                rawFallback: seg.raw,
-                onInteract: (payload: GuncatUiPayload): void => {
-                  this.onUiInteract(this.message.id, payload);
-                }
-              })
-            } else {
-              Column({ space: 8 }) {
-                Row()
-                  .width('60%')
-                  .height(12)
-                  .borderRadius(6)
-                  .backgroundColor($r('app.color.surface_secondary'))
-                Row()
-                  .width('35%')
-                  .height(12)
-                  .borderRadius(6)
-                  .backgroundColor($r('app.color.surface_secondary'))
+            GuncatUiView({
+              programText: seg.raw,
+              complete: seg.complete,
+              truncated: seg.truncated,
+              locked: this.uiLocked,
+              stateJson: seg.stateJson,
+              title: seg.title,
+              onInteract: (ev: GuncatUiEvent): void => {
+                this.onUiInteract(this.message.id, ev);
               }
-              .width('100%')
-              .padding(14)
-              .backgroundColor($r('app.color.surface'))
-              .borderRadius(18)
-              .alignItems(HorizontalAlign.Start)
-            }
+            })
           } else if (seg.text.trim() !== '') {
             RichTextView({ content: seg.text, selectionTrigger: 0 })
           }

@@ -1,7 +1,7 @@
 export class Constants {
   // App info
   static readonly APP_NAME: string = 'Guncat Work';
-  static readonly APP_VERSION: string = '6.1.2';
+  static readonly APP_VERSION: string = '6.4.0';
 
   // LocalStorage keys (统一存放在 Preferences 中, key 名字符串)
   static readonly LS_KEY_CONVERSATIONS: string = 'guncat_conversations';
@@ -170,24 +170,23 @@ export class Constants {
   // transform_file xlsx 输出的行数上限(内存型构建, 超大表请用 csv)
   static readonly WORK_TRANSFORM_XLSX_MAX_ROWS: number = 50000;
 
-  // ===== Guncat Work 6.3 交互模式 (Intelligent UI) =====
+  // ===== Guncat Work 6.4 交互模式 (Intelligent UI) =====
   // 交互模式虚拟智能体 id: 与 work 平行的第三个身份, 会话 mode 取 'interactive'。
   // 与工作模式共用 Agent Loop 与沙箱工作区, 但系统提示词要求模型把回答交付为
-  // ```guncat-ui 交互界面块(图表/表单/表格/指标), 由 GuncatUiView 原生渲染并回传用户操作。
+  // **guncat-ui lang 界面程序**(图表/表格/表单/卡片), 由 GuncatUiView 原生渲染并回传用户操作。
   static readonly INTERACTIVE_AGENT_ID: string = 'interactive';
   // 会话模式字符串('chat' | 'work' | 'interactive')
   static readonly MODE_CHAT: string = 'chat';
   static readonly MODE_WORK: string = 'work';
   static readonly MODE_INTERACTIVE: string = 'interactive';
-  // 交互界面块的语言标记(与 GuncatUiBlocks.LANG 一致)
+  // 界面围栏的语言标记(与 GuncatUiLang.FENCE_LANG 一致; 也接受 openui-lang)
   static readonly UI_BLOCK_LANG: string = 'guncat-ui';
-  // 交互模式单条消息最多渲染的界面块数(超出部分按原文 Markdown 渲染)
-  static readonly UI_MAX_BLOCKS_PER_MESSAGE: number = 3;
-  // 界面块被输出上限截断时, 自动追补的用户消息(最多自动续写一轮, 防止无限循环)
+  // 主回答没有产出可渲染界面时, 自动重新生成一次的兜底用户消息
   static readonly UI_CONTINUE_MESSAGE: string =
-    '【系统】你的上一条回复在 guncat-ui 界面块中间被输出上限截断了。请只输出该界面块的**剩余部分**（从被截断处继续，包括结尾的 ``` 与 JSON 收尾括号），不要重复已输出的内容，也不要重新解释。';
+    '【系统】你的上一条回复没有产出可用的 guncat-ui 界面程序。请把结论与数据重新组织成一份完整的界面程序: 第一行必须是 root = Card([...]), 参数按位置传递, 每个定义的标识符都要被引用。';
   static readonly UI_CONTINUE_MAX_ROUNDS: number = 2;
-  // JSON Output 模式下未显式配置 max_tokens 时的默认输出上限(界面 JSON 需要足够额度)
+  // forceJsonMode 专用请求未显式配置 max_tokens 时的默认输出上限
+  // (协议层保留的能力: 交互模式已改用 guncat-ui lang, 不再走 JSON Output)
   static readonly DEFAULT_JSON_OUTPUT_TOKENS: number = 8000;
 
   // ===== Guncat Work 6.1 (DeepSeek Harness 移植) =====

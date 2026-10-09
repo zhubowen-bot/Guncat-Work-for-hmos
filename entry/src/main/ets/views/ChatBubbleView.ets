@@ -4,7 +4,7 @@ import { ToolCallRecord } from '../model/ToolCallRecord';
 import { RichTextView } from './RichTextView';
 import { GuncatUiView } from './GuncatUiView';
 import { GuncatUiParts, GuncatUiSeg, GuncatUiSegType } from '../common/GuncatUiParts';
-import { GuncatUiBlocks, GuncatUiSpec, GuncatUiPayload } from '../common/GuncatUiSpec';
+import { GuncatUiEvent } from '../common/GuncatUiRuntime';
 
 // 工具步骤的文本格式化(静态类, 供 @Builder 内调用; WorkTurnView 复用)
 export class WorkStepFormat {
@@ -226,9 +226,9 @@ export struct ChatBubbleView {
   // ===== 交互模式 (Intelligent UI) =====
   // 界面块已回传(置灰防重复提交); 由 ChatPage 依据当前待交互消息判定
   @Prop uiLocked: boolean = false;
-  // 用户在交互界面上的操作回传(表单提交/选项点击), 由 ChatPage 转成 user 消息交给 Agent Loop
-  private onUiInteract: (messageId: string, payload: GuncatUiPayload) => void =
-    (_messageId: string, _payload: GuncatUiPayload): void => {};
+  // 用户在交互界面上的操作回传, 由 ChatPage 转成 user 消息(或仅持久化绑定值)
+  private onUiInteract: (messageId: string, ev: GuncatUiEvent) => void =
+    (_messageId: string, _ev: GuncatUiEvent): void => {};
   // 复制局部已改为 RichTextView 文本选择常开, 不再需要按钮回调
   // 深度思考条折叠状态 (默认折叠, 点击头部展开)
   @State private reasoningExpanded: boolean = false;
@@ -274,19 +274,17 @@ export struct ChatBubbleView {
     }
   }
 
-  // 交互界面块切分(仅在消息体含 guncat-ui 标记时才重建, 普通消息零开销)。
-  // finalized = 该条消息产出已结束: 未闭合的界面块据此从"生成中"转为"未完成"静态展示。
+  // 正文切分(文本片段 + 界面程序片段)。
+  // 注意: **不能**再用"正文里有没有 guncat-ui 围栏"当开关 —— 交互模式的主形态是
+  // 非围栏的整段界面程序; 而且普通回答也必须照样走文本片段路径(历史事故: 早期版本
+  // 在这里提前 return, 导致聊天模式里所有不含界面块的回答正文一个字都不显示)。
   private refreshUiParts(): void {
     let content: string = this.isStreaming ? this.visibleText : this.message.content;
-    this.lastUiSeen = content;
-    this.uiBuildFinalized = !this.isStreaming;
-    if (content.indexOf(GuncatUiBlocks.OPEN) < 0) {
-      if (this.uiSegs.length > 0) {
-        let empty: GuncatUiSeg[] = [];
-        this.applyUiSegs(empty);
-      }
+    if (content === this.lastUiSeen && this.uiBuildFinalized === !this.isStreaming) {
       return;
     }
+    this.lastUiSeen = content;
+    this.uiBuildFinalized = !this.isStreaming;
     let parts: GuncatUiParts = GuncatUiParts.build(content, this.uiBuildFinalized);
     let next: GuncatUiSeg[] = [];
     for (let i: number = 0; i < parts.segments.length; i++) {
@@ -360,7 +358,7 @@ export struct ChatBubbleView {
     this.uiSettleTimer = setInterval((): void => {
       waited += 250;
       let content: string = this.message.content;
-      if (content.indexOf(GuncatUiBlocks.OPEN) < 0) {
+      if (!GuncatUiParts.hasProgram(content)) {
         if (waited >= 8000) {
           this.stopUiSettleTimer();
         }
@@ -562,55 +560,38 @@ export struct ChatBubbleView {
     .padding({ left: 18, right: 18, top: 4, bottom: 16 })
   }
 
-  // 消息内容渲染: 把消息体切成「Markdown 文本片段 + guncat-ui 交互界面块」。
-  // - 命中界面块(交互模式)时: 文本片段仍走 RichTextView, 界面块走 GuncatUiView 原生渲染,
-  //   整个气泡的底色由父级 ai_msg 提供, 界面卡片自身为白色 raised 卡;
-  // - 未命中时: 与旧实现完全一致(单个 RichTextView), 聊天/工作模式行为不变。
+  // 消息内容渲染: 把消息体切成「Markdown 文本片段 + guncat-ui 界面程序片段」。
+  // - 命中界面程序时: 文本片段走 RichTextView, 界面片段走 GuncatUiView 原生交互渲染;
+  // - 未命中时: 单个 RichTextView —— 这一分支必须存在, 否则普通回答会一个字都不显示。
   @Builder
   buildAIContent() {
-    Column({ space: 8 }) {
-      ForEach(this.uiSegs, (seg: GuncatUiSeg, index: number) => {
-        if (seg.type === GuncatUiSegType.UI) {
-          if (seg.spec !== null) {
+    if (this.uiSegs.length === 0) {
+      RichTextView({ content: this.isStreaming ? this.visibleText : this.message.content })
+    } else {
+      Column({ space: 8 }) {
+        ForEach(this.uiSegs, (seg: GuncatUiSeg, index: number) => {
+          if (seg.type === GuncatUiSegType.UI) {
             GuncatUiView({
-              spec: seg.spec as GuncatUiSpec,
+              programText: seg.raw,
               complete: seg.complete,
               truncated: seg.truncated,
               locked: this.uiLocked,
-              rawFallback: seg.raw,
-              onInteract: (payload: GuncatUiPayload): void => {
-                this.onUiInteract(this.message.id, payload);
+              stateJson: seg.stateJson,
+              title: seg.title,
+              onInteract: (ev: GuncatUiEvent): void => {
+                this.onUiInteract(this.message.id, ev);
               }
             })
-          } else {
-            // 尚未成形: 极简骨架, 避免整块空白闪烁
-            Column({ space: 8 }) {
-              Row()
-                .width('60%')
-                .height(12)
-                .borderRadius(6)
-                .backgroundColor($r('app.color.surface_secondary'))
-              Row()
-                .width('35%')
-                .height(12)
-                .borderRadius(6)
-                .backgroundColor($r('app.color.surface_secondary'))
-            }
-            .width('100%')
-            .padding(14)
-            .backgroundColor($r('app.color.surface'))
-            .borderRadius(18)
-            .alignItems(HorizontalAlign.Start)
+          } else if (seg.text.trim() !== '') {
+            RichTextView({ content: seg.text })
           }
-        } else if (seg.text.trim() !== '') {
-          RichTextView({ content: seg.text })
-        }
-      }, (seg: GuncatUiSeg, index: number) => 'seg' + index + '_' +
-        (seg.type === GuncatUiSegType.UI ? 'ui' : 'tx' + seg.renderKey.toString()) +
-        '_k' + this.uiRenderKey.toString())
+        }, (seg: GuncatUiSeg, index: number) => 'seg' + index + '_' +
+          (seg.type === GuncatUiSegType.UI ? 'ui' : 'tx' + seg.renderKey.toString()) +
+          '_k' + this.uiRenderKey.toString())
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
     }
-    .width('100%')
-    .alignItems(HorizontalAlign.Start)
   }
 
   @Builder

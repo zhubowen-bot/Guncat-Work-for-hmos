@@ -28,7 +28,10 @@ import { SSEProtocolAdapter, SSEParseContext } from '../common/SSEProtocolAdapte
 import { RetryPolicy } from '../common/RetryPolicy';
 import { RetryAfterParser } from '../common/RetryAfterParser';
 import { LoopError } from '../common/LoopError';
-import { GuncatUiPrompt, GuncatUiSpec, GuncatUiParseResult, GuncatUiSpecParser } from '../common/GuncatUiSpec';
+import { GuncatUiPrompt } from '../common/GuncatUiPrompt';
+import { GuncatUiLang, GuncatUiFences, UiNode } from '../common/GuncatUiLang';
+import { GuncatUiLibrary } from '../common/GuncatUiLibrary';
+import { GuncatUiParts } from '../common/GuncatUiParts';
 export { LoopError };
 
 // 带分类的循环层错误已迁移到 common/LoopError(纯逻辑, 可单测);
@@ -674,8 +677,13 @@ export class AgentLoopService {
         '概括任务主题。要求: 只输出标题本身, 不要引号/句号/前后缀, 不要动词开头的句子,' +
         '保留关键名词。'));
       let snippetUser: string = userText.length > 600 ? userText.substring(0, 600) : userText;
+      // 交互模式的回答主体是界面程序, 直接截前 600 字会全是 root = Card(...) —— 先抽成可读摘要
+      let assistantPlain: string = GuncatUiParts.plainSummary(assistantText).trim();
+      if (assistantPlain === '') {
+        assistantPlain = assistantText;
+      }
       let snippetAssistant: string =
-        assistantText.length > 600 ? assistantText.substring(0, 600) : assistantText;
+        assistantPlain.length > 600 ? assistantPlain.substring(0, 600) : assistantPlain;
       messages.push(LoopMessage.user('用户请求: ' + snippetUser +
         '\n\n助手回答(节选): ' + snippetAssistant));
       let abort: AbortSignal = new AbortSignal();
@@ -694,52 +702,23 @@ export class AgentLoopService {
     }
   }
 
-  // ===== 交互模式: 结构化 JSON 界面块(JSON Output 专用请求) =====
+  // ===== 交互模式: 界面程序(guncat-ui lang) =====
+  //
+  // 与旧实现的关键区别: 不再用 JSON Output 模式要一份 JSON, 而是让模型直接输出
+  // guncat-ui lang 程序。原因:
+  //   1. 语言是**按行语句**, 输出被截断时只有最后一条没写完的语句会丢, 已写完的全部可渲染;
+  //   2. response_format=json_object 会把模型逼进"一个 JSON 对象"的思维, 反而写不出多语句结构;
+  //   3. 同一个语法既用于主回答也用于补救请求, 只有一套契约需要维护。
+  static readonly UI_REPAIR_MAX_TOKENS: number = 4000;
 
-  // JSON 输出模式的系统提示(DeepSeek JSON Output 要求提示词含 json 字样 + 期望格式样例)
-  static readonly UI_JSON_SYSTEM: string = [
-    '你是界面 JSON 生成器。你只输出一个合法 json 对象, 不输出任何解释、Markdown 围栏或多余文字。',
-    '**必须输出紧凑的单行 JSON**(不要换行缩进), 因为输出额度有限, 换行缩进会浪费额度并可能导致截断。',
-    'JSON 结构(数组元素数量受上限约束, 不要添加未列出的字段):',
-    '{"title":"界面标题(≤20字)","subtitle":"一句话说明(≤30字,可选)",',
-    '"controls":[{"name":"英文名","type":"slider|toggle|select|text","label":"标签","min":0,"max":100,"step":1,"default":0,"unit":"万","options":["A","B"]}],',
-    '"elements":[',
-    '{"kind":"card","title":"","text":"正文"},',
-    '{"kind":"metrics","items":[{"label":"指标","value":0,"unit":"","delta":""}]},',
-    '{"kind":"progress","title":"","value":0,"total":100,"unit":"%"},',
-    '{"kind":"table","headers":["列1","列2"],"rows":[["a","b"]]},',
-    '{"kind":"chart","chart":"bar|line|pie","title":"","labels":["A","B"],"values":[1,2],"series":["系列"],"unit":""},',
-    '{"kind":"note","tone":"info|success|warn|danger","text":""},',
-    '{"kind":"form","title":"","controls":["控件name"],"action":{"id":"submit","label":"提交","confirm":""}},',
-    '{"kind":"choice","title":"","options":["选项A","选项B"],"action":{"id":"pick","label":"选择"}},',
-    '{"kind":"markdown","text":"需要 Markdown 的正文"},',
-    '{"kind":"layout","layout":"list|grid|row","children":[]}',
-    ']}',
-    '硬性约束: **elements 必填且 2~4 个元素, 绝不能为空**; controls 最多 3 个; table rows 不超过 8 行; ',
-    'chart 的 labels 与 values 数量必须一致; 文案尽量短(每条 ≤60 字); 数值必须是真实算得或用工具查到的; ',
-    '只使用上面列出的 kind 与 type 取值; 不要输出颜色、样式、坐标或注释。'
-  ].join('\n');
-
-  // 触发请求的用户指令: 明确要求"只输出 json", 并给出样例
-  static readonly UI_JSON_INSTRUCTION: string = [
-    '把上一条回答的结论与数据转成一个 json 界面对象, 只输出 json(紧凑单行, 不要解释、不要围栏、不要换行缩进)。',
-    '要求: elements 给 2~4 个, 把核心结论与数据表达清楚; 需要用户调节参数时给 controls 并配一个 form; ',
-    '需要用户做选择时用 choice; 数值必须来自上文真实计算或工具结果, 不要编造。',
-    '输出样例(结构照抄, 内容替换): {"title":"结论","subtitle":"一句话说明",',
-    '"elements":[{"kind":"card","text":"核心结论"},',
-    '{"kind":"metrics","items":[{"label":"指标A","value":12,"unit":"%"}]},',
-    '{"kind":"choice","title":"想继续了解哪块?","options":["选项A","选项B"],"action":{"id":"pick","label":"选择"}}]}'
-  ].join('\n');
-
-  // 交互模式专用: 用 JSON Output 模式单独请求一个界面 JSON。
-  // 目的(对齐 DeepSeek JSON Output 文档): 用 response_format 保证输出是合法 JSON,
-  // 并给足 max_tokens, 从根本上避免界面块被中途截断; 请求不带工具, 与主循环隔离。
-  // 返回已解析并修复的 GuncatUiSpec; 失败返回 null(调用方回落到原文渲染)。
-  static async generateUiSpec(config: ApiConfig, messages: LoopMessage[],
-    abortSignal: AbortSignal): Promise<GuncatUiSpec | null> {
+  // 交互模式专用: 单独请求一份界面程序, 用于主回答没有产出可渲染界面时的补救。
+  // 返回界面程序源码; 失败返回空串(调用方回落到原文渲染)。
+  static async generateUiProgram(config: ApiConfig, messages: LoopMessage[],
+    abortSignal: AbortSignal): Promise<string> {
     let input: LoopMessage[] = [];
-    input.push(LoopMessage.system(AgentLoopService.UI_JSON_SYSTEM));
-    // 复用主循环的最近上下文(仅文本), 让 JSON 请求知道"上一条回答/工具结果"是什么
+    input.push(LoopMessage.system(GuncatUiPrompt.REPAIR_SYSTEM + '\n\n' +
+      GuncatUiLibrary.promptSection()));
+    // 复用主循环的最近上下文(仅文本), 让补救请求知道"上一条回答/工具结果"是什么
     let kept: LoopMessage[] = [];
     for (let i: number = 1; i < messages.length; i++) {
       let m: LoopMessage = messages[i];
@@ -754,34 +733,34 @@ export class AgentLoopService {
     for (let i: number = 0; i < kept.length; i++) {
       input.push(kept[i]);
     }
-    input.push(LoopMessage.user(AgentLoopService.UI_JSON_INSTRUCTION));
+    input.push(LoopMessage.user(GuncatUiPrompt.REPAIR_INSTRUCTION));
     let callbacks: LoopTurnCallbacks = new LoopTurnCallbacks();
     let turn: LoopTurnResult = await AgentLoopService.runTurnWithRetry(
       config, input, false, 'low', false, callbacks, abortSignal,
-      false, 1, null, true);
+      false, 1, null, false);
     let text: string = turn.content.trim();
     if (text === '') {
-      return null;
+      return '';
     }
-    // 模型可能仍套了围栏: 剥掉后按 JSON 解析(内部已含补括号/清洗容错)
-    let body: string = text;
-    let fenceStart: number = body.indexOf('```');
-    if (fenceStart >= 0) {
-      let afterFence: number = body.indexOf('\n', fenceStart);
-      let fenceEnd: number = body.lastIndexOf('```');
-      if (afterFence > 0 && fenceEnd > afterFence) {
-        body = body.substring(afterFence + 1, fenceEnd);
-      }
+    // 模型可能仍套了围栏: 取第一段界面围栏(或整段)
+    let programs: string[] = GuncatUiFences.extractPrograms(text);
+    let body: string = programs.length > 0 ? programs[0] : text;
+    if (!AgentLoopService.isUsableProgram(body)) {
+      return '';
     }
-    let result: GuncatUiParseResult = GuncatUiSpecParser.parse(body);
-    if (result.spec !== null && result.spec.elements.length > 0) {
-      return result.spec;
+    return body.trim();
+  }
+
+  // 程序是否可用: 能解析出根节点, 且至少有一个可渲染的元素
+  static isUsableProgram(body: string): boolean {
+    if (body === null || body === undefined || body.trim() === '') {
+      return false;
     }
-    let repaired: GuncatUiParseResult = GuncatUiSpecParser.parseStreaming(body);
-    if (repaired.spec !== null && repaired.spec.elements.length > 0) {
-      return repaired.spec;
+    let program = GuncatUiLang.parse(body);
+    if (program.root === null) {
+      return false;
     }
-    return null;
+    return UiNode.hasContent(program.root);
   }
 
   // 截图前的兜底补全: 缺名字的调用记录不送回(避免协议校验失败), 空 argsJson 填 '{}'

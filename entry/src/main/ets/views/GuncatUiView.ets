@@ -1,668 +1,630 @@
-// 交互模式 (Intelligent UI) 原生渲染器:
-// 把模型输出的 ```guncat-ui 文档(GuncatUiSpec)渲染为可交互的 ArkUI 组件——
-// 指标卡 / 进度条 / 表格 / 横向柱状图 / 折线图 / 环形占比 / 表单控件(滑块·开关·下拉·输入) / 选项按钮 / 提示条。
-// 设计约定:
-// - 控件当前值存在组件内部 @State values 中(键 = 控件 name), 不写回消息, 因此不落盘、不膨胀会话;
-// - 用户拖动滑块/输入/切换开关由 submitForm 汇总为一条 user 消息回传给模型, 模型据此重出界面(闭环);
-// - 选项按钮(choice)点击即回传, 不等提交;
-// - 流式期间 spec 会不断重建, @Watch('onSpecChanged') 只为新出现的控件补默认值, 不覆盖用户已改的值;
-// - 所有渲染受 complete 控制: 未闭合时禁用交互并显示「生成中」。
+// 交互模式 (Intelligent UI) 原生渲染器。
+//
+// 输入是一份 guncat-ui lang 程序(字符串), 这里负责把它渲染成原生 ArkUI 界面。
+// 设计要点(对齐参考项目的观感):
+//   1. **回答没有卡片外壳**: Card 只是一个 16 间距的纵向容器, 节奏来自间距与各组件自身的内边距,
+//      而不是"一个带边框和状态徽标的盒子"(这正是旧实现显得鸡肋的主要原因);
+//   2. **绑定是活的**: 用户拖动/点选后重新物化整棵树(表达式里的 $变量用新值重算), 界面立即变化;
+//      需要模型重算时用 Action([@ToAssistant(...)]) 回传一条消息, 触发新一轮;
+//   3. **流式中禁用交互**: 程序没写完时控件置灰, 避免在残缺界面上提交;
+//   4. 绑定值随消息持久化(尾标记), 用户填过的参数在滚动/切换会话/重启后仍在。
+import { common } from '@kit.AbilityKit';
+import { promptAction } from '@kit.ArkUI';
+import { pasteboard } from '@kit.BasicServicesKit';
 import {
-  GuncatUiSpec,
-  GuncatUiInput,
-  GuncatUiElement,
-  GuncatUiAction,
-  GuncatUiKind,
-  GuncatUiControlType,
-  GuncatUiActionStyle,
-  GuncatUiChartType,
-  GuncatUiMessageBuilder,
-  GuncatUiPayload,
-  GuncatUiLimits
-} from '../common/GuncatUiSpec';
+  GuncatUiLang,
+  UiProgram,
+  UiElement,
+  UiNode,
+  UiActionStep,
+  GuncatUiMaterializer,
+  UiLimits
+} from '../common/GuncatUiLang';
+import { GuncatUiLibrary } from '../common/GuncatUiLibrary';
+import {
+  GuncatUiState,
+  GuncatUiEvent,
+  GuncatUiRuntime
+} from '../common/GuncatUiRuntime';
+import { UiNum, UiPalette } from '../common/GuncatUiPaint';
+import {
+  GuncatUiBarChart,
+  GuncatUiLineChart,
+  GuncatUiPieChart,
+  GuncatUiRadialChart,
+  GuncatUiStackedBar,
+  GuncatUiRadarChart,
+  GuncatUiHorizontalBars
+} from './GuncatUiCharts';
+import { GuncatUiIcon } from './GuncatUiIcons';
+import { RichTextView } from './RichTextView';
 
 @Component
 export struct GuncatUiView {
-  @Prop @Watch('onSpecChanged') spec: GuncatUiSpec;
-  // 文档是否已闭合(流式中为 false, 界面按中间态渲染并禁用交互)
+  // 程序源码。传字符串而不是对象: ArkUI 里字符串 @Prop 的变更通知最可靠,
+  // 而嵌套对象经 @Prop 深拷贝后既慢又容易丢状态。
+  @Prop @Watch('onProgramChanged') programText: string = '';
+  // 程序是否已写完(流式中为 false)
   @Prop complete: boolean = true;
-  // 未闭合且本轮产出已结束(输出被截断/中断): 按"未完成"静态渲染, 而不是一直显示"生成中"
+  // 未写完但本轮产出已结束
   @Prop truncated: boolean = false;
-  // 已提交/已点击过: 置灰防止重复回传(由父组件按消息维度控制)
+  // 已归档 / 流式中: 禁止交互
   @Prop locked: boolean = false;
-  // 解析失败时块内原文: 非空则卡片展示「原始输出」而不是空盒子(spec 为 null 或解析不出元素时)
-  @Prop rawFallback: string = '';
-  // 交互回传(父组件转成 user 消息交给 Agent Loop)
-  private onInteract: (payload: GuncatUiPayload) => void = (_payload: GuncatUiPayload): void => {};
+  // 消息里持久化的绑定值
+  @Prop stateJson: string = '';
+  // 界面标题(回传消息前缀用)
+  @Prop title: string = '';
 
-  // 控件当前值(键 = 控件 name); 用 Record 而非 Map, 便于 ArkUI 状态追踪
-  @State private values: Record<string, Object> = {};
-  // 用户是否已改动过任一控件(未改动时提交按钮弱化为次要样式)
-  @State private dirty: boolean = false;
-  // 「查看原始输出」开关(解析失败或输出被截断时可用于自查)
+  // 交互回传: kind='action' 需要发消息给模型, kind='state' 只持久化绑定值
+  private onInteract: (ev: GuncatUiEvent) => void = (_ev: GuncatUiEvent): void => {};
+
+  @State private rev: number = 0;
   @State private showRaw: boolean = false;
+  @State private showErrors: boolean = false;
+  // 折叠/选项卡的展开状态(键 = 元素 key + 子项 value)
+  @State private expanded: Record<string, boolean> = {};
+  @State private selectedTab: Record<string, number> = {};
+
+  private program: UiProgram = new UiProgram();
+  private root: UiElement | null = null;
+  private state: GuncatUiState = new GuncatUiState();
+  private lastText: string = '';
+  private booted: boolean = false;
 
   aboutToAppear(): void {
-    this.seedDefaults();
+    GuncatUiLibrary.init();
+    this.rebuild();
   }
 
-  // spec 在流式中会被反复重建: 只补新控件的默认值
-  onSpecChanged(): void {
-    this.seedDefaults();
+  // 程序文本变化(流式/最终): 重新解析并保持用户已改的绑定值
+  onProgramChanged(): void {
+    this.rebuild();
   }
 
-  private seedDefaults(): void {
-    if (this.spec === null) {
+  private rebuild(): void {
+    let text: string = this.programText;
+    if (this.booted && text === this.lastText) {
       return;
     }
-    for (let i: number = 0; i < this.spec.controls.length; i++) {
-      let input: GuncatUiInput = this.spec.controls[i];
-      if (this.values[input.name] === undefined) {
-        if (input.type === GuncatUiControlType.TOGGLE) {
-          this.values[input.name] = input.defBool;
-        } else if (input.type === GuncatUiControlType.SLIDER) {
-          this.values[input.name] = input.defNum;
-        } else {
-          this.values[input.name] = input.defText;
-        }
-      }
+    this.lastText = text;
+    this.program = GuncatUiLang.parse(text);
+    let carry: Record<string, Object> | null = null;
+    if (this.booted) {
+      // 流式期间: 以当前绑定值为准, 保住用户已经调过的参数
+      carry = this.state.values;
+    } else if (this.stateJson.trim() !== '' && this.stateJson.trim() !== '{}') {
+      carry = GuncatUiState.fromJson(this.stateJson);
     }
+    this.state = GuncatUiState.of(this.program, carry);
+    this.root = GuncatUiLang.render(this.program, this.state.values);
+    this.booted = true;
+    this.rev++;
   }
 
-  private setValue(name: string, value: Object): void {
-    this.values[name] = value;
-    this.dirty = true;
+  // 绑定值变化后重新物化(表达式里的 $变量要用新值重算)
+  private rematerialize(): void {
+    this.root = GuncatUiLang.render(this.program, this.state.values);
+    this.rev++;
   }
 
-  private numOf(name: string, fallback: number): number {
-    let raw: Object | undefined = this.values[name];
-    if (raw === undefined) {
-      return fallback;
-    }
-    if (typeof raw === 'number') {
-      return raw as number;
-    }
-    if (typeof raw === 'string') {
-      let n: number = parseFloat(raw as string);
-      return isNaN(n) ? fallback : n;
-    }
-    return fallback;
-  }
-
-  private boolOf(name: string, fallback: boolean): boolean {
-    let raw: Object | undefined = this.values[name];
-    if (raw === undefined) {
-      return fallback;
-    }
-    if (typeof raw === 'boolean') {
-      return raw as boolean;
-    }
-    return fallback;
-  }
-
-  private textOf(name: string, fallback: string): string {
-    let raw: Object | undefined = this.values[name];
-    if (raw === undefined) {
-      return fallback;
-    }
-    if (typeof raw === 'string') {
-      return raw as string;
-    }
-    if (typeof raw === 'number' || typeof raw === 'boolean') {
-      return String(raw);
-    }
-    return fallback;
+  private interactive(): boolean {
+    return this.complete && !this.locked;
   }
 
   // ===== 回传 =====
-  private submitForm(action: GuncatUiAction, names: string[]): void {
-    if (!this.complete || this.locked) {
+  private emitAction(message: string): void {
+    if (message.trim() === '' || !this.interactive()) {
       return;
     }
-    let payload: GuncatUiPayload = new GuncatUiPayload();
-    payload.kind = 'form';
-    payload.actionId = action.id;
-    payload.confirm = action.confirm;
-    payload.title = this.spec.title;
-    let refs: string[] = names.length > 0 ? names : this.allControlNames();
-    for (let i: number = 0; i < refs.length; i++) {
-      let input: GuncatUiInput | null = this.spec.findControl(refs[i]);
-      if (input === null) {
-        continue;
+    let ev: GuncatUiEvent = new GuncatUiEvent();
+    ev.kind = 'action';
+    ev.message = message;
+    ev.title = this.title !== '' ? this.title : this.uiTitle();
+    ev.stateJson = this.stateSnapshot();
+    this.onInteract(ev);
+  }
+
+  private emitState(): void {
+    let ev: GuncatUiEvent = new GuncatUiEvent();
+    ev.kind = 'state';
+    ev.stateJson = this.stateSnapshot();
+    this.onInteract(ev);
+  }
+
+  private stateSnapshot(): string {
+    this.state.compact(this.program);
+    return this.state.toJson();
+  }
+
+  // 界面标题: 优先用消息里记录的, 其次从 CardHeader 取
+  private uiTitle(): string {
+    if (this.root === null) {
+      return '';
+    }
+    let kids: UiElement[] = UiNode.elementList(this.root, 'children');
+    for (let i: number = 0; i < kids.length; i++) {
+      if (kids[i].type === 'CardHeader') {
+        let t: string = UiNode.str(kids[i], 'title', '');
+        if (t !== '') {
+          return t;
+        }
       }
-      payload.names.push(input.name);
-      payload.labels.push(input.label);
-      payload.values.push(GuncatUiMessageBuilder.controlValueText(input, this.values));
     }
-    this.onInteract(payload);
+    return '';
   }
 
-  private allControlNames(): string[] {
-    let names: string[] = [];
-    if (this.spec === null) {
-      return names;
-    }
-    for (let i: number = 0; i < this.spec.controls.length; i++) {
-      names.push(this.spec.controls[i].name);
-    }
-    return names;
-  }
-
-  private clickAction(action: GuncatUiAction, value: string): void {
-    if (!this.complete || this.locked) {
+  private openUrl(url: string): void {
+    if (url === '') {
       return;
     }
-    let payload: GuncatUiPayload = new GuncatUiPayload();
-    payload.kind = 'action';
-    payload.actionId = action.id;
-    payload.confirm = action.confirm;
-    payload.title = this.spec.title;
-    payload.label = action.label;
-    payload.value = value;
-    this.onInteract(payload);
+    try {
+      let context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+      context.openLink(url);
+    } catch (e) {
+      promptAction.showToast({ message: '无法打开链接', duration: 2000 });
+    }
   }
 
-  // ===== 数值展示 =====
-  private fmt(n: number): string {
-    let rounded: number = Math.round(n * 100) / 100;
-    return String(rounded);
+  private copyText(text: string): void {
+    try {
+      let pb = pasteboard.getSystemPasteboard();
+      let data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text);
+      pb.setData(data).then(() => {
+        promptAction.showToast({ message: '已复制', duration: 1500 });
+      });
+    } catch (e) {
+      // 剪贴板不可用时静默
+    }
   }
 
-  private ratio(value: number, total: number): number {
-    if (total <= 0) {
-      return 0;
+  // 绑定值写入
+  private setBind(varName: string, value: Object, live: boolean): void {
+    if (varName === '') {
+      return;
     }
-    let r: number = value / total;
-    if (r < 0) {
-      return 0;
+    this.state.set(varName, value);
+    if (live) {
+      this.rematerialize();
     }
-    if (r > 1) {
-      return 1;
-    }
-    return r;
+    this.emitState();
   }
 
-  private toneColor(tone: string): ResourceColor {
-    if (tone === 'success') {
-      return $r('app.color.success');
-    }
-    if (tone === 'warn') {
-      return $r('app.color.warning');
-    }
-    if (tone === 'danger') {
-      return $r('app.color.danger');
-    }
-    return $r('app.color.brand');
+  // 控件当前值
+  private bindStr(varName: string, fallback: string): string {
+    return this.state.str(varName, fallback);
   }
 
-  private chartColor(i: number): string {
-    const palette: string[] = ['#4176E6', '#34C77B', '#F5A524', '#A855F7', '#22B8CF', '#EF4444'];
-    return palette[i % palette.length];
+  private bindNum(varName: string, fallback: number): number {
+    return this.state.num(varName, fallback);
   }
 
-  private seriesTotal(values: number[]): number {
-    let sum: number = 0;
-    for (let i: number = 0; i < values.length; i++) {
-      if (values[i] > 0) {
-        sum += values[i];
+  // ===== 动作执行 =====
+  private runButton(el: UiElement, form: UiElement | null): void {
+    if (!this.interactive()) {
+      return;
+    }
+    let steps: UiActionStep[] = UiNode.actionSteps(el, 'action');
+    let url: string = GuncatUiRuntime.urlOf(steps);
+    if (url !== '') {
+      this.openUrl(url);
+    }
+    let changed: boolean = GuncatUiRuntime.applySteps(steps, this.state);
+    let messages: string[] = GuncatUiRuntime.collectMessages(steps);
+    let message: string = messages.length > 0 ? messages.join('\n') : '';
+    if (message === '' && steps.length === 0) {
+      // 没写 action 的按钮: 把按钮文字发给助手(与参考项目一致)
+      message = GuncatUiRuntime.buttonMessage(el);
+    }
+    // 表单内的按钮: 把字段当前值一并带上
+    if (form !== null) {
+      let body: string = GuncatUiRuntime.formMessage(form, this.state);
+      if (message !== '') {
+        body = body === '' ? message : body + '\n' + message;
       }
+      message = GuncatUiRuntime.interactionText(this.title !== '' ? this.title : this.uiTitle(), body);
     }
-    return sum;
+    if (changed) {
+      this.rematerialize();
+    }
+    if (message !== '') {
+      this.emitAction(message);
+    } else if (changed) {
+      this.emitState();
+    }
   }
 
-  // 横向柱状图/折线图共用的最大值
-  private maxOf(values: number[]): number {
-    let max: number = 0;
-    for (let i: number = 0; i < values.length; i++) {
-      if (values[i] > max) {
-        max = values[i];
+  // 选中型控件的点击(单选/多选/开关): 只改本地绑定, 不发请求
+  private toggleChoice(el: UiElement, value: string, multi: boolean): void {
+    if (!this.interactive()) {
+      return;
+    }
+    let key: string = GuncatUiRuntime.stateKeyOf(el);
+    if (key === '') {
+      return;
+    }
+    let type: string = el.type;
+    if (type === 'SwitchGroup') {
+      let on: boolean = GuncatUiRuntime.switchValue(this.state, key, value, el);
+      GuncatUiRuntime.setMapValue(this.state, key, value, !on);
+    } else if (type === 'CheckBoxGroup') {
+      let current: Object | null = this.state.get(key);
+      let on2: boolean = GuncatUiRuntime.boolMapValue(current, value);
+      GuncatUiRuntime.setMapValue(this.state, key, value, !on2);
+    } else if (multi) {
+      let current2: Object | null = this.state.get(key);
+      let list: string[] = [];
+      if (current2 instanceof Array) {
+        let arr: Object[] = current2 as Object[];
+        for (let i: number = 0; i < arr.length; i++) {
+          list.push(GuncatUiMaterializer.toStr(arr[i]));
+        }
       }
-    }
-    return max <= 0 ? 1 : max;
-  }
-
-  // 折线图极值
-  private minOf(values: number[]): number {
-    if (values.length === 0) {
-      return 0;
-    }
-    let min: number = values[0];
-    for (let i: number = 1; i < values.length; i++) {
-      if (values[i] < min) {
-        min = values[i];
+      let next: string[] = [];
+      let found: boolean = false;
+      for (let i: number = 0; i < list.length; i++) {
+        if (list[i] === value) {
+          found = true;
+        } else {
+          next.push(list[i]);
+        }
       }
+      if (!found) {
+        next.push(value);
+      }
+      this.state.set(key, next as Object);
+    } else {
+      this.state.set(key, value);
     }
-    return min;
+    this.rematerialize();
+    this.emitState();
   }
 
-  private statsText(): string {
-    if (!this.complete) {
-      // 产出已结束但块没闭合 = 输出被截断/中断, 不能再说"生成中"
-      return this.truncated ? '未完成' : '生成中…';
+  private isSelected(el: UiElement, value: string): boolean {
+    let key: string = GuncatUiRuntime.stateKeyOf(el);
+    let type: string = el.type;
+    if (type === 'SwitchGroup') {
+      return GuncatUiRuntime.switchValue(this.state, key, value, el);
     }
-    if (this.locked) {
-      return '已提交';
+    if (type === 'CheckBoxGroup') {
+      let current: Object | null = this.state.get(key);
+      return GuncatUiRuntime.boolMapValue(current, value);
     }
-    if (this.spec === null || this.spec.elements.length === 0) {
-      return '无内容';
+    let raw: Object | null = this.state.get(key);
+    if (raw === null) {
+      raw = UiNode.raw(el, 'defaultValue');
     }
-    return this.dirty ? '已修改' : '可交互';
-  }
-
-  // 界面是否有真正可渲染的内容(元素或独立控件)
-  private hasContent(): boolean {
-    if (this.spec === null) {
+    if (raw instanceof Array) {
+      let arr: Object[] = raw as Object[];
+      for (let i: number = 0; i < arr.length; i++) {
+        if (GuncatUiMaterializer.toStr(arr[i]) === value) {
+          return true;
+        }
+      }
       return false;
     }
-    if (this.spec.elements.length > 0) {
-      return true;
+    return GuncatUiMaterializer.toStr(raw) === value;
+  }
+
+  private expandKey(el: UiElement, sub: string): string {
+    return el.key + '#' + sub;
+  }
+
+  private isExpanded(el: UiElement, sub: string, defaultOpen: boolean): boolean {
+    let v: boolean | undefined = this.expanded[this.expandKey(el, sub)];
+    return v === undefined ? defaultOpen : v;
+  }
+
+  private toggleExpand(el: UiElement, sub: string, defaultOpen: boolean): void {
+    let key: string = this.expandKey(el, sub);
+    let next: Record<string, boolean> = {};
+    let keys: string[] = Object.keys(this.expanded);
+    for (let i: number = 0; i < keys.length; i++) {
+      next[keys[i]] = this.expanded[keys[i]];
     }
-    return this.orphanControls().length > 0;
+    next[key] = !this.isExpanded(el, sub, defaultOpen);
+    this.expanded = next;
   }
 
-  // 兜底文案: 说明为什么这里没有正常界面
-  private fallbackText(): string {
-    if (this.truncated) {
-      return '这段界面内容不完整（模型输出被截断或未按格式写完），已展示能解析出的部分。发一句"重新生成界面"即可。';
-    }    if (this.complete) {
-      let chars: number = this.rawFallback.trim().length;
-      let detail: string = chars > 0 ? '（模型在这段里只写了 ' + chars.toString() + ' 个字符）' : '';
-      return '这段界面内容不完整，无法渲染成可交互组件' + detail +
-        '。发一句"重新生成界面"即可，或直接说清你想要的图表/表单。';
-    }
-    return '界面生成中…';
-  }
-
-  // "查看原始输出"开关文案
-  private rawToggleText(): string {
-    return this.showRaw ? '收起原始输出' : '查看原始输出';
-  }
-
+  // ===== 根 =====
   build() {
-    Column({ space: 12 }) {
-      // 头部: 图标 + 标题 + 状态徽标(没有标题也要出状态徽标, 避免出现"无标识空白盒")
-      Row({ space: 8 }) {
-        Text('✦')
-          .fontSize(14)
-          .fontColor($r('app.color.brand'))
-        Column({ space: 2 }) {
-          if (this.spec !== null && this.spec.title !== '') {
-            Text(this.spec.title)
-              .fontSize(15)
-              .fontWeight(FontWeight.Bold)
-              .fontColor($r('app.color.text_primary'))
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .width('100%')
-          }
-          if (this.spec !== null && this.spec.subtitle !== '') {
-            Text(this.spec.subtitle)
-              .fontSize(11)
-              .fontColor($r('app.color.text_secondary'))
-              .maxLines(2)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .width('100%')
-          }
-        }
-        .alignItems(HorizontalAlign.Start)
-        .layoutWeight(1)
-
-        Text(this.statsText())
-          .fontSize(10)
-          .fontColor(this.locked ? $r('app.color.text_tertiary') : $r('app.color.brand'))
-          .padding({ left: 8, right: 8, top: 3, bottom: 3 })
-          .borderRadius(8)
-          .backgroundColor($r('app.color.brand_light'))
-      }
-      .width('100%')
-      .alignItems(VerticalAlign.Center)
-
-      // 元素序列(spec 为空时跳过)
-      if (this.spec !== null) {
-        ForEach(this.spec.elements, (el: GuncatUiElement, index: number) => {
-          this.buildElement(el, 'e' + index)
-        }, (el: GuncatUiElement, index: number) => 'e' + index)
-
-        // 独立控件(未被 form 引用时, 作为独立卡片渲染, 用默认动作回传)
-        ForEach(this.orphanControls(), (input: GuncatUiInput) => {
-          this.buildControlCard(input)
-        }, (input: GuncatUiInput) => 'c_' + input.name)
-      }
-
-      // 骨架: 仅"正在生成且尚无内容"时显示(产出已结束的未闭合块走下面的"未完成"分支)
-      if (!this.complete && !this.truncated && !this.hasContent()) {
-        Column({ space: 8 }) {
-          Row()
-            .width('70%')
-            .height(12)
-            .borderRadius(6)
-            .backgroundColor($r('app.color.surface_secondary'))
-          Row()
-            .width('45%')
-            .height(12)
-            .borderRadius(6)
-            .backgroundColor($r('app.color.surface_secondary'))
+    Column({ space: 0 }) {
+      if (this.root === null) {
+        this.buildEmpty()
+      } else {
+        Column({ space: 16 }) {
+          this.buildChildren(this.root)
+          this.buildSources(this.root)
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
       }
-
-      // 兜底: 没有可渲染内容(已闭合但解析不出元素 / 输出被截断) → 说明原因 + 原始输出入口
-      if (!this.hasContent() && (this.complete || this.truncated)) {
-        Text(this.fallbackText())
-          .fontSize(11)
-          .fontColor($r('app.color.text_secondary'))
-          .width('100%')
-      }
-      // 有内容但块没写完: 明确标注(避免用户以为界面"就这些")
-      if (this.hasContent() && this.truncated) {
-        Text('界面输出未完成，以下为已生成的部分。')
-          .fontSize(11)
-          .fontColor($r('app.color.warning'))
-          .width('100%')
-      }
-      // 原始输出(自查用): 解析失败时默认展开, 其余情况折叠。
-      // 强制按字符换行 + 加大高度上限 + 显示字符数: JSON 常是超长单行, 不换行会被裁掉看不见。
-      if (this.rawFallback.trim() !== '' && (this.showRaw || (!this.hasContent() && this.complete))) {
-        Column({ space: 4 }) {
-          Row() {
-            Text('模型原始输出 · ' + this.rawFallback.trim().length.toString() + ' 字符')
-              .fontSize(10)
-              .fontColor($r('app.color.text_tertiary'))
-              .layoutWeight(1)
-          }
-          .width('100%')
-
-          Scroll() {
-            Text(this.rawFallback)
-              .fontSize(10)
-              .fontColor($r('app.color.text_tertiary'))
-              .fontFamily('monospace')
-              .width('100%')
-              .wordBreak(WordBreak.BREAK_ALL)
-              .textAlign(TextAlign.Start)
-          }
-          .scrollable(ScrollDirection.Vertical)
-          .scrollBar(BarState.Auto)
-          .constraintSize({ maxHeight: 300 })
-          .width('100%')
-          .align(Alignment.TopStart)
-        }
-        .width('100%')
-        .padding(10)
-        .backgroundColor($r('app.color.surface_secondary'))
-        .borderRadius(10)
-        .alignItems(HorizontalAlign.Start)
-      }
-      // 「查看原始输出」开关: 有任何原文时都可点开核对
-      if (this.rawFallback.trim() !== '' && !(!this.hasContent() && this.complete)) {
-        Button() {
-          Text(this.rawToggleText())
+      if (this.truncated) {
+        Row({ space: 6 }) {
+          GuncatUiIcon({ name: 'warning', iconSize: 12, color: '#F59E0B' })
+          Text('界面未写完，以上为已生成的部分')
             .fontSize(11)
-            .fontColor($r('app.color.text_secondary'))
+            .fontColor($r('app.color.text_tertiary'))
+            .layoutWeight(1)
         }
-        .height(30)
-        .padding({ left: 12, right: 12 })
-        .borderRadius(10)
-        .backgroundColor($r('app.color.surface_secondary'))
+        .width('100%')
+        .margin({ top: 10 })
+      }
+
+      if (this.program.errors.length > 0) {
+        Row({ space: 6 }) {
+          Text(this.showErrors ? '收起诊断' : ('诊断 · ' + this.program.errors.length.toString() + ' 条'))
+            .fontSize(10)
+            .fontColor($r('app.color.text_quaternary'))
+        }
+        .width('100%')
+        .margin({ top: 8 })
+        .onClick(() => {
+          this.showErrors = !this.showErrors;
+        })
+        if (this.showErrors) {
+          Column({ space: 2 }) {
+            ForEach(this.program.errors, (msg: string, i: number) => {
+              Text(msg)
+                .fontSize(10)
+                .fontColor($r('app.color.text_quaternary'))
+                .width('100%')
+            }, (msg: string, i: number) => 'err' + i.toString())
+          }
+          .width('100%')
+          .padding(8)
+          .backgroundColor($r('app.color.surface_secondary'))
+          .borderRadius(8)
+        }
+      }
+
+      if (this.programText.trim() !== '') {
+        Row({ space: 6 }) {
+          Text(this.showRaw ? '收起原始输出' : '查看原始输出')
+            .fontSize(10)
+            .fontColor($r('app.color.text_quaternary'))
+        }
+        .width('100%')
+        .margin({ top: 8 })
         .onClick(() => {
           this.showRaw = !this.showRaw;
         })
+        if (this.showRaw) {
+          Scroll() {
+            Text(this.programText)
+              .fontSize(10)
+              .fontFamily('monospace')
+              .fontColor($r('app.color.text_tertiary'))
+              .width('100%')
+              .wordBreak(WordBreak.BREAK_ALL)
+          }
+          .scrollable(ScrollDirection.Vertical)
+          .scrollBar(BarState.Auto)
+          .constraintSize({ maxHeight: 260 })
+          .width('100%')
+          .padding(10)
+          .backgroundColor($r('app.color.surface_secondary'))
+          .borderRadius(8)
+        }
       }
     }
     .width('100%')
-    .padding(14)
-    .backgroundColor($r('app.color.surface'))
-    .borderRadius(18)
-    .border({ width: 1, color: $r('app.color.divider') })
-    .shadow({ radius: 14, color: '#14000000', offsetX: 0, offsetY: 3 })
+    .alignItems(HorizontalAlign.Start)
+    // rev 只在这里被读取: 它的作用是"绑定值变化后通知框架本组件需要重渲染"
+    // (this.root 是普通字段, 不是可观察状态, 靠 rev 的赋值把重渲染打起来)。
+    .id('guncat-ui-r' + this.rev.toString())
   }
 
-  // 未被任何 form 引用的控件(单独成卡, 用空 id 提交=只回传改动)
-  private orphanControls(): GuncatUiInput[] {
-    if (this.spec === null) {
-      let none: GuncatUiInput[] = [];
-      return none;
-    }
-    let used: string[] = [];
-    for (let i: number = 0; i < this.spec.elements.length; i++) {
-      let el: GuncatUiElement = this.spec.elements[i];
-      for (let j: number = 0; j < el.controls.length; j++) {
-        used.push(el.controls[j]);
-      }
-      if (el.bind !== '') {
-        used.push(el.bind);
-      }
-      if (el.bind2 !== '') {
-        used.push(el.bind2);
-      }
-    }
-    let orphans: GuncatUiInput[] = [];
-    for (let i: number = 0; i < this.spec.controls.length; i++) {
-      let input: GuncatUiInput = this.spec.controls[i];
-      let isUsed: boolean = false;
-      for (let j: number = 0; j < used.length; j++) {
-        if (used[j] === input.name) {
-          isUsed = true;
-          break;
+  @Builder
+  buildEmpty() {
+    Column({ space: 6 }) {
+      if (this.complete) {
+        Text(this.programText.trim() === ''
+          ? '这段界面内容为空。'
+          : '这段界面没能渲染成可交互组件，可以让我重新生成一次。')
+          .fontSize(12)
+          .fontColor($r('app.color.text_secondary'))
+          .width('100%')
+      } else {
+        Row({ space: 8 }) {
+          LoadingProgress()
+            .width(14)
+            .height(14)
+            .color($r('app.color.brand'))
+          Text('正在生成界面…')
+            .fontSize(12)
+            .fontColor($r('app.color.text_tertiary'))
         }
-      }
-      if (!isUsed) {
-        orphans.push(input);
+        .width('100%')
       }
     }
-    return orphans;
+    .width('100%')
+  }
+
+  // sources: 回答用到的来源列表(渲染在最底部)
+  @Builder
+  buildSources(root: UiElement) {
+    if (this.sourceCount(root) > 0) {
+      Flex({ wrap: FlexWrap.Wrap }) {
+        ForEach(this.sourceRows(root), (row: string, i: number) => {
+          Text((i + 1).toString() + '. ' + row)
+            .fontSize(11)
+            .fontColor($r('app.color.text_secondary'))
+            .padding({ left: 9, right: 9, top: 4, bottom: 4 })
+            .borderRadius(999)
+            .backgroundColor($r('app.color.surface_secondary'))
+            .margin({ right: 6, bottom: 6 })
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }, (row: string, i: number) => 'src' + i.toString())
+      }
+      .width('100%')
+    }
+  }
+
+  private sourceCount(root: UiElement): number {
+    return UiNode.objList(root, 'sources').length;
+  }
+
+  private sourceRows(root: UiElement): string[] {
+    let rows: Record<string, Object>[] = UiNode.objList(root, 'sources');
+    let out: string[] = [];
+    for (let i: number = 0; i < rows.length; i++) {
+      let name: string = UiNode.objStr(rows[i], 'sourceName', '');
+      if (name === '') {
+        name = UiNode.objStr(rows[i], 'title', '');
+      }
+      out.push(name);
+    }
+    return out;
+  }
+
+  // 渲染元素的子元素(elements 型属性统一走这里)
+  //
+  // 关于 key: 这里刻意**不把 rev 拼进 key**。ArkUI 的 ForEach 在父组件重渲染时会重新执行
+  // item builder 并更新属性, key 只决定"复用还是重建"; 把版本号拼进 key 会让整棵子树在
+  // 每次流式分片/拖动滑块时被销毁重建 —— 表现为界面闪烁、输入框失焦。
+  // key 只用元素自身的稳定标识(命名的语句用变量名, 匿名内联元素用位置)。
+  @Builder
+  buildElements(list: UiElement[]) {
+    ForEach(list, (child: UiElement, index: number) => {
+      this.renderNode(child)
+    }, (child: UiElement, index: number) => child.key)
+  }
+
+  // 通用 children 容器
+  @Builder
+  buildChildren(el: UiElement) {
+    this.buildElements(UiNode.elementList(el, 'children'))
   }
 
   // ===== 元素分发 =====
   @Builder
-  buildElement(el: GuncatUiElement, key: string) {
-    if (el.kind === GuncatUiKind.LAYOUT) {
-      this.buildLayout(el, key)
-    } else if (el.kind === GuncatUiKind.METRICS) {
-      this.buildMetrics(el, key)
-    } else if (el.kind === GuncatUiKind.TABLE) {
+  renderNode(el: UiElement) {
+    if (el.type === 'Card') {
+      Column({ space: 16 }) {
+        this.buildChildren(el)
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+    } else if (el.type === 'CardHeader') {
+      this.buildCardHeader(el)
+    } else if (el.type === 'InlineHeader') {
+      this.buildInlineHeader(el)
+    } else if (el.type === 'TextContent') {
+      this.buildTextContent(el)
+    } else if (el.type === 'MarkDownRenderer') {
+      this.buildMarkdown(el)
+    } else if (el.type === 'Callout' || el.type === 'TextCallout') {
+      this.buildCallout(el)
+    } else if (el.type === 'Separator') {
+      this.buildSeparator(el)
+    } else if (el.type === 'Image') {
+      this.buildImage(el, false)
+    } else if (el.type === 'ImageBlock') {
+      this.buildImage(el, true)
+    } else if (el.type === 'ImageGallery') {
+      this.buildGallery(el)
+    } else if (el.type === 'CodeBlock') {
+      this.buildCodeBlock(el)
+    } else if (el.type === 'TagBlock' || el.type === 'Tag') {
+      this.buildTags(el)
+    } else if (el.type === 'EntityList') {
+      this.buildEntityList(el)
+    } else if (el.type === 'SectionBlock') {
+      this.buildSectionBlock(el)
+    } else if (el.type === 'Tabs') {
+      this.buildTabs(el)
+    } else if (el.type === 'Accordion') {
+      this.buildAccordion(el)
+    } else if (el.type === 'Carousel') {
+      this.buildCarousel(el)
+    } else if (el.type === 'Steps') {
+      this.buildSteps(el)
+    } else if (el.type === 'Table') {
       this.buildTable(el)
-    } else if (el.kind === GuncatUiKind.CHART) {
+    } else if (this.isChart(el.type)) {
       this.buildChart(el)
-    } else if (el.kind === GuncatUiKind.FORM) {
+    } else if (el.type === 'Text' || el.type === 'BoldText') {
+      this.buildText(el)
+    } else if (el.type === 'IconText') {
+      this.buildIconText(el)
+    } else if (el.type === 'ImageText') {
+      this.buildImageText(el)
+    } else if (el.type === 'MetricIndicatorInline' ||
+      el.type === 'MetricIndicatorWithStrikethrough') {
+      this.buildMetric(el)
+    } else if (el.type === 'ContextCardItem' || el.type === 'ContextCardBlock') {
+      this.buildContextCards(el)
+    } else if (el.type === 'OverviewCardItem' || el.type === 'OverviewCardBlock') {
+      this.buildOverviewCards(el)
+    } else if (el.type === 'SnippetCardItem' || el.type === 'SnippetCardBlock') {
+      this.buildSnippetCards(el)
+    } else if (el.type === 'CompositeCardItem' || el.type === 'CompositeCardBlock') {
+      this.buildCompositeCards(el)
+    } else if (el.type === 'VisualCardItem' || el.type === 'VisualCardBlock') {
+      this.buildVisualCards(el)
+    } else if (el.type === 'ListBlock') {
+      this.buildListBlock(el)
+    } else if (el.type === 'ListItem') {
+      this.buildListItem(el, false)
+    } else if (el.type === 'FollowUpBlock') {
+      this.buildFollowUps(el)
+    } else if (el.type === 'Form') {
       this.buildForm(el)
-    } else if (el.kind === GuncatUiKind.CHOICE) {
-      this.buildChoice(el)
+    } else if (el.type === 'FormControl') {
+      this.buildFormControl(el)
+    } else if (this.isControl(el.type)) {
+      this.buildControl(el)
+    } else if (el.type === 'Buttons') {
+      this.buildButtons(el, null)
+    } else if (el.type === 'Button') {
+      this.buildButton(el, null)
+    } else if (el.type === 'IconButton') {
+      this.buildIconButton(el, null)
+    } else if (el.type === 'Icon') {
+      GuncatUiIcon({ name: UiNode.str(el, 'name', 'dot'), iconSize: 14 })
+    } else if (el.type === 'Series' || el.type === 'Col' || el.type === 'SectionItem' ||
+      el.type === 'TabItem' || el.type === 'AccordionItem' || el.type === 'StepsItem' ||
+      el.type === 'SelectItem' || el.type === 'RadioItem' || el.type === 'CheckBoxItem' ||
+      el.type === 'SwitchItem' || el.type === 'ChipItem' || el.type === 'OptionCard' ||
+      el.type === 'ListItem' || el.type === 'FollowUpItem') {
+      // 这些是"参数型"组件, 只能作为父组件的参数使用; 单独出现时渲染其文字兜底
+      Text(this.fallbackLabel(el))
+        .fontSize(13)
+        .fontColor($r('app.color.text_primary'))
+        .width('100%')
     } else {
-      this.buildPlain(el, key)
-    }
-  }
-
-  // card / note / markdown / metric / progress
-  @Builder
-  buildPlain(el: GuncatUiElement, key: string) {
-    if (el.kind === GuncatUiKind.METRIC) {
-      this.buildMetricCard(el, 'm' + key)
-    } else if (el.kind === GuncatUiKind.PROGRESS) {
-      this.buildProgress(el)
-    } else if (el.kind === GuncatUiKind.NOTE) {
-      this.buildNote(el)
-    } else {
-      this.buildContainerCard(el, key)
-    }
-  }
-
-  // card: 可选标题 + 文本 + 子元素
-  @Builder
-  buildContainerCard(el: GuncatUiElement, key: string) {
-    Column({ space: 8 }) {
-      if (el.title !== '') {
-        Text(el.title)
-          .fontSize(13)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.text_primary'))
-          .width('100%')
-      }
-      if (el.text !== '') {
-        Text(el.text)
-          .fontSize(13)
-          .lineHeight(21)
-          .fontColor($r('app.color.text_primary'))
-          .width('100%')
-      }
-      ForEach(el.children, (child: GuncatUiElement, index: number) => {
-        this.buildElement(child, key + '_' + index)
-      }, (child: GuncatUiElement, index: number) => key + '_' + index)
-    }
-    .width('100%')
-    .padding(12)
-    .backgroundColor($r('app.color.surface_secondary'))
-    .borderRadius(14)
-    .alignItems(HorizontalAlign.Start)
-  }
-
-  // layout: list(默认, 纵向) / grid(两列) / row(横向等分)
-  @Builder
-  buildLayout(el: GuncatUiElement, key: string) {
-    Column({ space: 8 }) {
-      if (el.title !== '') {
-        Text(el.title)
-          .fontSize(13)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.text_primary'))
-          .width('100%')
-      }
-      if (el.layout === 'grid') {
-        Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
-          ForEach(el.children, (child: GuncatUiElement, index: number) => {
-            Column() {
-              this.buildElement(child, key + '_g' + index)
-            }
-            .width('48%')
-            .margin({ bottom: 8 })
-          }, (child: GuncatUiElement, index: number) => key + '_g' + index)
-        }
+      // 未知/未实现组件: 不静默吞掉, 给一行浅色提示便于排查
+      Text('未支持的组件 ' + el.type)
+        .fontSize(11)
+        .fontColor($r('app.color.text_quaternary'))
         .width('100%')
-      } else if (el.layout === 'row') {
-        Row({ space: 8 }) {
-          ForEach(el.children, (child: GuncatUiElement, index: number) => {
-            Column() {
-              this.buildElement(child, key + '_r' + index)
-            }
-            .layoutWeight(1)
-          }, (child: GuncatUiElement, index: number) => key + '_r' + index)
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Top)
-      } else {
-        Column({ space: 8 }) {
-          ForEach(el.children, (child: GuncatUiElement, index: number) => {
-            this.buildElement(child, key + '_l' + index)
-          }, (child: GuncatUiElement, index: number) => key + '_l' + index)
-        }
-        .width('100%')
-      }
     }
-    .width('100%')
-    .alignItems(HorizontalAlign.Start)
   }
 
-  // metrics: 指标组(≤2 个一行, 更多时两列)
-  @Builder
-  buildMetrics(el: GuncatUiElement, key: string) {
-    Column({ space: 8 }) {
-      if (el.title !== '') {
-        Text(el.title)
-          .fontSize(13)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.text_primary'))
-          .width('100%')
+  private fallbackLabel(el: UiElement): string {
+    let keys: string[] = ['text', 'title', 'label', 'value', 'heading', 'name', 'trigger'];
+    for (let i: number = 0; i < keys.length; i++) {
+      let v: string = UiNode.str(el, keys[i], '');
+      if (v !== '') {
+        return v;
       }
-      Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
-        ForEach(el.items, (item: GuncatUiElement, index: number) => {
-          Column() {
-            this.buildMetricCard(item, key + '_i' + index)
-          }
-          .width(el.items.length <= 2 ? '48%' : '31%')
-          .margin({ bottom: 8 })
-        }, (item: GuncatUiElement, index: number) => key + '_i' + index)
-      }
-      .width('100%')
     }
-    .width('100%')
-    .alignItems(HorizontalAlign.Start)
+    return el.type;
   }
 
+  // ===== 内容类组件 =====
   @Builder
-  buildMetricCard(metric: GuncatUiElement, key: string) {
+  buildCardHeader(el: UiElement) {
     Column({ space: 4 }) {
-      if (metric.label !== '') {
-        Text(metric.label)
-          .fontSize(11)
-          .fontColor($r('app.color.text_secondary'))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%')
-      }
-      Row({ space: 2 }) {
-        Text(this.fmt(metric.value))
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.text_primary'))
-        if (metric.unit !== '') {
-          Text(metric.unit)
-            .fontSize(11)
-            .fontColor($r('app.color.text_secondary'))
-            .margin({ bottom: 3 })
-        }
-      }
-      .alignItems(VerticalAlign.Bottom)
-
-      if (metric.delta !== '') {
-        Text(metric.delta)
-          .fontSize(11)
-          .fontColor(metric.delta.startsWith('-') ? $r('app.color.success') : $r('app.color.danger'))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%')
-      }
-    }
-    .width('100%')
-    .padding(10)
-    .backgroundColor($r('app.color.surface_secondary'))
-    .borderRadius(12)
-    .alignItems(HorizontalAlign.Start)
-  }
-
-  // progress: 进度条(可绑控件, 拖动即刷新)
-  @Builder
-  buildProgress(el: GuncatUiElement) {
-    Column({ space: 6 }) {
-      Row({ space: 6 }) {
-        Text(el.title !== '' ? el.title : el.label)
+      Text(UiNode.str(el, 'title', ''))
+        .fontSize(21)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.text_primary'))
+        .width('100%')
+      if (UiNode.has(el, 'subtitle')) {
+        Text(UiNode.str(el, 'subtitle', ''))
           .fontSize(12)
-          .fontColor($r('app.color.text_secondary'))
-          .layoutWeight(1)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(this.fmt(el.total > 0 ? Math.round(this.ratio(el.value, el.total) * 100) : 0) + '%')
-          .fontSize(12)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.brand'))
-      }
-      .width('100%')
-
-      Row() {
-        Row()
-          .width((this.ratio(el.value, el.total) * 100) + '%')
-          .height('100%')
-          .borderRadius(6)
-          .backgroundColor($r('app.color.brand'))
-      }
-      .width('100%')
-      .height(10)
-      .borderRadius(6)
-      .backgroundColor($r('app.color.surface_secondary'))
-
-      if (el.label !== '' && el.title !== '') {
-        Text(el.label + ' ' + this.fmt(el.value) + (el.unit !== '' ? el.unit : ''))
-          .fontSize(11)
           .fontColor($r('app.color.text_tertiary'))
           .width('100%')
       }
@@ -671,78 +633,584 @@ export struct GuncatUiView {
     .alignItems(HorizontalAlign.Start)
   }
 
-  // note: 提示条。
-  // 实现要点(真机事故): 早期版本用 "Row().height('100%')" 当左侧竖条, 在自动高度的父容器里
-  // 百分比高度会被解析成一个很大的值, 把整条撑成几百 vp 的空白(文字只占两行)。
-  // 现在改用**左边框**画竖条, 整条高度完全由文字决定, 容器内没有任何百分比高度。
   @Builder
-  buildNote(el: GuncatUiElement) {
-    Column({ space: 2 }) {
-      if (el.title !== '') {
-        Text(el.title)
+  buildInlineHeader(el: UiElement) {
+    Column({ space: 3 }) {
+      Text(UiNode.str(el, 'heading', ''))
+        .fontSize(17)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_primary'))
+        .width('100%')
+      if (UiNode.has(el, 'description')) {
+        Text(UiNode.str(el, 'description', ''))
           .fontSize(12)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.text_primary'))
+          .fontColor($r('app.color.text_secondary'))
           .width('100%')
       }
-      Text(el.text)
-        .fontSize(12)
-        .lineHeight(19)
-        .fontColor($r('app.color.text_secondary'))
-        .width('100%')
     }
     .width('100%')
-    .padding({ left: 10, right: 10, top: 8, bottom: 8 })
-    .backgroundColor($r('app.color.surface_secondary'))
-    .borderRadius(10)
-    .border({ width: { left: 3 }, color: this.toneColor(el.tone) })
     .alignItems(HorizontalAlign.Start)
   }
 
-  // table: 表头 + 行(横向可滚动, 窄屏不挤)
   @Builder
-  buildTable(el: GuncatUiElement) {
-    Column({ space: 8 }) {
-      if (el.title !== '') {
-        Text(el.title)
-          .fontSize(13)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.text_primary'))
-          .width('100%')
-      }
-      Scroll() {
-        Column() {
-          if (el.headers.length > 0) {
-            Row() {
-              ForEach(el.headers, (h: string, index: number) => {
-                Text(h)
-                  .fontSize(11)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor($r('app.color.brand'))
-                  .layoutWeight(1)
-                  .padding({ left: 8, right: 8, top: 7, bottom: 7 })
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-              }, (h: string, index: number) => 'h' + index)
-            }
-            .width(el.headers.length * 92)
-            .backgroundColor($r('app.color.brand_light'))
+  buildTextContent(el: UiElement) {
+    Column() {
+      this.inlineRich(UiNode.str(el, 'text', ''), this.contentSize(el), $r('app.color.text_primary'), false)
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  private contentSize(el: UiElement): number {
+    let size: string = UiNode.str(el, 'size', 'default');
+    if (size === 'small') {
+      return 13;
+    }
+    if (size === 'small-heavy') {
+      return 14;
+    }
+    if (size === 'large') {
+      return 18;
+    }
+    if (size === 'large-heavy') {
+      return 18;
+    }
+    return 15;
+  }
+
+  // 行内富文本: **粗体** / `code` / [文字](https://…) —— 用 Flex 换行承载,
+  // 不做完整 Markdown(那由 MarkDownRenderer 负责), 避免正文被包成代码块样式。
+  @Builder
+  inlineRich(text: string, textSize: number, textColor: ResourceColor, forceBold: boolean) {
+    Flex({ wrap: FlexWrap.Wrap }) {
+      ForEach(this.inlineSegments(text), (seg: InlineSeg, i: number) => {
+        if (seg.kind === 'link') {
+          Text(seg.text)
+            .fontSize(textSize)
+            .fontColor($r('app.color.brand'))
+            .decoration({ type: TextDecorationType.Underline, color: $r('app.color.brand') })
+            .onClick(() => {
+              this.openUrl(seg.url);
+            })
+        } else {
+          Text(seg.text)
+            .fontSize(textSize)
+            .fontWeight(seg.kind === 'bold' || forceBold ? FontWeight.Bold : FontWeight.Normal)
+            .fontColor(seg.kind === 'code' ? $r('app.color.brand') : textColor)
+        }
+      }, (seg: InlineSeg, i: number) => 'is' + i.toString() + seg.kind)
+    }
+    .width('100%')
+  }
+
+  private inlineSegments(text: string): InlineSeg[] {
+    let out: InlineSeg[] = [];
+    if (text === '') {
+      return out;
+    }
+    let i: number = 0;
+    let buf: string = '';
+    while (i < text.length) {
+      let c: string = text.charAt(i);
+      // **粗体**
+      if (c === '*' && i + 1 < text.length && text.charAt(i + 1) === '*') {
+        let close: number = text.indexOf('**', i + 2);
+        if (close > i + 2) {
+          if (buf !== '') {
+            out.push(InlineSeg.plain(buf));
+            buf = '';
           }
-          ForEach(el.rows, (row: string[], rIndex: number) => {
+          out.push(InlineSeg.bold(text.substring(i + 2, close)));
+          i = close + 2;
+          continue;
+        }
+      }
+      // `行内代码`
+      if (c === '`') {
+        let close2: number = text.indexOf('`', i + 1);
+        if (close2 > i + 1) {
+          if (buf !== '') {
+            out.push(InlineSeg.plain(buf));
+            buf = '';
+          }
+          out.push(InlineSeg.code(text.substring(i + 1, close2)));
+          i = close2 + 1;
+          continue;
+        }
+      }
+      // [文字](url)
+      if (c === '[') {
+        let mid: number = text.indexOf('](', i);
+        if (mid > i) {
+          let end: number = text.indexOf(')', mid + 2);
+          if (end > mid + 2) {
+            if (buf !== '') {
+              out.push(InlineSeg.plain(buf));
+              buf = '';
+            }
+            out.push(InlineSeg.link(text.substring(i + 1, mid), text.substring(mid + 2, end)));
+            i = end + 1;
+            continue;
+          }
+        }
+      }
+      buf = buf + c;
+      i++;
+    }
+    if (buf !== '') {
+      out.push(InlineSeg.plain(buf));
+    }
+    return out;
+  }
+
+  @Builder
+  buildMarkdown(el: UiElement) {
+    Column() {
+      RichTextView({ content: UiNode.str(el, 'textMarkdown', '') })
+    }
+    .width('100%')
+    .borderRadius(12)
+    .backgroundColor(UiNode.str(el, 'variant', 'clear') === 'sunk'
+      ? $r('app.color.surface_secondary') : Color.Transparent)
+    .clip(true)
+  }
+
+  @Builder
+  buildCallout(el: UiElement) {
+    Row({ space: 9 }) {
+      GuncatUiIcon({
+        name: this.toneIcon(UiNode.str(el, 'variant', 'info')),
+        iconSize: 15,
+        color: this.toneColor(UiNode.str(el, 'variant', 'info'))
+      })
+      Column({ space: 3 }) {
+        if (UiNode.has(el, 'title')) {
+          Text(UiNode.str(el, 'title', ''))
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary'))
+            .width('100%')
+        }
+        if (UiNode.has(el, 'description')) {
+          Text(UiNode.str(el, 'description', ''))
+            .fontSize(13)
+            .lineHeight(20)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+        }
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+    .backgroundColor($r('app.color.surface_secondary'))
+    .borderRadius(12)
+    .alignItems(VerticalAlign.Top)
+  }
+
+  private toneIcon(variant: string): string {
+    if (variant === 'success') {
+      return 'success';
+    }
+    if (variant === 'warning') {
+      return 'warning';
+    }
+    if (variant === 'error' || variant === 'danger') {
+      return 'error';
+    }
+    return 'info';
+  }
+
+  private toneColor(variant: string): string {
+    if (variant === 'success') {
+      return '#22C55E';
+    }
+    if (variant === 'warning') {
+      return '#F59E0B';
+    }
+    if (variant === 'error' || variant === 'danger') {
+      return '#EF4444';
+    }
+    return '#4176E6';
+  }
+
+  @Builder
+  buildSeparator(el: UiElement) {
+    if (UiNode.str(el, 'orientation', 'horizontal') === 'vertical') {
+      Divider()
+        .vertical(true)
+        .height(16)
+        .color($r('app.color.divider'))
+    } else {
+      Divider()
+        .color($r('app.color.divider'))
+        .width('100%')
+    }
+  }
+
+  // ArkTS 的 @Builder 体内只允许 UI 组件语法(不能声明局部变量), 所以取值一律走私有方法
+  private imageSrc(el: UiElement): string {
+    return UiNode.str(el, 'src', '');
+  }
+
+  private imageAlt(el: UiElement): string {
+    return UiNode.str(el, 'alt', '');
+  }
+
+  @Builder
+  buildImage(el: UiElement, block: boolean) {
+    Column() {
+      if (this.isRemoteImage(this.imageSrc(el))) {
+        Image(this.imageSrc(el))
+          .width('100%')
+          .height(block ? 200 : 170)
+          .objectFit(ImageFit.Cover)
+          .borderRadius(12)
+          .interpolation(ImageInterpolation.High)
+      } else {
+        Row() {
+          GuncatUiIcon({ name: 'image', iconSize: 18, color: '#8F8F8F' })
+        }
+        .width('100%')
+        .height(block ? 200 : 150)
+        .justifyContent(FlexAlign.Center)
+        .backgroundColor($r('app.color.surface_secondary'))
+        .borderRadius(12)
+      }
+      if (this.imageAlt(el) !== '' && block) {
+        Text(this.imageAlt(el))
+          .fontSize(11)
+          .fontColor($r('app.color.text_tertiary'))
+          .width('100%')
+          .margin({ top: 6 })
+      }
+    }
+    .width('100%')
+  }
+
+  private isRemoteImage(src: string): boolean {
+    if (src === '') {
+      return false;
+    }
+    return src.indexOf('https://') === 0 || src.indexOf('http://') === 0;
+  }
+
+  @Builder
+  buildGallery(el: UiElement) {
+    Row({ space: 8 }) {
+      ForEach(UiNode.objList(el, 'images'), (img: Record<string, Object>, i: number) => {
+        Column() {
+          if (this.isRemoteImage(UiNode.objStr(img, 'src', ''))) {
+            Image(UiNode.objStr(img, 'src', ''))
+              .width('100%')
+              .aspectRatio(1.25)
+              .objectFit(ImageFit.Cover)
+              .borderRadius(12)
+              .interpolation(ImageInterpolation.High)
+          } else {
             Row() {
-              ForEach(row, (cell: string, cIndex: number) => {
+              GuncatUiIcon({ name: 'image', iconSize: 16, color: '#8F8F8F' })
+            }
+            .width('100%')
+            .aspectRatio(1.25)
+            .justifyContent(FlexAlign.Center)
+            .backgroundColor($r('app.color.surface_secondary'))
+            .borderRadius(12)
+          }
+          if (UiNode.objStr(img, 'alt', '') !== '') {
+            Text(UiNode.objStr(img, 'alt', ''))
+              .fontSize(10)
+              .fontColor($r('app.color.text_tertiary'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+              .margin({ top: 4 })
+          }
+        }
+        .layoutWeight(1)
+      }, (img: Record<string, Object>, i: number) => 'gi' + i.toString())
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Top)
+  }
+
+  @Builder
+  buildCodeBlock(el: UiElement) {
+    Column({ space: 6 }) {
+      Row({ space: 6 }) {
+        Text(UiNode.str(el, 'language', 'text'))
+          .fontSize(10)
+          .fontColor($r('app.color.text_tertiary'))
+          .layoutWeight(1)
+        Text('复制')
+          .fontSize(10)
+          .fontColor($r('app.color.brand'))
+          .onClick(() => {
+            this.copyText(UiNode.str(el, 'codeString', ''));
+          })
+      }
+      .width('100%')
+      Scroll() {
+        Text(UiNode.str(el, 'codeString', ''))
+          .fontSize(12)
+          .fontFamily('monospace')
+          .fontColor($r('app.color.code_text'))
+          .width('100%')
+          .textAlign(TextAlign.Start)
+      }
+      .scrollable(ScrollDirection.Horizontal)
+      .scrollBar(BarState.Auto)
+      .width('100%')
+      .constraintSize({ maxHeight: 320 })
+      .align(Alignment.TopStart)
+    }
+    .width('100%')
+    .padding(12)
+    .backgroundColor($r('app.color.code_bg'))
+    .borderRadius(12)
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  buildTags(el: UiElement) {
+    Flex({ wrap: FlexWrap.Wrap }) {
+      if (el.type === 'Tag') {
+        this.tagPill(UiNode.str(el, 'text', ''), UiNode.str(el, 'variant', 'neutral'))
+      } else {
+        ForEach(UiNode.strList(el, 'tags'), (tag: string, i: number) => {
+          this.tagPill(tag, 'neutral')
+        }, (tag: string, i: number) => 'tg' + i.toString() + tag)
+      }
+    }
+    .width('100%')
+  }
+
+  @Builder
+  tagPill(text: string, variant: string) {
+    Text(text)
+      .fontSize(11)
+      .fontColor(this.tagTextColor(variant))
+      .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+      .borderRadius(999)
+      .backgroundColor(this.tagBgColor(variant))
+      .margin({ right: 6, bottom: 6 })
+  }
+
+  private tagBgColor(variant: string): ResourceColor {
+    if (variant === 'info') {
+      return '#E4EDFD';
+    }
+    if (variant === 'success') {
+      return '#E3F7EC';
+    }
+    if (variant === 'warning') {
+      return '#FDF3E0';
+    }
+    if (variant === 'danger') {
+      return '#FDE8E6';
+    }
+    return $r('app.color.surface_secondary');
+  }
+
+  private tagTextColor(variant: string): ResourceColor {
+    if (variant === 'info') {
+      return '#2A5DB0';
+    }
+    if (variant === 'success') {
+      return '#12805A';
+    }
+    if (variant === 'warning') {
+      return '#946200';
+    }
+    if (variant === 'danger') {
+      return '#B4372F';
+    }
+    return $r('app.color.text_secondary');
+  }
+
+  @Builder
+  buildEntityList(el: UiElement) {
+    Column({ space: 0 }) {
+      if (UiNode.obj(el, 'header') !== null) {
+        this.entityRow(UiNode.obj(el, 'header'), true)
+      }
+      ForEach(UiNode.objList(el, 'rows'), (row: Record<string, Object>, i: number) => {
+        this.entityRow(row, false)
+      }, (row: Record<string, Object>, i: number) => 'er' + i.toString())
+      if (UiNode.obj(el, 'footer') !== null) {
+        this.entityRow(UiNode.obj(el, 'footer'), true)
+      }
+    }
+    .width('100%')
+    .borderRadius(12)
+    .border({ width: 1, color: $r('app.color.divider') })
+    .clip(true)
+  }
+
+  @Builder
+  entityRow(row: Record<string, Object> | null, emphasize: boolean) {
+    Row() {
+      Text(UiNode.objStr(row, 'left', ''))
+        .fontSize(emphasize ? 12 : 13)
+        .fontWeight(emphasize ? FontWeight.Medium : FontWeight.Normal)
+        .fontColor($r('app.color.text_primary'))
+        .layoutWeight(1)
+      Text(UiNode.objStr(row, 'right', ''))
+        .fontSize(emphasize ? 12 : 13)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_primary'))
+    }
+    .width('100%')
+    .padding({ left: 12, right: 12, top: 9, bottom: 9 })
+    .backgroundColor(emphasize ? $r('app.color.surface_secondary') : Color.Transparent)
+  }
+
+  // ===== 图表分发 =====
+  private isChart(type: string): boolean {
+    return type === 'BarChart' || type === 'LineChart' || type === 'AreaChart' ||
+      type === 'HorizontalBarChart' || type === 'PieChart' || type === 'RadialChart' ||
+      type === 'SingleStackedBarChart' || type === 'RadarChart';
+  }
+
+  @Builder
+  buildChart(el: UiElement) {
+    Column({ space: 10 }) {
+      // 图表标题用邻近的 InlineHeader 承载, 这里不再重复
+      if (el.type === 'BarChart') {
+        GuncatUiBarChart({
+          labels: UiNode.strList(el, 'labels'),
+          seriesNames: this.seriesNames(el),
+          seriesValues: this.seriesValues(el),
+          stacked: UiNode.str(el, 'variant', 'grouped') === 'stacked',
+          bodyHeight: UiNode.num(el, 'height', 150),
+          yLabel: UiNode.str(el, 'yLabel', '')
+        })
+      } else if (el.type === 'LineChart' || el.type === 'AreaChart') {
+        GuncatUiLineChart({
+          labels: UiNode.strList(el, 'labels'),
+          seriesNames: this.seriesNames(el),
+          seriesValues: this.seriesValues(el),
+          smooth: UiNode.str(el, 'variant', 'linear') === 'natural',
+          area: el.type === 'AreaChart',
+          showDots: UiNode.strList(el, 'labels').length <= 12
+        })
+      } else if (el.type === 'HorizontalBarChart') {
+        GuncatUiHorizontalBars({
+          labels: UiNode.strList(el, 'labels'),
+          seriesNames: this.seriesNames(el),
+          seriesValues: this.seriesValues(el),
+          colors: [],
+          unit: ''
+        })
+      } else if (el.type === 'PieChart') {
+        GuncatUiPieChart({
+          labels: UiNode.strList(el, 'labels'),
+          values: UiNode.numList(el, 'values'),
+          donut: UiNode.str(el, 'variant', 'donut') !== 'pie'
+        })
+      } else if (el.type === 'RadialChart') {
+        GuncatUiRadialChart({
+          labels: UiNode.strList(el, 'labels'),
+          values: UiNode.numList(el, 'values')
+        })
+      } else if (el.type === 'SingleStackedBarChart') {
+        GuncatUiStackedBar({
+          labels: UiNode.strList(el, 'labels'),
+          values: UiNode.numList(el, 'values')
+        })
+      } else {
+        GuncatUiRadarChart({
+          labels: UiNode.strList(el, 'labels'),
+          seriesNames: this.seriesNames(el),
+          seriesNorm: this.seriesNorm(el)
+        })
+      }
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  private seriesNames(el: UiElement): string[] {
+    let series: UiElement[] = UiNode.elementList(el, 'series');
+    let out: string[] = [];
+    for (let i: number = 0; i < series.length; i++) {
+      out.push(UiNode.str(series[i], 'category', '系列' + (i + 1).toString()));
+    }
+    return out;
+  }
+
+  private seriesValues(el: UiElement): number[][] {
+    let series: UiElement[] = UiNode.elementList(el, 'series');
+    let out: number[][] = [];
+    for (let i: number = 0; i < series.length; i++) {
+      out.push(UiNode.numList(series[i], 'values'));
+    }
+    return out;
+  }
+
+  private seriesNorm(el: UiElement): number[][] {
+    let values: number[][] = this.seriesValues(el);
+    let max: number = 0;
+    for (let i: number = 0; i < values.length; i++) {
+      for (let j: number = 0; j < values[i].length; j++) {
+        if (values[i][j] > max) {
+          max = values[i][j];
+        }
+      }
+    }
+    if (max <= 0) {
+      max = 1;
+    }
+    let out: number[][] = [];
+    for (let i: number = 0; i < values.length; i++) {
+      let row: number[] = [];
+      for (let j: number = 0; j < values[i].length; j++) {
+        row.push(values[i][j] / max);
+      }
+      out.push(row);
+    }
+    return out;
+  }
+
+  // ===== 表格 =====
+  @Builder
+  buildTable(el: UiElement) {
+    Column({ space: 0 }) {
+      Scroll() {
+        Column({ space: 0 }) {
+          Row() {
+            ForEach(UiNode.elementList(el, 'columns'), (col: UiElement, ci: number) => {
+              Text(UiNode.str(col, 'label', ''))
+                .fontSize(11)
+                .fontWeight(FontWeight.Medium)
+                .fontColor($r('app.color.brand'))
+                .layoutWeight(1)
+                .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .textAlign(this.colAlign(col))
+            }, (col: UiElement, ci: number) => 'th' + ci.toString())
+          }
+          .width(this.tableWidth(el))
+          .backgroundColor($r('app.color.brand_light'))
+
+          ForEach(this.tableRows(el), (row: string[], ri: number) => {
+            Row() {
+              ForEach(row, (cell: string, ci: number) => {
                 Text(cell)
                   .fontSize(11)
                   .fontColor($r('app.color.text_primary'))
                   .layoutWeight(1)
-                  .padding({ left: 8, right: 8, top: 6, bottom: 6 })
-                  .maxLines(2)
+                  .padding({ left: 10, right: 10, top: 7, bottom: 7 })
+                  .maxLines(3)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
-              }, (cell: string, cIndex: number) => 'c' + rIndex + '_' + cIndex)
+                  .textAlign(this.colAlignAt(el, ci))
+              }, (cell: string, ci: number) => 'tc' + ri.toString() + '_' + ci.toString())
             }
-            .width(el.headers.length > 0 ? el.headers.length * 92 : row.length * 92)
-            .backgroundColor(rIndex % 2 === 0 ? $r('app.color.surface') : $r('app.color.surface_secondary'))
-          }, (row: string[], rIndex: number) => 'r' + rIndex)
+            .width(this.tableWidth(el))
+            .backgroundColor(ri % 2 === 0 ? Color.Transparent : $r('app.color.surface_secondary'))
+          }, (row: string[], ri: number) => 'tr' + ri.toString())
         }
         .borderRadius(12)
         .border({ width: 1, color: $r('app.color.divider') })
@@ -757,435 +1225,824 @@ export struct GuncatUiView {
     .alignItems(HorizontalAlign.Start)
   }
 
-  // chart: bar(横向柱) / pie(环形占比) / line(SVG 折线)
+  private tableWidth(el: UiElement): number {
+    let cols: number = UiNode.elementList(el, 'columns').length;
+    return cols <= 0 ? 300 : cols * 116;
+  }
+
+  private colAlign(col: UiElement): TextAlign {
+    return UiNode.str(col, 'type', 'string') === 'number' ? TextAlign.End : TextAlign.Start;
+  }
+
+  private colAlignAt(el: UiElement, index: number): TextAlign {
+    let cols: UiElement[] = UiNode.elementList(el, 'columns');
+    if (index >= cols.length) {
+      return TextAlign.Start;
+    }
+    return this.colAlign(cols[index]);
+  }
+
+  // 列式数据 → 行数组
+  private tableRows(el: UiElement): string[][] {
+    let cols: UiElement[] = UiNode.elementList(el, 'columns');
+    let data: string[][] = [];
+    let maxLen: number = 0;
+    for (let i: number = 0; i < cols.length; i++) {
+      let values: string[] = this.colTexts(cols[i]);
+      data.push(values);
+      if (values.length > maxLen) {
+        maxLen = values.length;
+      }
+    }
+    let rows: string[][] = [];
+    let limit: number = maxLen < 80 ? maxLen : 80;
+    for (let r: number = 0; r < limit; r++) {
+      let row: string[] = [];
+      for (let c: number = 0; c < cols.length; c++) {
+        row.push(r < data[c].length ? data[c][r] : '');
+      }
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  private colTexts(col: UiElement): string[] {
+    let raw: Object | null = UiNode.raw(col, 'data');
+    let out: string[] = [];
+    if (raw === null) {
+      return out;
+    }
+    let isNumber: boolean = UiNode.str(col, 'type', 'string') === 'number';
+    if (raw instanceof Array) {
+      let arr: Object[] = raw as Object[];
+      for (let i: number = 0; i < arr.length; i++) {
+        if (isNumber) {
+          out.push(UiNum.value(GuncatUiMaterializer.toNum(arr[i])));
+        } else {
+          out.push(GuncatUiMaterializer.toStr(arr[i]));
+        }
+      }
+      return out;
+    }
+    out.push(isNumber ? UiNum.value(GuncatUiMaterializer.toNum(raw)) : GuncatUiMaterializer.toStr(raw));
+    return out;
+  }
+
+  // ===== 布局类组件 =====
   @Builder
-  buildChart(el: GuncatUiElement) {
+  buildSectionBlock(el: UiElement) {
     Column({ space: 8 }) {
-      if (el.title !== '') {
-        Text(el.title)
-          .fontSize(13)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.text_primary'))
+      ForEach(UiNode.elementList(el, 'sections'), (sec: UiElement, i: number) => {
+        Column({ space: 8 }) {
+          Row({ space: 6 }) {
+            Text(UiNode.str(sec, 'trigger', ''))
+              .fontSize(14)
+              .fontWeight(FontWeight.Medium)
+              .fontColor($r('app.color.text_primary'))
+              .layoutWeight(1)
+            // isFoldable=false 的分节始终展开, 不显示折叠箭头
+            if (this.foldable(el)) {
+              GuncatUiIcon({
+                name: this.isExpanded(el, this.sectionKey(sec, i), true) ? 'chevron-up' : 'chevron-down',
+                iconSize: 11,
+                color: '#8F8F8F'
+              })
+            }
+          }
           .width('100%')
-      }
-      if (el.chart === GuncatUiChartType.PIE) {
-        this.buildPie(el)
-      } else if (el.chart === GuncatUiChartType.LINE) {
-        this.buildLine(el)
-      } else {
-        this.buildBars(el)
-      }
+          .onClick(() => {
+            if (this.foldable(el)) {
+              this.toggleExpand(el, this.sectionKey(sec, i), true);
+            }
+          })
+
+          if (!this.foldable(el) || this.isExpanded(el, this.sectionKey(sec, i), true)) {
+            Column({ space: 12 }) {
+              this.buildElements(UiNode.elementList(sec, 'content'))
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+          }
+        }
+        .width('100%')
+        .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+        .backgroundColor($r('app.color.surface_secondary'))
+        .borderRadius(12)
+        .alignItems(HorizontalAlign.Start)
+      }, (sec: UiElement, i: number) => sec.key)
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
   }
 
-  // 横向柱状图: 手机竖屏最易读的形态
-  @Builder
-  buildBars(el: GuncatUiElement) {
-    Column({ space: 7 }) {
-      ForEach(el.values, (value: number, index: number) => {
-        if (index < GuncatUiLimits.MAX_BARS_RENDER) {
-          Column({ space: 3 }) {
-            Row({ space: 6 }) {
-              Text(index < el.labels.length ? el.labels[index] : '#' + (index + 1))
-                .fontSize(11)
-                .fontColor($r('app.color.text_secondary'))
-                .layoutWeight(1)
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-              Text(this.fmt(value) + (el.unit !== '' ? el.unit : ''))
-                .fontSize(11)
-                .fontWeight(FontWeight.Medium)
-                .fontColor($r('app.color.text_primary'))
-            }
-            .width('100%')
+  // 分节的折叠键: 优先用 value, 缺省退回下标(不能把下标直接写进表达式, @Builder 里不允许局部变量)
+  private sectionKey(sec: UiElement, index: number): string {
+    let value: string = UiNode.str(sec, 'value', '');
+    return value === '' ? 'i' + index.toString() : value;
+  }
 
-            Row() {
-              Row()
-                .width((this.ratio(value, this.maxOf(el.values)) * 100) + '%')
-                .height('100%')
-                .borderRadius(4)
-                .backgroundColor(this.chartColor(index))
-            }
-            .width('100%')
-            .height(8)
-            .borderRadius(4)
-            .backgroundColor($r('app.color.surface_secondary'))
+  private foldable(el: UiElement): boolean {
+    return UiNode.bool(el, 'isFoldable', true);
+  }
+
+  @Builder
+  buildTabs(el: UiElement) {
+    Column({ space: 12 }) {
+      Scroll() {
+        Row({ space: 8 }) {
+          ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+            Text(UiNode.str(item, 'trigger', ''))
+              .fontSize(13)
+              .fontWeight(this.selectedIndexOf(el) === i ? FontWeight.Medium : FontWeight.Normal)
+              .fontColor(this.selectedIndexOf(el) === i ? Color.White : $r('app.color.text_secondary'))
+              .padding({ left: 14, right: 14, top: 7, bottom: 7 })
+              .borderRadius(999)
+              .backgroundColor(this.selectedIndexOf(el) === i
+                ? $r('app.color.brand') : $r('app.color.surface_secondary'))
+              .onClick(() => {
+                this.selectTab(el, i);
+              })
+          }, (item: UiElement, i: number) => 'tab' + i.toString())
+        }
+      }
+      .scrollable(ScrollDirection.Horizontal)
+      .scrollBar(BarState.Off)
+      .width('100%')
+
+      Column({ space: 12 }) {
+        ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+          if (this.selectedIndexOf(el) === i) {
+            this.buildElements(UiNode.elementList(item, 'content'))
+          }
+        }, (item: UiElement, i: number) => 'tabc' + i.toString() + '_' + this.selectedIndexOf(el).toString())
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  private selectedIndexOf(el: UiElement): number {
+    let v: number | undefined = this.selectedTab[el.key];
+    return v === undefined ? 0 : v;
+  }
+
+  private selectTab(el: UiElement, index: number): void {
+    let next: Record<string, number> = {};
+    let keys: string[] = Object.keys(this.selectedTab);
+    for (let i: number = 0; i < keys.length; i++) {
+      next[keys[i]] = this.selectedTab[keys[i]];
+    }
+    next[el.key] = index;
+    this.selectedTab = next;
+  }
+
+  @Builder
+  buildAccordion(el: UiElement) {
+    Column({ space: 8 }) {
+      ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+        Column({ space: 8 }) {
+          Row({ space: 6 }) {
+            Text(UiNode.str(item, 'trigger', ''))
+              .fontSize(14)
+              .fontWeight(FontWeight.Medium)
+              .fontColor($r('app.color.text_primary'))
+              .layoutWeight(1)
+            GuncatUiIcon({
+              name: this.isExpanded(el, UiNode.str(item, 'value', i.toString()), i === 0)
+                ? 'chevron-up' : 'chevron-down',
+              iconSize: 11,
+              color: '#8F8F8F'
+            })
           }
           .width('100%')
+          .onClick(() => {
+            this.toggleExpand(el, UiNode.str(item, 'value', i.toString()), i === 0);
+          })
+
+          if (this.isExpanded(el, UiNode.str(item, 'value', i.toString()), i === 0)) {
+            Column({ space: 12 }) {
+              this.buildElements(UiNode.elementList(item, 'content'))
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+          }
+        }
+        .width('100%')
+        .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+        .backgroundColor($r('app.color.surface_secondary'))
+        .borderRadius(12)
+        .alignItems(HorizontalAlign.Start)
+      }, (item: UiElement, i: number) => item.key)
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  buildCarousel(el: UiElement) {
+    Scroll() {
+      Row({ space: 10 }) {
+        ForEach(UiNode.elementList(el, 'children'), (child: UiElement, i: number) => {
+          Column({ space: 10 }) {
+            this.renderNode(child)
+          }
+          .width(264)
+          .padding(12)
+          .backgroundColor($r('app.color.surface_secondary'))
+          .borderRadius(14)
+          .alignItems(HorizontalAlign.Start)
+        }, (child: UiElement, i: number) => 'cr' + i.toString() + '_' + child.key)
+      }
+    }
+    .scrollable(ScrollDirection.Horizontal)
+    .scrollBar(BarState.Off)
+    .width('100%')
+    .align(Alignment.TopStart)
+  }
+
+  @Builder
+  buildSteps(el: UiElement) {
+    Column({ space: 0 }) {
+      ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+        Row({ space: 10 }) {
+          Column() {
+            Text((i + 1).toString())
+              .fontSize(11)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(Color.White)
+          }
+          .width(20)
+          .height(20)
+          .borderRadius(10)
+          .backgroundColor($r('app.color.brand'))
+          .justifyContent(FlexAlign.Center)
+
+          Column({ space: 3 }) {
+            Text(UiNode.str(item, 'title', ''))
+              .fontSize(13)
+              .fontWeight(FontWeight.Medium)
+              .fontColor($r('app.color.text_primary'))
+              .width('100%')
+            Text(UiNode.str(item, 'details', ''))
+              .fontSize(12)
+              .lineHeight(19)
+              .fontColor($r('app.color.text_secondary'))
+              .width('100%')
+          }
+          .layoutWeight(1)
           .alignItems(HorizontalAlign.Start)
         }
-      }, (value: number, index: number) => 'bar' + index)
-
-      if (el.values.length > GuncatUiLimits.MAX_BARS_RENDER) {
-        Text('仅展示前 ' + GuncatUiLimits.MAX_BARS_RENDER + ' 项(共 ' + el.values.length + ' 项)')
-          .fontSize(10)
-          .fontColor($r('app.color.text_tertiary'))
-      }
+        .width('100%')
+        .padding({ top: 8, bottom: 8 })
+        .alignItems(VerticalAlign.Top)
+      }, (item: UiElement, i: number) => 'step' + i.toString())
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
   }
 
-  // 折线图: 纯 SVG path, 无需图片资源
+  // ===== 指标与文本 =====
   @Builder
-  buildLine(el: GuncatUiElement) {
-    Column({ space: 6 }) {
-      Shape() {
-        Path()
-          .commands(this.linePath(el.values, 260, 90, 6))
-          .stroke(this.chartColor(0))
-          .strokeWidth(2)
-          .fill(Color.Transparent)
-      }
-      .width('100%')
-      .height(92)
-      .viewPort({ x: 0, y: 0, width: 260, height: 90 })
-
-      Row() {
-        Text(el.labels.length > 0 ? el.labels[0] : '')
-          .fontSize(10)
-          .fontColor($r('app.color.text_tertiary'))
-          .layoutWeight(1)
-        if (el.labels.length > 1) {
-          Text(el.labels[el.labels.length - 1])
-            .fontSize(10)
-            .fontColor($r('app.color.text_tertiary'))
-        }
-      }
-      .width('100%')
-    }
-    .width('100%')
-    .alignItems(HorizontalAlign.Start)
-  }
-
-  // 折线路径: SVG 坐标空间固定 260x90
-  private linePath(values: number[], w: number, h: number, pad: number): string {
-    if (values.length === 0) {
-      return '';
-    }
-    let max: number = this.maxOf(values);
-    let min: number = this.minOf(values);
-    let span: number = max - min;
-    if (span <= 0) {
-      span = 1;
-    }
-    let step: number = values.length > 1 ? (w - pad * 2) / (values.length - 1) : 0;
-    let path: string = '';
-    for (let i: number = 0; i < values.length; i++) {
-      let x: number = pad + step * i;
-      let y: number = h - pad - ((values[i] - min) / span) * (h - pad * 2);
-      path = path + (i === 0 ? 'M' : 'L') + (Math.round(x * 10) / 10) + ' ' +
-        (Math.round(y * 10) / 10) + ' ';
-    }
-    return path.trim();
-  }
-
-  // 环形占比图 + 图例
-  @Builder
-  buildPie(el: GuncatUiElement) {
-    Column({ space: 10 }) {
-      Row({ space: 14 }) {
-        Stack() {
-          // 用环形描边拼出占比: 每个数据段按固定半径的角度绘制圆弧
-          Shape() {
-            ForEach(el.values, (value: number, index: number) => {
-              Path()
-                .commands(this.arcPath(el.values, index, 60, 60, 44))
-                .stroke(this.chartColor(index))
-                .strokeWidth(14)
-                .fill(Color.Transparent)
-                .strokeLineCap(LineCapStyle.Butt)
-            }, (value: number, index: number) => 'arc' + index)
-          }
-          .width(120)
-          .height(120)
-          .viewPort({ x: 0, y: 0, width: 120, height: 120 })
-
-          Column({ space: 1 }) {
-            Text(el.totalLabel !== '' ? el.totalLabel : this.fmt(this.seriesTotal(el.values)))
-              .fontSize(15)
-              .fontWeight(FontWeight.Bold)
-              .fontColor($r('app.color.text_primary'))
-            if (el.unit !== '') {
-              Text(el.unit)
-                .fontSize(10)
-                .fontColor($r('app.color.text_secondary'))
-            }
-          }
-        }
-        .width(120)
-        .height(120)
-
-        Column({ space: 6 }) {
-          ForEach(el.values, (value: number, index: number) => {
-            if (index < 6) {
-              Row({ space: 6 }) {
-                Row()
-                  .width(8)
-                  .height(8)
-                  .borderRadius(4)
-                  .backgroundColor(this.chartColor(index))
-                Text(index < el.labels.length ? el.labels[index] : '#' + (index + 1))
-                  .fontSize(11)
-                  .fontColor($r('app.color.text_primary'))
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .layoutWeight(1)
-                Text(this.fmt(this.ratio(value, this.seriesTotal(el.values)) * 100) + '%')
-                  .fontSize(11)
-                  .fontColor($r('app.color.text_secondary'))
-              }
-              .width('100%')
-            }
-          }, (value: number, index: number) => 'lg' + index)
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-      }
-      .width('100%')
-      .alignItems(VerticalAlign.Center)
-    }
-    .width('100%')
-    .alignItems(HorizontalAlign.Start)
-  }
-
-  // 单段圆弧路径(极坐标 → SVG path)
-  private arcPath(values: number[], index: number, cx: number, cy: number, r: number): string {
-    let total: number = this.seriesTotal(values);
-    if (total <= 0) {
-      return '';
-    }
-    let startRatio: number = 0;
-    for (let i: number = 0; i < index; i++) {
-      if (values[i] > 0) {
-        startRatio += values[i] / total;
-      }
-    }
-    let sweep: number = values[index] > 0 ? values[index] / total : 0;
-    if (sweep <= 0) {
-      return '';
-    }
-    // 单段铺满整圈时避免起点终点重合导致不渲染
-    if (sweep >= 0.9999) {
-      sweep = 0.9999;
-    }
-    let a0: number = startRatio * Math.PI * 2 - Math.PI / 2;
-    let a1: number = (startRatio + sweep) * Math.PI * 2 - Math.PI / 2;
-    let x0: number = cx + r * Math.cos(a0);
-    let y0: number = cy + r * Math.sin(a0);
-    let x1: number = cx + r * Math.cos(a1);
-    let y1: number = cy + r * Math.sin(a1);
-    let large: number = sweep > 0.5 ? 1 : 0;
-    return 'M' + (Math.round(x0 * 10) / 10) + ' ' + (Math.round(y0 * 10) / 10) +
-      ' A' + r + ' ' + r + ' 0 ' + large + ' 1 ' +
-      (Math.round(x1 * 10) / 10) + ' ' + (Math.round(y1 * 10) / 10);
-  }
-
-  // form: 控件集合 + 提交按钮
-  @Builder
-  buildForm(el: GuncatUiElement) {
-    Column({ space: 10 }) {
-      if (el.title !== '') {
-        Text(el.title)
-          .fontSize(13)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.text_primary'))
+  buildText(el: UiElement) {
+    Column({ space: 3 }) {
+      Text(UiNode.str(el, 'value', ''))
+        .fontSize(this.textSize(el))
+        .fontWeight(el.type === 'BoldText' || UiNode.str(el, 'variant', 'text') === 'number'
+          ? FontWeight.Bold : FontWeight.Normal)
+        .fontColor($r('app.color.text_primary'))
+        .width('100%')
+      if (UiNode.has(el, 'subtext')) {
+        Text(UiNode.str(el, 'subtext', ''))
+          .fontSize(11)
+          .fontColor($r('app.color.text_secondary'))
           .width('100%')
       }
-      ForEach(el.controls, (name: string) => {
-        this.buildControlByName(name, 'f_' + name)
-      }, (name: string) => 'f_' + name)
-
-      // 提交按钮: 未改动时为次要样式, 改动后转主样式
-      Button() {
-        Text(el.action !== null ? el.action.label : '提交')
-          .fontSize(13)
-          .fontColor(this.locked ? $r('app.color.text_tertiary') : Color.White)
-          .fontWeight(FontWeight.Medium)
-      }
-      .width('100%')
-      .height(38)
-      .borderRadius(12)
-      .backgroundColor(this.locked ? $r('app.color.surface_secondary') :
-        (this.dirty ? $r('app.color.brand') : $r('app.color.brand_pressed')))
-      .enabled(this.complete && !this.locked)
-      .onClick(() => {
-        let action: GuncatUiAction = el.action !== null ? el.action : this.defaultAction();
-        this.submitForm(action, el.controls);
-      })
     }
     .width('100%')
-    .padding(12)
-    .backgroundColor($r('app.color.surface_secondary'))
-    .borderRadius(14)
     .alignItems(HorizontalAlign.Start)
   }
 
-  private defaultAction(): GuncatUiAction {
-    let action: GuncatUiAction = new GuncatUiAction();
-    action.id = 'submit';
-    action.label = '提交';
-    action.style = GuncatUiActionStyle.PRIMARY;
-    return action;
+  private textSize(el: UiElement): number {
+    let size: string = UiNode.str(el, 'size', 'md');
+    if (size === 'xs') {
+      return 12;
+    }
+    if (size === 'sm') {
+      return 14;
+    }
+    if (size === 'lg') {
+      return 22;
+    }
+    return 16;
   }
 
-  // choice: 选项按钮组(点击即回传) + 可选次要动作
   @Builder
-  buildChoice(el: GuncatUiElement) {
-    Column({ space: 8 }) {
-      if (el.title !== '') {
-        Text(el.title)
+  buildIconText(el: UiElement) {
+    Row({ space: 9 }) {
+      this.iconBadge(UiNode.element(el, 'icon'))
+      Column({ space: 2 }) {
+        Text(UiNode.str(el, 'title', ''))
           .fontSize(13)
-          .fontWeight(FontWeight.Medium)
+          .fontWeight(UiNode.bool(el, 'bold', false) ? FontWeight.Bold : FontWeight.Medium)
           .fontColor($r('app.color.text_primary'))
           .width('100%')
-      }
-      ForEach(el.options, (option: string) => {
-        Button() {
-          Text(option)
-            .fontSize(13)
-            .fontColor($r('app.color.text_primary'))
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        if (UiNode.has(el, 'subtitle')) {
+          Text(UiNode.str(el, 'subtitle', ''))
+            .fontSize(11)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
             .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
-        .width('100%')
-        .constraintSize({ minHeight: 38 })
-        .borderRadius(12)
-        .backgroundColor($r('app.color.surface_secondary'))
-        .border({ width: 1, color: $r('app.color.divider') })
-        .enabled(this.complete && !this.locked)
-        .onClick(() => {
-          let action: GuncatUiAction = el.action !== null ? el.action : this.defaultAction();
-          this.clickAction(action, option);
-        })
-      }, (option: string) => 'opt_' + option)
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center)
+  }
 
-      if (el.action2 !== null) {
-        Button() {
-          Text(el.action2 !== null ? el.action2.label : '继续')
-            .fontSize(12)
-            .fontColor($r('app.color.brand'))
+  @Builder
+  iconBadge(icon: UiElement | null) {
+    Column() {
+      GuncatUiIcon({
+        name: icon === null ? 'dot' : UiNode.str(icon, 'name', 'dot'),
+        iconSize: 15,
+        color: '#4176E6'
+      })
+    }
+    .width(30)
+    .height(30)
+    .borderRadius(15)
+    .backgroundColor($r('app.color.brand_light'))
+    .justifyContent(FlexAlign.Center)
+  }
+
+  @Builder
+  buildImageText(el: UiElement) {
+    Row({ space: 9 }) {
+      if (this.isRemoteImage(UiNode.str(el, 'src', ''))) {
+        Image(UiNode.str(el, 'src', ''))
+          .width(40)
+          .height(40)
+          .borderRadius(10)
+          .objectFit(ImageFit.Cover)
+          .interpolation(ImageInterpolation.High)
+      } else {
+        Column() {
+          GuncatUiIcon({ name: 'image', iconSize: 15, color: '#8F8F8F' })
+        }
+        .width(40)
+        .height(40)
+        .borderRadius(10)
+        .backgroundColor($r('app.color.surface_secondary'))
+        .justifyContent(FlexAlign.Center)
+      }
+      Column({ space: 2 }) {
+        Text(UiNode.str(el, 'title', ''))
+          .fontSize(13)
+          .fontWeight(UiNode.bool(el, 'bold', false) ? FontWeight.Bold : FontWeight.Medium)
+          .fontColor($r('app.color.text_primary'))
+          .width('100%')
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        if (UiNode.has(el, 'subtitle')) {
+          Text(UiNode.str(el, 'subtitle', ''))
+            .fontSize(11)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  buildMetric(el: UiElement) {
+    Row({ space: 8 }) {
+      Text(UiNode.str(el, 'value', ''))
+        .fontSize(17)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.text_primary'))
+      if (UiNode.has(el, 'previousValue')) {
+        Text(UiNode.str(el, 'previousValue', ''))
+          .fontSize(12)
+          .fontColor($r('app.color.text_tertiary'))
+          .decoration({ type: TextDecorationType.LineThrough, color: $r('app.color.text_tertiary') })
+      }
+      if (this.trendText(el) !== '') {
+        Text(this.trendText(el))
+          .fontSize(11)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.trendUp(el) ? '#12805A' : '#B4372F')
+          .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+          .borderRadius(6)
+          .backgroundColor(this.trendUp(el) ? '#E3F7EC' : '#FDE8E6')
+      }
+      if (UiNode.has(el, 'subtext')) {
+        Text(UiNode.str(el, 'subtext', ''))
+          .fontSize(11)
+          .fontColor($r('app.color.text_secondary'))
+          .layoutWeight(1)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center)
+  }
+
+  private trendText(el: UiElement): string {
+    let trend: Record<string, Object> | null = UiNode.obj(el, 'trend');
+    if (trend === null) {
+      return '';
+    }
+    let value: number = UiNode.objNum(trend, 'value', 0);
+    if (value === 0) {
+      return '';
+    }
+    let dir: string = UiNode.objStr(trend, 'direction', 'up');
+    return (dir === 'down' ? '▼ ' : '▲ ') + UiNum.trim(Math.abs(value)) + '%';
+  }
+
+  private trendUp(el: UiElement): boolean {
+    let trend: Record<string, Object> | null = UiNode.obj(el, 'trend');
+    if (trend === null) {
+      return true;
+    }
+    return UiNode.objStr(trend, 'direction', 'up') !== 'down';
+  }
+
+  // ===== 卡片块 =====
+  @Builder
+  buildContextCards(el: UiElement) {
+    if (el.type === 'ContextCardItem') {
+      this.contextCard(el)
+    } else {
+      Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
+        ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+          Column() {
+            this.contextCard(item)
+          }
+          .width(UiNode.elementList(el, 'items').length <= 1 ? '100%' : '48%')
+          .margin({ bottom: 8 })
+        }, (item: UiElement, i: number) => 'cc' + i.toString())
+      }
+      .width('100%')
+    }
+  }
+
+  @Builder
+  contextCard(item: UiElement) {
+    Column({ space: 4 }) {
+      Text(UiNode.str(item, 'title', ''))
+        .fontSize(13)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_primary'))
+        .width('100%')
+      if (UiNode.has(item, 'body')) {
+        Text(UiNode.str(item, 'body', ''))
+          .fontSize(12)
+          .lineHeight(19)
+          .fontColor($r('app.color.text_secondary'))
+          .width('100%')
+      }
+    }
+    .width('100%')
+    .padding(12)
+    .backgroundColor($r('app.color.surface_secondary'))
+    .borderRadius(12)
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  buildOverviewCards(el: UiElement) {
+    if (el.type === 'OverviewCardItem') {
+      this.overviewCard(el)
+    } else {
+      Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
+        ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+          Column() {
+            this.overviewCard(item)
+          }
+          .width(UiNode.elementList(el, 'items').length <= 1 ? '100%' : '48%')
+          .margin({ bottom: 8 })
+        }, (item: UiElement, i: number) => 'oc' + i.toString())
+      }
+      .width('100%')
+    }
+  }
+
+  @Builder
+  overviewCard(item: UiElement) {
+    Column({ space: 8 }) {
+      if (UiNode.element(item, 'top') !== null) {
+        this.renderNode(UiNode.element(item, 'top') as UiElement)
+      }
+      if (UiNode.element(item, 'bottom') !== null) {
+        this.renderNode(UiNode.element(item, 'bottom') as UiElement)
+      }
+    }
+    .width('100%')
+    .padding(12)
+    .backgroundColor($r('app.color.surface_secondary'))
+    .borderRadius(12)
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  buildSnippetCards(el: UiElement) {
+    if (el.type === 'SnippetCardItem') {
+      this.snippetCard(el)
+    } else {
+      Column({ space: 8 }) {
+        ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+          this.snippetCard(item)
+        }, (item: UiElement, i: number) => 'sc' + i.toString())
+      }
+      .width('100%')
+    }
+  }
+
+  @Builder
+  snippetCard(item: UiElement) {
+    Row({ space: 8 }) {
+      Column() {
+        if (UiNode.element(item, 'lhs') !== null) {
+          this.renderNode(UiNode.element(item, 'lhs') as UiElement)
+        }
+      }
+      .layoutWeight(1)
+      if (UiNode.element(item, 'rhs') !== null) {
+        this.renderNode(UiNode.element(item, 'rhs') as UiElement)
+      }
+    }
+    .width('100%')
+    .padding(12)
+    .backgroundColor($r('app.color.surface_secondary'))
+    .borderRadius(12)
+    .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  buildCompositeCards(el: UiElement) {
+    if (el.type === 'CompositeCardItem') {
+      this.compositeCard(el)
+    } else {
+      Column({ space: 10 }) {
+        ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+          this.compositeCard(item)
+        }, (item: UiElement, i: number) => 'mc' + i.toString())
+      }
+      .width('100%')
+    }
+  }
+
+  @Builder
+  compositeCard(item: UiElement) {
+    Column({ space: 10 }) {
+      if (UiNode.element(item, 'header') !== null) {
+        this.renderNode(UiNode.element(item, 'header') as UiElement)
+      }
+      Column({ space: 8 }) {
+        this.buildElements(UiNode.elementList(item, 'body'))
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      if (UiNode.obj(item, 'footer') !== null) {
+        Row({ space: 10 }) {
+          if (UiNode.objStr(UiNode.obj(item, 'footer'), 'price', '') !== '') {
+            Text(UiNode.objStr(UiNode.obj(item, 'footer'), 'price', ''))
+              .fontSize(15)
+              .fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.text_primary'))
+              .layoutWeight(1)
+          } else {
+            Blank()
+          }
         }
         .width('100%')
-        .height(34)
-        .borderRadius(12)
-        .backgroundColor($r('app.color.brand_light'))
-        .enabled(this.complete && !this.locked)
-        .onClick(() => {
-          let secondary: GuncatUiAction | null = el.action2;
-          if (secondary !== null) {
-            this.clickAction(secondary, '');
-          }
-        })
       }
+    }
+    .width('100%')
+    .padding(12)
+    .backgroundColor($r('app.color.surface'))
+    .borderRadius(14)
+    .border({ width: 1, color: $r('app.color.divider') })
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  buildVisualCards(el: UiElement) {
+    if (el.type === 'VisualCardItem') {
+      this.visualCard(el)
+    } else {
+      Column({ space: 10 }) {
+        ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+          this.visualCard(item)
+        }, (item: UiElement, i: number) => 'vc' + i.toString())
+      }
+      .width('100%')
+    }
+  }
+
+  @Builder
+  visualCard(item: UiElement) {
+    Column({ space: 8 }) {
+      if (UiNode.element(item, 'tag') !== null) {
+        Row() {
+          this.renderNode(UiNode.element(item, 'tag') as UiElement)
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.End)
+      }
+      if (UiNode.element(item, 'body') !== null) {
+        this.renderNode(UiNode.element(item, 'body') as UiElement)
+      }
+    }
+    .width('100%')
+    .padding(14)
+    .backgroundColor($r('app.color.brand_light'))
+    .borderRadius(14)
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  // ===== 列表与追问 =====
+  @Builder
+  buildListBlock(el: UiElement) {
+    Column({ space: el.type === 'ListBlock' && UiNode.str(el, 'variant', 'number') === 'number' ? 0 : 8 }) {
+      ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+        if (UiNode.str(el, 'variant', 'number') === 'image') {
+          Row({ space: 10 }) {
+            if (this.isRemoteImage(UiNode.objStr(UiNode.obj(item, 'image'), 'src', ''))) {
+              Image(UiNode.objStr(UiNode.obj(item, 'image'), 'src', ''))
+                .width(44)
+                .height(44)
+                .borderRadius(10)
+                .objectFit(ImageFit.Cover)
+            }
+            Column({ space: 2 }) {
+              Text(UiNode.str(item, 'title', ''))
+                .fontSize(13)
+                .fontWeight(FontWeight.Medium)
+                .fontColor($r('app.color.text_primary'))
+                .width('100%')
+              if (UiNode.has(item, 'subtitle')) {
+                Text(UiNode.str(item, 'subtitle', ''))
+                  .fontSize(12)
+                  .fontColor($r('app.color.text_secondary'))
+                  .width('100%')
+              }
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
+          }
+          .width('100%')
+          .padding({ top: 6, bottom: 6 })
+          .alignItems(VerticalAlign.Center)
+        } else {
+          Row({ space: 9 }) {
+            Column() {
+              Text((i + 1).toString())
+                .fontSize(11)
+                .fontWeight(FontWeight.Medium)
+                .fontColor($r('app.color.brand'))
+            }
+            .width(20)
+            .height(20)
+            .borderRadius(10)
+            .backgroundColor($r('app.color.brand_light'))
+            .justifyContent(FlexAlign.Center)
+
+            Column({ space: 2 }) {
+              Text(UiNode.str(item, 'title', ''))
+                .fontSize(13)
+                .fontColor($r('app.color.text_primary'))
+                .width('100%')
+              if (UiNode.has(item, 'subtitle')) {
+                Text(UiNode.str(item, 'subtitle', ''))
+                  .fontSize(12)
+                  .lineHeight(19)
+                  .fontColor($r('app.color.text_secondary'))
+                  .width('100%')
+              }
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
+
+            if (UiNode.has(item, 'actionLabel')) {
+              Text(UiNode.str(item, 'actionLabel', ''))
+                .fontSize(12)
+                .fontColor($r('app.color.brand'))
+                .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                .borderRadius(999)
+                .backgroundColor($r('app.color.brand_light'))
+                .enabled(this.interactive())
+                .onClick(() => {
+                  this.runButton(item, null);
+                })
+            }
+          }
+          .width('100%')
+          .padding({ top: 8, bottom: 8 })
+          .alignItems(VerticalAlign.Top)
+        }
+      }, (item: UiElement, i: number) => 'li' + i.toString() + item.key)
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
   }
 
-  // 独立控件卡片(带默认提交动作)
   @Builder
-  buildControlCard(input: GuncatUiInput) {
-    Column({ space: 8 }) {
-      this.buildControl(input, 'oc_' + input.name)
-      Button() {
-        Text('提交')
+  buildListItem(el: UiElement, insideBlock: boolean) {
+    Column({ space: 2 }) {
+      Text(UiNode.str(el, 'title', ''))
+        .fontSize(13)
+        .fontColor($r('app.color.text_primary'))
+        .width('100%')
+      if (UiNode.has(el, 'subtitle')) {
+        Text(UiNode.str(el, 'subtitle', ''))
           .fontSize(12)
-          .fontColor(this.locked ? $r('app.color.text_tertiary') : Color.White)
+          .fontColor($r('app.color.text_secondary'))
+          .width('100%')
       }
-      .width('100%')
-      .height(34)
-      .borderRadius(12)
-      .backgroundColor(this.locked ? $r('app.color.surface_secondary') : $r('app.color.brand'))
-      .enabled(this.complete && !this.locked)
-      .onClick(() => {
-        this.submitForm(this.defaultAction(), [input.name]);
-      })
     }
     .width('100%')
-    .padding(12)
+    .padding({ top: 6, bottom: 6 })
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  buildFollowUps(el: UiElement) {
+    Flex({ wrap: FlexWrap.Wrap }) {
+      ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+        Text(UiNode.str(item, 'text', ''))
+          .fontSize(12)
+          .fontColor($r('app.color.brand'))
+          .padding({ left: 12, right: 12, top: 7, bottom: 7 })
+          .borderRadius(999)
+          .backgroundColor($r('app.color.brand_light'))
+          .margin({ right: 8, bottom: 8 })
+          .enabled(this.interactive())
+          .onClick(() => {
+            this.emitAction(UiNode.str(item, 'text', ''));
+          })
+      }, (item: UiElement, i: number) => 'fu' + i.toString())
+    }
+    .width('100%')
+  }
+
+  // ===== 表单 =====
+  private isControl(type: string): boolean {
+    return type === 'Input' || type === 'TextArea' || type === 'Select' ||
+      type === 'Slider' || type === 'RadioGroup' || type === 'CheckBoxGroup' ||
+      type === 'SwitchGroup' || type === 'Chips' || type === 'OptionCards' ||
+      type === 'DatePicker';
+  }
+
+  @Builder
+  buildForm(el: UiElement) {
+    Column({ space: 14 }) {
+      Column({ space: 14 }) {
+        this.buildElements(UiNode.elementList(el, 'fields'))
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+
+      this.buildButtons(UiNode.element(el, 'buttons'), el)
+    }
+    .width('100%')
+    .padding(14)
     .backgroundColor($r('app.color.surface_secondary'))
     .borderRadius(14)
     .alignItems(HorizontalAlign.Start)
   }
 
-  // 按控件名渲染(form 内引用)
   @Builder
-  buildControlByName(name: string, key: string) {
-    if (this.spec.findControl(name) !== null) {
-      this.buildControl(this.spec.findControl(name) as GuncatUiInput, key)
-    }
-  }
-
-  // 单个控件: 标签行(值预览) + 具体形态
-  @Builder
-  buildControl(input: GuncatUiInput, key: string) {
-    Column({ space: 6 }) {
-      Row({ space: 6 }) {
-        Text(input.label)
-          .fontSize(12)
-          .fontColor($r('app.color.text_secondary'))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .layoutWeight(1)
-        if (input.type !== GuncatUiControlType.TEXT) {
-          Text(GuncatUiMessageBuilder.controlValueText(input, this.values))
-            .fontSize(12)
-            .fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.brand'))
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-      }
-      .width('100%')
-
-      if (input.type === GuncatUiControlType.SLIDER) {
-        Slider({
-          value: this.numOf(input.name, input.defNum),
-          min: input.min,
-          max: input.max,
-          step: input.step,
-          style: SliderStyle.OutSet
-        })
-          .width('100%')
-          .selectedColor($r('app.color.brand'))
-          .trackColor($r('app.color.surface'))
-          .blockColor($r('app.color.surface'))
-          .enabled(this.complete && !this.locked)
-          .onChange((value: number, mode: SliderChangeMode) => {
-            if (mode === SliderChangeMode.Moving || mode === SliderChangeMode.End) {
-              this.setValue(input.name, value);
-            }
-          })
-      } else if (input.type === GuncatUiControlType.TOGGLE) {
-        Row() {
-          Toggle({ type: ToggleType.Switch, isOn: this.boolOf(input.name, input.defBool) })
-            .selectedColor($r('app.color.brand'))
-            .enabled(this.complete && !this.locked)
-            .onChange((isOn: boolean) => {
-              this.setValue(input.name, isOn);
-            })
-        }
+  buildFormControl(el: UiElement) {
+    Column({ space: 7 }) {
+      Text(UiNode.str(el, 'label', ''))
+        .fontSize(13)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_primary'))
         .width('100%')
-        .justifyContent(FlexAlign.Start)
-      } else if (input.type === GuncatUiControlType.SELECT) {
-        this.buildSelect(input)
-      } else {
-        TextInput({ text: this.textOf(input.name, input.defText), placeholder: input.placeholder })
+      if (UiNode.element(el, 'input') !== null) {
+        this.renderNode(UiNode.element(el, 'input') as UiElement)
+      }
+      if (UiNode.has(el, 'hint')) {
+        Text(UiNode.str(el, 'hint', ''))
+          .fontSize(11)
+          .fontColor($r('app.color.text_tertiary'))
           .width('100%')
-          .height(38)
-          .fontSize(13)
-          .fontColor($r('app.color.text_primary'))
-          .placeholderColor($r('app.color.text_tertiary'))
-          .backgroundColor($r('app.color.surface'))
-          .borderRadius(10)
-          .maxLength(GuncatUiLimits.MAX_TEXT)
-          .enabled(this.complete && !this.locked)
-          .onChange((value: string) => {
-            this.setValue(input.name, value);
-          })
       }
     }
     .width('100%')
@@ -1193,35 +2050,555 @@ export struct GuncatUiView {
   }
 
   @Builder
-  buildSelect(input: GuncatUiInput) {
-    Select(input.options.map((option: string): SelectOption => {
-      return { value: option } as SelectOption;
-    }))
-      .selected(this.selectIndex(input))
-      .value(this.textOf(input.name, input.defText) !== '' ?
-        this.textOf(input.name, input.defText) : '请选择')
+  buildControl(el: UiElement) {
+    if (el.type === 'Input') {
+      this.buildInput(el, false)
+    } else if (el.type === 'TextArea') {
+      this.buildInput(el, true)
+    } else if (el.type === 'DatePicker') {
+      this.buildDatePicker(el)
+    } else if (el.type === 'Slider') {
+      this.buildSlider(el)
+    } else if (el.type === 'SwitchGroup') {
+      this.buildSwitchGroup(el)
+    } else if (el.type === 'CheckBoxGroup') {
+      this.buildPillGroup(el, true)
+    } else if (el.type === 'RadioGroup') {
+      this.buildPillGroup(el, false)
+    } else if (el.type === 'Select') {
+      this.buildSelect(el)
+    } else if (el.type === 'Chips') {
+      this.buildChips(el)
+    } else if (el.type === 'OptionCards') {
+      this.buildOptionCards(el)
+    }
+  }
+
+  @Builder
+  buildInput(el: UiElement, multiline: boolean) {
+    Column({ space: 4 }) {
+      if (multiline) {
+        TextArea({
+          text: this.bindStr(GuncatUiRuntime.stateKeyOf(el), ''),
+          placeholder: UiNode.str(el, 'placeholder', '')
+        })
+          .width('100%')
+          .height(Math.max(64, UiNode.num(el, 'rows', 3) * 22))
+          .fontSize(14)
+          .fontColor($r('app.color.text_primary'))
+          .placeholderColor($r('app.color.text_quaternary'))
+          .backgroundColor($r('app.color.surface'))
+          .borderRadius(10)
+          .enabled(this.interactive())
+          .onChange((value: string) => {
+            this.state.set(GuncatUiRuntime.stateKeyOf(el), value);
+          })
+          .onBlur(() => {
+            this.emitState();
+          })
+      } else {
+        TextInput({
+          text: this.bindStr(GuncatUiRuntime.stateKeyOf(el), ''),
+          placeholder: UiNode.str(el, 'placeholder', '')
+        })
+          .width('100%')
+          .height(40)
+          .fontSize(14)
+          .fontColor($r('app.color.text_primary'))
+          .placeholderColor($r('app.color.text_quaternary'))
+          .backgroundColor($r('app.color.surface'))
+          .borderRadius(10)
+          .type(this.inputType(UiNode.str(el, 'type', 'text')))
+          .enabled(this.interactive())
+          .onChange((value: string) => {
+            this.state.set(GuncatUiRuntime.stateKeyOf(el), value);
+          })
+          .onSubmit(() => {
+            this.emitState();
+          })
+          .onBlur(() => {
+            this.emitState();
+          })
+      }
+      if (this.ruleText(el) !== '') {
+        Text(this.ruleText(el))
+          .fontSize(10)
+          .fontColor($r('app.color.text_quaternary'))
+          .width('100%')
+      }
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  private inputType(type: string): InputType {
+    if (type === 'number') {
+      return InputType.Number;
+    }
+    if (type === 'email') {
+      return InputType.Email;
+    }
+    if (type === 'url') {
+      return InputType.Normal;
+    }
+    return InputType.Normal;
+  }
+
+  private ruleText(el: UiElement): string {
+    let rules: Record<string, Object> | null = UiNode.obj(el, 'rules');
+    if (rules === null) {
+      return '';
+    }
+    let parts: string[] = [];
+    let req: Object | undefined = rules['required'];
+    if (req !== undefined && GuncatUiMaterializer.truthy(req)) {
+      parts.push('必填');
+    }
+    let min: Object | undefined = rules['min'];
+    if (min !== undefined) {
+      parts.push('≥' + UiNum.trim(GuncatUiMaterializer.toNum(min)));
+    }
+    let max: Object | undefined = rules['max'];
+    if (max !== undefined) {
+      parts.push('≤' + UiNum.trim(GuncatUiMaterializer.toNum(max)));
+    }
+    return parts.join(' · ');
+  }
+
+  @Builder
+  buildDatePicker(el: UiElement) {
+    TextInput({
+      text: this.bindStr(GuncatUiRuntime.stateKeyOf(el), ''),
+      placeholder: UiNode.str(el, 'mode', 'single') === 'range' ? '开始日期 ~ 结束日期' : 'YYYY-MM-DD'
+    })
       .width('100%')
-      .height(38)
-      .font({ size: 13 })
+      .height(40)
+      .fontSize(14)
       .fontColor($r('app.color.text_primary'))
-      .selectedOptionFont({ size: 13 })
-      .optionFont({ size: 13 })
+      .placeholderColor($r('app.color.text_quaternary'))
       .backgroundColor($r('app.color.surface'))
       .borderRadius(10)
-      .enabled(this.complete && !this.locked)
-      .onSelect((index: number, value: string) => {
-        this.setValue(input.name, value);
+      .enabled(this.interactive())
+      .onChange((value: string) => {
+        this.state.set(GuncatUiRuntime.stateKeyOf(el), value);
+      })
+      .onBlur(() => {
+        this.emitState();
       })
   }
 
-  // 下拉当前选中下标(未命中时取 0, 与 defText 默认取首项一致)
-  private selectIndex(input: GuncatUiInput): number {
-    let current: string = this.textOf(input.name, input.defText);
-    for (let i: number = 0; i < input.options.length; i++) {
-      if (input.options[i] === current) {
-        return i;
+  @Builder
+  buildSlider(el: UiElement) {
+    Column({ space: 4 }) {
+      Row({ space: 8 }) {
+        if (UiNode.has(el, 'label')) {
+          Text(UiNode.str(el, 'label', ''))
+            .fontSize(12)
+            .fontColor($r('app.color.text_secondary'))
+            .layoutWeight(1)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        } else {
+          Blank()
+        }
+        Text(UiNum.trim(this.bindNum(GuncatUiRuntime.stateKeyOf(el), GuncatUiRuntime.sliderDefault(el))))
+          .fontSize(13)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.brand'))
+      }
+      .width('100%')
+
+      Slider({
+        value: this.bindNum(GuncatUiRuntime.stateKeyOf(el), GuncatUiRuntime.sliderDefault(el)),
+        min: UiNode.num(el, 'min', 0),
+        max: UiNode.num(el, 'max', 100),
+        step: this.sliderStep(el),
+        style: SliderStyle.OutSet
+      })
+        .width('100%')
+        .selectedColor($r('app.color.brand'))
+        .trackColor($r('app.color.surface'))
+        .blockColor($r('app.color.surface'))
+        .enabled(this.interactive())
+        .onChange((value: number, mode: SliderChangeMode) => {
+          if (mode === SliderChangeMode.Moving || mode === SliderChangeMode.End ||
+            mode === SliderChangeMode.Click) {
+            this.state.set(GuncatUiRuntime.stateKeyOf(el), value);
+            this.rematerialize();
+          }
+          if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
+            this.emitState();
+          }
+        })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  private sliderStep(el: UiElement): number {
+    let step: number = UiNode.num(el, 'step', 0);
+    if (step > 0) {
+      return step;
+    }
+    return UiNode.str(el, 'variant', 'continuous') === 'discrete' ? 1 : 1;
+  }
+
+  @Builder
+  buildSwitchGroup(el: UiElement) {
+    Column({ space: 0 }) {
+      ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+        Row({ space: 10 }) {
+          Column({ space: 2 }) {
+            Text(UiNode.str(item, 'label', UiNode.str(item, 'name', '')))
+              .fontSize(13)
+              .fontColor($r('app.color.text_primary'))
+              .width('100%')
+            if (UiNode.has(item, 'description')) {
+              Text(UiNode.str(item, 'description', ''))
+                .fontSize(11)
+                .fontColor($r('app.color.text_secondary'))
+                .width('100%')
+            }
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          Toggle({
+            type: ToggleType.Switch,
+            isOn: this.isSelected(el, UiNode.str(item, 'name', ''))
+          })
+            .selectedColor($r('app.color.brand'))
+            .enabled(this.interactive())
+            .onChange((_isOn: boolean) => {
+              this.toggleChoice(el, UiNode.str(item, 'name', ''), false);
+            })
+        }
+        .width('100%')
+        .padding({ top: 8, bottom: 8 })
+        .alignItems(VerticalAlign.Center)
+      }, (item: UiElement, i: number) => 'sw' + i.toString())
+    }
+    .width('100%')
+  }
+
+  // 单选/多选药丸组(reference 风格: 选中 = 深色实心)
+  @Builder
+  buildPillGroup(el: UiElement, multi: boolean) {
+    Flex({ wrap: FlexWrap.Wrap }) {
+      ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+        if (UiNode.has(item, 'description')) {
+          Column({ space: 3 }) {
+            Text(UiNode.str(item, 'label', ''))
+              .fontSize(13)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(this.isSelected(el, this.itemValue(el, item)) && !multi
+                ? $r('app.color.brand') : $r('app.color.text_primary'))
+              .width('100%')
+            Text(UiNode.str(item, 'description', ''))
+              .fontSize(11)
+              .fontColor($r('app.color.text_secondary'))
+              .width('100%')
+          }
+          .padding({ left: 12, right: 12, top: 9, bottom: 9 })
+          .borderRadius(12)
+          .backgroundColor($r('app.color.surface'))
+          .border({
+            width: 1,
+            color: this.isSelected(el, this.itemValue(el, item))
+              ? $r('app.color.brand') : $r('app.color.divider')
+          })
+          .margin({ bottom: 8 })
+          .constraintSize({ minWidth: 140 })
+          // 注意: 在 wrap 布局的 Flex 里用 layoutWeight 会把每一项都撑满整行,
+          // 带描述的选项一律整行铺开(与 reference 的"带说明选项 = 整行卡片"一致)
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+          .enabled(this.interactive())
+          .onClick(() => {
+            this.toggleChoice(el, this.itemValue(el, item), multi);
+          })
+        } else {
+          Text(UiNode.str(item, 'label', ''))
+            .fontSize(13)
+            .fontColor(this.isSelected(el, this.itemValue(el, item))
+              ? Color.White : $r('app.color.text_primary'))
+            .padding({ left: 14, right: 14, top: 9, bottom: 9 })
+            .borderRadius(999)
+            .backgroundColor(this.isSelected(el, this.itemValue(el, item))
+              ? $r('app.color.brand') : $r('app.color.surface'))
+            .border({ width: 1, color: $r('app.color.divider') })
+            .margin({ right: 8, bottom: 8 })
+            .enabled(this.interactive())
+            .onClick(() => {
+              this.toggleChoice(el, this.itemValue(el, item), multi);
+            })
+        }
+      }, (item: UiElement, i: number) => 'pg' + i.toString() + item.key)
+    }
+    .width('100%')
+  }
+
+  // 选项的值: RadioItem/ChipItem/OptionCard 用 value; CheckBoxItem 用 name
+  private itemValue(group: UiElement, item: UiElement): string {
+    if (group.type === 'CheckBoxGroup') {
+      return UiNode.str(item, 'name', '');
+    }
+    return UiNode.str(item, 'value', '');
+  }
+
+  @Builder
+  buildSelect(el: UiElement) {
+    Column({ space: 6 }) {
+      Flex({ wrap: FlexWrap.Wrap }) {
+        ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+          Text(UiNode.str(item, 'label', ''))
+            .fontSize(13)
+            .fontColor(this.isSelected(el, UiNode.str(item, 'value', ''))
+              ? Color.White : $r('app.color.text_primary'))
+            .padding({ left: 14, right: 14, top: 9, bottom: 9 })
+            .borderRadius(999)
+            .backgroundColor(this.isSelected(el, UiNode.str(item, 'value', ''))
+              ? $r('app.color.brand') : $r('app.color.surface'))
+            .border({ width: 1, color: $r('app.color.divider') })
+            .margin({ right: 8, bottom: 8 })
+            .enabled(this.interactive())
+            .onClick(() => {
+              this.toggleChoice(el, UiNode.str(item, 'value', ''), false);
+            })
+        }, (item: UiElement, i: number) => 'sel' + i.toString() + item.key)
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  buildChips(el: UiElement) {
+    Flex({ wrap: FlexWrap.Wrap }) {
+      ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+        Text(UiNode.str(item, 'label', ''))
+          .fontSize(12)
+          .fontColor(this.isSelected(el, UiNode.str(item, 'value', ''))
+            ? Color.White : $r('app.color.text_primary'))
+          .padding({ left: 12, right: 12, top: 7, bottom: 7 })
+          .borderRadius(999)
+          .backgroundColor(this.isSelected(el, UiNode.str(item, 'value', ''))
+            ? $r('app.color.brand') : $r('app.color.surface'))
+          .border({ width: 1, color: $r('app.color.divider') })
+          .margin({ right: 8, bottom: 8 })
+          .opacity(UiNode.bool(item, 'disabled', false) ? 0.45 : 1)
+          .enabled(this.interactive() && !UiNode.bool(item, 'disabled', false))
+          .onClick(() => {
+            this.toggleChoice(el, UiNode.str(item, 'value', ''),
+              UiNode.str(el, 'type', 'single') === 'multiple');
+          })
+      }, (item: UiElement, i: number) => 'ch' + i.toString() + item.key)
+    }
+    .width('100%')
+  }
+
+  @Builder
+  buildOptionCards(el: UiElement) {
+    Column({ space: 8 }) {
+      ForEach(UiNode.elementList(el, 'items'), (item: UiElement, i: number) => {
+        Row({ space: 10 }) {
+          Column({ space: 3 }) {
+            Text(UiNode.str(item, 'title', ''))
+              .fontSize(14)
+              .fontWeight(FontWeight.Medium)
+              .fontColor($r('app.color.text_primary'))
+              .width('100%')
+            if (UiNode.has(item, 'subtitle')) {
+              Text(UiNode.str(item, 'subtitle', ''))
+                .fontSize(12)
+                .fontColor($r('app.color.text_secondary'))
+                .width('100%')
+            }
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          if (this.isSelected(el, UiNode.str(item, 'value', ''))) {
+            GuncatUiIcon({ name: 'check', iconSize: 15, color: '#4176E6' })
+          }
+        }
+        .width('100%')
+        .padding(12)
+        .borderRadius(12)
+        .backgroundColor(this.isSelected(el, UiNode.str(item, 'value', ''))
+          ? $r('app.color.brand_light') : $r('app.color.surface'))
+        .border({
+          width: 1,
+          color: this.isSelected(el, UiNode.str(item, 'value', ''))
+            ? $r('app.color.brand') : $r('app.color.divider')
+        })
+        .opacity(UiNode.bool(item, 'disabled', false) ? 0.45 : 1)
+        .alignItems(VerticalAlign.Center)
+        .enabled(this.interactive() && !UiNode.bool(item, 'disabled', false))
+        .onClick(() => {
+          this.toggleChoice(el, UiNode.str(item, 'value', ''),
+            UiNode.str(el, 'type', 'single') === 'multiple');
+        })
+      }, (item: UiElement, i: number) => 'op' + i.toString() + item.key)
+    }
+    .width('100%')
+  }
+
+  // ===== 按钮 =====
+  @Builder
+  buildButtons(el: UiElement | null, form: UiElement | null) {
+    if (el !== null) {
+      if (UiNode.str(el, 'direction', 'row') === 'column') {
+        Column({ space: 8 }) {
+          this.buildElements(UiNode.elementList(el, 'buttons'))
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+      } else {
+        Row({ space: 10 }) {
+          ForEach(UiNode.elementList(el, 'buttons'), (btn: UiElement, i: number) => {
+            Column() {
+              if (btn.type === 'IconButton') {
+                this.buildIconButton(btn, form)
+              } else {
+                this.buildButton(btn, form)
+              }
+            }
+            .layoutWeight(1)
+          }, (btn: UiElement, i: number) => 'btn' + i.toString())
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
       }
     }
-    return 0;
+  }
+
+  @Builder
+  buildButton(el: UiElement, form: UiElement | null) {
+    Text(UiNode.str(el, 'label', '按钮'))
+      .fontSize(this.buttonFontSize(el))
+      .fontWeight(FontWeight.Medium)
+      .fontColor(this.buttonTextColor(el))
+      .textAlign(TextAlign.Center)
+      .width('100%')
+      .constraintSize({ minHeight: this.buttonHeight(el) })
+      .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+      .borderRadius(999)
+      .backgroundColor(this.buttonBg(el))
+      .opacity(this.interactive() ? 1 : 0.5)
+      .enabled(this.interactive())
+      .onClick(() => {
+        this.runButton(el, form);
+      })
+  }
+
+  private buttonFontSize(el: UiElement): number {
+    let size: string = UiNode.str(el, 'size', 'medium');
+    if (size === 'extra-small' || size === 'small') {
+      return 12;
+    }
+    if (size === 'large') {
+      return 15;
+    }
+    return 13;
+  }
+
+  private buttonHeight(el: UiElement): number {
+    let size: string = UiNode.str(el, 'size', 'medium');
+    if (size === 'extra-small') {
+      return 28;
+    }
+    if (size === 'small') {
+      return 32;
+    }
+    if (size === 'large') {
+      return 44;
+    }
+    return 38;
+  }
+
+  private buttonIsPrimary(el: UiElement): boolean {
+    return UiNode.str(el, 'variant', 'primary') === 'primary';
+  }
+
+  private buttonBg(el: UiElement): ResourceColor {
+    if (UiNode.str(el, 'type', 'normal') === 'destructive') {
+      return $r('app.color.danger');
+    }
+    let variant: string = UiNode.str(el, 'variant', 'primary');
+    if (variant === 'primary') {
+      return $r('app.color.brand');
+    }
+    if (variant === 'tertiary') {
+      return Color.Transparent;
+    }
+    return $r('app.color.surface');
+  }
+
+  private buttonTextColor(el: UiElement): ResourceColor {
+    if (UiNode.str(el, 'type', 'normal') === 'destructive' || this.buttonIsPrimary(el)) {
+      return Color.White;
+    }
+    if (UiNode.str(el, 'variant', 'primary') === 'tertiary') {
+      return $r('app.color.brand');
+    }
+    return $r('app.color.text_primary');
+  }
+
+  @Builder
+  buildIconButton(el: UiElement, form: UiElement | null) {
+    Row() {
+      GuncatUiIcon({
+        name: UiNode.element(el, 'icon') === null ? 'dot'
+          : UiNode.str(UiNode.element(el, 'icon') as UiElement, 'name', 'dot'),
+        iconSize: 16,
+        color: this.buttonIsPrimary(el) ? '#FFFFFF' : '#4176E6'
+      })
+    }
+    .width(this.buttonHeight(el))
+    .height(this.buttonHeight(el))
+    .borderRadius(UiNode.str(el, 'shape', 'circle') === 'square' ? 10 : this.buttonHeight(el) / 2)
+    .backgroundColor(this.buttonBg(el))
+    .justifyContent(FlexAlign.Center)
+    .opacity(this.interactive() ? 1 : 0.5)
+    .enabled(this.interactive())
+    .onClick(() => {
+      this.runButton(el, form);
+    })
+  }
+}
+
+// 行内富文本片段
+class InlineSeg {
+  kind: string = 'plain';
+  text: string = '';
+  url: string = '';
+
+  static plain(text: string): InlineSeg {
+    let s: InlineSeg = new InlineSeg();
+    s.kind = 'plain';
+    s.text = text;
+    return s;
+  }
+
+  static bold(text: string): InlineSeg {
+    let s: InlineSeg = new InlineSeg();
+    s.kind = 'bold';
+    s.text = text;
+    return s;
+  }
+
+  static code(text: string): InlineSeg {
+    let s: InlineSeg = new InlineSeg();
+    s.kind = 'code';
+    s.text = text;
+    return s;
+  }
+
+  static link(text: string, url: string): InlineSeg {
+    let s: InlineSeg = new InlineSeg();
+    s.kind = 'link';
+    s.text = text;
+    s.url = url;
+    return s;
   }
 }

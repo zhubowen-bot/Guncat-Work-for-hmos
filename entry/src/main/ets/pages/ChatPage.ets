@@ -14,7 +14,8 @@ import { WorkspaceBar, WorkspaceFileIcons } from '../views/WorkspaceBar';
 import { WorkTurnView } from '../views/WorkTurnView';
 import { WorkArtifactsCard } from '../views/WorkArtifactsCard';
 import { WorkArtifactFile, WorkArtifactSummary, WorkArtifactUtil } from '../common/WorkArtifacts';
-import { GuncatUiPayload } from '../common/GuncatUiSpec';
+import { GuncatUiEvent } from '../common/GuncatUiRuntime';
+import { GuncatUiParts } from '../common/GuncatUiParts';
 import { Message } from '../model/Message';
 import { Agent } from '../model/Agent';
 import { Conversation } from '../model/Conversation';
@@ -1227,10 +1228,10 @@ struct ChatPage {
                   this.fillInputFromMessage(msg);
                 }
               },
-              // 聊天模式兜底: 消息体若含 guncat-ui 块同样可交互
+              // 聊天模式兜底: 消息体若含界面程序同样可交互
               uiLocked: this.vm.isStreaming,
-              onUiInteract: (messageId: string, payload: GuncatUiPayload): void => {
-                this.vm.sendUiInteraction(messageId, payload);
+              onUiInteract: (messageId: string, ev: GuncatUiEvent): void => {
+                this.vm.sendUiInteraction(messageId, ev);
                 this.refreshTick++;
               }
             })
@@ -1318,8 +1319,8 @@ struct ChatPage {
             // 交互模式: 仅最新一轮界面可交互, 历史界面块与执行中的界面置灰防重复提交
             uiLocked: this.vm.interactiveMode &&
               (msg.id !== this.vm.pendingUiMessageId || this.vm.isStreaming),
-            onUiInteract: (messageId: string, payload: GuncatUiPayload): void => {
-              this.vm.sendUiInteraction(messageId, payload);
+            onUiInteract: (messageId: string, ev: GuncatUiEvent): void => {
+              this.vm.sendUiInteraction(messageId, ev);
               this.refreshTick++;
               this.scrollToBottomDelayed();
             },
@@ -1442,7 +1443,13 @@ struct ChatPage {
     }
     this.showToast('正在导出…');
     let context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
-    DocxExporter.exportToDocx(context, msg.content, 'Guncat Work 对话导出').then((fileName: string) => {
+    // 交互模式的回答主体是界面程序, 直接导出会把程序源码写进 Word:
+    // 先抽成"正文 + 界面里用户可见的文字", 再交给 DocxExporter。
+    let exportText: string = GuncatUiParts.plainSummary(msg.content);
+    if (exportText.trim() === '') {
+      exportText = msg.content;
+    }
+    DocxExporter.exportToDocx(context, exportText, 'Guncat Work 对话导出').then((fileName: string) => {
       this.showToast('已导出 ' + fileName);
     }).catch((error: Error) => {
       this.showToast('导出失败: ' + error.message);
