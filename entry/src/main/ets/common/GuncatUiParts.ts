@@ -68,6 +68,7 @@ export class GuncatUiParts {
           uiSeg.complete = true;
           uiSeg.spec = result.spec;
           uiSeg.raw = f.text;
+          // 完整 JSON 解析成功但标记过 salvaged 的情况不会走到这里; 这里只处理"干净解析"
           parts.segments.push(uiSeg);
           parts.hasUi = true;
         } else {
@@ -78,6 +79,7 @@ export class GuncatUiParts {
           let rescuedSeg: GuncatUiSeg = new GuncatUiSeg();
           rescuedSeg.type = GuncatUiSegType.UI;
           rescuedSeg.complete = true;
+          // 救助产物 = 原文有内容丢失 → 一律按"不完整"标注, 不再安静地少渲染几个元素
           rescuedSeg.truncated = true;
           rescuedSeg.spec = salvaged.spec;
           rescuedSeg.raw = f.text;

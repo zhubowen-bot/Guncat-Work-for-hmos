@@ -884,8 +884,10 @@ export class GuncatUiSpecParser {
     }
     if (!completed && result.spec !== null) {
       // 中间态: 元素可能少于最终结果, 调用方据 fragment.complete 判定是否可交互。
-      // 补括号会截掉尾部, 因此标题与已出现的控件要从原文再扫一遍补齐。
-      return GuncatUiSpecParser.mergeRescued(result.spec, raw);
+      // 补括号会截掉尾部, 因此标题、控件、以及**坏元素之后那些已写完的元素**都要从原文再扫一遍补齐。
+      let merged: GuncatUiParseResult = GuncatUiSpecParser.mergeRescued(result.spec, raw);
+      GuncatUiSpecParser.mergeScannedElements(merged.spec as GuncatUiSpec, raw);
+      return merged;
     }
     if (result.spec !== null) {
       return result;
@@ -893,6 +895,8 @@ export class GuncatUiSpecParser {
     // 补括号仍失败: 退化为「逐元素」渐进解析(同样先清洗)
     let loose: GuncatUiParseResult = GuncatUiSpecParser.parseLoosePrefix(raw);
     if (loose.spec !== null) {
+      // 逐元素扫描容易漏掉"坏元素之后"的完整元素, 同样补齐
+      GuncatUiSpecParser.mergeScannedElements(loose.spec, raw);
       return loose;
     }
     // 再退化: 尾部被截断在字符串/半截数字里时, 逐级砍尾重试, 尽量救出已写完的元素。
@@ -1011,6 +1015,10 @@ export class GuncatUiSpecParser {
   // 结构化回退: 从尾部逐个扫描「字段分隔边界」, 每个边界都尝试"截断 + 补括号"解析。
   // 边界取: 根对象顶层逗号之后、以及对象/数组的 } ] 之后 —— 这两处截断天然是完整字段边界。
   // 单行 JSON 被砍在字符串/键名中间时, 只有这种回退才能救出已写完的字段。
+  //
+  // 额外收益(真机教训): 解析成功后, 再把**扫描得到的所有"已闭合元素对象"逐个合并进来**。
+  // 截断往往发生在 elements 中段: 若只按"截到最后一个能解析的前缀", 会连带丢掉坏元素**之后**
+  // 那些已经写完的好元素(真机上 table / choice 就是这样消失的)。
   private static backtrackSalvage(json: string): GuncatUiParseResult {
     let base: GuncatUiParseResult = new GuncatUiParseResult();
     base.error = '尚未成形';
@@ -1063,13 +1071,115 @@ export class GuncatUiSpecParser {
       try {
         let r: GuncatUiParseResult = GuncatUiSpecParser.parse(repaired);
         if (r.spec !== null && r.spec.elements.length > 0) {
+          // 靠"往回退"才解析成功 = 原文有内容丢失(输出被截断): 标记为救助产物,
+          // 渲染层据此提示"内容不完整", 循环层据此触发自动重做。
+          r.spec.salvaged = true;
+          // 再把"整段扫描能解析出的所有完整元素"合并进来: 截断点之后的完整元素不该被丢掉
+          GuncatUiSpecParser.mergeScannedElements(r.spec, text);
           return r;
         }
       } catch (e) {
         // 该边界仍不可解析: 继续往前退
       }
     }
-    return base;
+    // 所有边界都失败: 直接整段扫描元素(哪怕只救得出中间某几个)
+    let scanned: GuncatUiElement[] = GuncatUiSpecParser.scanCompleteElements(text);
+    if (scanned.length === 0) {
+      return base;
+    }
+    let spec: GuncatUiSpec = new GuncatUiSpec();
+    spec.title = GuncatUiSpecParser.looseTitle(text);
+    spec.subtitle = GuncatUiSpecParser.looseSubtitle(text);
+    spec.elements = scanned;
+    spec.salvaged = true;
+    let out: GuncatUiParseResult = new GuncatUiParseResult();
+    out.spec = spec;
+    return out;
+  }
+
+  // 扫描原文里所有"括号成对闭合"的顶层对象, 逐个尝试解析成元素(坏元素跳过, 不影响后面的)。
+  // 关键: 用一个**坏元素不会吃掉后面内容**的扫描方式 —— 先找 {"kind" 起点, 再从该点起算括号深度,
+  // 遇到"还没闭合就冒出的下一个 {"kind"" 时放弃当前(它已损坏), 从新的起点继续。
+  // 若按整段绝对深度扫描, 一个未闭合的坏元素会把后面所有好元素一起吞掉(真机上 table 吃掉 choice)。
+  private static scanCompleteElements(text: string): GuncatUiElement[] {
+    let found: GuncatUiElement[] = [];
+    let search: number = 0;
+    while (found.length < GuncatUiLimits.MAX_ELEMENTS) {
+      let kindIdx: number = text.indexOf('{"kind"', search);
+      if (kindIdx < 0) {
+        break;
+      }
+      // 从该起点重新计算括号深度(与整段深度无关, 坏元素不会连累后面的元素)
+      let depth: number = 0;
+      let inString: boolean = false;
+      let escaped: boolean = false;
+      let end: number = -1;
+      for (let i: number = kindIdx; i < text.length; i++) {
+        let ch: string = text.charAt(i);
+        if (inString) {
+          if (escaped) {
+            escaped = false;
+          } else if (ch === '\\') {
+            escaped = true;
+          } else if (ch === '"') {
+            inString = false;
+          }
+          continue;
+        }
+        if (ch === '"') {
+          inString = true;
+        } else if (ch === '{') {
+          depth++;
+        } else if (ch === '}') {
+          depth--;
+          if (depth === 0) {
+            end = i + 1;
+            break;
+          }
+        }
+        // 当前元素还没闭合就又出现了新的元素起点 → 放弃它, 从新起点继续
+        if (i > kindIdx && ch === '{' && text.startsWith('{"kind"', i)) {
+          break;
+        }
+      }
+      if (end > 0) {
+        let chunk: string = text.substring(kindIdx, end);
+        try {
+          let el: GuncatUiElement | null = parseElement(JSON.parse(chunk) as Object);
+          if (el !== null) {
+            found.push(el);
+          }
+        } catch (e) {
+          // 该元素本身非法: 跳过, 继续扫描后面的
+        }
+        search = end;
+      } else {
+        search = kindIdx + 7;
+      }
+    }
+    return found;
+  }
+
+  // 把扫描到的完整元素并入已解析文档(按 kind+title 去重, 保持原有顺序在前)
+  private static mergeScannedElements(spec: GuncatUiSpec, text: string): void {
+    let scanned: GuncatUiElement[] = GuncatUiSpecParser.scanCompleteElements(text);
+    for (let i: number = 0; i < scanned.length; i++) {
+      let candidate: GuncatUiElement = scanned[i];
+      if (candidate.kind === '' || spec.elements.length >= GuncatUiLimits.MAX_ELEMENTS) {
+        continue;
+      }
+      let exists: boolean = false;
+      for (let j: number = 0; j < spec.elements.length; j++) {
+        let el: GuncatUiElement = spec.elements[j];
+        if (el.kind === candidate.kind && el.title === candidate.title && el.text === candidate.text) {
+          exists = true;
+          break;
+        }
+      }
+      if (!exists) {
+        spec.elements.push(candidate);
+      }
+    }
   }
 
   // 块已闭合但解析失败时的结构化救助(逐字段回退 / 文本级救助)。
@@ -1477,6 +1587,23 @@ export class GuncatUiBlocks {
     return null;
   }
 
+  // 原文里声明了几个元素(数 "kind" 出现次数)。
+  // 用途: 与"实际解析出的元素数"比对 —— 少了说明内容丢失(输出被截断), 必须按"不完整"处理:
+  // 提示用户 + 触发自动重做, 而不是安静地少渲染几个元素。
+  static declaredElementCount(body: string): number {
+    let count: number = 0;
+    let from: number = 0;
+    while (true) {
+      let idx: number = body.indexOf('"kind"', from);
+      if (idx < 0) {
+        break;
+      }
+      count++;
+      from = idx + 6;
+    }
+    return count;
+  }
+
   // 解析单个已闭合块(不抛异常, 失败返回 error)
   static parseComplete(body: string): GuncatUiParseResult {
     try {
@@ -1522,10 +1649,15 @@ export class GuncatUiBlocks {
       if (count >= minElements) {
         continue;
       }
-      // 解析失败时看结构化救助结果: 救出了元素 → 渲染层已能展示, 不必重做
+      // 解析失败时看结构化救助结果: 救出了元素, 但**必须与原文声明的元素数比对** ——
+      // 原文有 3 个 "kind" 却只解析出 1 个, 说明输出被截断丢了两个元素, 仍要按"残缺"处理
+      // (真机事故: 原来只看"≥1 个元素"就放行, 结果卡片安静地少渲染了几个元素且不做任何提示)。
       let salvaged2: GuncatUiParseResult = GuncatUiBlocks.salvageBlockBody(f.text);
       if (salvaged2.spec !== null && salvaged2.spec.elements.length > 0) {
-        continue;
+        let declared: number = GuncatUiBlocks.declaredElementCount(f.text);
+        if (declared <= salvaged2.spec.elements.length) {
+          continue;
+        }
       }
       return true;
     }

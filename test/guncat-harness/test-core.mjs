@@ -1456,6 +1456,22 @@ console.log('[GuncatUiSpec]');
   const hopelessSpec = GuncatUiBlocks.salvageBlockBody(GuncatUiBlocks.firstClosedBody(hopelessBlock));
   check('无内容可救时给出空文档(仍走卡片)', hopelessSpec.spec !== null &&
     hopelessSpec.spec.elements.length === 0 && hopelessSpec.spec.salvaged === true);
+
+  // 真机事故六: 截断发生在 elements 中段时, **坏元素之后的完整元素不能被丢掉**。
+  // 截图里 table / choice 就这样消失了(只救出第一个 note)。
+  const midTruncated = '{"version":1,"title":"地瓜是不是红薯","elements":[' +
+    '{"kind":"note","tone":"success","text":"北方: 地瓜 = 红薯"},' +
+    '{"kind":"table","headers":["对比项","红薯"],"rows":[["学名","甘薯 Ipomo' +  // 中段被砍
+    '{"kind":"choice","options":["北方","川渝"],"action":{"id":"region","label":"看我这儿的叫法"}}' +
+    '],"controls":[]}';
+  const midSpec = GuncatUiBlocks.salvageBlockBody(midTruncated);
+  check('截断后仍合并出坏元素之后的完整元素', midSpec.spec !== null &&
+    midSpec.spec.elements.length === 2 &&
+    midSpec.spec.elements[0].kind === 'note' &&
+    midSpec.spec.elements[1].kind === 'choice' &&
+    midSpec.spec.salvaged === true);
+  check('声明元素数可用于判定丢失', GuncatUiBlocks.declaredElementCount(midTruncated) === 3 &&
+    midSpec.spec.elements.length < 3);
 }
 
 console.log('');
