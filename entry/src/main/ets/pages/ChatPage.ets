@@ -1321,6 +1321,8 @@ struct ChatPage {
               msg.role === 'assistant',
             // 交互模式选「关闭」思考时不再挂空的"思考中"条(历史消息有思考内容仍会显示)
             thinkingExpected: this.vm.loopThinkingEnabled,
+            // 交互模式: 思考与工具调用合成一条活动折叠栏, 正文开始输出后默认收起成"已完成"
+            groupActivity: this.vm.interactiveMode,
             // 交互模式: 仅最新一轮界面可交互, 历史界面块与执行中的界面置灰防重复提交
             uiLocked: this.vm.interactiveMode &&
               (msg.id !== this.vm.pendingUiMessageId || this.vm.isStreaming),

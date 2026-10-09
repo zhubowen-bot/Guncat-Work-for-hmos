@@ -28,6 +28,11 @@ export struct WorkTurnView {
   // 本轮是否会产出思考内容: 交互模式选「关闭」思考时为 false,
   // 用于避免流式期间挂一条永远不填内容的"思考中"条
   @Prop thinkingExpected: boolean = true;
+  // 交互模式: 把"思考 + 工具调用"合成一个活动折叠栏, 正文开始输出后默认收起成"已完成"
+  @Prop groupActivity: boolean = false;
+  // 用户是否手动开合过活动栏; 没动过时按"是否还在跑"自动决定开合
+  @State private activityTouched: boolean = false;
+  @State private activityOpen: boolean = false;
   private onCopyPlain: (id: string) => void = (_id: string): void => {};
   private onCopyMarkdown: (id: string) => void = (_id: string): void => {};
   private onExportWord: (id: string) => void = (_id: string): void => {};
@@ -315,10 +320,14 @@ export struct WorkTurnView {
 
   build() {
     Column({ space: 8 }) {
-      // 思考(折叠条, 默认收起)。
-      // thinkingExpected: 本轮是否会产出思考内容(交互模式选「关闭」时为 false)。
-      // 之前只看 isStreaming, 关掉思考后仍会挂一条永远不填内容的"思考中"条, 看起来像卡住。
-      if (this.message.reasoning !== '' ||
+      // 活动区(思考 + 工具调用)。
+      // 交互模式: 合成**一个**活动折叠栏, 正文开始输出后默认收起(见 buildActivityGroup);
+      // 其它模式: 保持原样 —— 思考条在上、工具行在正文之后, 各自独立开合。
+      if (this.groupActivity) {
+        if (this.hasActivity()) {
+          this.buildActivityGroup()
+        }
+      } else if (this.message.reasoning !== '' ||
         (this.isStreaming && this.thinkingExpected)) {
         this.buildThinking()
       }
@@ -345,8 +354,9 @@ export struct WorkTurnView {
         .width('100%')
         .alignItems(HorizontalAlign.Start)
       }
-      // 工具步骤(dsh 式行内工具行, 点击展开 IO 卡片/diff 卡片)
-      if (this.message.toolCalls.length > 0) {
+      // 工具步骤(dsh 式行内工具行, 点击展开 IO 卡片/diff 卡片)。
+      // 分组模式下工具行已经进了活动栏(位于正文之前), 这里不再重复渲染。
+      if (!this.groupActivity && this.message.toolCalls.length > 0) {
         this.buildSteps()
       }
       // 统计行(dsh StatsLine): 仅最终回复且数据可用时展示
@@ -496,9 +506,186 @@ export struct WorkTurnView {
     return totalMs;
   }
 
+  // ===== 交互模式: 活动折叠栏(思考 + 工具调用) =====
+  //
+  // 需求: 正文前的思考与工具调用, 在**正文开始输出后**默认收成一条"已完成"折叠栏。
+  // 实现要点:
+  //   1. 开合状态是**纯派生**的(activityOpenNow), 不在 build 里改 @State ——
+  //      ArkUI 构建期改状态会触发重渲染告警/抖动, 而这里每次 message.content 变化
+  //      (ObjectLink 会触发重渲染)都会自然重算, 正文一出现就自动收起;
+  //   2. 用户点过之后(activityTouched)完全听用户的, 不再自动开合;
+  //   3. 只有"还在跑"的时候默认展开, 跑完(含没有正文的轮次)一律收成一条已完成栏。
+  private hasActivity(): boolean {
+    return this.message.toolCalls.length > 0 || this.message.reasoning !== '' ||
+      (this.isStreaming && this.thinkingExpected);
+  }
+
+  private activityOpenNow(): boolean {
+    if (this.activityTouched) {
+      return this.activityOpen;
+    }
+    // 需求: 正文开始输出后默认收起。正文之前保持展开, 让用户实时看到在思考/调什么工具。
+    // 刻意**不**因为"又有新工具在跑"而自动重新展开 —— 那会在多轮之间来回开合, 很晃眼;
+    // 那种情况下由 activityRunning() 把标题改成"正在处理…", 不会误导。
+    return this.isStreaming && this.message.content === '';
+  }
+
+  // 是否还有活在做: 流式中且(正文还没出现 或 还有工具在跑)。
+  // 用于标题与转圈图标 —— 保证"已完成"只在真的做完时才出现。
+  private activityRunning(): boolean {
+    if (!this.isStreaming) {
+      return false;
+    }
+    if (this.message.content === '') {
+      return true;
+    }
+    for (let i: number = 0; i < this.message.toolCalls.length; i++) {
+      let call: ToolCallRecord = this.message.toolCalls[i];
+      if (call.durationMs < 0 && (this.isStreaming || call.preparing || call.started)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private activityTitle(): string {
+    return this.activityRunning() ? '正在处理…' : '已完成';
+  }
+
+  // 折叠态摘要: "思考 + 3 个工具 · 12.4s"
+  private activitySummary(): string {
+    let parts: string[] = [];
+    if (this.message.reasoning !== '') {
+      parts.push('思考');
+    }
+    if (this.message.toolCalls.length > 0) {
+      parts.push(this.message.toolCalls.length.toString() + ' 个工具');
+    }
+    let text: string = parts.join(' + ');
+    let ms: number = this.toolTotalMs();
+    if (ms > 0) {
+      text = text === '' ? WorkStepFormat.formatDuration(ms)
+        : text + ' · ' + WorkStepFormat.formatDuration(ms);
+    }
+    return text;
+  }
+
   @Builder
-  private buildThinking() {
-    Column() {
+  private buildActivityGroup() {
+    Column({ space: 6 }) {
+      // 折叠头(整行可点): 跑动中转圈 + "正在处理…", 完成后对勾 + "已完成" + 摘要
+      Row({ space: 6 }) {
+        if (this.activityRunning()) {
+          LoadingProgress()
+            .width(12)
+            .height(12)
+            .color($r('app.color.brand'))
+            .flexShrink(0)
+        } else {
+          Text('✓')
+            .fontSize(12)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.brand'))
+            .width(12)
+            .textAlign(TextAlign.Center)
+            .flexShrink(0)
+        }
+        Text(this.activityTitle())
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_secondary'))
+          .flexShrink(0)
+        if (this.activitySummary() !== '') {
+          Text(this.activitySummary())
+            .fontSize(11)
+            .fontColor($r('app.color.text_tertiary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+        } else {
+          Blank()
+        }
+        SymbolGlyph(this.activityOpenNow() ? $r('sys.symbol.chevron_up')
+          : $r('sys.symbol.chevron_down'))
+          .fontSize(11)
+          .fontColor([$r('app.color.text_tertiary')])
+          .flexShrink(0)
+      }
+      .width('100%')
+      .padding({ left: 12, right: 12, top: 7, bottom: 7 })
+      .borderRadius(12)
+      .backgroundColor($r('app.color.raised_surface'))
+      .alignItems(VerticalAlign.Center)
+      .onClick(() => {
+        // 先按当前**派生**状态取反, 再标记"用户已接管"
+        this.activityOpen = !this.activityOpenNow();
+        this.activityTouched = true;
+      })
+
+      // 展开体: 思考(跑动中显示最新一句跑马灯, 结束后显示完整思考) + 工具行
+      if (this.activityOpenNow()) {
+        Column({ space: 6 }) {
+          if (this.message.reasoning !== '' || (this.isStreaming && this.thinkingExpected)) {
+            this.buildActivityThinking()
+          }
+          if (this.message.toolCalls.length > 0) {
+            this.buildSteps()
+          }
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+      }
+    }
+    .width('100%')
+  }
+
+  @Builder
+  private buildActivityThinking() {
+    Column({ space: 4 }) {
+      Row({ space: 6 }) {
+        SymbolGlyph($r('sys.symbol.lightbulb'))
+          .fontSize(12)
+          .fontColor([$r('app.color.text_tertiary')])
+          .flexShrink(0)
+        Text('思考')
+          .fontSize(11)
+          .fontColor($r('app.color.text_tertiary'))
+          .flexShrink(0)
+        if (this.isStreaming && this.getMarqueeText() !== '') {
+          Scroll(this.marqueeScroller) {
+            Text(this.getMarqueeText())
+              .fontSize(11)
+              .fontColor($r('app.color.text_tertiary'))
+              .maxLines(1)
+          }
+          .scrollable(ScrollDirection.Horizontal)
+          .scrollBar(BarState.Off)
+          .edgeEffect(EdgeEffect.None)
+          .align(Alignment.Start)
+          .height(16)
+          .layoutWeight(1)
+        } else {
+          Blank()
+        }
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      if (!this.isStreaming && this.message.reasoning !== '') {
+        Text(this.message.reasoning)
+          .fontSize(12)
+          .fontColor($r('app.color.text_secondary'))
+          .lineHeight(19)
+          .width('100%')
+      }
+    }
+    .width('100%')
+    .padding({ left: 12, right: 2 })
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  private buildThinking() {    Column() {
       Row({ space: 6 }) {
         SymbolGlyph($r('sys.symbol.lightbulb'))
           .fontSize(13)
