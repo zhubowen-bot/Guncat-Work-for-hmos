@@ -412,7 +412,7 @@ export struct GuncatUiView {
       }
       // 构建指纹: 用于确认设备上跑的是哪一版交互界面渲染器(排查问题时按此对齐)
       Row() {
-        Text('交互界面 v3 · 自动修复已启用')
+        Text('交互界面 v4 · 实时刷新')
           .fontSize(9)
           .fontColor($r('app.color.text_quaternary'))
       }

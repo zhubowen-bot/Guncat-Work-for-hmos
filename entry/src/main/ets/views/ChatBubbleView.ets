@@ -243,8 +243,11 @@ export struct ChatBubbleView {
   // visibleText 保留 33ms 节流, 作为 UI 缓冲, 避免每个 token 都触发整块重渲染
   @State visibleText: string = '';
   @State visibleReasoning: string = '';
-  // 交互模式: 消息体内嵌的 guncat-ui 界面块切分结果(普通文本片段 + 交互界面片段)
-  @State private uiParts: GuncatUiParts = new GuncatUiParts();
+  // 交互模式: 消息体内嵌的 guncat-ui 界面块切分结果(普通文本片段 + 交互界面片段)。
+  // 必须用**数组型 @State + 整数组重赋值**才能被 ArkUI 观察到: 早前放在类实例
+  // (GuncatUiParts) 的字段里, 流式结束后那次赋值不会驱动 ForEach 重跑, 表现为
+  // "卡片停在骨架态, 切走再切回会话(组件重建)才正常"。这是本功能的关键坑, 勿改回。
+  @State private uiSegs: GuncatUiSeg[] = [];
   private flushTimer: number = -1;
   // 思考跑马灯: 流式中在思考条右侧空白区滚动呈现最新思考内容(对齐工作模式 WorkTurnView)
   private marqueeScroller: Scroller = new Scroller();
@@ -268,12 +271,18 @@ export struct ChatBubbleView {
   private refreshUiParts(): void {
     let content: string = this.isStreaming ? this.visibleText : this.message.content;
     if (content.indexOf(GuncatUiBlocks.OPEN) < 0) {
-      if (this.uiParts.segments.length > 0) {
-        this.uiParts = new GuncatUiParts();
+      if (this.uiSegs.length > 0) {
+        this.uiSegs = [];
       }
       return;
     }
-    this.uiParts = GuncatUiParts.build(content, !this.isStreaming);
+    let parts: GuncatUiParts = GuncatUiParts.build(content, !this.isStreaming);
+    // 重新赋值整个数组(而不是改内部字段), 保证 UI 一定刷新
+    let next: GuncatUiSeg[] = [];
+    for (let i: number = 0; i < parts.segments.length; i++) {
+      next.push(parts.segments[i]);
+    }
+    this.uiSegs = next;
   }
 
   aboutToAppear(): void {
@@ -448,7 +457,7 @@ export struct ChatBubbleView {
   @Builder
   buildAIContent() {
     Column({ space: 8 }) {
-      ForEach(this.uiParts.segments, (seg: GuncatUiSeg, index: number) => {
+      ForEach(this.uiSegs, (seg: GuncatUiSeg, index: number) => {
         if (seg.type === GuncatUiSegType.UI) {
           if (seg.spec !== null) {
             GuncatUiView({

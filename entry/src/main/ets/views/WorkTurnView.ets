@@ -34,8 +34,10 @@ export struct WorkTurnView {
   @State private stepsTick: number = 0;
   @State private visibleText: string = '';
   @State private visibleReasoning: string = '';
-  // 交互模式: 本轮正文里内嵌的 guncat-ui 界面块(工作模式下恒为空)
-  @State private uiParts: GuncatUiParts = new GuncatUiParts();
+  // 交互模式: 本轮正文里内嵌的 guncat-ui 界面块(工作模式下恒为空)。
+  // 与 ChatBubbleView 同理: 必须用数组型 @State + 整数组重赋值才能被 ArkUI 观察到,
+  // 否则流式结束后界面卡片不会刷新(切走再切回会话才正常)。勿改回类实例字段。
+  @State private uiSegs: GuncatUiSeg[] = [];
   // 该轮界面是否已回传(仅最新一轮可交互)
   @Prop uiLocked: boolean = false;
   private onUiInteract: (messageId: string, payload: GuncatUiPayload) => void =
@@ -63,12 +65,18 @@ export struct WorkTurnView {
   private refreshUiParts(): void {
     let content: string = this.isStreaming ? this.visibleText : this.message.content;
     if (content.indexOf(GuncatUiBlocks.OPEN) < 0) {
-      if (this.uiParts.segments.length > 0) {
-        this.uiParts = new GuncatUiParts();
+      if (this.uiSegs.length > 0) {
+        this.uiSegs = [];
       }
       return;
     }
-    this.uiParts = GuncatUiParts.build(content, !this.isStreaming);
+    let parts: GuncatUiParts = GuncatUiParts.build(content, !this.isStreaming);
+    // 重新赋值整个数组, 保证 UI 一定刷新(改内部字段不会被观察到)
+    let next: GuncatUiSeg[] = [];
+    for (let i: number = 0; i < parts.segments.length; i++) {
+      next.push(parts.segments[i]);
+    }
+    this.uiSegs = next;
   }
 
   aboutToAppear(): void {
@@ -145,14 +153,14 @@ export struct WorkTurnView {
   // 未命中界面块时与旧实现完全一致(单个 RichTextView), 工作模式行为不变。
   @Builder
   buildTurnContent() {
-    if (this.uiParts.segments.length === 0) {
+    if (this.uiSegs.length === 0) {
       RichTextView({
         content: this.isStreaming ? this.visibleText : this.message.content,
         selectionTrigger: 0
       })
     } else {
       Column({ space: 8 }) {
-        ForEach(this.uiParts.segments, (seg: GuncatUiSeg, index: number) => {
+        ForEach(this.uiSegs, (seg: GuncatUiSeg, index: number) => {
           if (seg.type === GuncatUiSegType.UI) {
             if (seg.spec !== null) {
               GuncatUiView({
