@@ -672,37 +672,32 @@ export struct GuncatUiView {
     .alignItems(HorizontalAlign.Start)
   }
 
-  // note: 提示条
+  // note: 提示条。
+  // 实现要点(真机事故): 早期版本用 "Row().height('100%')" 当左侧竖条, 在自动高度的父容器里
+  // 百分比高度会被解析成一个很大的值, 把整条撑成几百 vp 的空白(文字只占两行)。
+  // 现在改用**左边框**画竖条, 整条高度完全由文字决定, 容器内没有任何百分比高度。
   @Builder
   buildNote(el: GuncatUiElement) {
-    Row({ space: 8 }) {
-      Row()
-        .width(3)
-        .height('100%')
-        .borderRadius(2)
-        .backgroundColor(this.toneColor(el.tone))
-      Column({ space: 2 }) {
-        if (el.title !== '') {
-          Text(el.title)
-            .fontSize(12)
-            .fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.text_primary'))
-            .width('100%')
-        }
-        Text(el.text)
+    Column({ space: 2 }) {
+      if (el.title !== '') {
+        Text(el.title)
           .fontSize(12)
-          .lineHeight(19)
-          .fontColor($r('app.color.text_secondary'))
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_primary'))
           .width('100%')
       }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
+      Text(el.text)
+        .fontSize(12)
+        .lineHeight(19)
+        .fontColor($r('app.color.text_secondary'))
+        .width('100%')
     }
     .width('100%')
     .padding({ left: 10, right: 10, top: 8, bottom: 8 })
     .backgroundColor($r('app.color.surface_secondary'))
     .borderRadius(10)
-    .alignItems(VerticalAlign.Top)
+    .border({ width: { left: 3 }, color: this.toneColor(el.tone) })
+    .alignItems(HorizontalAlign.Start)
   }
 
   // table: 表头 + 行(横向可滚动, 窄屏不挤)
