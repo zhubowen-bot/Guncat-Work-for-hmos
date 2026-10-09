@@ -51,16 +51,8 @@ export struct WorkTurnView {
   private uiBuildFinalized: boolean = false;
   private lastUiSeen: string = '';
   private lastUiFinalized: boolean = false;
-  // 诊断仪表(排查卡片不刷新): 实例号递增 = 组件被重建; 内容修订号递增 = 收到新内容
-  private static uiInstanceSeq: number = 0;
-  private uiRenderId: number = 0;
-  @State private uiContentRev: number = 0;
-  @State private uiMountedSec: number = 0;
-  private uiMountTick: number = -1;
   // 界面片段的渲染 key 版本: 变化即让 ForEach key 变化, 强制重建子组件
   @State private uiRenderKey: number = 0;
-  // [诊断] 上一次重建看到的正文长度
-  @State private uiSeenLen: number = 0;
   // 文本片段的历史 renderKey(按下标记账): 文案变化时递增, 迫使尾部 RichTextView 重建
   private textKeySeq: Map<number, number> = new Map<number, number>();
   // 思考跑马灯: 流式中在思考条右侧空白区滚动呈现最新思考内容
@@ -81,7 +73,6 @@ export struct WorkTurnView {
   // finalized = 本轮产出已结束(不再流式): 未闭合的界面块据此从"生成中"转为"未完成"静态展示。
   private refreshUiParts(): void {
     let content: string = this.isStreaming ? this.visibleText : this.message.content;
-    this.uiSeenLen = content.length;
     this.lastUiSeen = content;
     this.lastUiFinalized = !this.isStreaming;
     this.uiBuildFinalized = this.lastUiFinalized;
@@ -103,7 +94,6 @@ export struct WorkTurnView {
   // 按"已结束"语义重建一次界面片段
   private refreshUiPartsFinal(): void {
     let content: string = this.message.content;
-    this.uiSeenLen = content.length;
     this.lastUiSeen = content;
     this.lastUiFinalized = true;
     this.uiBuildFinalized = true;
@@ -139,7 +129,6 @@ export struct WorkTurnView {
     }
     this.uiSegs = next;
     let newShape: string = this.uiSegsShape();
-    this.uiContentRev++;
     if (oldShape !== newShape) {
       this.uiRenderKey++;
     }
@@ -216,15 +205,6 @@ export struct WorkTurnView {
   aboutToAppear(): void {
     this.visibleText = this.message.content;
     this.visibleReasoning = this.message.reasoning;
-    WorkTurnView.uiInstanceSeq++;
-    this.uiRenderId = WorkTurnView.uiInstanceSeq;
-    this.uiContentRev = 0;
-    this.uiMountedSec = 0;
-    if (this.uiMountTick === -1) {
-      this.uiMountTick = setInterval((): void => {
-        this.uiMountedSec++;
-      }, 1000);
-    }
     this.refreshUiParts();
     // 无论父组件是否通知"流式结束", 组件自己兜底完成收尾重建
     this.startUiSettleTimer();
@@ -266,10 +246,6 @@ export struct WorkTurnView {
     if (this.flushTimer !== -1) {
       clearInterval(this.flushTimer);
       this.flushTimer = -1;
-    }
-    if (this.uiMountTick !== -1) {
-      clearInterval(this.uiMountTick);
-      this.uiMountTick = -1;
     }
     this.stopUiSettleTimer();
   }
@@ -319,10 +295,6 @@ export struct WorkTurnView {
                 truncated: seg.truncated,
                 locked: this.uiLocked,
                 rawFallback: seg.raw,
-                renderId: this.uiRenderId,
-                contentRev: this.uiContentRev,
-                mountedSec: this.uiMountedSec,
-                seenLen: this.uiSeenLen,
                 onInteract: (payload: GuncatUiPayload): void => {
                   this.onUiInteract(this.message.id, payload);
                 }

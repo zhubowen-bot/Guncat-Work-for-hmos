@@ -253,12 +253,6 @@ export struct ChatBubbleView {
   private uiSettleTimer: number = -1;
   private uiBuildFinalized: boolean = false;
   private lastUiSeen: string = '';
-  // 诊断仪表: 实例号(重建计数) + 内容修订号(收到更新的次数) + 已挂载秒数
-  private static uiInstanceSeq: number = 0;
-  private uiRenderId: number = 0;
-  @State private uiContentRev: number = 0;
-  @State private uiMountedSec: number = 0;
-  private uiMountTick: number = -1;
   // 界面片段渲染 key 版本: 变化即让 ForEach key 变化 → 强制重建子组件(绕开失效的观察链)
   @State private uiRenderKey: number = 0;
   // 文本片段的历史 renderKey(按下标记账): 文案变化时递增, 迫使尾部 RichTextView 重建
@@ -335,7 +329,6 @@ export struct ChatBubbleView {
     }
     this.uiSegs = next;
     let newShape: string = this.uiSegsShape();
-    this.uiContentRev++;
     if (oldShape !== newShape) {
       this.uiRenderKey++;
     }
@@ -405,15 +398,6 @@ export struct ChatBubbleView {
   aboutToAppear(): void {
     this.visibleText = this.message.content;
     this.visibleReasoning = this.message.reasoning;
-    ChatBubbleView.uiInstanceSeq++;
-    this.uiRenderId = ChatBubbleView.uiInstanceSeq;
-    this.uiContentRev = 0;
-    this.uiMountedSec = 0;
-    if (this.uiMountTick === -1) {
-      this.uiMountTick = setInterval((): void => {
-        this.uiMountedSec++;
-      }, 1000);
-    }
     this.refreshUiParts();
     this.startUiSettleTimer();
     if (this.isStreaming && this.flushTimer === -1) {
@@ -452,10 +436,6 @@ export struct ChatBubbleView {
     if (this.flushTimer !== -1) {
       clearInterval(this.flushTimer);
       this.flushTimer = -1;
-    }
-    if (this.uiMountTick !== -1) {
-      clearInterval(this.uiMountTick);
-      this.uiMountTick = -1;
     }
     this.stopUiSettleTimer();
   }
@@ -598,10 +578,6 @@ export struct ChatBubbleView {
               truncated: seg.truncated,
               locked: this.uiLocked,
               rawFallback: seg.raw,
-              renderId: this.uiRenderId,
-              contentRev: this.uiContentRev,
-              mountedSec: this.uiMountedSec,
-              seenLen: this.message.content.length,
               onInteract: (payload: GuncatUiPayload): void => {
                 this.onUiInteract(this.message.id, payload);
               }
