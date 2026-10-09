@@ -216,6 +216,21 @@ export struct GuncatUiView {
     return this.complete && !this.locked;
   }
 
+  // 整棵界面的重渲染开关(见 build 里那个恒真的 if)。
+  //
+  // 为什么要这么一个"没用"的方法: 绑定值与物化树都放在**普通字段**(state / root)里, 框架看不见;
+  // 只有"构建期表达式里当场读到"的 @State 才会被登记成依赖。真机一轮轮试出来的结论:
+  //   · 组件参数/属性表达式里的读取(如 Text(this.debugDragText()))  → 会被追踪 ✓
+  //   · 读在方法内部、或只读在 .id() 上                              → 不被追踪 ✗
+  //   · 条件表达式(if)在构建期求值, 分支体会整段重跑                  → 会被追踪 ✓
+  // 于是"恒真但读了 rev/sigTick"的 if 就成了整棵树唯一的唤醒开关: 它一重跑, 里面
+  // buildChildren(this.root, ...) 会重新读**刚物化出来的新树**, 各子项的渲染指纹才重算,
+  // 依赖绑定值的节点才会换键重建。折叠/选项卡(if (this.isExpanded(...)))本来就是靠它工作的。
+  // 恒真: rev/sigTick 都从 0 开始递增, 不可能为负。
+  private treeAwake(): boolean {
+    return this.rev + this.sigTick >= 0;
+  }
+
   // 临时诊断文本: 读一下 sigTick/rev —— 只要有事件推进它们, 这行字就该跟着变。
   // 字段含义: B=Begin M=Moving E=End C=Click I=静默计时器收尾 F=finishDrag
   //           frz=拖动链快照条数 rev/sig=两个 epoch key/val=滑块的 state 键与当前值
@@ -464,126 +479,129 @@ export struct GuncatUiView {
 
   build() {
     Column({ space: 0 }) {
-      // ==== 临时诊断行(定位"拖动后不刷新"用, 定位完删掉) ====
-      // 它能回答四个问题: ①Begin/Moving/End/Click 这些回调到底有没有来(M/E/C/B + I=静默计时器
-      // 收尾 + F=finishDrag); ②rev/sigTick 有没有推进; ③滑块写进的 state 键与当前值;
-      // ④最关键: 这**行字本身**会不会变 —— 它靠读取 sigTick 刷新, 如果连它都不动, 说明这个
-      // 组件的重渲染链路根本没通, 后面所有"换键重建"的推断都不成立。
-      if (GuncatUiView.DEBUG_DRAG) {
-        Text(this.debugDragText())
-          .fontSize(11)
-          .fontColor($r('app.color.danger'))
-          .backgroundColor('#FFF3F3')
-          .width('100%')
-          .padding({ left: this.edge(), right: this.edge(), top: 6, bottom: 6 })
-          .margin({ bottom: 8 })
-      }
-      if (this.root === null) {
-        this.buildEmpty()
-      } else {
-        Column({ space: 16 }) {
-          this.buildChildren(this.root, true)
-          this.buildSources(this.root)
-        }
-        .width('100%')
-        .alignItems(HorizontalAlign.Start)
-        .padding({ left: this.edge(), right: this.edge() })
-      }
-      // ==== 临时诊断行(下): 故意再放一份 —— 长界面滚动到底部时顶部那行看不到, 而用户关注的
-      // 就是"拖完值没变"的现场, 所以底部也要有一份。定位完与上面那份一起删掉。 ====
-      if (GuncatUiView.DEBUG_DRAG) {
-        Text(this.debugDragText())
-          .fontSize(11)
-          .fontColor($r('app.color.danger'))
-          .backgroundColor('#FFF3F3')
-          .width('100%')
-          .padding({ left: this.edge(), right: this.edge(), top: 6, bottom: 6 })
-          .margin({ top: 8 })
-      }
-      // 以下"脚注区"(截断提示 / 诊断 / 原始输出)与正文左对齐, 所以同样加左右内边距
-      if (this.truncated) {
-        Row({ space: 6 }) {
-          GuncatUiIcon({ name: 'warning', iconSize: 12, color: '#F59E0B' })
-          Text('界面未写完，以上为已生成的部分')
+      // 整棵界面的"重渲染开关": 条件恒真, 但它在**构建期**读到了 rev/sigTick ——
+      // 只有这种"构建期表达式里当场读到"的 @State 才会被 ArkUI 登记成依赖(真机踩透了:
+      // 读在方法内部、或只读在 .id() 上都不算), 而条件分支一重跑, 分支体里的
+      // buildChildren(this.root, ...) 就会重新读一遍**刚物化出来的新树**, 各子项的
+      // 渲染指纹才会重算 → 依赖绑定值的节点跟着换键重建。折叠/选项卡本来就是这个机制。
+      if (this.treeAwake()) {
+        // ==== 临时诊断行(定位"拖动后不刷新"用, 定位完删掉) ====
+        // 它能回答四个问题: ①Begin/Moving/End/Click 这些回调到底有没有来(M/E/C/B + I=静默计时器
+        // 收尾 + F=finishDrag); ②rev/sigTick 有没有推进; ③滑块写进的 state 键与当前值;
+        // ④最关键: 这**行字本身**会不会变 —— 它靠读取 sigTick 刷新, 如果连它都不动, 说明这个
+        // 组件的重渲染链路根本没通, 后面所有"换键重建"的推断都不成立。
+        if (GuncatUiView.DEBUG_DRAG) {
+          Text(this.debugDragText())
             .fontSize(11)
-            .fontColor($r('app.color.text_tertiary'))
-            .layoutWeight(1)
+            .fontColor($r('app.color.danger'))
+            .backgroundColor('#FFF3F3')
+            .width('100%')
+            .padding({ left: this.edge(), right: this.edge(), top: 6, bottom: 6 })
+            .margin({ bottom: 8 })
         }
-        .width('100%')
-        .padding({ left: this.edge(), right: this.edge() })
-        .margin({ top: 10 })
-      }
-
-      if (this.program.errors.length > 0) {
-        Row({ space: 6 }) {
-          Text(this.showErrors ? '收起诊断' : ('诊断 · ' + this.program.errors.length.toString() + ' 条'))
-            .fontSize(10)
-            .fontColor($r('app.color.text_quaternary'))
-        }
-        .width('100%')
-        .padding({ left: this.edge(), right: this.edge() })
-        .margin({ top: 8 })
-        .onClick(() => {
-          this.showErrors = !this.showErrors;
-        })
-        if (this.showErrors) {
-          Column({ space: 2 }) {
-            ForEach(this.program.errors, (msg: string, i: number) => {
-              Text(msg)
-                .fontSize(10)
-                .fontColor($r('app.color.text_quaternary'))
-                .width('100%')
-            }, (msg: string, i: number) => 'err' + i.toString())
+        if (this.root === null) {
+          this.buildEmpty()
+        } else {
+          Column({ space: 16 }) {
+            this.buildChildren(this.root, true)
+            this.buildSources(this.root)
           }
           .width('100%')
-          .padding(8)
-          .backgroundColor($r('app.color.surface_secondary'))
-          .borderRadius(8)
-          .margin({ left: this.edge(), right: this.edge() })
+          .alignItems(HorizontalAlign.Start)
+          .padding({ left: this.edge(), right: this.edge() })
         }
-      }
-
-      if (this.programText.trim() !== '') {
-        Row({ space: 6 }) {
-          Text(this.showRaw ? '收起原始输出' : '查看原始输出')
-            .fontSize(10)
-            .fontColor($r('app.color.text_quaternary'))
+        // ==== 临时诊断行(下): 故意再放一份 —— 长界面滚动到底部时顶部那行看不到, 而用户关注的
+        // 就是"拖完值没变"的现场, 所以底部也要有一份。定位完与上面那份一起删掉。 ====
+        if (GuncatUiView.DEBUG_DRAG) {
+          Text(this.debugDragText())
+            .fontSize(11)
+            .fontColor($r('app.color.danger'))
+            .backgroundColor('#FFF3F3')
+            .width('100%')
+            .padding({ left: this.edge(), right: this.edge(), top: 6, bottom: 6 })
+            .margin({ top: 8 })
         }
-        .width('100%')
-        .padding({ left: this.edge(), right: this.edge() })
-        .margin({ top: 8 })
-        .onClick(() => {
-          this.showRaw = !this.showRaw;
-        })
-        if (this.showRaw) {
-          Scroll() {
-            Text(this.programText)
-              .fontSize(10)
-              .fontFamily('monospace')
+        // 以下"脚注区"(截断提示 / 诊断 / 原始输出)与正文左对齐, 所以同样加左右内边距
+        if (this.truncated) {
+          Row({ space: 6 }) {
+            GuncatUiIcon({ name: 'warning', iconSize: 12, color: '#F59E0B' })
+            Text('界面未写完，以上为已生成的部分')
+              .fontSize(11)
               .fontColor($r('app.color.text_tertiary'))
-              .width('100%')
-              .wordBreak(WordBreak.BREAK_ALL)
+              .layoutWeight(1)
           }
-          .scrollable(ScrollDirection.Vertical)
-          .scrollBar(BarState.Auto)
-          .constraintSize({ maxHeight: 260 })
           .width('100%')
-          .padding(10)
-          .backgroundColor($r('app.color.surface_secondary'))
-          .borderRadius(8)
-          .margin({ left: this.edge(), right: this.edge() })
+          .padding({ left: this.edge(), right: this.edge() })
+          .margin({ top: 10 })
+        }
+  
+        if (this.program.errors.length > 0) {
+          Row({ space: 6 }) {
+            Text(this.showErrors ? '收起诊断' : ('诊断 · ' + this.program.errors.length.toString() + ' 条'))
+              .fontSize(10)
+              .fontColor($r('app.color.text_quaternary'))
+          }
+          .width('100%')
+          .padding({ left: this.edge(), right: this.edge() })
+          .margin({ top: 8 })
+          .onClick(() => {
+            this.showErrors = !this.showErrors;
+          })
+          if (this.showErrors) {
+            Column({ space: 2 }) {
+              ForEach(this.program.errors, (msg: string, i: number) => {
+                Text(msg)
+                  .fontSize(10)
+                  .fontColor($r('app.color.text_quaternary'))
+                  .width('100%')
+              }, (msg: string, i: number) => 'err' + i.toString())
+            }
+            .width('100%')
+            .padding(8)
+            .backgroundColor($r('app.color.surface_secondary'))
+            .borderRadius(8)
+            .margin({ left: this.edge(), right: this.edge() })
+          }
+        }
+  
+        if (this.programText.trim() !== '') {
+          Row({ space: 6 }) {
+            Text(this.showRaw ? '收起原始输出' : '查看原始输出')
+              .fontSize(10)
+              .fontColor($r('app.color.text_quaternary'))
+          }
+          .width('100%')
+          .padding({ left: this.edge(), right: this.edge() })
+          .margin({ top: 8 })
+          .onClick(() => {
+            this.showRaw = !this.showRaw;
+          })
+          if (this.showRaw) {
+            Scroll() {
+              Text(this.programText)
+                .fontSize(10)
+                .fontFamily('monospace')
+                .fontColor($r('app.color.text_tertiary'))
+                .width('100%')
+                .wordBreak(WordBreak.BREAK_ALL)
+            }
+            .scrollable(ScrollDirection.Vertical)
+            .scrollBar(BarState.Auto)
+            .constraintSize({ maxHeight: 260 })
+            .width('100%')
+            .padding(10)
+            .backgroundColor($r('app.color.surface_secondary'))
+            .borderRadius(8)
+            .margin({ left: this.edge(), right: this.edge() })
+          }
         }
       }
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-    // ⚠️ 这一行是**重渲染的触发器**, 不是普通样式: rev 必须在一个**构建期直接求值的属性表达式**
-    // 里被读到, ArkUI 才会把本组件登记成 rev 的依赖 —— 绑定值变化后 build() 才会重跑, 内层
-    // ForEach 才有机会重算各子项的键(指纹)。真机踩过: 把 rev 的读取挪进 itemKey()/wake() 这类
-    // **方法内部**之后, 依赖没登记上, 于是"拖动松手后数值/指标卡/图表全都不刷新", 而拖动本身
-    // 还是好的 —— 就是这个原因。
-    // (真机已验证: 每次变化 id 并不会破坏正在拖动的 Slider; 护手势真正靠的是 dragFreeze 快照。)
-    .id('guncat-ui-r' + this.rev.toString())
+    // 这里**不再**靠 id 变化触发重渲染: 真机证明那样不管用(读取没被登记成依赖), 而且每次变化
+    // 的 id 没必要。重渲染开关是上面那个恒真的 `if (this.treeAwake())`。id 保持恒定。
+    .id('guncat-ui')
   }
 
   @Builder
