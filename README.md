@@ -853,7 +853,7 @@ ChatViewModel.executeWorkLoop(conv)
 3. **防堆砌**：同一份数据不要原样说三遍——指标卡给总量与同比、图表给趋势与分布、表格给逐行明细，三者必须互补（这一条是为了避免"为了丰富而重复"走向另一个极端）。
 4. **同一份数据的「不合格 vs 合格」对照**：❌ 只有 `TextContent` + `Table`；✅ 抬头/指标卡/折线/环形/明细表/表单分层组织。
 
-**「下一步入口」的收敛**：每轮仍要给下一步入口，但**必须是和当前数据直接相关的具体动作**（`Buttons` / `OptionCards`，1~2 条即可）。`FollowUpBlock` / `FollowUpItem` 那类「你可能还想问」的追问建议**默认不要用**（用户明确反馈不喜欢卡片末尾每次都挂 q1/q2/q3）。为此从提示词里全面下架：语法段 D 小节改成推荐 `Buttons`/`OptionCards` 并写明"默认不要用"；「丰富度」优先级表与分层配方移除它；反例清单新增一条点名；示例 2 改用 `Buttons`；`INTERACTIVE_DUTY` 第 4 条改成"入口必须具体"；两个补救提示词一并收敛；组件清单给这两个组件标注 **不推荐**。**组件本身仍保留在注册表里** —— 删掉会让历史消息里已经生成的追问块变成"未知组件"诊断。共 8 条断言守住。
+**追问块已彻底下架（同日第十四次）**：每轮仍要给「下一步入口」，但**必须是和当前数据直接相关的具体动作**（`Buttons` / `OptionCards`，1~2 条即可）。追问块（`FollowUpBlock` / `FollowUpItem`）现在**不是"不推荐"，而是模型根本看不到** —— 用户反馈模型总凑不齐标准的三条（老给两条），与其反复教育，不如把组件从提示词清单里拿掉：`UiComp.promptHidden = true`，`GuncatUiLibrary.promptSection()` 过滤掉它，提示词正文里所有点名（语法段 D 小节、反例清单、`INTERACTIVE_DUTY`、补救提示词）一并删除。**组件本身照旧注册、照旧能解析与渲染** —— 历史消息里已经生成的追问块、以及外部程序里的追问块仍然兼容，这就是"接口兜底"。
 
 配套改动：`STREAMING` 里原来的"不要 6 个元素写成 20 个元素"改成"组件数量不是越少越好，8~14 个分层清晰是目标"；`ANTI_PATTERNS` 增加三条（偷懒的文字+表格组合、把结构化指标塞进正文、为丰富而重复数据）；`INTERACTIVE_DUTY` 增加"默认往丰富那一侧靠"；`REPAIR_SYSTEM`/`REPAIR_INSTRUCTION`（主回答没产出程序时的补救）也从"3~5 个元素"改为要求分层与图表。**共 17 条提示词断言**在 `test/guncat-harness/test-core.mjs` 里守住这些内容，避免以后改提示词时被无声删掉。
 
@@ -892,7 +892,7 @@ tuneBtn = Buttons([Button("换口径重算", Action([@ToAssistant("按客户数�
 | 动作 | `Action([@ToAssistant("文本"), @Set($x, 值), @Reset($x), @OpenUrl("https://…")])` |
 | 注释 | `//` 或 `#` 行注释（会被剔除） |
 
-组件库共 **70 个组件**，分 9 组：根与内容 / 布局 / 表格与数据 / 图表 / 指标与文本 / 卡片块 / 列表与追问 / 表单 / 按钮与图标。渲染器为每个组件都给出原生 ArkUI 实现：
+组件库共 **70 个组件**，分 9 组：根与内容 / 布局 / 表格与数据 / 图表 / 指标与文本 / 卡片块 / 列表 / 表单 / 按钮与图标。渲染器为每个组件都给出原生 ArkUI 实现：
 
 | 组 | 组件 |
 | --- | --- |
@@ -902,7 +902,7 @@ tuneBtn = Buttons([Button("换口径重算", Action([@ToAssistant("按客户数�
 | 图表 | `BarChart` `LineChart` `AreaChart` `HorizontalBarChart` `PieChart` `RadialChart` `SingleStackedBarChart` `Series` `RadarChart` |
 | 指标与文本 | `Text` `BoldText` `IconText` `ImageText` `MetricIndicatorInline` `MetricIndicatorWithStrikethrough` |
 | 卡片块 | `SnippetCardBlock` `OverviewCardBlock` `ContextCardBlock` `CompositeCardBlock` `VisualCardBlock`（及各自 Item） |
-| 列表与追问 | `ListBlock` `ListItem` `FollowUpBlock` `FollowUpItem` |
+| 列表 | `ListBlock` `ListItem` |
 | 表单 | `Form` `FormControl` `Input` `TextArea` `Select` `SelectItem` `DatePicker` `Slider` `RadioGroup` `RadioItem` `CheckBoxGroup` `CheckBoxItem` `SwitchGroup` `SwitchItem` `Chips` `ChipItem` `OptionCards` `OptionCard` |
 | 按钮与图标 | `Button` `Buttons` `IconButton` `Icon` |
 
@@ -1167,7 +1167,7 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 > 把交互模式的交付格式从「一个严格 JSON 对象」**彻底重写**为一种声明式界面语言（`guncat-ui lang`，对齐参考项目 [open-intelligent-ui](https://github.com/thesysdev/openui) 的 OpenUI Lang 设计），并把渲染器从 11 种元素扩展到 70 个原生组件。旧的 `common/GuncatUiSpec.ts`（JSON DSL + 解析器 + 救助链 + JSON Output 补救）已整体删除。
 
 - **交付格式：JSON → 按行语句**。旧格式是一大段严格 JSON，被输出上限截断就**整块作废**（只能靠额外的 `response_format: json_object` 请求重做一次）。新格式每条语句独立成行：`root = Card([header, chart])` / `header = CardHeader("标题")` / `chart = BarChart([...], [s1], "grouped")`。截断只损失**最后一条没写完的语句**，前面的全部保留并照常渲染——"补救"从主路径降级成兜底。
-- **70 个原生组件**（9 组）：`Card` `CardHeader` `TextContent` `MarkDownRenderer` `Callout` `Image` `ImageGallery` `CodeBlock` `TagBlock` `EntityList` / `SectionBlock` `Tabs` `Accordion` `Carousel` `Steps` / `Table`+`Col` / 8 种图表（柱状·折线·面积·横向条·饼环·径向·雷达·堆叠条）/ 指标与文本 / 5 类卡片块 / 列表与追问 / 全套表单控件 / 按钮与图标。图表全部用声明式 `Shape`+`Path` 与 `Row`/`Column` 现画，不引入图表库、不产生图片文件。
+- **70 个原生组件**（9 组）：`Card` `CardHeader` `TextContent` `MarkDownRenderer` `Callout` `Image` `ImageGallery` `CodeBlock` `TagBlock` `EntityList` / `SectionBlock` `Tabs` `Accordion` `Carousel` `Steps` / `Table`+`Col` / 8 种图表（柱状·折线·面积·横向条·饼环·径向·雷达·堆叠条）/ 指标与文本 / 5 类卡片块 / 列表 / 全套表单控件 / 按钮与图标（`FollowUpBlock`/`FollowUpItem` 仍注册但已从提示词清单下架，仅作接口兜底）。图表全部用声明式 `Shape`+`Path` 与 `Row`/`Column` 现画，不引入图表库、不产生图片文件。
 - **双向绑定（`$变量`）——"能调"的关键**：把控件绑到一个 `$变量`，用户拖动/勾选后界面**立即用新值重新求值整棵树**（`"金额 " + $amount + " 万"` 会变），不发请求、不等模型。需要模型换数据/换算法时点按钮（`Action([@ToAssistant("…")])`）或提交表单，把设置 + 诉求打包回传，模型产出**更新后的完整界面**。
 - **状态随消息持久化**：用户调过的参数以 `]]>guncat-ui:state` 尾标记保存在消息里（滚动 / 切会话 / 重启后仍在），下一轮请求前被翻译成一句人话（`(用户在当前交互界面上的设置: 金额=45; 口径=customers。)`）交给模型——对齐参考项目改写 `]]>openui:context` 的做法。
 - **回答不再有"卡片外壳"**：旧实现在界面外面套了一层带边框、阴影和状态徽标（`可交互`/`生成中…`）的卡片，观感像"嵌在聊天里的小部件"。现在 `Card` 只是一个 16 间距的纵向容器，节奏来自间距与各组件自身的内边距——这是本次改动最直观的观感提升。
@@ -1191,7 +1191,7 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 - **活动折叠栏（同日第六次）**：交互模式下，正文前的**思考与全部工具调用**在正文开始输出后自动收成**一个**「✓ 已完成 · 思考 + 3 个工具 · 12.4s」折叠栏（点开可看完整思考与工具 IO）。正文之前保持展开以实时显示进度；开合状态为纯派生（`activityOpenNow()`），用户点过后完全听用户的；标题/转圈由 `activityRunning()` 决定，避免"还在跑却写着已完成"。工作模式不受影响。
 - **活动折叠栏合并（同日第七次）**：一个用户任务往往跑好几轮，原先**每轮一条**折叠栏（真机上出现四条「已完成」叠在一起）。现在按**回合**合并：只有回合最后一条渲染折叠栏，历史轮只出正文（无正文则整条不渲染），展开后能看到整个回合的活动（历史轮为只读摘要）。合并只做在渲染层 —— 一轮一条 assistant 消息是 Agent Loop 的既定结构（下一轮历史由 `conv.messages` 重建，assistant 与 `toolCalls` 必须同进同出），合并数据会让模型看到"一条 assistant 同时调了所有工具"。同时新增「已停止」状态（`Constants.WORK_STOPPED_NOTE`，生产者与消费者共用），避免手动停止的回合显示"已完成"。
 
-- **不推荐追问建议（同日第八次）**：用户反馈不喜欢卡片末尾每次都挂一组「你可能还想问」的追问（`FollowUpBlock` / q1·q2·q3）。提示词全面收敛到「只用和当前数据直接相关的具体动作」（`Buttons` / `OptionCards`，1~2 条）：语法段、丰富度优先级表与分层配方、反例清单、示例 2、`INTERACTIVE_DUTY`、两个补救提示词、组件清单标注（**不推荐**）共 8 处；组件本身保留在注册表以免历史消息的追问块变成未知组件。新增 8 条断言，单测 465 → 473 项。
+- **不推荐追问建议（同日第八次）**：用户反馈不喜欢卡片末尾每次都挂一组「你可能还想问」的追问（`FollowUpBlock` / q1·q2·q3）。提示词全面收敛到「只用和当前数据直接相关的具体动作」（`Buttons` / `OptionCards`，1~2 条）：语法段、丰富度优先级表与分层配方、反例清单、示例 2、`INTERACTIVE_DUTY`、两个补救提示词、组件清单标注（**不推荐**）共 8 处；组件本身保留在注册表以免历史消息的追问块变成未知组件。新增 8 条断言，单测 465 → 473 项。→ **同日第十四次改成彻底下架（组件不再出现在提示词清单里），见上文**。
 
 - **每轮思考默认收起（同日第九次）**：合并成一条折叠栏后，展开它会把每轮的思考文字**全部铺开**，几轮下来就是一面文字墙。改成每轮一条「💡 思考 ⌄」子折叠行、**默认全收起**（`expandedThinkingId` 手风琴，同一时刻只展开一条；跑动中的那轮在标题行给最新一句跑马灯，不算展开）。历史轮那条 ForEach 的 key 里编进了展开位（`'pm' + id + '#' + 展开位`）—— ArkUI 的 `ForEach` 键值不变就直接复用子组件、连 item builder 都不执行，所以展开状态必须编进键里才能可靠重建。
 

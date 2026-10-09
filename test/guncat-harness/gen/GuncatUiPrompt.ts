@@ -80,12 +80,11 @@ export class GuncatUiPrompt {
     '- `@OpenUrl("https://…")` — 打开链接。',
     '`Action([...])` 里可以按顺序放多个步骤, 例如 `Action([@Set($range, "30d"), @ToAssistant("换成 30 天口径")])`。',
     '',
-    '### D. 表单与追问',
+    '### D. 表单',
     '- 要用户填参数: 用 `Form(name, buttons, fields)`, 字段用 `FormControl(标签, 控件)` 包起来,',
     '  提交按钮用 `Button("提交", Action([@ToAssistant("按这些参数重算")]))`。',
     '- 要用户在几个方案里挑: 用 `OptionCards` 或 `Chips`(点一下就回传, 比让用户打字快)。',
-    '- 想引导下一步: 用 `Buttons` / `OptionCards` 给出**和当前数据直接相关**的具体动作。',
-    '  `FollowUpBlock` 那类"追问建议"默认**不要用** —— 每个界面末尾都挂三条猜出来的问题很像模板。'
+    '- 想引导下一步: 用 `Buttons` / `OptionCards` 给出**和当前数据直接相关**的具体动作。'
   ].join('\n');
 
   // 输出顺序: 流式观感完全取决于它
@@ -134,7 +133,7 @@ export class GuncatUiPrompt {
     '| 让用户选方案 | `OptionCards` / `CompositeCardBlock` | 让用户打字描述 |',
     '| 属性 / 标签 / 关键词 | `TagBlock` / `Tag` | 逗号分隔的一句话 |',
     '| 结论与提醒 | `Callout` / `TextCallout` | 夹在正文里的括号说明 |',
-    '| 下一步入口 | `Buttons` / `OptionCards`(具体动作) | 只给一个静态结论就结束; 也不要堆猜测性追问 |',
+    '| 下一步入口 | `Buttons` / `OptionCards`(具体动作) | 只给一个静态结论就结束 |',
     '| 图片展示 | `ImageGallery` / `Carousel` / `VisualCardBlock` | 一张小图 + 一行说明 |',
     '',
     '**表格只用于"需要逐行精确核对"的场合**, 而且必须有一个"看得懂"的上层:',
@@ -285,10 +284,8 @@ export class GuncatUiPrompt {
     '  应该拆成 `OverviewCardBlock` + 多个 `MetricIndicatorInline`, 每个指标一张卡、涨跌自带颜色与箭头。',
     '- ❌ **为了显得丰富而重复数据**: 同一份数字在指标卡、图表、表格里原样出现三遍。三者要互补',
     '  (指标卡给总量与同比、图表给趋势与分布、表格给逐行明细), 不互补就是噪音。',
-    '- ❌ **在卡片末尾堆一组"你可能还想问"的追问建议**(`FollowUpBlock` / 一堆 `FollowUpItem`): 这是最容易被',
-    '  吐槽的一处 —— 每个界面末尾都挂着三条猜出来的问题, 占版面、像模板, 还会诱导用户去点而不是自己思考。',
-    '  **默认不要写**。真的需要下一步入口时, 用 `Buttons` / `OptionCards` 给**和当前数据直接相关**的',
-    '  具体动作(例如"按 30 天口径重算"), **1~2 条就够, 不要凑三条**; 只有用户明确说"给点方向"时才考虑追问建议。'
+    '- ❌ **给一堆空泛的收尾按钮**: 下一步入口必须是**和当前数据直接相关**的具体动作',
+    '  (例如"按 30 天口径重算"), **1~2 条就够**。凑数量、猜用户想问什么, 都会被当成模板。'
   ].join('\n');
 
   // 交互模式专有职责: 覆盖共享 Agent Loop 提示词里的「文件交付优先」
@@ -307,8 +304,7 @@ export class GuncatUiPrompt {
     '3. **数据不足时不要停**: 用 `TextCallout` 说明缺口, 用 `Form` / `OptionCards` 让用户补齐参数, ',
     '   收到回传后再算再画 —— 界面本身就是收集参数的工具。',
     '4. **每轮都要给"下一步的入口", 但入口必须具体**: 用 `Buttons` / `OptionCards` 给出和当前数据直接',
-    '   相关的动作(点一下就回传), 1~2 条即可。**不要**在末尾堆一组猜测性的追问建议(`FollowUpBlock`) ——',
-    '   每个界面都挂三条"你可能还想问"很像模板, 用户很反感; 只有用户明确要更多方向时才用。',
+    '   相关的动作(点一下就回传), 1~2 条即可。凑数量、猜用户想问什么都会被当成模板。',
     '5. **连续调参是常态**: 收到界面回传后, 你要产出**更新后的完整界面**(新数值), ',
     '   让界面成为可以反复操作的仪表盘, 而不是一次性快照。',
     '6. **文字怎么放进界面**: 需要说明、引导、给结论时一律用组件承载 ——',
@@ -352,7 +348,7 @@ export class GuncatUiPrompt {
     '数值必须来自上文已给出的真实结果, 不要编造。',
     '回答要有层次: 抬头(CardHeader) → 结论指标(OverviewCardBlock/MetricIndicatorInline) → ',
     '可视化(图表) → 明细(Table/EntityList) → 操作入口(Form/OptionCards/Buttons)。',
-    '不要只输出一段文字加一张表格, 也不要在末尾堆一组"你可能还想问"的追问建议。'
+    '不要只输出一段文字加一张表格。'
   ].join('\n');
 
   static readonly REPAIR_INSTRUCTION: string = [
@@ -362,7 +358,7 @@ export class GuncatUiPrompt {
     '有趋势就给 LineChart/AreaChart, 有构成就给 PieChart/SingleStackedBarChart, 有排名就给 HorizontalBarChart, ',
     '有达成率就给 RadialChart; 表格只用于逐行精确核对, 不要一上来就是一张表; ',
     '需要用户调节参数就给 Form + 控件, 需要用户选择就给 OptionCards 或 Buttons; ',
-    '结尾给 1~2 个和当前数据直接相关的可点动作(Buttons/OptionCards), 不要堆"你可能还想问"的追问建议。',
+    '结尾给 1~2 个和当前数据直接相关的可点动作(Buttons/OptionCards)。',
     '不要只输出一段文字加一张表格。'
   ].join('\n');
 }

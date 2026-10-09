@@ -17,12 +17,19 @@ export class UiComp {
   group: string = '';
   desc: string = '';
   params: UiParam[] = [];
+  // 只在"接口兜底"里存在、**不写进提示词组件清单**的组件。
+  // 用途(真机踩过): 追问块(FollowUpBlock)这类组件, 即使提示词三令五申"不推荐", 模型仍会隔三差五
+  // 生成 —— 而且总凑不齐标准数量(说要三条, 它给两条)。与其教育它, 不如**让它看不到**: 组件照旧
+  // 注册、照旧能解析与渲染(旧消息、外部程序仍然兼容 = 接口兜底), 只是不再出现在提示词清单里。
+  promptHidden: boolean = false;
 
-  constructor(name: string, group: string, desc: string, params: UiParam[]) {
+  constructor(name: string, group: string, desc: string, params: UiParam[],
+    promptHidden: boolean = false) {
     this.name = name;
     this.group = group;
     this.desc = desc;
     this.params = params;
+    this.promptHidden = promptHidden;
   }
 }
 
@@ -93,7 +100,7 @@ function anyOf(name: string, required: boolean): UiParam {
 export class GuncatUiLibrary {
   static readonly GROUP_ORDER: string[] = [
     '根与内容', '布局', '表格与数据', '图表', '指标与文本',
-    '卡片块', '列表与追问', '表单', '按钮与图标'
+    '卡片块', '列表', '表单', '按钮与图标'
   ];
 
   private static table: Record<string, UiComp> = {};
@@ -284,20 +291,18 @@ export class GuncatUiLibrary {
     out.push(new UiComp('VisualCardItem', g6, '视觉卡项: body 文字, tag 角标, bgImageSrc 背景图。',
       [el('body', true), sOpt('id'), sOpt('bgImageSrc'), el('tag', false)]));
 
-    // ===== 列表与追问 =====
+    // ===== 列表(+ 追问兜底) =====
     out.push(new UiComp('ListBlock', g7,
       '列表。variant 取 number|image; size 取 default|small。items 传 ListItem。',
       [els('items', true), sOpt('variant'), sOpt('size')]));
     out.push(new UiComp('ListItem', g7,
       '列表项: title + subtitle; 可选 image {"src","alt"}、actionLabel + action 做行内按钮。',
       [s('title', true), sOpt('subtitle'), obj('image', false), sOpt('actionLabel'), act('action', false)]));
-    out.push(new UiComp('FollowUpBlock', g7,
-      '追问建议(点一下就把该文本发给助手)。items 传 FollowUpItem。' +
-      '**不推荐**: 每个界面末尾都挂三条猜出来的问题很像模板, 默认不要用; ' +
-      '需要下一步入口时优先 Buttons / OptionCards 给具体动作。',
-      [els('items', true)]));
-    out.push(new UiComp('FollowUpItem', g7, '追问项: 一句话问题(配合 FollowUpBlock, 不推荐默认使用)。',
-      [s('text', true)]));
+    // ↓ 只做接口兜底: 注册着(旧消息里的追问块照常解析/渲染), 但**不进提示词清单**, 模型看不到就不会再生成。
+    out.push(new UiComp('FollowUpBlock', g7, '追问建议(接口兜底组件, 不写进提示词)。items 传 FollowUpItem。',
+      [els('items', true)], true));
+    out.push(new UiComp('FollowUpItem', g7, '追问项(接口兜底组件, 不写进提示词)。',
+      [s('text', true)], true));
 
     // ===== 表单 =====
     out.push(new UiComp('Form', g8,
@@ -422,7 +427,7 @@ export class GuncatUiLibrary {
       let groupLines: string[] = [];
       for (let i: number = 0; i < GuncatUiLibrary.order.length; i++) {
         let def: UiComp | undefined = GuncatUiLibrary.table[GuncatUiLibrary.order[i]];
-        if (def === undefined || def.group !== group) {
+        if (def === undefined || def.group !== group || def.promptHidden) {
           continue;
         }
         groupLines.push('- `' + GuncatUiLibrary.signature(def.name) + '` — ' + def.desc);

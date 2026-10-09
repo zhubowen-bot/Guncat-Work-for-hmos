@@ -1759,31 +1759,38 @@ console.log('[组件库与提示词]');
   check('补救系统提示要求层次',
     GuncatUiPrompt.REPAIR_SYSTEM.indexOf('不要只输出一段文字加一张表格') > 0);
 
-  // 追问建议(FollowUpBlock): 用户明确表示不喜欢"卡片末尾的 q1/q2/q3", 提示词必须持续压制它
-  check('语法段不再推荐 FollowUpBlock',
-    GuncatUiPrompt.INTERACTION.indexOf('FollowUpBlock') > 0 &&
-    GuncatUiPrompt.INTERACTION.indexOf('`FollowUpBlock` 那类"追问建议"默认**不要用**') > 0);
+  // 追问块(FollowUpBlock): 用户明确表示不喜欢"卡片末尾的 q1/q2/q3", 现在是**彻底下架** ——
+  // 模型根本看不到(提示词里连名字都不出现、组件清单里也不列), 但组件仍在注册表里做接口兜底。
+  check('提示词全篇不再出现 FollowUpBlock/FollowUpItem',
+    GuncatUiPrompt.promptSection().indexOf('FollowUp') < 0);
+  check('语法段仍要求入口具体(Buttons/OptionCards)',
+    GuncatUiPrompt.INTERACTION.indexOf('`Buttons` / `OptionCards` 给出**和当前数据直接相关**的具体动作') > 0);
   check('丰富度优先级把下一步入口收敛到 Buttons/OptionCards',
     GuncatUiPrompt.RICHNESS.indexOf('`Buttons` / `OptionCards`(具体动作)') > 0 &&
     GuncatUiPrompt.RICHNESS.indexOf('| 下一步入口 | `Buttons` / `FollowUpBlock` |') < 0);
   check('分层配方不再列 FollowUpBlock',
     GuncatUiPrompt.RICHNESS.indexOf('`Form` / `OptionCards` / `Buttons`(每轮都要有') > 0 &&
     GuncatUiPrompt.RICHNESS.indexOf('`Form` / `OptionCards` / `Buttons` / `FollowUpBlock`') < 0);
-  check('反例点名不要堆追问建议',
-    GuncatUiPrompt.ANTI_PATTERNS.indexOf('在卡片末尾堆一组"你可能还想问"的追问建议') > 0 &&
-    GuncatUiPrompt.ANTI_PATTERNS.indexOf('1~2 条就够, 不要凑三条') > 0);
-  check('职责段要求入口具体且不堆追问',
+  check('反例要求入口具体、1~2 条就够',
+    GuncatUiPrompt.ANTI_PATTERNS.indexOf('下一步入口必须是**和当前数据直接相关**的具体动作') > 0 &&
+    GuncatUiPrompt.ANTI_PATTERNS.indexOf('**1~2 条就够**') > 0);
+  check('职责段要求入口具体',
     GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('但入口必须具体') > 0 &&
-    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('很像模板, 用户很反感') > 0);
+    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('凑数量') > 0);
   check('示例不再使用 FollowUpBlock',
     GuncatUiPrompt.EXAMPLES.indexOf('FollowUpBlock') < 0 &&
     GuncatUiPrompt.EXAMPLES.indexOf('FollowUpItem') < 0);
-  check('补救提示词不再推荐 FollowUpBlock',
+  check('补救提示词不再出现 FollowUpBlock',
     GuncatUiPrompt.REPAIR_SYSTEM.indexOf('FollowUpBlock') < 0 &&
-    GuncatUiPrompt.REPAIR_SYSTEM.indexOf('追问建议') > 0);
-  check('组件清单把 FollowUpBlock 标为不推荐',
-    GuncatUiLibrary.promptSection().indexOf('**不推荐**') > 0 &&
-    GuncatUiLibrary.promptSection().indexOf('需要下一步入口时优先 Buttons / OptionCards') > 0);
+    GuncatUiPrompt.REPAIR_SYSTEM.indexOf('FollowUpItem') < 0);
+  check('组件清单里没有 FollowUp(模型看不到)',
+    GuncatUiLibrary.promptSection().indexOf('FollowUp') < 0 &&
+    GuncatUiLibrary.promptSection().indexOf('需要下一步入口时优先 Buttons / OptionCards') < 0);
+  // 但"接口兜底"必须在: 仍然注册、仍然能解析渲染(历史消息里的追问块不能变成未知组件)
+  check('追问块仍注册(接口兜底)',
+    GuncatUiLibrary.isKnown('FollowUpBlock') && GuncatUiLibrary.isKnown('FollowUpItem'));
+  check('追问块仍能解析(接口兜底)',
+    GuncatUiLang.parse('root = Card([f])\nf = FollowUpBlock([FollowUpItem("还要看什么?")])').errors.length === 0);
   // 本地兜底联网搜索: 工具名从 search_web 改为 local_web_search(旧名与服务端 web_search
   // 只差词序, 模型很容易误当成"那个搜索工具"而优先调用 —— 真机表现就是"AI 特别爱调本地搜索")。
   // 同时提示词必须写成"默认不用本机兜底"。
