@@ -10,6 +10,9 @@ import { ToolCallRecord } from '../model/ToolCallRecord';
 import { RichTextView } from './RichTextView';
 import { WorkStepFormat } from './ChatBubbleView';
 import { FileDiff } from '../common/DiffUtil';
+import { GuncatUiView } from './GuncatUiView';
+import { GuncatUiParts, GuncatUiSeg, GuncatUiSegType } from '../common/GuncatUiParts';
+import { GuncatUiBlocks, GuncatUiSpec, GuncatUiPayload } from '../common/GuncatUiSpec';
 
 // diff 卡片行模型
 class DiffRow {
@@ -31,6 +34,12 @@ export struct WorkTurnView {
   @State private stepsTick: number = 0;
   @State private visibleText: string = '';
   @State private visibleReasoning: string = '';
+  // 交互模式: 本轮正文里内嵌的 guncat-ui 界面块(工作模式下恒为空)
+  @State private uiParts: GuncatUiParts = new GuncatUiParts();
+  // 该轮界面是否已回传(仅最新一轮可交互)
+  @Prop uiLocked: boolean = false;
+  private onUiInteract: (messageId: string, payload: GuncatUiPayload) => void =
+    (_messageId: string, _payload: GuncatUiPayload): void => {};
   // 上一次工具行状态签名(数量/参数量/执行态): 变化才递增 stepsTick 触发行重建,
   // 避免流式期间每 33ms 无条件重建导致 LoadingProgress 动画永远停在第一帧(观感即"卡住")
   private lastCallsSig: string = '';
@@ -45,12 +54,26 @@ export struct WorkTurnView {
       this.visibleText = this.message.content;
       this.visibleReasoning = this.message.reasoning;
       this.stepsTick++;
+      this.refreshUiParts();
     }
+  }
+
+  // 交互界面块切分(仅正文含 guncat-ui 标记时重建, 工作模式零开销)
+  private refreshUiParts(): void {
+    let content: string = this.isStreaming ? this.visibleText : this.message.content;
+    if (content.indexOf(GuncatUiBlocks.OPEN) < 0) {
+      if (this.uiParts.segments.length > 0) {
+        this.uiParts = new GuncatUiParts();
+      }
+      return;
+    }
+    this.uiParts = GuncatUiParts.build(content);
   }
 
   aboutToAppear(): void {
     this.visibleText = this.message.content;
     this.visibleReasoning = this.message.reasoning;
+    this.refreshUiParts();
     if (this.isStreaming && this.flushTimer === -1) {
       this.flushTimer = setInterval(() => {
         if (this.isStreaming) {
@@ -78,6 +101,8 @@ export struct WorkTurnView {
             this.lastCallsSig = sig;
             this.stepsTick++;
           }
+          // 交互界面块随流式文本渐进成形
+          this.refreshUiParts();
         }
       }, 33);
     }
@@ -115,6 +140,58 @@ export struct WorkTurnView {
     return call.preparing ? '生成调用中…' : '等待中…';
   }
 
+  // 正文渲染: 普通文本片段走 Markdown; 交互模式下内嵌的 guncat-ui 块走原生交互渲染。
+  // 未命中界面块时与旧实现完全一致(单个 RichTextView), 工作模式行为不变。
+  @Builder
+  buildTurnContent() {
+    if (this.uiParts.segments.length === 0) {
+      RichTextView({
+        content: this.isStreaming ? this.visibleText : this.message.content,
+        selectionTrigger: 0
+      })
+    } else {
+      Column({ space: 8 }) {
+        ForEach(this.uiParts.segments, (seg: GuncatUiSeg, index: number) => {
+          if (seg.type === GuncatUiSegType.UI) {
+            if (seg.spec !== null) {
+              GuncatUiView({
+                spec: seg.spec as GuncatUiSpec,
+                complete: seg.complete,
+                locked: this.uiLocked,
+                onInteract: (payload: GuncatUiPayload): void => {
+                  this.onUiInteract(this.message.id, payload);
+                }
+              })
+            } else {
+              Column({ space: 8 }) {
+                Row()
+                  .width('60%')
+                  .height(12)
+                  .borderRadius(6)
+                  .backgroundColor($r('app.color.surface_secondary'))
+                Row()
+                  .width('35%')
+                  .height(12)
+                  .borderRadius(6)
+                  .backgroundColor($r('app.color.surface_secondary'))
+              }
+              .width('100%')
+              .padding(14)
+              .backgroundColor($r('app.color.surface'))
+              .borderRadius(18)
+              .alignItems(HorizontalAlign.Start)
+            }
+          } else if (seg.text.trim() !== '') {
+            RichTextView({ content: seg.text, selectionTrigger: 0 })
+          }
+        }, (seg: GuncatUiSeg, index: number) => 'tseg' + index + '_' +
+          (seg.type === GuncatUiSegType.UI ? 'ui' : 'tx'))
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+    }
+  }
+
   build() {
     Column({ space: 8 }) {
       // 思考(折叠条, 默认收起)
@@ -124,10 +201,7 @@ export struct WorkTurnView {
       // 正文: 本轮叙述/结论, 按发生时序渲染在工具行之前
       if (this.isStreaming || this.message.content !== '') {
         Column() {
-          RichTextView({
-            content: this.isStreaming ? this.visibleText : this.message.content,
-            selectionTrigger: 0
-          })
+          this.buildTurnContent()
           // 流式光标: 仅在模型仍在输出文本(尚无工具调用)时显示;
           // 工具执行阶段正文已停, 挂着光标反而像多出一个空行
           if (this.isStreaming && this.message.content !== '' &&

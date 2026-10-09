@@ -170,6 +170,20 @@ export class Constants {
   // transform_file xlsx 输出的行数上限(内存型构建, 超大表请用 csv)
   static readonly WORK_TRANSFORM_XLSX_MAX_ROWS: number = 50000;
 
+  // ===== Guncat Work 6.3 交互模式 (Intelligent UI) =====
+  // 交互模式虚拟智能体 id: 与 work 平行的第三个身份, 会话 mode 取 'interactive'。
+  // 与工作模式共用 Agent Loop 与沙箱工作区, 但系统提示词要求模型把回答交付为
+  // ```guncat-ui 交互界面块(图表/表单/表格/指标), 由 GuncatUiView 原生渲染并回传用户操作。
+  static readonly INTERACTIVE_AGENT_ID: string = 'interactive';
+  // 会话模式字符串('chat' | 'work' | 'interactive')
+  static readonly MODE_CHAT: string = 'chat';
+  static readonly MODE_WORK: string = 'work';
+  static readonly MODE_INTERACTIVE: string = 'interactive';
+  // 交互界面块的语言标记(与 GuncatUiBlocks.LANG 一致)
+  static readonly UI_BLOCK_LANG: string = 'guncat-ui';
+  // 交互模式单条消息最多渲染的界面块数(超出部分按原文 Markdown 渲染)
+  static readonly UI_MAX_BLOCKS_PER_MESSAGE: number = 3;
+
   // ===== Guncat Work 6.1 (DeepSeek Harness 移植) =====
   // 工具输出溢出暂存目录(工作区内, 不注入运行时快照文件树; 对齐 dsh 的 spill store)
   static readonly WORK_SPILL_DIR: string = '.spill';

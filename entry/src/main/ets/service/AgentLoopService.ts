@@ -28,6 +28,7 @@ import { SSEProtocolAdapter, SSEParseContext } from '../common/SSEProtocolAdapte
 import { RetryPolicy } from '../common/RetryPolicy';
 import { RetryAfterParser } from '../common/RetryAfterParser';
 import { LoopError } from '../common/LoopError';
+import { GuncatUiPrompt } from '../common/GuncatUiSpec';
 export { LoopError };
 
 // 带分类的循环层错误已迁移到 common/LoopError(纯逻辑, 可单测);
@@ -1161,6 +1162,40 @@ export class AgentLoopService {
     }
     AgentLoopService.lastPromptBudget = PromptBudget.fromPrompt(AgentLoopService.cachedWorkPrompt);
     return AgentLoopService.cachedWorkPrompt;
+  }
+
+  // ===== 交互模式 (Intelligent UI) 系统提示词 =====
+  // 与工作模式的区别只有「交付形态」: 仍然拥有完整工具面与沙箱工作区, 但每一轮的回答
+  // 必须交付为 ```guncat-ui 交互界面块(由 GuncatUiView 原生渲染并回传用户操作)。
+  // 同样保持 100% 静态 + 进程内缓存, 以维持相邻轮次的 KV 缓存前缀一致。
+  private static cachedInteractivePrompt: string = '';
+
+  static buildInteractiveSystemPrompt(): string {
+    if (AgentLoopService.cachedInteractivePrompt !== '') {
+      return AgentLoopService.cachedInteractivePrompt;
+    }
+    let skillsSection: string = WorkSkillService.promptSectionWithMode(Constants.WORK_PROMPT_SKILL_DIRECTORY_MODE);
+    let defs: Record<string, Object>[] = WorkFileService.toolRegistryDefs();
+    let staticDir: string = PromptBuilder.toolsDirectory();
+    let missing: string[] = PromptBuilder.missingToolNames(staticDir, defs);
+    let extraTools: string = missing.length > 0 ?
+      PromptBuilder.buildToolDirectory(PromptBuilder.defsByNames(defs, missing)) : '';
+    let base: string = Constants.WORK_PROMPT_TOOL_DIRECTORY_MODE === 'dynamic_only' ?
+      PromptBuilder.buildWithToolDirectoryMode(skillsSection, staticDir,
+        PromptBuilder.buildToolDirectory(defs), 'dynamic_only') :
+      PromptBuilder.build(skillsSection, extraTools);
+    AgentLoopService.cachedInteractivePrompt =
+      GuncatUiPrompt.promptSection() + '\n\n' + base + '\n\n' + GuncatUiPrompt.INTERACTIVE_DUTY;
+    AgentLoopService.lastPromptBudget = PromptBudget.fromPrompt(AgentLoopService.cachedInteractivePrompt);
+    return AgentLoopService.cachedInteractivePrompt;
+  }
+
+  // 交互模式下替换工作模式「最终交付」章节的职责声明(交付形态由界面块承载)
+  static buildWorkSystemPromptFor(mode: string): string {
+    if (mode === Constants.MODE_INTERACTIVE) {
+      return AgentLoopService.buildInteractiveSystemPrompt();
+    }
+    return AgentLoopService.buildWorkSystemPrompt();
   }
 
   // @deprecated 旧实现保留: 提示词已迁移到 PromptBuilder 分块构建; 此方法仅作兼容与回归对照。

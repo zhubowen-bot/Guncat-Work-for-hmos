@@ -204,22 +204,22 @@ export struct AgentDrawerView {
     .hitTestBehavior(HitTestMode.Transparent)
   }
 
-  // Agent模式分组: 抽取 work 虚拟智能体, 作为独立小节展示在「聊天模式」标题上方
+  // Agent模式分组: 抽取 work / interactive 虚拟智能体, 作为独立小节展示在「聊天模式」标题上方
   private workAgents(): Agent[] {
     let list: Agent[] = [];
     for (let i: number = 0; i < this.agents.length; i++) {
-      if (this.agents[i].id === 'work') {
+      if (this.agents[i].id === 'work' || this.agents[i].id === 'interactive') {
         list.push(this.agents[i]);
       }
     }
     return list;
   }
 
-  // 聊天智能体分组: 排除 work 虚拟项
+  // 聊天智能体分组: 排除 work / interactive 虚拟项
   private chatAgents(): Agent[] {
     let list: Agent[] = [];
     for (let i: number = 0; i < this.agents.length; i++) {
-      if (this.agents[i].id !== 'work') {
+      if (this.agents[i].id !== 'work' && this.agents[i].id !== 'interactive') {
         list.push(this.agents[i]);
       }
     }
@@ -229,10 +229,15 @@ export struct AgentDrawerView {
   @Builder
   buildAgentItem(agent: Agent) {
     Row() {
-      // 工作模式虚拟智能体用机器人图标(无底色), 普通智能体用自定义图标或猫头像
-      // 侧边栏机器人用 #0A59F7, 与轻简/效率/专家三个模式图标的蓝一致(非应用品牌蓝)
+      // Agent Loop 虚拟智能体用矢量图标(无底色), 普通智能体用自定义图标或猫头像
+      // 侧边栏图标用 #0A59F7, 与轻简/效率/专家三个模式图标的蓝一致(非应用品牌蓝)
       if (agent.id === 'work') {
         Image($r('app.media.ic_work'))
+          .width(32)
+          .height(32)
+          .fillColor('#0A59F7')
+      } else if (agent.id === 'interactive') {
+        Image($r('app.media.ic_interactive'))
           .width(32)
           .height(32)
           .fillColor('#0A59F7')

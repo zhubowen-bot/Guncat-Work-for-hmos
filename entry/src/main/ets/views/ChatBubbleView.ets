@@ -2,6 +2,9 @@ import { Message } from '../model/Message';
 import { Attachment } from '../model/Attachment';
 import { ToolCallRecord } from '../model/ToolCallRecord';
 import { RichTextView } from './RichTextView';
+import { GuncatUiView } from './GuncatUiView';
+import { GuncatUiParts, GuncatUiSeg, GuncatUiSegType } from '../common/GuncatUiParts';
+import { GuncatUiBlocks, GuncatUiSpec, GuncatUiPayload } from '../common/GuncatUiSpec';
 
 // 工具步骤的文本格式化(静态类, 供 @Builder 内调用; WorkTurnView 复用)
 export class WorkStepFormat {
@@ -220,6 +223,12 @@ export struct ChatBubbleView {
   private onImageTap: (url: string) => void = (_url: string): void => {};
   // 用户消息: 把内容原样填回输入框(重新编辑发送)
   private onEditToInput: (id: string) => void = (_id: string): void => {};
+  // ===== 交互模式 (Intelligent UI) =====
+  // 界面块已回传(置灰防重复提交); 由 ChatPage 依据当前待交互消息判定
+  @Prop uiLocked: boolean = false;
+  // 用户在交互界面上的操作回传(表单提交/选项点击), 由 ChatPage 转成 user 消息交给 Agent Loop
+  private onUiInteract: (messageId: string, payload: GuncatUiPayload) => void =
+    (_messageId: string, _payload: GuncatUiPayload): void => {};
   // 复制局部已改为 RichTextView 文本选择常开, 不再需要按钮回调
   // 深度思考条折叠状态 (默认折叠, 点击头部展开)
   @State private reasoningExpanded: boolean = false;
@@ -234,6 +243,8 @@ export struct ChatBubbleView {
   // visibleText 保留 33ms 节流, 作为 UI 缓冲, 避免每个 token 都触发整块重渲染
   @State visibleText: string = '';
   @State visibleReasoning: string = '';
+  // 交互模式: 消息体内嵌的 guncat-ui 界面块切分结果(普通文本片段 + 交互界面片段)
+  @State private uiParts: GuncatUiParts = new GuncatUiParts();
   private flushTimer: number = -1;
   // 思考跑马灯: 流式中在思考条右侧空白区滚动呈现最新思考内容(对齐工作模式 WorkTurnView)
   private marqueeScroller: Scroller = new Scroller();
@@ -248,12 +259,26 @@ export struct ChatBubbleView {
       this.visibleText = this.message.content;
       this.visibleReasoning = this.message.reasoning;
       this.stepsTick++;
+      this.refreshUiParts();
     }
+  }
+
+  // 交互界面块切分(仅在消息体含 guncat-ui 标记时才重建, 普通消息零开销)
+  private refreshUiParts(): void {
+    let content: string = this.isStreaming ? this.visibleText : this.message.content;
+    if (content.indexOf(GuncatUiBlocks.OPEN) < 0) {
+      if (this.uiParts.segments.length > 0) {
+        this.uiParts = new GuncatUiParts();
+      }
+      return;
+    }
+    this.uiParts = GuncatUiParts.build(content);
   }
 
   aboutToAppear(): void {
     this.visibleText = this.message.content;
     this.visibleReasoning = this.message.reasoning;
+    this.refreshUiParts();
     if (this.isStreaming && this.flushTimer === -1) {
       this.flushTimer = setInterval(() => {
         if (this.isStreaming) {
@@ -279,6 +304,8 @@ export struct ChatBubbleView {
           if (this.message.toolCalls.length > 0) {
             this.stepsTick++;
           }
+          // 交互界面块随流式文本渐进成形(未闭合时按中间态渲染并禁用交互)
+          this.refreshUiParts();
         }
       }, 33);
     }
@@ -413,6 +440,53 @@ export struct ChatBubbleView {
     .padding({ left: 18, right: 18, top: 4, bottom: 16 })
   }
 
+  // 消息内容渲染: 把消息体切成「Markdown 文本片段 + guncat-ui 交互界面块」。
+  // - 命中界面块(交互模式)时: 文本片段仍走 RichTextView, 界面块走 GuncatUiView 原生渲染,
+  //   整个气泡的底色由父级 ai_msg 提供, 界面卡片自身为白色 raised 卡;
+  // - 未命中时: 与旧实现完全一致(单个 RichTextView), 聊天/工作模式行为不变。
+  @Builder
+  buildAIContent() {
+    Column({ space: 8 }) {
+      ForEach(this.uiParts.segments, (seg: GuncatUiSeg, index: number) => {
+        if (seg.type === GuncatUiSegType.UI) {
+          if (seg.spec !== null) {
+            GuncatUiView({
+              spec: seg.spec as GuncatUiSpec,
+              complete: seg.complete,
+              locked: this.uiLocked,
+              onInteract: (payload: GuncatUiPayload): void => {
+                this.onUiInteract(this.message.id, payload);
+              }
+            })
+          } else {
+            // 尚未成形: 极简骨架, 避免整块空白闪烁
+            Column({ space: 8 }) {
+              Row()
+                .width('60%')
+                .height(12)
+                .borderRadius(6)
+                .backgroundColor($r('app.color.surface_secondary'))
+              Row()
+                .width('35%')
+                .height(12)
+                .borderRadius(6)
+                .backgroundColor($r('app.color.surface_secondary'))
+            }
+            .width('100%')
+            .padding(14)
+            .backgroundColor($r('app.color.surface'))
+            .borderRadius(18)
+            .alignItems(HorizontalAlign.Start)
+          }
+        } else if (seg.text.trim() !== '') {
+          RichTextView({ content: seg.text })
+        }
+      }, (seg: GuncatUiSeg, index: number) => 'seg' + index + '_' + (seg.type === GuncatUiSegType.UI ? 'ui' : 'tx'))
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
   @Builder
   buildAIMessage() {
     Row() {
@@ -438,14 +512,8 @@ export struct ChatBubbleView {
 
         // 气泡本体
         Column() {
-          // 消息内容
-          // 流式中与流式结束统一使用 RichTextView
-          // 库内置流式增量渲染 (3.3+ 优化表格/代码块/插件闪烁)
-          // visibleText 在 33ms 节流中持续更新, 同一组件实例贯穿整个生命周期,
-          // Controller / 主题色 / 滚动位置都不会因为 isStreaming 切换而丢失
-          RichTextView({
-            content: this.isStreaming ? this.visibleText : this.message.content
-          })
+          // 消息内容: 普通文本片段走 Markdown, guncat-ui 块走原生交互渲染
+          this.buildAIContent()
 
           // 流式光标
           if (this.isStreaming && this.message.content !== '') {

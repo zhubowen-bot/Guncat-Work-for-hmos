@@ -14,6 +14,7 @@ import { WorkspaceBar, WorkspaceFileIcons } from '../views/WorkspaceBar';
 import { WorkTurnView } from '../views/WorkTurnView';
 import { WorkArtifactsCard } from '../views/WorkArtifactsCard';
 import { WorkArtifactFile, WorkArtifactSummary, WorkArtifactUtil } from '../common/WorkArtifacts';
+import { GuncatUiPayload } from '../common/GuncatUiSpec';
 import { Message } from '../model/Message';
 import { Agent } from '../model/Agent';
 import { Conversation } from '../model/Conversation';
@@ -179,8 +180,8 @@ struct ChatPage {
       // 记录本次回调前的流式状态与产物数量, 用于判断“任务刚结束/产物卡刚出现”时需要置底
       const wasStreaming: boolean = this.lastStreamingState;
       const prevArtifacts: number = this.workArtifacts.length;
-      // 切到非工作模式的智能体/会话时收起工作区弹层
-      if (!this.vm.workMode && this.workspacePopupOpen) {
+      // 切到非 Agent Loop 模式的智能体/会话时收起工作区弹层
+      if (!this.vm.agentLoopMode && this.workspacePopupOpen) {
         this.workspacePopupOpen = false;
       }
       // 切换/新建会话时工作时间归零
@@ -219,7 +220,7 @@ struct ChatPage {
     });
     // 工作模式工作时间计时: 面板随开随关, 计时必须挂在常驻的 ChatPage 上才不中断
     this.workTickTimer = setInterval((): void => {
-      if (!this.vm.workMode) {
+      if (!this.vm.agentLoopMode) {
         return;
       }
       if (this.vm.currentConversationId !== this.lastWorkConvId) {
@@ -235,13 +236,13 @@ struct ChatPage {
       // 每 3 秒兜底刷新工作区文件列表: 流式期间始终刷新(工具结果已有即时刷新, 这里覆盖其余变化);
       // 非流式但工作区面板/弹层可见时也刷新, 覆盖定时任务等后台写入
       this.workTickCounter++;
-      if (this.vm.workMode && this.workTickCounter % 3 === 0 &&
+      if (this.vm.agentLoopMode && this.workTickCounter % 3 === 0 &&
         (this.vm.isStreaming || this.detailsOpen || this.workspacePopupOpen)) {
         this.vm.refreshWorkspace();
       }
       // 详情面板统计快照每秒重建: 顶层 @State 整体重赋值驱动统计区逐秒刷新
       // (任务用时逐秒走字, 流式速度/缓存命中随最新消息更新)
-      if (this.vm.workMode && this.detailsOpen) {
+      if (this.vm.agentLoopMode && this.detailsOpen) {
         this.rebuildWorkStats();
       }
     }, 1000);
@@ -456,8 +457,8 @@ struct ChatPage {
             // 工具开关行
             Row() {
               this.buildModelSelector()
-              if (this.vm.workMode) {
-                // 工作模式: 联网搜索摆在原深度思考的位置; 深度思考默认开启不再显示开关
+              if (this.vm.agentLoopMode) {
+                // Agent Loop 模式(工作/交互): 联网搜索摆在原深度思考的位置; 深度思考默认开启不再显示开关
                 ToggleSwitch({
                   isOn: this.vm.webSearchEnabled,
                   label: '联网搜索',
@@ -470,8 +471,8 @@ struct ChatPage {
                   .margin({ left: 10 })
                 ToggleSwitch({
                   isOn: true,
-                  label: '工作区',
-                  // 点击不再直接退出工作模式, 而是在胶囊上方弹出工作区面板(退出入口在面板里)
+                  label: this.vm.loopToolLabel,
+                  // 点击不再直接退出该模式, 而是在胶囊上方弹出面板(退出入口在面板里)
                   onChange: (_v: boolean) => {
                     this.workspacePopupOpen = !this.workspacePopupOpen;
                     if (this.workspacePopupOpen) {
@@ -528,8 +529,8 @@ struct ChatPage {
               isStreaming: this.vm.isStreaming,
               isParsing: this.vm.isParsing,
               isListening: this.isListening,
-              allowSteer: this.vm.workMode,
-              placeholder: this.vm.workMode ? '描述任务...' : '输入消息...',
+              allowSteer: this.vm.agentLoopMode,
+              placeholder: this.vm.agentLoopMode ? this.vm.loopInputPlaceholder : '输入消息...',
               onSend: (text: string) => {
                 this.handleSend(text);
               },
@@ -1157,8 +1158,8 @@ struct ChatPage {
         .fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.text_primary'))
         .margin({ bottom: 12 })
-      Text(this.vm.workMode ?
-        'Guncat Harness：自主调度数十种工具，直接读写工作区文件，单次任务可连续运行上百轮会话，独立完成编程级复杂度的长程任务。' :
+      Text(this.vm.agentLoopMode ?
+        this.vm.loopEmptyDescription :
         (this.vm.currentAgent !== null ? this.vm.currentAgent.description : '选择一个智能体开始对话'))
         .fontSize(14)
         .fontColor($r('app.color.text_secondary'))
@@ -1185,7 +1186,7 @@ struct ChatPage {
   buildMessageList() {
     Scroll(this.messageScroller) {
       Column() {
-        if (this.vm.workMode) {
+        if (this.vm.agentLoopMode) {
           this.buildWorkTimeline()
         } else {
           ForEach(this.vm.currentMessages, (msg: Message) => {
@@ -1194,7 +1195,7 @@ struct ChatPage {
               isStreaming: this.vm.isStreaming &&
                 msg === this.vm.currentMessages[this.vm.currentMessages.length - 1] &&
                 msg.role === 'assistant',
-              isWork: this.vm.workMode,
+              isWork: this.vm.agentLoopMode,
               isLastAssistant: this.vm.currentMessages.length > 0 &&
                 msg === this.vm.currentMessages[this.vm.currentMessages.length - 1] &&
                 msg.role === 'assistant',
@@ -1225,6 +1226,12 @@ struct ChatPage {
                 if (msg !== null) {
                   this.fillInputFromMessage(msg);
                 }
+              },
+              // 聊天模式兜底: 消息体若含 guncat-ui 块同样可交互
+              uiLocked: this.vm.isStreaming,
+              onUiInteract: (messageId: string, payload: GuncatUiPayload): void => {
+                this.vm.sendUiInteraction(messageId, payload);
+                this.refreshTick++;
               }
             })
           }, (msg: Message) => msg.id)
@@ -1283,11 +1290,11 @@ struct ChatPage {
           .fillColor($r('app.color.brand'))
 
         Column() {
-          Text('工作模式')
+          Text(this.vm.loopModeTitle)
             .fontSize(15)
             .fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.text_primary'))
-          Text(this.vm.isStreaming ? '任务执行中...' : 'Agent 就绪, 描述任务或上传文件')
+          Text(this.vm.loopModeHint)
             .fontSize(11)
             .fontColor($r('app.color.text_secondary'))
             .margin({ top: 2 })
@@ -1308,6 +1315,14 @@ struct ChatPage {
               msg === this.vm.currentMessages[this.vm.currentMessages.length - 1],
             isLastAssistant: msg === this.vm.currentMessages[this.vm.currentMessages.length - 1] &&
               msg.role === 'assistant',
+            // 交互模式: 仅最新一轮界面可交互, 历史界面块与执行中的界面置灰防重复提交
+            uiLocked: this.vm.interactiveMode &&
+              (msg.id !== this.vm.pendingUiMessageId || this.vm.isStreaming),
+            onUiInteract: (messageId: string, payload: GuncatUiPayload): void => {
+              this.vm.sendUiInteraction(messageId, payload);
+              this.refreshTick++;
+              this.scrollToBottomDelayed();
+            },
             onCopyPlain: (id: string) => {
               this.vm.copyMessagePlain(id);
               this.showToast('已复制');
@@ -1550,8 +1565,9 @@ struct ChatPage {
       .constraintSize({ maxHeight: 240 })
       .scrollBar(BarState.Off)
 
-      if (this.vm.workMode) {
-        // 推理强度区仅工作模式显示: 分隔横线 + 档位选择(聊天模式弹层保持只有模型列表)
+      if (this.vm.agentLoopMode) {
+        // Agent Loop 模式(工作/交互): 相关能力预设(推理强度)同样可用
+        // 推理强度区仅 Agent Loop 模式显示: 分隔横线 + 档位选择(聊天模式弹层保持只有模型列表)
         Divider()
           .strokeWidth(1)
           .color($r('app.color.divider'))
@@ -1696,8 +1712,8 @@ struct ChatPage {
   }
 
   private async handleFileUpload(): Promise<void> {
-    // 工作模式: 上传直接进入沙箱工作区, 不作为聊天附件
-    if (this.vm.workMode) {
+    // Agent Loop 模式(工作/交互): 上传直接进入沙箱工作区, 不作为聊天附件
+    if (this.vm.agentLoopMode) {
       await this.vm.uploadToWorkspace();
       this.refreshTick++;
       return;
@@ -1771,9 +1787,9 @@ struct ChatPage {
     this.workStats = s;
   }
 
-  // 重建工作模式产物汇总卡: 从消息工具调用中聚合改动文件, 并只保留工作区仍存在的文件
+  // 重建 Agent Loop 模式产物汇总卡: 从消息工具调用中聚合改动文件, 并只保留工作区仍存在的文件
   private rebuildWorkArtifacts(): void {
-    if (!this.vm.workMode) {
+    if (!this.vm.agentLoopMode) {
       this.workArtifacts = [];
       this.workArtifactAdds = 0;
       this.workArtifactDels = 0;

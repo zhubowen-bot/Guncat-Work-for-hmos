@@ -202,6 +202,11 @@ export struct DswSidebar {
           .width(22)
           .height(22)
           .fillColor($r('app.color.brand'))
+      } else if (agent.id === 'interactive') {
+        Image($r('app.media.ic_interactive'))
+          .width(22)
+          .height(22)
+          .fillColor($r('app.color.brand'))
       } else {
         Image(agent.icon !== '' ? $rawfile(agent.icon) : $r('app.media.cat_avatar'))
           .width(22)
@@ -279,7 +284,7 @@ export struct DswSidebar {
   private workAgents(): Agent[] {
     let list: Agent[] = [];
     for (let i: number = 0; i < this.agents.length; i++) {
-      if (this.agents[i].id === 'work') {
+      if (this.agents[i].id === 'work' || this.agents[i].id === 'interactive') {
         list.push(this.agents[i]);
       }
     }
@@ -289,7 +294,7 @@ export struct DswSidebar {
   private chatAgents(): Agent[] {
     let list: Agent[] = [];
     for (let i: number = 0; i < this.agents.length; i++) {
-      if (this.agents[i].id !== 'work') {
+      if (this.agents[i].id !== 'work' && this.agents[i].id !== 'interactive') {
         list.push(this.agents[i]);
       }
     }

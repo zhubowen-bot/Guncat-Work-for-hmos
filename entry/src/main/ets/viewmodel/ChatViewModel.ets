@@ -43,6 +43,7 @@ import { StorageManager } from '../data/StorageManager';
 import { Constants } from '../common/Constants';
 import { generateMessageId } from '../common/Utils';
 import { arrayBufferToBase64 } from '../common/Utils';
+import { GuncatUiPayload, GuncatUiMessageBuilder } from '../common/GuncatUiSpec';
 import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { common, Want, wantConstant } from '@kit.AbilityKit';
@@ -173,7 +174,48 @@ export class ChatViewModel {
   // 当前会话是否工作模式(由会话自身 mode 决定, 切换会话自动跟随)
   get workMode(): boolean {
     let conv: Conversation | null = this.currentConversation;
-    return conv !== null && conv.mode === 'work';
+    return conv !== null && conv.mode === Constants.MODE_WORK;
+  }
+
+  // 当前会话是否交互模式(Intelligent UI); 与工作模式共用 Agent Loop, 仅提示词与渲染不同
+  get interactiveMode(): boolean {
+    let conv: Conversation | null = this.currentConversation;
+    return conv !== null && conv.mode === Constants.MODE_INTERACTIVE;
+  }
+
+  // 当前会话是否走 Agent Loop(工作模式或交互模式)
+  get agentLoopMode(): boolean {
+    let conv: Conversation | null = this.currentConversation;
+    return conv !== null &&
+      (conv.mode === Constants.MODE_WORK || conv.mode === Constants.MODE_INTERACTIVE);
+  }
+
+  // Agent Loop 模式的界面标识与文案(工作模式 / 交互模式共用时间线布局)
+  get loopModeTitle(): string {
+    return this.interactiveMode ? '交互模式' : '工作模式';
+  }
+
+  // 输入框占位与工具行文案
+  get loopToolLabel(): string {
+    return this.interactiveMode ? '交互界面' : '工作区';
+  }
+
+  get loopModeHint(): string {
+    if (this.interactiveMode) {
+      return this.isStreaming ? '正在生成交互界面…' : 'Intelligent UI 就绪, 说出你的问题或上传数据';
+    }
+    return this.isStreaming ? '任务执行中...' : 'Agent 就绪, 描述任务或上传文件';
+  }
+
+  get loopInputPlaceholder(): string {
+    return this.interactiveMode ? '描述你想看到/操作的界面…' : '描述任务...';
+  }
+
+  get loopEmptyDescription(): string {
+    if (this.interactiveMode) {
+      return 'Intelligent UI：回答不是一段文字，而是可以拖参数、点选项、看图表更新的交互界面——调一下，它重算给你看。';
+    }
+    return 'Guncat Harness：自主调度数十种工具，直接读写工作区文件，单次任务可连续运行上百轮会话，独立完成编程级复杂度的长程任务。';
   }
 
   async init(): Promise<void> {
@@ -225,9 +267,12 @@ export class ChatViewModel {
     // 热加载 rawfile/plugins 插件(注册进 ToolRegistry, 工作模式动态目录自动包含)
     await PluginHotLoader.loadAll(this.context);
     this.agents.unshift(this.buildWorkAgent());
-    // 记录第一个真实智能体(退出工作模式时回切)
+    // 交互模式(Intelligent UI)与工作模式平行, 固定排在「Agent模式」分组第二位
+    this.agents.splice(1, 0, this.buildInteractiveAgent());
+    // 记录第一个真实智能体(退出工作/交互模式时回切)
     for (let i: number = 0; i < this.agents.length; i++) {
-      if (this.agents[i].id !== Constants.WORK_AGENT_ID) {
+      if (this.agents[i].id !== Constants.WORK_AGENT_ID &&
+        this.agents[i].id !== Constants.INTERACTIVE_AGENT_ID) {
         this.lastChatAgentId = this.agents[i].id;
         break;
       }
@@ -236,17 +281,23 @@ export class ChatViewModel {
     // 加载对话(旧数据迁移: 工作会话统一挂到 work 虚拟智能体下)
     this.conversations = await StorageManager.loadConversations(this.context);
     for (let i: number = 0; i < this.conversations.length; i++) {
-      if (this.conversations[i].mode === 'work' &&
+      if (this.conversations[i].mode === Constants.MODE_WORK &&
         this.conversations[i].agentId !== Constants.WORK_AGENT_ID) {
         this.conversations[i].agentId = Constants.WORK_AGENT_ID;
       }
+      // 交互模式会话同理(agentId 固定为 interactive; 早期数据可能缺失)
+      if (this.conversations[i].mode === Constants.MODE_INTERACTIVE &&
+        this.conversations[i].agentId !== Constants.INTERACTIVE_AGENT_ID) {
+        this.conversations[i].agentId = Constants.INTERACTIVE_AGENT_ID;
+      }
     }
 
-    // 恢复当前智能体(默认取第一个真实智能体, 跳过 work 虚拟项)
+    // 恢复当前智能体(默认取第一个真实智能体, 跳过 work/interactive 虚拟项)
     let agentId: string = await StorageManager.loadString(this.context, Constants.LS_KEY_CURRENT_AGENT_ID, '');
     let firstAgent: Agent | null = null;
     for (let i: number = 0; i < this.agents.length; i++) {
-      if (this.agents[i].id !== Constants.WORK_AGENT_ID) {
+      if (this.agents[i].id !== Constants.WORK_AGENT_ID &&
+        this.agents[i].id !== Constants.INTERACTIVE_AGENT_ID) {
         firstAgent = this.agents[i];
         break;
       }
@@ -293,7 +344,7 @@ export class ChatViewModel {
     return latest;
   }
 
-  // 切换智能体('work' 即工作模式虚拟智能体)
+  // 切换智能体('work' / 'interactive' 即工作模式 / 交互模式虚拟智能体)
   async selectAgent(agentId: string): Promise<void> {
     let target: Agent | null = null;
     for (let i: number = 0; i < this.agents.length; i++) {
@@ -306,7 +357,7 @@ export class ChatViewModel {
       return;
     }
     this.currentAgent = target;
-    if (agentId !== Constants.WORK_AGENT_ID) {
+    if (agentId !== Constants.WORK_AGENT_ID && agentId !== Constants.INTERACTIVE_AGENT_ID) {
       this.lastChatAgentId = agentId;
     }
     if (this.context !== null) {
@@ -355,8 +406,8 @@ export class ChatViewModel {
     if (conv.messages.length === 0) {
       await this.applyAgentThinkingDefault();
     }
-    // 工作会话: 深度思考保持开启并刷新工作区文件列表
-    if (conv.mode === 'work') {
+    // Agent Loop 会话(工作/交互模式): 深度思考保持开启并刷新工作区文件列表
+    if (conv.mode === Constants.MODE_WORK || conv.mode === Constants.MODE_INTERACTIVE) {
       if (!this.thinkingEnabled) {
         await this.setThinkingEnabled(true);
       }
@@ -367,14 +418,19 @@ export class ChatViewModel {
     }
   }
 
-  // 新建对话(模式由当前智能体决定: work 虚拟智能体 → 工作模式, 其他 → 聊天模式)
+  // 新建对话(模式由当前智能体决定: work → 工作模式, interactive → 交互模式, 其他 → 聊天模式)
   async startNewConversation(): Promise<void> {
     // 清空空对话
     await this.cleanupEmptyConversation();
     if (this.currentAgent === null) {
       return;
     }
-    let mode: string = this.currentAgent.id === Constants.WORK_AGENT_ID ? 'work' : 'chat';
+    let mode: string = Constants.MODE_CHAT;
+    if (this.currentAgent.id === Constants.WORK_AGENT_ID) {
+      mode = Constants.MODE_WORK;
+    } else if (this.currentAgent.id === Constants.INTERACTIVE_AGENT_ID) {
+      mode = Constants.MODE_INTERACTIVE;
+    }
     let conv: Conversation = Conversation.create(this.currentAgent.id, '', mode);
     this.conversations.unshift(conv);
     this.currentConversationId = conv.id;
@@ -382,9 +438,9 @@ export class ChatViewModel {
       await StorageManager.saveString(this.context, Constants.LS_KEY_CURRENT_CONV_ID, conv.id);
     }
     this.persistConversations();
-    if (mode === 'work') {
+    if (mode === Constants.MODE_WORK || mode === Constants.MODE_INTERACTIVE) {
       this.workspaceJustAdded = [];
-      // 工作模式默认强制开启深度思考(工具行不再显示该开关)
+      // Agent Loop 模式默认强制开启深度思考(工具行不再显示该开关)
       await this.setThinkingEnabled(true);
       await this.refreshWorkspace();
     } else {
@@ -408,9 +464,11 @@ export class ChatViewModel {
 
   // 删除对话
   async deleteConversation(convId: string): Promise<void> {
-    // 工作会话删除时同步清理沙箱工作区与会话事件日志, 避免孤儿数据堆积
+    // Agent Loop 会话(工作/交互模式)删除时同步清理沙箱工作区与会话事件日志, 避免孤儿数据堆积
     for (let i: number = 0; i < this.conversations.length; i++) {
-      if (this.conversations[i].id === convId && this.conversations[i].mode === 'work' && this.context !== null) {
+      if (this.conversations[i].id === convId &&
+        (this.conversations[i].mode === Constants.MODE_WORK ||
+          this.conversations[i].mode === Constants.MODE_INTERACTIVE) && this.context !== null) {
         WorkFileService.deleteWorkspace(this.context, convId);
         SessionLogService.close(this.context, convId, true);
         break;
@@ -424,7 +482,12 @@ export class ChatViewModel {
       } else {
         // 创建新对话(模式跟随当前智能体)
         if (this.currentAgent !== null) {
-          let newMode: string = this.currentAgent.id === Constants.WORK_AGENT_ID ? 'work' : 'chat';
+          let newMode: string = Constants.MODE_CHAT;
+          if (this.currentAgent.id === Constants.WORK_AGENT_ID) {
+            newMode = Constants.MODE_WORK;
+          } else if (this.currentAgent.id === Constants.INTERACTIVE_AGENT_ID) {
+            newMode = Constants.MODE_INTERACTIVE;
+          }
           let conv: Conversation = Conversation.create(this.currentAgent.id, '', newMode);
           this.conversations.unshift(conv);
           this.currentConversationId = conv.id;
@@ -512,6 +575,32 @@ export class ChatViewModel {
     return agent;
   }
 
+  // 交互模式虚拟智能体(Intelligent UI): 与工作模式共用 Agent Loop, 但回答交付为可交互界面
+  private buildInteractiveAgent(): Agent {
+    let agent: Agent = Agent.of(Constants.INTERACTIVE_AGENT_ID, '交互模式',
+      'Intelligent UI 交互台: 回答不是纯文本, 而是图表 / 表单 / 表格等可操作界面, 调参即重算', '系统', '', '');
+    agent.shortDescription = 'Intelligent UI「新」';
+    agent.icon = '';
+    return agent;
+  }
+
+  // 进入/退出交互模式: 即切换到/切离 interactive 虚拟智能体
+  async setInteractiveMode(enabled: boolean): Promise<void> {
+    if (enabled === this.interactiveMode) {
+      return;
+    }
+    if (this.isStreaming || this.isParsing) {
+      promptAction.showToast({ message: '请等待当前任务完成后再切换模式', duration: 2000 });
+      return;
+    }
+    let targetId: string = enabled ? Constants.INTERACTIVE_AGENT_ID : this.lastChatAgentId;
+    if (targetId === '') {
+      return;
+    }
+    await this.selectAgent(targetId);
+    this.notifyUIChange();
+  }
+
   // 进入/退出工作模式: 即切换到/切离 work 虚拟智能体
   async setWorkMode(enabled: boolean): Promise<void> {
     if (enabled === this.workMode) {
@@ -529,13 +618,14 @@ export class ChatViewModel {
     this.notifyUIChange();
   }
 
-  // 刷新当前工作会话的文件列表(非工作会话为空)
+  // 刷新当前 Agent Loop 会话(工作/交互模式)的文件列表(其他会话为空)
   async refreshWorkspace(): Promise<void> {
     if (this.context === null) {
       return;
     }
     let conv: Conversation | null = this.currentConversation;
-    if (conv === null || conv.mode !== 'work') {
+    if (conv === null ||
+      (conv.mode !== Constants.MODE_WORK && conv.mode !== Constants.MODE_INTERACTIVE)) {
       return;
     }
     this.workspaceLoading = true;
@@ -1199,13 +1289,65 @@ export class ChatViewModel {
     });
   }
 
+  // ===== 交互模式 (Intelligent UI): 界面回传 =====
+  // 用户在交互界面上的操作(表单提交 / 选项点击)转化为一条 user 消息:
+  // - 循环空闲: 立即触发下一轮 Agent Loop(模型据新参数重出界面, 形成闭环);
+  // - 循环进行中: 走插话通道, 由主循环在本轮工具执行结束后注入(对齐 steer 语义)。
+  sendUiInteraction(messageId: string, payload: GuncatUiPayload): void {
+    let conv: Conversation | null = this.currentConversation;
+    if (conv === null || conv.mode !== Constants.MODE_INTERACTIVE) {
+      return;
+    }
+    // 只允许与最后一条 assistant 消息上的界面交互(历史界面块视为已归档)
+    let lastAssistantId: string = '';
+    for (let i: number = conv.messages.length - 1; i >= 0; i--) {
+      if (conv.messages[i].role === 'assistant') {
+        lastAssistantId = conv.messages[i].id;
+        break;
+      }
+    }
+    if (lastAssistantId === '' || lastAssistantId !== messageId) {
+      promptAction.showToast({ message: '该界面已归档，请在最新界面中操作', duration: 2000 });
+      return;
+    }
+    let text: string = GuncatUiMessageBuilder.toUserText(payload);
+    if (text.trim() === '') {
+      return;
+    }
+    let userMsg: Message = Message.ofUser(generateMessageId(), text, text, []);
+    conv.messages.push(userMsg);
+    this.persistConversations();
+    this.notifyUIChange();
+    if (this.isStreaming) {
+      this.workSteerQueue.push(text);
+      return;
+    }
+    this.executeWorkLoop(conv);
+  }
+
+  // 当前是否有可交互的界面(最后一条 assistant 消息含 guncat-ui 块), 供 UI 判定置灰
+  get pendingUiMessageId(): string {
+    let conv: Conversation | null = this.currentConversation;
+    if (conv === null || conv.mode !== Constants.MODE_INTERACTIVE) {
+      return '';
+    }
+    for (let i: number = conv.messages.length - 1; i >= 0; i--) {
+      let m: Message = conv.messages[i];
+      if (m.role === 'assistant') {
+        return m.content.indexOf('```' + Constants.UI_BLOCK_LANG) >= 0 ? m.id : '';
+      }
+    }
+    return '';
+  }
+
   // ===== Guncat Work 6.1: steering / ask_user / schedule / title =====
 
   // 任务执行中的用户插话(对齐 dsh 的 steer): 消息进会话历史与插话队列,
   // 本轮工具执行结束后作为"用户补充"注入下一步请求
   private steerWork(text: string): void {
     let conv: Conversation | null = this.currentConversation;
-    if (conv === null || conv.mode !== 'work') {
+    if (conv === null ||
+      (conv.mode !== Constants.MODE_WORK && conv.mode !== Constants.MODE_INTERACTIVE)) {
       return;
     }
     let msg: Message = Message.ofUser(generateMessageId(), text, text, []);
@@ -1251,7 +1393,8 @@ export class ChatViewModel {
       return;
     }
     let conv: Conversation | null = this.currentConversation;
-    if (conv === null || conv.mode !== 'work') {
+    if (conv === null ||
+      (conv.mode !== Constants.MODE_WORK && conv.mode !== Constants.MODE_INTERACTIVE)) {
       return;
     }
     let curConv: Conversation = conv;
@@ -1331,8 +1474,8 @@ export class ChatViewModel {
     // 闭包内不继承可空变量的收窄, 先落成非空局部量
     let conv: Conversation = convOpt;
 
-    // ===== 工作模式: Agent Loop 任务 =====
-    if (conv.mode === 'work') {
+    // ===== Agent Loop 模式(工作模式 / 交互模式): 走同一个循环, 系统提示词按会话模式选择 =====
+    if (conv.mode === Constants.MODE_WORK || conv.mode === Constants.MODE_INTERACTIVE) {
       let workFullText: string = userText;
       if (this.workspaceJustAdded.length > 0) {
         let note: string = '【已上传到工作区的文件】' + this.workspaceJustAdded.join(', ');
@@ -1439,7 +1582,7 @@ export class ChatViewModel {
     try {
       // 组装与协议无关的循环历史(含既有全部消息); 系统提示词为静态文本, 整个循环不重写
       let messages: LoopMessage[] = [];
-      messages.push(LoopMessage.system(AgentLoopService.buildWorkSystemPrompt()));
+      messages.push(LoopMessage.system(AgentLoopService.buildWorkSystemPromptFor(conv.mode)));
       for (let i: number = 0; i < conv.messages.length; i++) {
         let m: Message = conv.messages[i];
         if (m.role === 'user' && m.content !== '') {
@@ -1502,7 +1645,7 @@ export class ChatViewModel {
         // 上下文预算管理(缓存感知): 超预算先无模型剪枝, 再前缀复用式压缩, 最后整条裁剪。
         // assistant 与其工具结果在同一条消息内, 压缩/裁剪都不会拆散协议对;
         // 任务清单与工作区文件不参与压缩, 始终可由模型 read_file 找回。
-        let compactNote: string = await this.compactWorkHistoryIfNeeded(messages, false);
+        let compactNote: string = await this.compactWorkHistoryIfNeeded(messages, false, conv.mode);
         if (compactNote !== '') {
           metrics.recordCompaction();
         }
@@ -1557,7 +1700,7 @@ export class ChatViewModel {
         // 记录请求字符量, 与 usage 的真实 prompt tokens 配对, 推导本会话字符→token 比例
         let requestChars: number = loopMsgChars(messages);
         let turn: LoopTurnResult = await this.runStepWithOverflowRetry(
-          messages, turnMsg, compactNote, callbacks, ctx, conv.id, (): void => {
+          messages, turnMsg, compactNote, callbacks, ctx, conv.id, conv.mode, (): void => {
             // 上下文超限强制压缩后重试: 清掉上一次尝试已流出的部分工具行
             metrics.recordCompaction();
             turnMsg.toolCalls = [];
@@ -1909,7 +2052,7 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
     try {
       // 组装与协议无关的循环历史(含既有全部消息); 系统提示词为静态文本, 整个循环不重写
       let messages: LoopMessage[] = [];
-      messages.push(LoopMessage.system(AgentLoopService.buildWorkSystemPrompt()));
+      messages.push(LoopMessage.system(AgentLoopService.buildWorkSystemPromptFor(conv.mode)));
       for (let i: number = 0; i < conv.messages.length; i++) {
         let m: Message = conv.messages[i];
         if (m.role === 'user' && m.content !== '') {
@@ -2074,7 +2217,7 @@ if (this.abortSignal.aborted) {
         // 上下文预算管理(缓存感知): 超预算先无模型剪枝, 再前缀复用式压缩, 最后整条裁剪。
         // assistant 与其工具结果在同一条消息内, 压缩/裁剪都不会拆散协议对;
         // 任务清单与工作区文件不参与压缩, 始终可由模型 read_file 找回。
-        let compactNote: string = await this.compactWorkHistoryIfNeeded(messages, false);
+        let compactNote: string = await this.compactWorkHistoryIfNeeded(messages, false, conv.mode);
         if (compactNote !== '') {
           metrics.recordCompaction();
         }
@@ -2129,7 +2272,7 @@ if (this.abortSignal.aborted) {
         // 记录请求字符量, 与 usage 的真实 prompt tokens 配对, 推导本会话字符→token 比例
         let requestChars: number = loopMsgChars(messages);
         let turn: LoopTurnResult = await this.runStepWithOverflowRetry(
-          messages, turnMsg, compactNote, callbacks, ctx, conv.id, (): void => {
+          messages, turnMsg, compactNote, callbacks, ctx, conv.id, conv.mode, (): void => {
             // 上下文超限强制压缩后重试: 清掉上一次尝试已流出的部分工具行
             metrics.recordCompaction();
             turnMsg.toolCalls = [];
@@ -2397,9 +2540,11 @@ if (this.abortSignal.aborted) {
         }
         return info;
 
-  }  private async runStepWithOverflowRetry(messages: LoopMessage[], turnMsg: Message,
+  }
+
+  private async runStepWithOverflowRetry(messages: LoopMessage[], turnMsg: Message,
     compactNote: string, callbacks: LoopTurnCallbacks,
-    ctx: common.UIAbilityContext, convId: string,
+    ctx: common.UIAbilityContext, convId: string, loopMode: string,
     onForcedRetry: () => void): Promise<LoopTurnResult> {
     try {
       return await AgentLoopService.runTurnWithRetry(
@@ -2409,7 +2554,7 @@ if (this.abortSignal.aborted) {
       let err: Error = e as Error;
       if (LoopDecisions.shouldForceCompactOnOverflow(this.abortSignal.aborted,
         err instanceof LoopError && (err as LoopError).isContextOverflow(), false)) {
-        let forcedNote: string = await this.compactWorkHistoryIfNeeded(messages, true);
+        let forcedNote: string = await this.compactWorkHistoryIfNeeded(messages, true, loopMode);
         if (forcedNote !== '') {
           turnMsg.content = forcedNote;
           onForcedRetry();
@@ -2471,7 +2616,8 @@ if (this.abortSignal.aborted) {
     }
   }
 
-  private async compactWorkHistoryIfNeeded(messages: LoopMessage[], force: boolean): Promise<string> {
+  private async compactWorkHistoryIfNeeded(messages: LoopMessage[], force: boolean,
+    loopMode: string = Constants.MODE_WORK): Promise<string> {
     if (!force && !this.workHistoryOverBudget(messages)) {
       return '';
     }
@@ -2502,7 +2648,7 @@ if (this.abortSignal.aborted) {
           summary = summary.substring(0, Constants.WORK_SUMMARY_MAX_CHARS) + '…';
         }
         let kept: LoopMessage[] = messages.slice(oldEnd);
-        let rebuilt: LoopMessage[] = [LoopMessage.system(AgentLoopService.buildWorkSystemPrompt()),
+        let rebuilt: LoopMessage[] = [LoopMessage.system(AgentLoopService.buildWorkSystemPromptFor(loopMode)),
           LoopMessage.user('【上下文压缩】以下为此前 ' + (oldEnd - 1).toString() +
             ' 条执行历史的状态摘要, 请基于它继续任务:\n' + summary)];
         for (let k: number = 0; k < kept.length; k++) {
