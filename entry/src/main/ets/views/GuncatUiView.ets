@@ -263,9 +263,8 @@ export struct GuncatUiView {
   // 兜底文案: 说明为什么这里没有正常界面
   private fallbackText(): string {
     if (this.truncated) {
-      return '这段界面输出没有写完（模型输出被截断或中断），已按已生成的部分展示。发一句"继续"或让它重新生成即可。';
-    }
-    if (this.complete) {
+      return '这段界面内容不完整（模型输出被截断或未按格式写完），已展示能解析出的部分。发一句"重新生成界面"即可。';
+    }    if (this.complete) {
       let chars: number = this.rawFallback.trim().length;
       let detail: string = chars > 0 ? '（模型在这段里只写了 ' + chars.toString() + ' 个字符）' : '';
       return '这段界面内容不完整，无法渲染成可交互组件' + detail +

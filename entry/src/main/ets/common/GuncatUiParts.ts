@@ -71,10 +71,19 @@ export class GuncatUiParts {
           parts.segments.push(uiSeg);
           parts.hasUi = true;
         } else {
-          // 闭合但非法: 原文交还 Markdown(含围栏标记), 让用户看到真实输出
-          let rawSeg: GuncatUiSeg = new GuncatUiSeg();
-          rawSeg.text = GuncatUiBlocks.renderRaw(f.text);
-          parts.segments.push(rawSeg);
+          // 闭合但解析失败: 做一次"结构化救助"(逐字段回退 → 控件/标题级救助)。
+          // **guncat-ui 块永不退回普通代码块**(那等于把一条长 JSON 贴在聊天里, 又被截断又难读):
+          // 救出内容就正常渲染, 救不出也渲染成"无内容 + 原始输出"的卡片。
+          let salvaged: GuncatUiParseResult = GuncatUiBlocks.salvageBlockBody(f.text);
+          let rescuedSeg: GuncatUiSeg = new GuncatUiSeg();
+          rescuedSeg.type = GuncatUiSegType.UI;
+          rescuedSeg.complete = true;
+          rescuedSeg.truncated = true;
+          rescuedSeg.spec = salvaged.spec;
+          rescuedSeg.raw = f.text;
+          rescuedSeg.error = salvaged.error;
+          parts.segments.push(rescuedSeg);
+          parts.hasUi = true;
         }
       } else {
         // 未闭合: 渐进渲染, 禁用交互。finalized 表示本轮产出已结束(输出被截断/中断),

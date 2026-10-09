@@ -195,6 +195,8 @@ export class GuncatUiSpec {
   subtitle: string = '';
   controls: GuncatUiInput[] = [];
   elements: GuncatUiElement[] = [];
+  // 本次结果是否为"救助/降级"产物(解析失败后逐字段回退得到): 渲染层据此提示"内容不完整"
+  salvaged: boolean = false;
 
   findControl(name: string): GuncatUiInput | null {
     for (let i: number = 0; i < this.controls.length; i++) {
@@ -963,17 +965,25 @@ export class GuncatUiSpecParser {
     if (json.length < 2) {
       return base;
     }
+    // 1) 结构化回退(最优先): 按 JSON 语法逐字段往回退。
+    //    真机事故: 紧凑单行 JSON 被砍在键名中间("subtitl), 百分比砍尾永远砍不出合法片段,
+    //    于是整块解析失败 → 卡片退回普通代码块。这里按"引号/括号平衡"的边界逐级回退,
+    //    一定能在某个完整字段处收口(最差也能保住 title)。
+    let structural: GuncatUiParseResult = GuncatUiSpecParser.backtrackSalvage(json);
+    if (structural.spec !== null && structural.spec.elements.length > 0) {
+      return structural;
+    }
     let cuts: number[] = [];
-    // 1) 砍掉最后一个不完整的行(流式最常见的截断点)
+    // 2) 砍掉最后一个不完整的行(流式最常见的截断点)
     let lastNl: number = json.lastIndexOf('\n');
     if (lastNl > 0) {
       cuts.push(lastNl);
     }
-    // 2) 尾部 5% / 15% / 30%(数字写成 "123.45" 或长字符串被截断的情形)
+    // 3) 尾部 5% / 15% / 30%(数字写成 "123.45" 或长字符串被截断的情形)
     cuts.push(json.length - Math.max(1, Math.floor(json.length * 0.05)));
     cuts.push(json.length - Math.max(1, Math.floor(json.length * 0.15)));
     cuts.push(json.length - Math.max(1, Math.floor(json.length * 0.30)));
-    // 3) 二分兜底
+    // 4) 二分兜底
     cuts.push(Math.floor(json.length / 2));
     for (let i: number = 0; i < cuts.length; i++) {
       let cut: number = cuts[i];
@@ -996,6 +1006,95 @@ export class GuncatUiSpecParser {
       }
     }
     return base;
+  }
+
+  // 结构化回退: 从尾部逐个扫描「字段分隔边界」, 每个边界都尝试"截断 + 补括号"解析。
+  // 边界取: 根对象顶层逗号之后、以及对象/数组的 } ] 之后 —— 这两处截断天然是完整字段边界。
+  // 单行 JSON 被砍在字符串/键名中间时, 只有这种回退才能救出已写完的字段。
+  private static backtrackSalvage(json: string): GuncatUiParseResult {
+    let base: GuncatUiParseResult = new GuncatUiParseResult();
+    base.error = '尚未成形';
+    let text: string = sanitizeJsonText(json);
+    // 收集候选截断点(从后往前), 上限 60 个防止退化扫描过慢
+    let boundaries: number[] = [];
+    let depth: number = 0;
+    let inString: boolean = false;
+    let escaped: boolean = false;
+    for (let i: number = 0; i < text.length; i++) {
+      let ch: string = text.charAt(i);
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch === '\\') {
+          escaped = true;
+        } else if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (ch === '"') {
+        inString = true;
+      } else if (ch === '{' || ch === '[') {
+        depth++;
+      } else if (ch === '}' || ch === ']') {
+        depth--;
+        if (depth >= 1) {
+          boundaries.push(i + 1);
+        }
+      } else if (ch === ',' && depth === 1) {
+        boundaries.push(i);
+      }
+    }
+    if (boundaries.length === 0) {
+      return base;
+    }
+    let tried: number = 0;
+    for (let k: number = boundaries.length - 1; k >= 0 && tried < 60; k--) {
+      // 与同层重复边界去重
+      if (k < boundaries.length - 1 && boundaries[k] === boundaries[k + 1]) {
+        continue;
+      }
+      tried++;
+      let cut: number = boundaries[k];
+      if (cut <= 1 || cut >= text.length) {
+        continue;
+      }
+      let repaired: string = GuncatUiSpecParser.repairOpenJson(text.substring(0, cut));
+      try {
+        let r: GuncatUiParseResult = GuncatUiSpecParser.parse(repaired);
+        if (r.spec !== null && r.spec.elements.length > 0) {
+          return r;
+        }
+      } catch (e) {
+        // 该边界仍不可解析: 继续往前退
+      }
+    }
+    return base;
+  }
+
+  // 块已闭合但解析失败时的结构化救助(逐字段回退 / 文本级救助)。
+  // **永不返回 null**: 最差也交出一份空文档, 让渲染层用卡片展示「原始输出」——
+  // guncat-ui 块绝不允许退回普通代码块显示(那等于把一条长 JSON 贴在聊天里, 又截断又难读)。
+  static salvageBlockBody(body: string): GuncatUiParseResult {
+    let salvaged: GuncatUiParseResult = GuncatUiSpecParser.salvageTruncated(body);
+    if (salvaged.spec !== null && salvaged.spec.elements.length > 0) {
+      salvaged.spec.salvaged = true;
+      return salvaged;
+    }
+    let rescued: GuncatUiParseResult = GuncatUiSpecParser.rescue(body);
+    if (rescued.spec !== null && rescued.spec.elements.length > 0) {
+      rescued.spec.salvaged = true;
+      return rescued;
+    }
+    // 连元素都没有: 交出一份"带能取到的标题"的空文档, 由渲染层显示「无内容」+ 原始输出
+    let spec: GuncatUiSpec = new GuncatUiSpec();
+    spec.title = GuncatUiSpecParser.looseTitle(body);
+    spec.subtitle = GuncatUiSpecParser.looseSubtitle(body);
+    spec.salvaged = true;
+    let out: GuncatUiParseResult = new GuncatUiParseResult();
+    out.spec = spec;
+    out.error = '内容不完整';
+    return out;
   }
 
   // 文本级救助: 结构已经完全不可解析时(输出在 controls/开头就被截断),
@@ -1389,6 +1488,11 @@ export class GuncatUiBlocks {
     }
   }
 
+  // 块已闭合但解析失败时的结构化救助(逐字段回退 / 文本级救助); 永不返回 null
+  static salvageBlockBody(body: string): GuncatUiParseResult {
+    return GuncatUiSpecParser.salvageBlockBody(body);
+  }
+
   // 还原一个块的原始 Markdown 文本(解析失败时交还 Markdown 库渲染)
   static renderRaw(body: string): string {
     return GuncatUiBlocks.OPEN + '\n' + body + '\n' + GuncatUiBlocks.FENCE;
@@ -1415,9 +1519,15 @@ export class GuncatUiBlocks {
       }
       let r: GuncatUiParseResult = GuncatUiBlocks.parseComplete(f.text);
       let count: number = r.spec !== null ? r.spec.elements.length : 0;
-      if (count < minElements) {
-        return true;
+      if (count >= minElements) {
+        continue;
       }
+      // 解析失败时看结构化救助结果: 救出了元素 → 渲染层已能展示, 不必重做
+      let salvaged2: GuncatUiParseResult = GuncatUiBlocks.salvageBlockBody(f.text);
+      if (salvaged2.spec !== null && salvaged2.spec.elements.length > 0) {
+        continue;
+      }
+      return true;
     }
     return false;
   }

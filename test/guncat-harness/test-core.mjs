@@ -1299,10 +1299,10 @@ console.log('[GuncatUiSpec]');
     parts.segments[1].type === GuncatUiSegType.UI && parts.segments[2].type === GuncatUiSegType.TEXT);
   check('界面片段携带 spec', parts.segments[1].spec !== null && parts.segments[1].complete === true);
   const badParts = GuncatUiParts.build('```guncat-ui\n{oops}\n```');
-  // 非法块不渲染为界面, 但原文(含围栏)必须保留给 Markdown 库, 避免内容"凭空消失"
-  check('非法块保留原文渲染', badParts.hasUi === false &&
-    badParts.segments.length === 1 && badParts.segments[0].text.indexOf('{oops}') >= 0 &&
-    badParts.segments[0].text.indexOf('```guncat-ui') >= 0);
+  // 非法块也渲染成卡片(带原始输出), 不再交给 Markdown 变成代码块
+  check('非法块走卡片而非代码块', badParts.segments.length === 1 &&
+    badParts.segments[0].type === GuncatUiSegType.UI &&
+    badParts.segments[0].raw.indexOf('{oops}') >= 0);
   const plainParts = GuncatUiParts.build('普通回答, 无界面块');
   check('无界面块时单文本片段', plainParts.segments.length === 1 && plainParts.hasUi === false);
 
@@ -1333,12 +1333,15 @@ console.log('[GuncatUiSpec]');
   const fenceFrags = GuncatUiBlocks.split('a\n```guncat-ui\n' + fenceBody + '\n```\nb');
   check('内嵌围栏不截断 JSON', fenceFrags.length === 3 && fenceFrags[1].complete === true &&
     fenceFrags[1].text.trim() === fenceBody && fenceFrags[2].text.indexOf('b') >= 0);
-  // 解析失败的块: 整块原文必须交还 Markdown 渲染(用户看得到真实输出), 且不产生界面片段
+  // 解析失败的块: **不再退回普通代码块** —— guncat-ui 块永远渲染成卡片
+  // (退回代码块等于把一条长 JSON 贴在聊天里, 又被截断又难读; 真机事故: 完整 JSON 也这样显示了)
   const badSeg = GuncatUiParts.build('```guncat-ui\n{ 完全不是 JSON }\n```');
-  check('解析失败退回原文且不产生界面片段', badSeg.hasUi === false &&
-    badSeg.segments.length === 1 && badSeg.segments[0].type === GuncatUiSegType.TEXT &&
-    badSeg.segments[0].text.indexOf('完全不是 JSON') >= 0 &&
-    badSeg.segments[0].text.indexOf('```guncat-ui') >= 0);
+  const badUi = badSeg.segments.find((s) => s.type === GuncatUiSegType.UI);
+  check('解析失败的块仍渲染成卡片(不退回代码块)', badSeg.hasUi === true &&
+    badUi !== undefined && badUi.spec !== null && badUi.raw.indexOf('完全不是 JSON') >= 0 &&
+    badUi.truncated === true);
+  check('解析失败的块不产生 Markdown 代码块片段',
+    badSeg.segments.every((s) => s.type !== GuncatUiSegType.TEXT || s.text.indexOf('```') < 0));
   // 只有控件的文档兜底为表单, 而不是空卡片
   const controlOnly = GuncatUiBlocks.extract(
     '```guncat-ui\n{"title":"T","controls":[{"name":"a","type":"slider","label":"A"}],"elements":[]}\n```');
@@ -1436,6 +1439,23 @@ console.log('[GuncatUiSpec]');
     salvagedProg.spec.elements.length === 1);
   check('截断但可救出的块不算 degenerate',
     GuncatUiBlocks.isDegenerate(salvaged, 1) === false);
+  // 真机事故五: 紧凑单行 JSON 被砍在键名中间("subtitl), 且块已闭合 → 解析整块失败。
+  // 结构化回退必须逐字段救回内容, 让卡片仍能渲染(而不是退回普通代码块)。
+  const compactTruncated = '引导\n```guncat-ui\n{"version":1,"title":"地瓜 vs 红薯","subtitl\n```\n后续正文';
+  const compactSalvaged = GuncatUiBlocks.salvageBlockBody(
+    GuncatUiBlocks.firstClosedBody(compactTruncated));
+  check('单行 JSON 砍在键名中间也能救出内容', compactSalvaged.spec !== null &&
+    compactSalvaged.spec.title === '地瓜 vs 红薯' && compactSalvaged.spec.salvaged === true);
+  const compactParts = GuncatUiParts.build(compactTruncated, true);
+  const compactUi = compactParts.segments.find((s) => s.type === GuncatUiSegType.UI);
+  check('该块仍渲染成卡片而不是代码块', compactParts.hasUi === true &&
+    compactUi !== undefined && compactUi.spec !== null && compactUi.raw.length > 0);
+  check('该块标记为不完整', compactUi !== undefined && compactUi.truncated === true);
+  // 无内容可救时也仍然是卡片(带原始输出), 只是没有标题/元素
+  const hopelessBlock = '```guncat-ui\n{ 完全不是 JSON }\n```';
+  const hopelessSpec = GuncatUiBlocks.salvageBlockBody(GuncatUiBlocks.firstClosedBody(hopelessBlock));
+  check('无内容可救时给出空文档(仍走卡片)', hopelessSpec.spec !== null &&
+    hopelessSpec.spec.elements.length === 0 && hopelessSpec.spec.salvaged === true);
 }
 
 console.log('');
