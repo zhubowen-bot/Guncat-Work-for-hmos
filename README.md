@@ -1143,9 +1143,13 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 - 原始附件不会作为永久文件复制到应用数据中。
 - 网络请求使用 HTTPS，实际数据处理政策以所配置的模型服务商为准。
 
-## 6.4.0 更新（交互模式全面重写 · guncat-ui lang）
+## 6.3.0 更新（交互模式 · Intelligent UI）
 
-> 本次把交互模式的交付格式从「一个严格 JSON 对象」**彻底重写**为一种声明式界面语言（`guncat-ui lang`，对齐参考项目 [open-intelligent-ui](https://github.com/thesysdev/openui) 的 OpenUI Lang 设计），并把渲染器从 11 种元素扩展到 70 个原生组件。旧的 `common/GuncatUiSpec.ts`（JSON DSL + 解析器 + 救助链 + JSON Output 补救）已整体删除。
+> 6.3.0 期间交互模式做了**两轮**大改：先上线初版（严格 JSON DSL），随后**全面重写**为声明式界面语言 `guncat-ui lang`。两轮都属于 6.3.0（**不单列 6.4.0**，应用版本号保持 `6.3.0` / versionCode 710），下面按"由新到旧"合并记录。
+
+### 重写：guncat-ui lang（对齐 open-intelligent-ui）
+
+> 把交互模式的交付格式从「一个严格 JSON 对象」**彻底重写**为一种声明式界面语言（`guncat-ui lang`，对齐参考项目 [open-intelligent-ui](https://github.com/thesysdev/openui) 的 OpenUI Lang 设计），并把渲染器从 11 种元素扩展到 70 个原生组件。旧的 `common/GuncatUiSpec.ts`（JSON DSL + 解析器 + 救助链 + JSON Output 补救）已整体删除。
 
 - **交付格式：JSON → 按行语句**。旧格式是一大段严格 JSON，被输出上限截断就**整块作废**（只能靠额外的 `response_format: json_object` 请求重做一次）。新格式每条语句独立成行：`root = Card([header, chart])` / `header = CardHeader("标题")` / `chart = BarChart([...], [s1], "grouped")`。截断只损失**最后一条没写完的语句**，前面的全部保留并照常渲染——"补救"从主路径降级成兜底。
 - **70 个原生组件**（9 组）：`Card` `CardHeader` `TextContent` `MarkDownRenderer` `Callout` `Image` `ImageGallery` `CodeBlock` `TagBlock` `EntityList` / `SectionBlock` `Tabs` `Accordion` `Carousel` `Steps` / `Table`+`Col` / 8 种图表（柱状·折线·面积·横向条·饼环·径向·雷达·堆叠条）/ 指标与文本 / 5 类卡片块 / 列表与追问 / 全套表单控件 / 按钮与图标。图表全部用声明式 `Shape`+`Path` 与 `Row`/`Column` 现画，不引入图表库、不产生图片文件。
@@ -1194,7 +1198,7 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
   - **技能文档的口径修正做在投喂处**：技能散文是导入内容（20+ 处旧名），与其改散文、下次导入又带进来，不如在 `load_skill` 的返回前统一贴一条"联网口径"说明（`WorkFileService.LOAD_SKILL_SEARCH_NOTE`）。
   - 顺带：时间线里这个工具显示为「Local Search」+ 圆圈放大镜（此前落在 default 分支、显示原始工具名）；`AgentLoopService.buildWorkSystemPromptLegacy()` 标注 `@deprecated 未被调用`（活的是 `PromptBuilder`，避免以后改错文件）。新增 5 条断言，单测 474 → 479 项。
 
-## 6.3.0 更新（交互模式 · Intelligent UI）
+### 初版：JSON DSL（交互模式上线）
 
 - 新增 **Agent 模式第三项：交互模式（Intelligent UI）**，与「工作模式」平行展示在侧边栏的「Agent模式」分组中。它共用同一套 Agent Loop、沙箱工作区与 42 个工具，但**回答不是纯文本，而是可交互的界面**：指标卡、进度条、表格、横向柱状图 / 折线图 / 环形占比，以及滑块 / 开关 / 下拉 / 输入框与选项按钮。
 - **交互闭环**：在界面上拖动参数、切换开关、选择选项后点「提交」，全部取值会打包成一条消息回传，模型随即**重算并重出更新后的界面**——界面成为可反复操作的仪表盘，而不是一张死图；也支持点选项即回传（无需提交）。

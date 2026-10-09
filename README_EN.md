@@ -892,6 +892,9 @@ You can also select content in Gallery or a file manager and choose Guncat Work 
 - Requests use HTTPS. Data-processing policies still depend on the configured model provider.
 
 ## Version 6.3.0 (Interactive Mode · Intelligent UI)
+
+> Interactive Mode was reworked **twice** within 6.3.0: the initial release below (strict JSON DSL), then a **full rewrite** to the declarative `guncat-ui lang` (70 native components, aligned with [open-intelligent-ui](https://github.com/thesysdev/openui)). Both belong to 6.3.0 — there is no 6.4.0; the app version stays `6.3.0` / versionCode 710. This English section still documents the initial release only; the rewrite entries (same-day items 2–12) are in the [Chinese README](README.md#630-更新交互模式--intelligent-ui).
+
 - Added **a third Agent Mode entry: Interactive Mode (Intelligent UI)**, shown in parallel with Work Mode under the sidebar's "Agent Mode" group. It shares the same Agent Loop, sandbox workspace, and 42 tools, but **answers are not plain text — they are operable interfaces**: metric cards, progress bars, tables, horizontal bar / line / donut charts, sliders, switches, dropdowns, text inputs, and choice buttons.
 - **Interaction loop**: drag a parameter, flip a switch, or pick an option and tap "Submit"; every value is packed into one message back to the model, which then **recomputes and re-renders the updated interface**. The interface becomes a reusable dashboard instead of a static picture. Choice buttons report back on a single tap, no submit needed.
 - **Native rendering, no extra dependencies**: the strict JSON inside a ` ```guncat-ui ` fence is parsed by `GuncatUiSpec` and rendered by `GuncatUiView` into native ArkUI components. Line and donut charts are drawn on the fly with Shape + Path — no chart library and no image files.
