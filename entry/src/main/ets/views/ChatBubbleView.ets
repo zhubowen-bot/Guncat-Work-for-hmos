@@ -454,6 +454,7 @@ export struct ChatBubbleView {
               spec: seg.spec as GuncatUiSpec,
               complete: seg.complete,
               locked: this.uiLocked,
+              rawFallback: seg.raw,
               onInteract: (payload: GuncatUiPayload): void => {
                 this.onUiInteract(this.message.id, payload);
               }

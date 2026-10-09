@@ -28,6 +28,8 @@ export struct GuncatUiView {
   @Prop complete: boolean = true;
   // 已提交/已点击过: 置灰防止重复回传(由父组件按消息维度控制)
   @Prop locked: boolean = false;
+  // 解析失败时块内原文: 非空则卡片展示「原始输出」而不是空盒子(spec 为 null 或解析不出元素时)
+  @Prop rawFallback: string = '';
   // 交互回传(父组件转成 user 消息交给 Agent Loop)
   private onInteract: (payload: GuncatUiPayload) => void = (_payload: GuncatUiPayload): void => {};
 
@@ -46,6 +48,9 @@ export struct GuncatUiView {
   }
 
   private seedDefaults(): void {
+    if (this.spec === null) {
+      return;
+    }
     for (let i: number = 0; i < this.spec.controls.length; i++) {
       let input: GuncatUiInput = this.spec.controls[i];
       if (this.values[input.name] === undefined) {
@@ -129,11 +134,14 @@ export struct GuncatUiView {
   }
 
   private allControlNames(): string[] {
-    let out: string[] = [];
-    for (let i: number = 0; i < this.spec.controls.length; i++) {
-      out.push(this.spec.controls[i].name);
+    let names: string[] = [];
+    if (this.spec === null) {
+      return names;
     }
-    return out;
+    for (let i: number = 0; i < this.spec.controls.length; i++) {
+      names.push(this.spec.controls[i].name);
+    }
+    return names;
   }
 
   private clickAction(action: GuncatUiAction, value: string): void {
@@ -230,62 +238,84 @@ export struct GuncatUiView {
     if (this.locked) {
       return '已提交';
     }
+    if (this.spec === null || this.spec.elements.length === 0) {
+      return '无内容';
+    }
     return this.dirty ? '已修改' : '可交互';
+  }
+
+  // 界面是否有真正可渲染的内容(元素或独立控件)
+  private hasContent(): boolean {
+    if (this.spec === null) {
+      return false;
+    }
+    if (this.spec.elements.length > 0) {
+      return true;
+    }
+    return this.orphanControls().length > 0;
+  }
+
+  // 兜底文案: 说明为什么这里没有界面
+  private fallbackText(): string {
+    if (this.complete) {
+      return '这段内容没有生成可交互的元素（JSON 结构不被识别），已按原始输出展示。';
+    }
+    return '解析中…';
   }
 
   build() {
     Column({ space: 12 }) {
-      // 头部: 图标 + 标题 + 状态徽标
-      if (this.spec.title !== '' || this.spec.subtitle !== '') {
-        Row({ space: 8 }) {
-          Text('✦')
-            .fontSize(14)
-            .fontColor($r('app.color.brand'))
-          Column({ space: 2 }) {
-            if (this.spec.title !== '') {
-              Text(this.spec.title)
-                .fontSize(15)
-                .fontWeight(FontWeight.Bold)
-                .fontColor($r('app.color.text_primary'))
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .width('100%')
-            }
-            if (this.spec.subtitle !== '') {
-              Text(this.spec.subtitle)
-                .fontSize(11)
-                .fontColor($r('app.color.text_secondary'))
-                .maxLines(2)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .width('100%')
-            }
+      // 头部: 图标 + 标题 + 状态徽标(没有标题也要出状态徽标, 避免出现"无标识空白盒")
+      Row({ space: 8 }) {
+        Text('✦')
+          .fontSize(14)
+          .fontColor($r('app.color.brand'))
+        Column({ space: 2 }) {
+          if (this.spec !== null && this.spec.title !== '') {
+            Text(this.spec.title)
+              .fontSize(15)
+              .fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.text_primary'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
           }
-          .alignItems(HorizontalAlign.Start)
-          .layoutWeight(1)
-
-          Text(this.statsText())
-            .fontSize(10)
-            .fontColor(this.locked ? $r('app.color.text_tertiary') : $r('app.color.brand'))
-            .padding({ left: 8, right: 8, top: 3, bottom: 3 })
-            .borderRadius(8)
-            .backgroundColor($r('app.color.brand_light'))
+          if (this.spec !== null && this.spec.subtitle !== '') {
+            Text(this.spec.subtitle)
+              .fontSize(11)
+              .fontColor($r('app.color.text_secondary'))
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+          }
         }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+
+        Text(this.statsText())
+          .fontSize(10)
+          .fontColor(this.locked ? $r('app.color.text_tertiary') : $r('app.color.brand'))
+          .padding({ left: 8, right: 8, top: 3, bottom: 3 })
+          .borderRadius(8)
+          .backgroundColor($r('app.color.brand_light'))
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      // 元素序列(spec 为空时跳过)
+      if (this.spec !== null) {
+        ForEach(this.spec.elements, (el: GuncatUiElement, index: number) => {
+          this.buildElement(el, 'e' + index)
+        }, (el: GuncatUiElement, index: number) => 'e' + index)
+
+        // 独立控件(未被 form 引用时, 作为独立卡片渲染, 用默认动作回传)
+        ForEach(this.orphanControls(), (input: GuncatUiInput) => {
+          this.buildControlCard(input)
+        }, (input: GuncatUiInput) => 'c_' + input.name)
       }
 
-      // 元素序列
-      ForEach(this.spec.elements, (el: GuncatUiElement, index: number) => {
-        this.buildElement(el, 'e' + index)
-      }, (el: GuncatUiElement, index: number) => 'e' + index)
-
-      // 独立控件(未被 form 引用时, 作为独立卡片渲染, 用默认动作回传)
-      ForEach(this.orphanControls(), (input: GuncatUiInput) => {
-        this.buildControlCard(input)
-      }, (input: GuncatUiInput) => 'c_' + input.name)
-
-      // 流式骨架
-      if (!this.complete && this.spec.elements.length === 0) {
+      // 流式骨架(尚未成形)
+      if (!this.complete && !this.hasContent()) {
         Column({ space: 8 }) {
           Row()
             .width('70%')
@@ -301,6 +331,31 @@ export struct GuncatUiView {
         .width('100%')
         .alignItems(HorizontalAlign.Start)
       }
+
+      // 兜底: 已闭合但解析不出任何元素 → 展示原因 + 原始输出, 绝不出现空盒子
+      if (this.complete && !this.hasContent()) {
+        Text(this.fallbackText())
+          .fontSize(11)
+          .fontColor($r('app.color.text_secondary'))
+          .width('100%')
+        if (this.rawFallback.trim() !== '') {
+          Scroll() {
+            Text(this.rawFallback)
+              .fontSize(10)
+              .fontColor($r('app.color.text_tertiary'))
+              .fontFamily('monospace')
+              .width('100%')
+          }
+          .scrollable(ScrollDirection.Vertical)
+          .scrollBar(BarState.Off)
+          .constraintSize({ maxHeight: 180 })
+          .width('100%')
+          .padding(10)
+          .backgroundColor($r('app.color.surface_secondary'))
+          .borderRadius(10)
+          .align(Alignment.TopStart)
+        }
+      }
     }
     .width('100%')
     .padding(14)
@@ -312,6 +367,10 @@ export struct GuncatUiView {
 
   // 未被任何 form 引用的控件(单独成卡, 用空 id 提交=只回传改动)
   private orphanControls(): GuncatUiInput[] {
+    if (this.spec === null) {
+      let none: GuncatUiInput[] = [];
+      return none;
+    }
     let used: string[] = [];
     for (let i: number = 0; i < this.spec.elements.length; i++) {
       let el: GuncatUiElement = this.spec.elements[i];
@@ -325,7 +384,7 @@ export struct GuncatUiView {
         used.push(el.bind2);
       }
     }
-    let out: GuncatUiInput[] = [];
+    let orphans: GuncatUiInput[] = [];
     for (let i: number = 0; i < this.spec.controls.length; i++) {
       let input: GuncatUiInput = this.spec.controls[i];
       let isUsed: boolean = false;
@@ -336,10 +395,10 @@ export struct GuncatUiView {
         }
       }
       if (!isUsed) {
-        out.push(input);
+        orphans.push(input);
       }
     }
-    return out;
+    return orphans;
   }
 
   // ===== 元素分发 =====
@@ -765,14 +824,14 @@ export struct GuncatUiView {
       span = 1;
     }
     let step: number = values.length > 1 ? (w - pad * 2) / (values.length - 1) : 0;
-    let out: string = '';
+    let path: string = '';
     for (let i: number = 0; i < values.length; i++) {
       let x: number = pad + step * i;
       let y: number = h - pad - ((values[i] - min) / span) * (h - pad * 2);
-      out = out + (i === 0 ? 'M' : 'L') + (Math.round(x * 10) / 10) + ' ' +
+      path = path + (i === 0 ? 'M' : 'L') + (Math.round(x * 10) / 10) + ' ' +
         (Math.round(y * 10) / 10) + ' ';
     }
-    return out.trim();
+    return path.trim();
   }
 
   // 环形占比图 + 图例

@@ -1304,6 +1304,54 @@ console.log('[GuncatUiSpec]');
     badParts.segments[0].text.indexOf('```guncat-ui') >= 0);
   const plainParts = GuncatUiParts.build('普通回答, 无界面块');
   check('无界面块时单文本片段', plainParts.segments.length === 1 && plainParts.hasUi === false);
+
+  // ===== 真实模型输出的容错(首页截图事故: 卡片渲染成空壳) =====
+  // 事故根因: elements 缺失/写法不对 → 解析失败 → 界面片段 spec=null → 裸骨架空盒。
+  // 以下每一条都是模型真实写过的形态, 必须都能渲染出元素。
+  const tolerant = [
+    ['单元素漏写 elements', '{"kind":"card","title":"地瓜","text":"红薯"}', 1],
+    ['elements 写成对象', '{"title":"T","elements":{"kind":"card","text":"x"}}', 1],
+    ['用 items 代替 elements', '{"title":"T","items":[{"kind":"card","text":"x"}]}', 1],
+    ['kind 大小写', '{"title":"T","elements":[{"kind":"Card","text":"x"}]}', 1],
+    ['kind 近义词 kv', '{"title":"T","elements":[{"kind":"kv","kv":[["a","1"]]}]}', 1],
+    ['kind 近义词 list', '{"title":"T","elements":[{"kind":"list","items":[{"kind":"note","text":"x"}]}]}', 1],
+    ['JSON 带注释', '{\n// 说明\n"title":"T","elements":[{"kind":"card"}]\n}', 1],
+    ['JSON 带尾随逗号', '{"title":"T","elements":[{"kind":"card"},]}', 1],
+    ['JSON 带全角引号', '｛"title":"T","elements":[{"kind":"card","text":"x"}]｝', 1],
+    ['字符串内嵌代码围栏', '{"title":"T","elements":[{"kind":"markdown","text":"示例:\\n```js\\n1\\n```"}]}', 1],
+    ['只有控件没有元素', '{"title":"T","controls":[{"name":"a","type":"slider"}],"elements":[]}', 1],
+    ['数字写进 title/text', '{"title":123,"elements":[{"kind":"note","text":456}]}', 1]
+  ];
+  for (const [name, body, minElems] of tolerant) {
+    const one = GuncatUiBlocks.extract('```guncat-ui\n' + body + '\n```');
+    check('容错渲染: ' + name,
+      one.length === 1 && one[0].elements.length >= minElems);
+  }
+  // 内嵌围栏不得截断 JSON: 必须吃满到真正的闭合围栏
+  const fenceBody = '{"title":"T","elements":[{"kind":"markdown","text":"```js\\n1\\n```"}]}';
+  const fenceFrags = GuncatUiBlocks.split('a\n```guncat-ui\n' + fenceBody + '\n```\nb');
+  check('内嵌围栏不截断 JSON', fenceFrags.length === 3 && fenceFrags[1].complete === true &&
+    fenceFrags[1].text.trim() === fenceBody && fenceFrags[2].text.indexOf('b') >= 0);
+  // 解析失败的块: 整块原文必须交还 Markdown 渲染(用户看得到真实输出), 且不产生界面片段
+  const badSeg = GuncatUiParts.build('```guncat-ui\n{ 完全不是 JSON }\n```');
+  check('解析失败退回原文且不产生界面片段', badSeg.hasUi === false &&
+    badSeg.segments.length === 1 && badSeg.segments[0].type === GuncatUiSegType.TEXT &&
+    badSeg.segments[0].text.indexOf('完全不是 JSON') >= 0 &&
+    badSeg.segments[0].text.indexOf('```guncat-ui') >= 0);
+  // 只有控件的文档兜底为表单, 而不是空卡片
+  const controlOnly = GuncatUiBlocks.extract(
+    '```guncat-ui\n{"title":"T","controls":[{"name":"a","type":"slider","label":"A"}],"elements":[]}\n```');
+  check('控件兜底成表单', controlOnly.length === 1 && controlOnly[0].elements.length === 1 &&
+    controlOnly[0].elements[0].kind === 'form' && controlOnly[0].elements[0].controls[0] === 'a');
+  // 流式未闭合且尚无元素时: 界面片段必须带原文, 供卡片兜底展示(而不是空盒)
+  const openSeg = GuncatUiParts.build('说明\n```guncat-ui\n{');
+  const openUi = openSeg.segments.find((s) => s.type === GuncatUiSegType.UI);
+  check('未闭合片段带原文兜底', openUi !== undefined && openUi.complete === false &&
+    openUi.raw.indexOf('{') >= 0);
+  // 真正无法理解的结构仍退回原文渲染
+  const hopeless = GuncatUiParts.build('```guncat-ui\n{"elements":{"nope":1}}\n```');
+  check('无法理解的结构退回原文', hopeless.hasUi === false &&
+    hopeless.segments[0].text.indexOf('nope') >= 0);
 }
 
 console.log('');

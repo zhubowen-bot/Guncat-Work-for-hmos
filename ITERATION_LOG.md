@@ -39,6 +39,23 @@
 - 界面块解析失败时按普通代码块渲染，暂不提供「查看原始 JSON」折叠入口。
 - 交互模式仍走最终回答 + 界面块，尚未提供长任务中途主动弹界面的 `render_ui` 工具。
 
+### 真机事故修复 R68.1：卡片渲染成空壳（2026-10-09 当天）
+**现象**：真机对话中界面卡片只显示一个空盒子 + 两条灰色骨架条，没有标题、没有元素、也没有状态徽标；用户追问「怎么卡片什么都没有」后模型重发一次，仍是空壳。
+
+**定位**：截图形态可反推唯一分支——`GuncatUiView` 只在 `spec` 为「骨架文档」（title 空 + elements 空）时渲染该形态。写脚本遍历 18 种真实模型输出形态后确认：**只要 `GuncatUiParts` 切出的界面片段 `spec === null`（解析失败）或解析成功但元素数为 0，就会渲染成这个空壳**。模型那两次输出即属此类：把单个元素当成了顶层文档（`{"title","text"}` 而不是 `{"elements":[...]}`）、或用了未登记的 `kind`（`kv`/`list`）、或 JSON 带注释/尾随逗号。
+
+**修复（三层，全部是"让模型的小毛病不影响交付"）**：
+1. **分词层**：闭合围栏不再取「文本中下一个 ``` 」，改为遍历候选并用顶层括号闭合性（`isBalancedJson`）判定——块内 JSON 若含 Markdown 代码围栏，原实现会把 JSON 截断成半截导致解析失败。
+2. **解析层**：`GuncatUiKind.normalize` 把 `kv/list/panel/kpi/stats/text/options/…` 等近义 kind 及大小写变体归一化（不再直接丢弃）；元素列表接受 `elements / items / blocks / children / content / sections` 及「单个顶层元素对象」「elements 写成对象」；`parse` 在严格解析失败后用 `sanitizeJsonText`（去 JS 注释、去尾随逗号、还原全角引号）再试一次；表格接受 `kv/pairs/data` 键值对形态；`title/text/label/delta` 接受数字；只有 `controls` 没有元素时兜底生成一张表单。
+3. **渲染层**：界面卡片头部改为「始终渲染」（不再因为没有标题就整体消失），状态徽标新增 `无内容`；已闭合但解析不出元素时显示原因文案 + 可滚动的**原始输出**（`GuncatUiSeg.raw` → `GuncatUiView.rawFallback`），彻底消灭"什么都不显示"的空盒。
+4. **提示词**：反例清单补充「单元素必须放进 elements 数组」「JSON 里不要写代码围栏」「不要编造 kind」，硬性纪律明确 `elements` 必填且至少 1 个元素。
+
+**验证**：`test-core` 由 328 项扩到 **345 项全绿**（新增 12 条容错形态断言 + 内嵌围栏不截断 + 解析失败退回原文 + 未闭合片段带原文 + 控件兜底成表单）；`tsc` 通过；`assembleHap` **BUILD SUCCESSFUL**。
+
+**附带踩坑（ArkTS 编译红线）**：`GuncatUiSpecParser` 的多个静态方法与模块级函数里都写了 `let out`，TypeScript 编译不报，但 ArkTS/Rollup 在 `CompileArkTS` 阶段报 `Cannot redeclare block-scoped variable 'out'`（同一模块内重复声明标识符即失败）——已全部改成 `cleaned / withoutCommas / repaired / looseSpec / specs / names / orphans / path`。**新增纯逻辑模块时，模块内标识符不要重名。**
+
+**环境顺带说明**：本轮 `assembleHap` 时 DevEco 用本机调试证书重写了 `build-profile.json5` 的签名段（旧配置指向改名前的 `GuncatAI_HMOS-APP`，新配置指向当前目录名 `Guncat-Work-for-hmos`），与代码改动无关。
+
 ### 下一项
 见 `BACKLOG.md`「交互模式后续待办」：交互状态归档、数据集绑定（界面元素直连工作区文件本地重算）、元素扩充（timeline/kanban/区间滑块/日期）、解析失败回退入口、`render_ui` 工具化渲染。
 

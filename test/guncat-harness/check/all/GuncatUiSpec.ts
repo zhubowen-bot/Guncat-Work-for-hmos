@@ -42,6 +42,51 @@ export class GuncatUiKind {
       kind === GuncatUiKind.FORM || kind === GuncatUiKind.CHOICE ||
       kind === GuncatUiKind.MARKDOWN;
   }
+
+  // 模型常见的等价/近义 kind 归一化(不理解的取值才丢弃)
+  static normalize(kind: string): string {
+    let k: string = kind.trim().toLowerCase();
+    if (k === 'kv' || k === 'keyvalue' || k === 'key-value' || k === 'pair' || k === 'pairs' ||
+      k === 'rows' || k === 'tableview') {
+      return GuncatUiKind.TABLE;
+    }
+    if (k === 'stats' || k === 'stat' || k === 'kpi' || k === 'indicators' ||
+      k === 'metric-group' || k === 'metricgroup') {
+      return GuncatUiKind.METRICS;
+    }
+    if (k === 'text' || k === 'paragraph' || k === 'p' || k === 'rich' ||
+      k === 'richtext' || k === 'markdown-text') {
+      return GuncatUiKind.MARKDOWN;
+    }
+    if (k === 'panel' || k === 'section' || k === 'box' || k === 'group' ||
+      k === 'container' || k === 'list' || k === 'stack' || k === 'grid' || k === 'row' ||
+      k === 'column' || k === 'columns' || k === 'flex') {
+      return GuncatUiKind.LAYOUT;
+    }
+    if (k === 'tip' || k === 'info' || k === 'alert' || k === 'hint' || k === 'warning' ||
+      k === 'message') {
+      return GuncatUiKind.NOTE;
+    }
+    if (k === 'bar' || k === 'line' || k === 'pie' || k === 'area' || k === 'donut' ||
+      k === 'doughnut' || k === 'column' || k === 'graph' || k === 'bars' || k === 'lines') {
+      return GuncatUiKind.CHART;
+    }
+    if (k === 'progressbar' || k === 'bar-progress' || k === 'gauge') {
+      return GuncatUiKind.PROGRESS;
+    }
+    if (k === 'input' || k === 'inputs' || k === 'controls' || k === 'fields' ||
+      k === 'slider' || k === 'form-group') {
+      return GuncatUiKind.FORM;
+    }
+    if (k === 'options' || k === 'select' || k === 'buttons' || k === 'choices' ||
+      k === 'radio') {
+      return GuncatUiKind.CHOICE;
+    }
+    if (k === 'value' || k === 'number' || k === 'kpi-item') {
+      return GuncatUiKind.METRIC;
+    }
+    return GuncatUiKind.isAllowed(k) ? k : '';
+  }
 }
 
 // 控件类型
@@ -182,6 +227,171 @@ function asString(v: Object | undefined | null, fallback: string): string {
   return fallback;
 }
 
+// 数字保留两位小数(避免 1234.5000000000002 这类浮点尾巴)
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+// 清洗 JSON 文本中夹带的 JS 注释(模型偶发): 仅处理字符串外且前导为空白的 // 与 /* */
+function stripJsonComments(text: string): string {
+  if (text.indexOf('//') < 0 && text.indexOf('/*') < 0) {
+    return text;
+  }
+  let cleaned: string = '';
+  let inString: boolean = false;
+  let escaped: boolean = false;
+  let i: number = 0;
+  while (i < text.length) {
+    let ch: string = text.charAt(i);
+    let next: string = i + 1 < text.length ? text.charAt(i + 1) : '';
+    if (inString) {
+      cleaned = cleaned + ch;
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      i++;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      cleaned = cleaned + ch;
+      i++;
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      while (i < text.length && text.charAt(i) !== '\n') {
+        i++;
+      }
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      i += 2;
+      while (i < text.length && !(text.charAt(i) === '*' && i + 1 < text.length &&
+        text.charAt(i + 1) === '/')) {
+        i++;
+      }
+      i += 2;
+      continue;
+    }
+    cleaned = cleaned + ch;
+    i++;
+  }
+  return cleaned;
+}
+
+// 去掉对象/数组内最后一个元素后的尾随逗号(模型偶发)
+function stripTrailingCommas(text: string): string {
+  let withoutCommas: string = '';
+  let inString: boolean = false;
+  let escaped: boolean = false;
+  for (let i: number = 0; i < text.length; i++) {
+    let ch: string = text.charAt(i);
+    if (inString) {
+      withoutCommas = withoutCommas + ch;
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      withoutCommas = withoutCommas + ch;
+      continue;
+    }
+    if (ch === ',') {
+      // 向前看: 下一个非空白字符若是 } 或 ] 则该逗号是多余的
+      let j: number = i + 1;
+      while (j < text.length) {
+        let probe: string = text.charAt(j);
+        if (probe === ' ' || probe === '\t' || probe === '\n' || probe === '\r') {
+          j++;
+          continue;
+        }
+        break;
+      }
+      let after: string = j < text.length ? text.charAt(j) : '';
+      if (after === '}' || after === ']') {
+        continue;
+      }
+    }
+    withoutCommas = withoutCommas + ch;
+  }
+  return withoutCommas;
+}
+
+// 把全角引号/花括号还原为半角(中文输入法污染的 JSON)
+function normalizeFullWidth(text: string): string {
+  if (text.indexOf('“') < 0 && text.indexOf('”') < 0 && text.indexOf('｛') < 0 &&
+    text.indexOf('｝') < 0 && text.indexOf('：') < 0 && text.indexOf('，') < 0) {
+    return text;
+  }
+  let fixed: string = text;
+  fixed = fixed.split('“').join('"');
+  fixed = fixed.split('”').join('"');
+  fixed = fixed.split('｛').join('{');
+  fixed = fixed.split('｝').join('}');
+  fixed = fixed.split('［').join('[');
+  fixed = fixed.split('］').join(']');
+  return fixed;
+}
+
+// 清洗候选(注释 + 尾随逗号 + 全角符号), 解析失败时按候选逐级重试
+function sanitizeJsonText(text: string): string {
+  return stripTrailingCommas(stripJsonComments(normalizeFullWidth(text)));
+}
+
+// 顶层容器括号是否闭合(用于识别围栏内 JSON 是否被内嵌代码围栏提前截断)
+function isBalancedJson(text: string): boolean {
+  let startsWithBrace: boolean = text.startsWith('{');
+  let startsWithBracket: boolean = text.startsWith('[');
+  if (!startsWithBrace && !startsWithBracket) {
+    return false;
+  }
+  let round: number = 0;
+  let square: number = 0;
+  let inString: boolean = false;
+  let escaped: boolean = false;
+  for (let i: number = 0; i < text.length; i++) {
+    let ch: string = text.charAt(i);
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === '{') {
+      round++;
+    } else if (ch === '}') {
+      round--;
+      if (round < 0) {
+        return false;
+      }
+    } else if (ch === '[') {
+      square++;
+    } else if (ch === ']') {
+      square--;
+      if (square < 0) {
+        return false;
+      }
+    }
+  }
+  return round === 0 && square === 0;
+}
+
 function asNumber(v: Object | undefined | null, fallback: number): number {
   if (v === undefined || v === null) {
     return fallback;
@@ -238,7 +448,7 @@ function toList(v: Object | undefined | null): Object[] {
 
 function toStrList(v: Object | undefined | null, max: number): string[] {
   let raw: Object[] = toList(v);
-  let out: string[] = [];
+  let strs: string[] = [];
   for (let i: number = 0; i < raw.length && i < max; i++) {
     let item: Object = raw[i];
     let s: string = '';
@@ -246,29 +456,77 @@ function toStrList(v: Object | undefined | null, max: number): string[] {
       s = String(item);
     }
     if (s !== '') {
-      out.push(clampText(s, GuncatUiLimits.MAX_TITLE));
+      strs.push(clampText(s, GuncatUiLimits.MAX_TITLE));
     }
   }
-  return out;
+  return strs;
 }
 
 function toNumList(v: Object | undefined | null, max: number): number[] {
   let raw: Object[] = toList(v);
-  let out: number[] = [];
+  let nums: number[] = [];
   for (let i: number = 0; i < raw.length && i < max; i++) {
     let item: Object = raw[i];
     if (typeof item === 'number' || typeof item === 'string') {
       let n: number = asNumber(item, NaN);
       if (!isNaN(n)) {
-        out.push(n);
+        nums.push(n);
       } else {
-        out.push(0);
+        nums.push(0);
       }
     } else {
-      out.push(0);
+      nums.push(0);
     }
   }
-  return out;
+  return nums;
+}
+
+// kv / rows / items 形态的键值对 → 两列 rows(模型常把表格写成 [{label,value}] 或 [["a","b"]])
+function toKeyValueRows(v: Object | undefined | null, max: number): string[][] {
+  let raw: Object[] = toList(v);
+  let rows: string[][] = [];
+  for (let i: number = 0; i < raw.length && i < max; i++) {
+    let item: Object = raw[i];
+    if (item instanceof Array) {
+      let cells: Object[] = item as Object[];
+      let row: string[] = [];
+      for (let c: number = 0; c < cells.length && c < GuncatUiLimits.MAX_COLS; c++) {
+        row.push(clampText(asString(cells[c], ''), GuncatUiLimits.MAX_TITLE));
+      }
+      if (row.length > 0) {
+        rows.push(row);
+      }
+      continue;
+    }
+    if (item !== null && item instanceof Object) {
+      let o: Record<string, Object> = item as Record<string, Object>;
+      let key: string = asString(o['label'], '');
+      if (key === '') {
+        key = asString(o['key'], '');
+      }
+      if (key === '') {
+        key = asString(o['name'], '');
+      }
+      if (key === '') {
+        key = asString(o['title'], '');
+      }
+      let value: string = asString(o['value'], '');
+      if (value === '') {
+        value = asString(o['text'], '');
+      }
+      if (key === '' && value === '') {
+        continue;
+      }
+      rows.push([clampText(key, GuncatUiLimits.MAX_TITLE),
+        clampText(value, GuncatUiLimits.MAX_TITLE)]);
+    }
+  }
+  return rows;
+}
+
+// 宽松文本取值: 数字/布尔也接受(模型常把数值直接写进 text/title)
+function textField(obj: Record<string, Object>, key: string): string {
+  return asString(obj[key], '');
 }
 
 // ===== 解析: 控件 =====
@@ -279,6 +537,10 @@ function parseInput(v: Object): GuncatUiInput | null {
   let obj: Record<string, Object> = v as Record<string, Object>;
   let input: GuncatUiInput = new GuncatUiInput();
   input.name = asString(obj['name'], '');
+  if (input.name === '') {
+    // 模型偶发省略 name: 用 label 兜底, 再退化为下标占位由调用方处理
+    input.name = asString(obj['id'], '');
+  }
   if (input.name === '') {
     return null;
   }
@@ -341,23 +603,35 @@ function parseElement(v: Object): GuncatUiElement | null {
     return null;
   }
   let obj: Record<string, Object> = v as Record<string, Object>;
-  let kind: string = asString(obj['kind'], '');
-  if (!GuncatUiKind.isAllowed(kind)) {
+  // kind 允许近义/大小写/连字符变体(模型自由发挥时归一化, 完全不认识才丢弃)
+  let rawKind: string = asString(obj['kind'], '');
+  if (rawKind === '') {
+    rawKind = asString(obj['type'], '');
+  }
+  let kind: string = GuncatUiKind.normalize(rawKind);
+  if (kind === '') {
     return null;
   }
   let el: GuncatUiElement = new GuncatUiElement();
   el.kind = kind;
   el.id = asString(obj['id'], '');
-  el.title = clampText(asString(obj['title'], ''), GuncatUiLimits.MAX_TITLE);
-  el.text = clampText(asString(obj['text'], ''), GuncatUiLimits.MAX_TEXT);
+  el.title = clampText(textField(obj, 'title'), GuncatUiLimits.MAX_TITLE);
+  el.text = clampText(textField(obj, 'text'), GuncatUiLimits.MAX_TEXT);
+  if (el.text === '') {
+    el.text = clampText(textField(obj, 'content'), GuncatUiLimits.MAX_TEXT);
+  }
+  if (el.text === '' && kind === GuncatUiKind.CARD) {
+    el.text = clampText(textField(obj, 'label'), GuncatUiLimits.MAX_TEXT);
+  }
   el.layout = asString(obj['layout'], '');
+  el.layout = el.layout.toLowerCase();
   el.bind = asString(obj['bind'], '');
   el.bind2 = asString(obj['bind2'], '');
   el.value = asNumber(obj['value'], 0);
   el.total = asNumber(obj['total'], 100);
   el.unit = clampText(asString(obj['unit'], ''), 16);
-  el.label = clampText(asString(obj['label'], ''), 40);
-  el.delta = clampText(asString(obj['delta'], ''), 40);
+  el.label = clampText(textField(obj, 'label'), 40);
+  el.delta = clampText(textField(obj, 'delta'), 40);
   el.bars = toNumList(obj['bars'], GuncatUiLimits.MAX_BARS);
   el.lines = toStrList(obj['lines'], GuncatUiLimits.MAX_LINES);
   el.headers = toStrList(obj['headers'], GuncatUiLimits.MAX_COLS);
@@ -367,7 +641,20 @@ function parseElement(v: Object): GuncatUiElement | null {
   el.values = toNumList(obj['values'], GuncatUiLimits.MAX_BARS + GuncatUiLimits.MAX_SERIES);
   el.labels = toStrList(obj['labels'], GuncatUiLimits.MAX_BARS);
   el.totalLabel = clampText(asString(obj['totalLabel'], ''), 40);
-  let chart: string = asString(obj['chart'], GuncatUiChartType.BAR);
+  let chart: string = asString(obj['chart'], '').trim().toLowerCase();
+  if (chart === '') {
+    // chart 类型也可能写在 kind 里(kind: "pie")
+    chart = rawKind.trim().toLowerCase();
+  }
+  if (chart === 'area') {
+    chart = GuncatUiChartType.LINE;
+  }
+  if (chart === 'donut' || chart === 'doughnut' || chart === 'ring') {
+    chart = GuncatUiChartType.PIE;
+  }
+  if (chart === 'column' || chart === 'bars' || chart === 'horizontalBar') {
+    chart = GuncatUiChartType.BAR;
+  }
   el.chart = GuncatUiChartType.isAllowed(chart) ? chart : GuncatUiChartType.BAR;
   el.action = parseAction(obj['action']);
   el.action2 = parseAction(obj['action2']);
@@ -392,9 +679,9 @@ function parseElement(v: Object): GuncatUiElement | null {
     items.push(metric);
   }
   el.items = items;
-  // 表格行
-  let rawRows: Object[] = toList(obj['rows']);
+  // 表格行: 优先 rows(二维数组), 其次 kv / pairs / data(键值对形态)
   let rows: string[][] = [];
+  let rawRows: Object[] = toList(obj['rows']);
   for (let i: number = 0; i < rawRows.length && i < GuncatUiLimits.MAX_ROWS; i++) {
     let rawRow: Object = rawRows[i];
     if (!(rawRow instanceof Array)) {
@@ -411,6 +698,28 @@ function parseElement(v: Object): GuncatUiElement | null {
       row.push(clampText(s, GuncatUiLimits.MAX_TITLE));
     }
     rows.push(row);
+  }
+  if (rows.length === 0) {
+    let kv: Object[] = toList(obj['kv']);
+    if (kv.length === 0) {
+      kv = toList(obj['pairs']);
+    }
+    if (kv.length === 0) {
+      kv = toList(obj['data']);
+    }
+    if (kv.length === 0 && el.kind === GuncatUiKind.TABLE) {
+      // 表格元素直接把 items 当键值对(metrics 之外的 items 形态)
+      kv = toList(obj['items']);
+    }
+    if (kv.length > 0) {
+      rows = toKeyValueRows(kv, GuncatUiLimits.MAX_ROWS);
+    }
+  }
+  // kv 归一化成 table 时补默认表头
+  if (el.kind === GuncatUiKind.TABLE && el.headers.length === 0 && rows.length > 0 &&
+    rows[0].length === 2 &&
+    (obj['kv'] !== undefined || obj['pairs'] !== undefined || obj['data'] !== undefined)) {
+    el.headers = ['指标', '值'];
   }
   el.rows = rows;
   // 嵌套子元素
@@ -443,15 +752,23 @@ function sliceAfterKey(text: string, key: string): string {
 }
 
 export class GuncatUiSpecParser {
-  // 容错解析: 缺字段用默认值, 未知 kind 直接丢弃; 结构性错误(非对象/无元素)返回 error
+  // 容错解析: 缺字段用默认值, 未知 kind 归一化后仍不认识才丢弃; 结构性错误(非对象/无元素)返回 error。
+  // 第一遍严格解析(失败抛错, 由调用方决定是否降级为原文渲染), 失败后再清洗注释/尾随逗号/全角符号重试一次。
   static parse(json: string): GuncatUiParseResult {
-    let result: GuncatUiParseResult = new GuncatUiParseResult();
     let trimmed: string = json.trim();
     if (trimmed === '') {
-      result.error = '内容为空';
-      return result;
+      let emptyResult: GuncatUiParseResult = new GuncatUiParseResult();
+      emptyResult.error = '内容为空';
+      return emptyResult;
     }
-    let parsed: Object = JSON.parse(trimmed) as Object;
+    let parsed: Object;
+    try {
+      parsed = JSON.parse(trimmed) as Object;
+    } catch (e) {
+      // 清洗后重试(注释 / 尾随逗号 / 全角引号): 仍失败则把异常抛给调用方
+      parsed = JSON.parse(sanitizeJsonText(trimmed)) as Object;
+    }
+    let result: GuncatUiParseResult = new GuncatUiParseResult();
     if (parsed === null || !(parsed instanceof Object) || parsed instanceof Array) {
       result.error = '顶层必须是 JSON 对象';
       return result;
@@ -468,12 +785,32 @@ export class GuncatUiSpecParser {
         spec.controls.push(input);
       }
     }
-    let rawElements: Object[] = toList(obj['elements']);
+    // 元素列表: elements / items / blocks / content 四种常见写法都接受
+    let rawElements: Object[] = GuncatUiSpecParser.collectElements(obj);
     for (let i: number = 0; i < rawElements.length && i < GuncatUiLimits.MAX_ELEMENTS; i++) {
       let el: GuncatUiElement | null = parseElement(rawElements[i]);
       if (el !== null) {
         spec.elements.push(el);
       }
+    }
+    // 没有任何元素但声明了控件时, 兜底把控件渲染成表单, 而不是给出空白卡片
+    if (spec.elements.length === 0 && spec.controls.length > 0) {
+      let names: string[] = [];
+      for (let i: number = 0; i < spec.controls.length; i++) {
+        names.push(spec.controls[i].name);
+      }
+      let form: GuncatUiElement = new GuncatUiElement();
+      form.kind = GuncatUiKind.FORM;
+      form.id = 'fallback_form';
+      form.title = spec.title;
+      form.controls = names;
+      let action: GuncatUiAction = new GuncatUiAction();
+      action.id = 'submit';
+      action.label = '提交';
+      action.style = GuncatUiActionStyle.PRIMARY;
+      form.action = action;
+      spec.elements.push(form);
+      spec.title = '';
     }
     if (spec.elements.length === 0) {
       result.error = '没有可渲染的元素(elements 为空或 kind 均非法)';
@@ -483,12 +820,41 @@ export class GuncatUiSpecParser {
     return result;
   }
 
+  // 汇总元素的多种写法: elements 数组 / items·blocks·content 数组 / 单个顶层元素对象
+  private static collectElements(obj: Record<string, Object>): Object[] {
+    let keys: string[] = ['elements', 'items', 'blocks', 'children', 'content', 'sections'];
+    for (let i: number = 0; i < keys.length; i++) {
+      let raw: Object | undefined = obj[keys[i]];
+      if (raw === undefined) {
+        continue;
+      }
+      if (raw instanceof Array) {
+        let list: Object[] = raw as Object[];
+        if (list.length > 0) {
+          return list;
+        }
+      } else if (raw instanceof Object) {
+        // 模型把 elements 写成了单个对象({ "elements": { "kind": "card" } })
+        let single: Object[] = [];
+        single.push(raw);
+        return single;
+      }
+    }
+    // 模型把「单个元素」当成了顶层文档({kind, title, text})
+    if (obj['kind'] !== undefined) {
+      let self: Object[] = [];
+      self.push(obj as Object);
+      return self;
+    }
+    return [];
+  }
+
   // 流式容错解析: JSON 尚未闭合时也尽量给出可渲染的中间态(界面边生成边成形)。
   // 尚未成形时返回「骨架文档」(title 可能已有, elements 为空), 让界面立刻出现占位。
   static parseStreaming(json: string): GuncatUiParseResult {
-    let text: string = json;
+    // 先清洗(注释/尾随逗号/全角符号)再补括号, 两种容错叠加后中间态的命中率最高
+    let text: string = sanitizeJsonText(json);
     let completed: boolean = false;
-    // 尾部未闭合就补齐括号, 让完整的前缀元素先解析出来
     try {
       GuncatUiSpecParser.parse(text);
       completed = true;
@@ -509,8 +875,8 @@ export class GuncatUiSpecParser {
     if (result.spec !== null) {
       return result;
     }
-    // 补括号仍失败: 退化为「逐元素」渐进解析
-    let loose: GuncatUiParseResult = GuncatUiSpecParser.parseLoosePrefix(json);
+    // 补括号仍失败: 退化为「逐元素」渐进解析(同样先清洗)
+    let loose: GuncatUiParseResult = GuncatUiSpecParser.parseLoosePrefix(sanitizeJsonText(json));
     if (loose.spec === null) {
       // 连一个完整元素都没有: 给出骨架, 保证流式期间界面盒子已经存在
       let skeleton: GuncatUiParseResult = new GuncatUiParseResult();
@@ -570,18 +936,18 @@ export class GuncatUiSpecParser {
         }
       }
     }
-    let out: string = body;
+    let repaired: string = body;
     for (let i: number = opens.length - 1; i >= 0; i--) {
-      out = out + (opens[i] === '{' ? '}' : ']');
+      repaired = repaired + (opens[i] === '{' ? '}' : ']');
     }
-    return out;
+    return repaired;
   }
 
   // 最宽松的退化路径: 只保留已闭合的元素对象, 用顶层字段拼出可渲染文档
   private static parseLoosePrefix(json: string): GuncatUiParseResult {
     let result: GuncatUiParseResult = new GuncatUiParseResult();
-    let out: GuncatUiSpec = new GuncatUiSpec();
-    out.title = GuncatUiSpecParser.looseTitle(json);
+    let looseSpec: GuncatUiSpec = new GuncatUiSpec();
+    looseSpec.title = GuncatUiSpecParser.looseTitle(json);
     let elementsRaw: string = sliceAfterKey(json, 'elements');
     let arrStart: number = elementsRaw.indexOf('[');
     if (arrStart < 0) {
@@ -620,8 +986,8 @@ export class GuncatUiSpecParser {
             let chunk: string = body.substring(start, i + 1);
             try {
               let el: GuncatUiElement | null = parseElement(JSON.parse(chunk) as Object);
-              if (el !== null && out.elements.length < GuncatUiLimits.MAX_ELEMENTS) {
-                out.elements.push(el);
+              if (el !== null && looseSpec.elements.length < GuncatUiLimits.MAX_ELEMENTS) {
+                looseSpec.elements.push(el);
               }
             } catch (e) {
               // 单个元素非法: 跳过
@@ -631,11 +997,11 @@ export class GuncatUiSpecParser {
         }
       }
     }
-    if (out.elements.length === 0) {
+    if (looseSpec.elements.length === 0) {
       result.error = '尚未成形';
       return result;
     }
-    result.spec = out;
+    result.spec = looseSpec;
     return result;
   }
 }
@@ -667,6 +1033,28 @@ export class GuncatUiBlocks {
       from = idx + GuncatUiBlocks.OPEN.length;
     }
     return -1;
+  }
+
+  // 寻找真正的闭合围栏: 依次试每个 ``` 候选, 只接受能让顶层 JSON 闭合的那个。
+  // 找不到闭合候选(流式中)返回 -1; 全部候选都不闭合时回退为第一个候选(保证不会漏掉块)。
+  private static findClosingFence(text: string, bodyStart: number): number {
+    let first: number = -1;
+    let from: number = bodyStart;
+    while (from <= text.length) {
+      let idx: number = text.indexOf(GuncatUiBlocks.FENCE, from);
+      if (idx < 0) {
+        break;
+      }
+      if (first < 0) {
+        first = idx;
+      }
+      let body: string = text.substring(bodyStart, idx);
+      if (isBalancedJson(sanitizeJsonText(body).trim())) {
+        return idx;
+      }
+      from = idx + GuncatUiBlocks.FENCE.length;
+    }
+    return first;
   }
 
   // 返回片段序列: fence=false 为普通文本, fence=true 为 guncat-ui 块正文
@@ -702,7 +1090,10 @@ export class GuncatUiBlocks {
         break;
       }
       bodyStart = nl + 1;
-      let close: number = text.indexOf(GuncatUiBlocks.FENCE, bodyStart);
+      // 关键: 块内 JSON 字符串里可能包含 ``` (例如 markdown 元素里嵌代码围栏),
+      // 若直接取文本中"下一个 ``` "会把 JSON 截断 → 解析失败 → 界面退化成空骨架。
+      // 因此从每个候选闭合围栏试起, 只接受能让顶层括号闭合的那一个。
+      let close: number = GuncatUiBlocks.findClosingFence(text, bodyStart);
       if (close < 0) {
         let partial2: GuncatUiFragment = new GuncatUiFragment();
         partial2.text = text.substring(bodyStart);
@@ -768,7 +1159,7 @@ export class GuncatUiBlocks {
 
   // 提取全部已闭合的 guncat-ui 文档
   static extract(text: string): GuncatUiSpec[] {
-    let out: GuncatUiSpec[] = [];
+    let specs: GuncatUiSpec[] = [];
     let fragments: GuncatUiFragment[] = GuncatUiBlocks.split(text);
     for (let i: number = 0; i < fragments.length; i++) {
       let f: GuncatUiFragment = fragments[i];
@@ -778,13 +1169,13 @@ export class GuncatUiBlocks {
       try {
         let r: GuncatUiParseResult = GuncatUiSpecParser.parse(f.text);
         if (r.spec !== null) {
-          out.push(r.spec);
+          specs.push(r.spec);
         }
       } catch (e) {
         // 非法 JSON: 交由调用方按原文渲染, 不阻断消息
       }
     }
-    return out;
+    return specs;
   }
 
   // 至少存在一个已闭合且可解析的文档(用于决定是否隐藏原始围栏文本)
@@ -912,6 +1303,7 @@ export class GuncatUiPrompt {
     '',
     '## 硬性纪律',
     '- 一个 guncat-ui 块内只放一个 JSON 对象；一次回复最多 3 个界面块，宁少勿滥。',
+    '- **elements 是必填数组，且至少有 1 个元素**；单个元素也要写进数组里，不要把它当成顶层文档。',
     '- 界面块之外可以写文字，但必须简短；**禁止在正文里重复界面已经表达的数据**。',
     '- 数值必须真实可核对：来自计算或工具结果的数值直接写；给不出数据的字段不要编造，改用 note 说明。',
     '- 图表 values 与 labels 数量必须一致；bar/line 的 values 默认 1 条序列与 labels 一一对应（多序列才用 series）。',
@@ -920,12 +1312,16 @@ export class GuncatUiPrompt {
     '- 移动端竖屏：一屏能读完优先；元素顺序按「结论 → 数据 → 操作」排列。'
   ].join('\n');
 
-  // 反例(模型最常见的 3 类错误)
+  // 反例(模型最常见的错误——这些都会导致界面渲染不出来)
   static readonly ANTI_PATTERNS: string = [
-    '# 交互界面常见错误（自查）',
+    '# 交互界面常见错误（自查，写错就会渲染失败）',
+    '- **只写了一个元素却没放进 elements**：`{"kind":"card","text":"…"}` 是错的，必须写成 `{"elements":[{"kind":"card","text":"…"}]}`。',
+    '- **漏写 elements**：只有 title/controls 而没有 elements 时界面会是空的。至少要有 1 个元素。',
     '- 用 markdown 表格代替 table/chart：数据类内容一律用 table/chart/metrics，markdown 只用于叙述。',
     '- 只输出界面不输出行动入口：阐述完结论后若用户可能有下一步诉求，附 form 或 choice。',
-    '- JSON 里写中文全角引号、注释、尾随逗号、或把数字写成带单位的字符串（应写 4.8 + "unit": "%"）。'
+    '- **JSON 语法违规**：中文全角引号 “ ”、单引号、`//` 或 `/* */` 注释、尾随逗号、把数字写成带单位的字符串（应写 4.8 + "unit": "%"）。',
+    '- **在 JSON 字符串里写 Markdown 代码围栏**（三个反引号）：会提前截断界面块。需要代码内容时用普通文本描述，不要放围栏。',
+    '- 编造元素或控件类型名（如 "kv"/"list"/"Card"）：只使用清单内的取值，否则该元素会被丢弃。'
   ].join('\n');
 
   static promptSection(): string {

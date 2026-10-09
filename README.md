@@ -857,7 +857,24 @@ ChatViewModel.executeWorkLoop(conv)
 
 控件类型 `slider` / `toggle` / `select` / `text` 由 `GuncatUiView` 渲染为 Slider / Toggle(Switch) / Select / TextInput；**未被任何 form 引用的控件**会自动成为独立卡片并附带默认提交按钮（避免模型漏写 form 时控件不可用）。
 
-**容错与限额**（`GuncatUiLimits`）：控件 ≤12、元素 ≤60、表格 ≤60×8、柱状条 ≤24（渲染前 12）、选项 ≤24、提示/文本行 ≤24；未知 `kind` / 控件类型 / 图表类型 / 语气取值一律**丢弃降级**，而不是报错。
+**容错与限额**（`GuncatUiLimits`）：控件 ≤12、元素 ≤60、表格 ≤60×8、柱状条 ≤24（渲染前 12）、选项 ≤24、提示/文本行 ≤24。
+
+解析器刻意"迁就"模型的小毛病（这些都是真机上真实出现过的写法，曾导致卡片渲染成空壳）：
+
+| 模型写法 | 处理 |
+| --- | --- |
+| `{"kind":"card","text":"…"}`（单个元素当顶层文档） | 视为 `elements: [该元素]` |
+| 用 `items` / `blocks` / `children` / `content` / `sections` 代替 `elements` | 等价接受 |
+| `elements` 写成了单个对象 | 包成单元素数组 |
+| `kind` 写 `kv` / `list` / `panel` / `kpi` / `stats` / `Card` 等近义或大小写变体 | `GuncatUiKind.normalize` 归一化；**只有完全无法识别才丢弃** |
+| JSON 带 `//` `/* */` 注释、尾随逗号、中文全角引号 | 严格解析失败后清洗重试 |
+| 表格写成 `kv` / `pairs` / `data` 键值对 | 转成两列 rows |
+| `title` / `text` / `label` / `delta` 写成数字 | 按文本接受 |
+| 只给了 `controls` 没给元素 | 兜底生成一张表单，而不是空白卡片 |
+| 字符串里嵌了 Markdown 代码围栏 | 分词器用**括号闭合性**判定真正的闭合围栏，不再被截断 |
+| 彻底解析不出来 | 原文交还 Markdown 渲染；流式中间态则在卡片上展示**原始输出**（`GuncatUiSeg.raw` → `rawFallback`），绝不出现空盒子 |
+
+> **不要把这些容错当成"可以随便写"**：系统提示词里的反例清单仍明确要求 `elements` 必填、不要把代码围栏写进 JSON、不要编造 `kind`；容错只是保证模型偶发失误时用户仍能看到内容。
 
 ### 4. 渲染与流式成形
 
@@ -870,6 +887,7 @@ assistant Message.content（含 ```guncat-ui 围栏）
 
 - **闭合块**：`GuncatUiBlocks.extract/parseComplete` 解析成功才从 Markdown 正文中移除并原生渲染；**解析失败则原文（含围栏）照旧交给 Markdown 库**——用户永远看得到模型的真实输出，不会"内容凭空消失"。
 - **未闭合块**（流式中）：`GuncatUiBlocks.progress` → `GuncatUiSpecParser.parseStreaming` 用「补括号修复 → 退化逐元素扫描 → 骨架文档」三级容错给出中间态，界面**边生成边成形**，此时 `complete=false` 显示「生成中…」并禁用全部交互与提交。
+- **卡片永不为空**（真机事故后加固）：卡片头部（✦ + 标题 + 状态徽标）**始终渲染**，没有标题时至少显示状态徽标（`可交互` / `生成中…` / `已提交` / `无内容`）；若块已闭合却解析不出任何元素，卡片会显示原因文案 + 可滚动的**原始输出**，用户能直接看到模型到底写了什么。
 - **重建时机**：`WorkTurnView` / `ChatBubbleView` 在消息体含 ` ```guncat-ui ` 时才重建片段（普通消息零开销），重建源为流式 33ms flush 的 `visibleText`；`GuncatUiView` 用 `@Watch('onSpecChanged')` 只为**新出现的控件**补默认值，不覆盖用户已改的值。
 - **界面归属**：交互模式走 `ChatPage.buildWorkTimeline()` → `WorkTurnView`（共享时间线，含思考/工具行），聊天模式走 `ChatBubbleView`，两条路径都接了 `GuncatUiView`。
 
@@ -1040,6 +1058,7 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 - **提示词同源**：交互模式的系统提示词（DSL 契约 + 反例 + 模式职责）与解析器同文件维护（`common/GuncatUiSpec.ts`），提示词文档与解析行为不会漂移；上下文压缩后重建历史同样按会话模式取提示词。
 - 交互模式沿用工作模式的全部基础设施：任务清单、工具时间线、工作区上传、产物卡片、深度思考默认开启、三协议流式 function-calling；需要正式文件时照常产出 Word / Excel / PPT。
 - 应用版本号升至 `6.3.0`（versionCode 710）。
+- **卡片空壳修复（同日）**：真机上曾出现「界面卡片只有一个空盒子和两条灰条」。根因是模型输出的小毛病（把单个元素当成顶层文档、`kind` 用了未登记的名字、JSON 带注释或尾随逗号）让解析失败，卡片退化成了无标题的骨架。现已三层加固：分词器按**括号闭合性**判定真正的闭合围栏（块内出现代码围栏不再截断 JSON）；解析器接受 `items/blocks/…` 等写法、归一化近义 `kind`、清洗注释与尾随逗号与全角引号、控件兜底成表单；卡片头部**始终渲染**并在解析不出元素时展示**模型的原始输出**。彻底消灭"什么都不显示"的空卡片。
 
 ## 6.2.0更新
 
@@ -1211,6 +1230,13 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 
 - 确认安装的是包含 Share Kit UTD 声明的最新 HAP。
 - 更新安装后重新打开图库分享面板，让系统刷新分享目标。
+
+### 交互模式的卡片是空的 / 只显示一个灰条盒子
+
+- 卡片右上角的状态徽标会说明原因：`生成中…` 表示界面块还没输出完（模型仍在写 JSON）；`无内容` 表示模型输出的 JSON 里没有可识别的元素。
+- 出现 `无内容` 时，卡片内会直接展示**模型的原始输出**，可以据此判断是哪种写法出错（常见：元素没放进 `elements` 数组、`kind` 用了未登记的名字、JSON 带注释或尾随逗号）。
+- 最直接的解决办法：回一句「请按 elements 数组重新生成界面」，模型会重新输出；解析器已对大多数常见写法做了容错，仍失败时按原文展示而不会留空白。
+- 若整段 JSON 连围栏都没解析成卡片，说明块本身不闭合或不是合法 JSON，此时会按普通代码块渲染，JSON 原文可见可复制。
 
 ### 后台朗读停止
 

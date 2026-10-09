@@ -24,6 +24,8 @@ export class GuncatUiSeg {
   complete: boolean = true;
   spec: GuncatUiSpec | null = null;
   error: string = '';
+  // 解析失败时保留块内原文(界面卡片上以「原始输出」展示, 避免出现空盒子)
+  raw: string = '';
 }
 
 export class GuncatUiParts {
@@ -68,11 +70,12 @@ export class GuncatUiParts {
           parts.segments.push(rawSeg);
         }
       } else {
-        // 流式中间态: 渐进渲染, 禁用交互
+        // 流式中间态: 渐进渲染, 禁用交互; 同时带上原文, 便于解析始终失败时兜底展示
         let progress: GuncatUiProgress | null = GuncatUiBlocks.progress(content);
         let uiSeg2: GuncatUiSeg = new GuncatUiSeg();
         uiSeg2.type = GuncatUiSegType.UI;
         uiSeg2.complete = false;
+        uiSeg2.raw = f.text;
         if (progress !== null) {
           uiSeg2.spec = progress.spec;
           uiSeg2.error = progress.error;
