@@ -113,6 +113,10 @@
       "value": "#EC1313"
     },
     {
+      "name": "danger_light",
+      "value": "#FCE9E9"
+    },
+    {
       "name": "warning",
       "value": "#F59E0B"
     },

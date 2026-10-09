@@ -2519,7 +2519,9 @@ export struct GuncatUiView {
                 this.buildButton(btn, form)
               }
             }
-            .layoutWeight(1)
+            // 单个按钮**不拉满整行**: 一整条彩色长条很难看(真机反馈"太难看"有一部分来自它),
+            // 让它按内容宽度左对齐; 多个按钮才等分
+            .layoutWeight(UiNode.elementList(el, 'buttons').length > 1 ? 1 : 0)
           }, (btn: UiElement, i: number) => 'btn' + i.toString())
         }
         .width('100%')
@@ -2540,6 +2542,7 @@ export struct GuncatUiView {
       .padding({ left: 16, right: 16, top: 8, bottom: 8 })
       .borderRadius(999)
       .backgroundColor(this.buttonBg(el))
+      .border({ width: 1, color: this.buttonBorderColor(el) })
       .opacity(this.interactive() ? 1 : 0.5)
       .enabled(this.interactive())
       .onClick(() => {
@@ -2572,29 +2575,41 @@ export struct GuncatUiView {
     return 38;
   }
 
-  private buttonIsPrimary(el: UiElement): boolean {
-    return UiNode.str(el, 'variant', 'primary') === 'primary';
-  }
-
+  // 按钮视觉统一为"浅底 + 彩字"的胶囊, 不用实心大色块。
+  // 真机反馈: 主按钮原先是大面积实心品牌蓝 + 白字(还经常被拉成一整条), 太重、很扎眼。
+  // 现在: 主按钮 = brand_light 底 + brand 字(与「交互界面」胶囊同一套语言),
+  //       次按钮 = raised_surface 底 + 1px 描边 + 主文字色,
+  //       危险按钮 = danger_light 底 + danger 字,
+  //       三级按钮 = 透明底 + brand 字(保持原样)。
   private buttonBg(el: UiElement): ResourceColor {
     if (UiNode.str(el, 'type', 'normal') === 'destructive') {
-      return $r('app.color.danger');
+      return $r('app.color.danger_light');
     }
     let variant: string = UiNode.str(el, 'variant', 'primary');
     if (variant === 'primary') {
-      return $r('app.color.brand');
+      return $r('app.color.brand_light');
     }
     if (variant === 'tertiary') {
       return Color.Transparent;
     }
-    return $r('app.color.surface');
+    return $r('app.color.raised_surface');
+  }
+
+  // 次要按钮描边: 深色模式下 raised_surface 与卡片底色相同, 没有描边就"看不见按钮"
+  private buttonBorderColor(el: UiElement): ResourceColor {
+    if (UiNode.str(el, 'type', 'normal') === 'destructive') {
+      return Color.Transparent;
+    }
+    return UiNode.str(el, 'variant', 'primary') === 'secondary' ?
+      $r('app.color.divider') : Color.Transparent;
   }
 
   private buttonTextColor(el: UiElement): ResourceColor {
-    if (UiNode.str(el, 'type', 'normal') === 'destructive' || this.buttonIsPrimary(el)) {
-      return Color.White;
+    if (UiNode.str(el, 'type', 'normal') === 'destructive') {
+      return $r('app.color.danger');
     }
-    if (UiNode.str(el, 'variant', 'primary') === 'tertiary') {
+    let variant: string = UiNode.str(el, 'variant', 'primary');
+    if (variant === 'primary' || variant === 'tertiary') {
       return $r('app.color.brand');
     }
     return $r('app.color.text_primary');
@@ -2607,7 +2622,8 @@ export struct GuncatUiView {
         name: UiNode.element(el, 'icon') === null ? 'dot'
           : UiNode.str(UiNode.element(el, 'icon') as UiElement, 'name', 'dot'),
         iconSize: 16,
-        color: this.buttonIsPrimary(el) ? '#FFFFFF' : '#4176E6'
+        // 与按钮文字同色(浅底 + 彩字), 不再出现"实心深蓝底 + 白图标"
+        color: this.buttonTextColor(el)
       })
     }
     .width(this.buttonHeight(el))

@@ -1178,6 +1178,15 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 
 - **图表不再通栏（同日第十次）**：真机反馈"有些图表像之前的表格一样位置偏左"。原因是**顶层图表**走 `bleed()`（负外边距、比文字宽 16vp×2），而嵌在 SectionBlock/Tabs 里的图表 `topLevel=false` 不通栏 —— 于是同一屏里图表左边缘忽左忽右，正是"偶尔"的来源。现在图表和表格一样与文字同宽（`bleed` 只留给纯视觉的图片/图片墙/轮播，用户此前明确说过"其他组件宽些没关系"）。顺带把折线/面积图的左内边距从 34vp 收到 12vp：本项目**不画 y 轴刻度文字**（极值在下方单独一行展示），34vp 的左侧留白真机上就是一整块空白、绘图区被推到右边；左右 12/8 接近对称。新增 1 条断言，单测 473 → 474 项。
 
+- **按钮视觉统一（同日第十一次）**：用户反馈"深蓝底白字的按钮太难看"。按钮样式集中在 `GuncatUiView` 的 `buttonBg` / `buttonTextColor` / `buttonBorderColor`：
+  - `primary` = `brand_light` 底 + `brand` 字（与「交互界面」胶囊、`预览/分享` 同一套语言）
+  - `secondary` = `raised_surface` 底 + 1px `divider` 描边 + 主文字色（**描边是必需的**：深色模式下 `raised_surface` 与卡片底色相同，没有描边就"看不见按钮"）
+  - `destructive` = `danger_light` 底 + `danger` 字（新增 `danger_light` 色值，明暗两套都加了）
+  - `tertiary` = 透明底 + `brand` 字
+  - `IconButton` 的图标色改为直接取 `buttonTextColor()`（此前是"实心底 → 白图标"的硬编码），`GuncatUiIcon.color` 的类型从 `string` 放宽到 `ResourceColor`，这样调用方既能传十六进制也能传 `$r('app.color.*')`，深色模式才跟着变。
+  - 另外**单个按钮不再拉满整行**（`layoutWeight` 只在 2 个以上按钮时才等分）—— 一整条彩色长条也是"难看"的一部分，现在按内容宽度左对齐。
+  - 注意：**选中态**（Tabs / Chips / Select 选项）仍是实心 brand + 白字，这是"已选中"的强语义，与按钮不同层；`OptionCards` 用 `brand_light` + `brand` 描边。用户未对此提出异议，暂不统一。
+
 ## 6.3.0 更新（交互模式 · Intelligent UI）
 
 - 新增 **Agent 模式第三项：交互模式（Intelligent UI）**，与「工作模式」平行展示在侧边栏的「Agent模式」分组中。它共用同一套 Agent Loop、沙箱工作区与 42 个工具，但**回答不是纯文本，而是可交互的界面**：指标卡、进度条、表格、横向柱状图 / 折线图 / 环形占比，以及滑块 / 开关 / 下拉 / 输入框与选项按钮。

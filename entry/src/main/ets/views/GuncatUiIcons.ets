@@ -56,7 +56,9 @@ export struct GuncatUiIcon {
   @Prop name: string = 'dot';
   // 不能叫 size: CustomComponent 已经内置了 size(value: SizeOptions) 属性, 同名会冲突
   @Prop iconSize: number = 14;
-  @Prop color: string = '#8F8F8F';
+  // ResourceColor 而不是 string: 这样调用方既能传十六进制(模型给的图标色/调色板色),
+  // 也能传 $r('app.color.brand') 这类主题色 —— 深色模式下才跟着变
+  @Prop color: ResourceColor = '#8F8F8F';
 
   build() {
     Text(GuncatUiIcon.glyph(this.name))
