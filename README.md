@@ -915,6 +915,11 @@ assistant Message.content（整段界面程序，或 ```guncat-ui 围栏 + 前�
 - **宽度约定**：`GuncatUiView` 的根容器左右各留 `edge()=16vp` 内边距，使界面里的**文字**与同一条消息的正文（RichTextView 的 16vp）左右对齐 —— 否则界面文字行宽会比正文更宽，观感像"溢出到气泡边缘"。**表格刻意不做通栏**（表头底色与每列文字都从最左侧开始，比正文宽出去就会显得"整块偏左/歪了"）；只有图表 / 图片 / 图片墙 / 轮播这类"本身没有左对齐文字"的组件在**顶层**时用 `bleed(topLevel)` 抵消这层内边距拿到通栏宽度，`renderNode(el, topLevel)` 的 `topLevel` 只在 root 的 Card 直接子项里为 `true`（嵌套在卡片里的同款组件不会被推出去）。脚注区（截断提示 / 诊断 / 原始输出）也补上同样的内边距以保持左对齐。
 - **ArkUI 刷新机制（踩过的坑，改代码前必读）**：`GuncatUiView` 内部所有 `ForEach` 的 key **必须拼上 `rev`（页面版本号）**。ArkUI 的 `ForEach` 在重渲染时先比对新旧键值，**键值不变的项直接复用已有子组件、连 item builder 都不会重新执行**；而"绑定值变了 → 重新物化出新树"这件事只能靠重建传下去。真机表现：点 `Chips` / 单选 / 多选后选中态不变，切到别的会话再切回来（组件被销毁重建）才显示正确。加 `rev` 的代价是重建开销，用两处约束压住：① 流式期间控件本来就禁用，重建只影响观感；② **Slider 拖动中不重新物化**（松手 `End` / 点击轨道 `Click` 才刷新），否则正在拖的那个 Slider 组件会被销毁、手势丢失（表现为"拖到一半卡住"）。
 - **ArkUI 布局挤压（踩过的坑）**：`Row` 里"固定尺寸元素 + `layoutWeight` 文本"时，固定尺寸那个元素的布局宽度**偶尔会被测成 0**，于是文本左移、和它叠在一起（真机截图：小圆底图标压在标题第一个字上）。因此凡是这种组合都做三重保险：① 固定尺寸元素加 `.flexShrink(0)` + `.constraintSize({minWidth, minHeight})`；② 间距不用 `Row({space})` 而是给文本列显式 `.margin({left})`；③ 图标类元素把这三条**封装在组件内部**（`GuncatUiIcon` / `GuncatUiChevron` / `GuncatUiIconBadge`），这样任何一处使用都自动带上，不必逐个调用点记得加。已加固的位置：`IconText`、`ImageText`、`Callout`、`ListBlock(variant=image)`、`SwitchGroup`、`EntityList`、`Slider` 标签行、图表图例圆点、有序列表序号圆点。
+- **图表绘制：一律不用 `Shape` + `viewPort`（踩过的坑，改图表前必读）**：ArkUI 会把 `viewPort` 坐标系缩放到组件实际尺寸，但 **`strokeWidth` 不参与这个缩放**（按 vp 解释）。真机后果：① 饼图为了"填满扇形"写 `strokeWidth(100)`，实际画出一条 100vp 宽的巨型圆环，被容器裁成半个圆（"饼图显示不全"）；② 径向图在 52vp 盒子里用 200 的 viewPort，内容缩到 0.26 倍而环宽仍是 8vp，于是变成又小又粗的色块、百分比数字被挤出圈外（"比例有问题"）；③ 折线图用 `aspectRatio` 让 ArkUI 推导高度，真机上推出来的盒子又高又空、内容只画了一小块（"折线图太小"）。
+  现在的约定：
+  - **固定尺寸图表**（饼/环/径向/雷达）→ 固定 vp 盒子 + **绝对坐标绘制**（不设 `viewPort`，1 单位 = 1vp）：饼图用**实心扇形** `wedgeAt`（不再靠 strokeWidth 填满），环形用 `arcAt` 描边（半径取内外中线、环宽 = 描边宽度），径向用 `circleAt` 轨道 + `arcAt` 进度弧。
+  - **宽度自适应图表**（折线/面积）→ 用 `onAreaChange` **量出真实宽度**，再按 vp 绝对坐标算路径（`UiBox.of(w, h)` 承载尺寸与内边距），高度由 `chartHeight`（默认 160vp）显式给定，不再用 `aspectRatio`。
+  - 几何计算全部放在 `common/GuncatUiPaint.ts`（纯逻辑、可单测）：`linePath/areaPath/gridPaths/points` 接受 `UiBox`，新增 `arcAt/wedgeAt/circleAt`。
 - **本地调参不碰滚动位置**：界面回传分两类 —— `kind='action'`（要模型重算）会追加用户消息并滚到底部；`kind='state'`（拖动 / 勾选 / 填表）**既不整页刷新也不滚动**（`ChatViewModel.persistUiState()` 刻意不调 `notifyUIChange()`，`ChatPage` 也只在 `action` 时 `refreshTick++` / `scrollToBottomDelayed()`），否则用户在卡片里操作时页面会突然被拽到底部。
 - **输出形态纪律**：提示词禁止模型在程序之外写文字（详见上文「交互模式」一节的同名条目），设计上只做提示词约束、**不在客户端删除模型已写出的文字**——那等于丢内容，而"内容凭空消失"是这个项目一直避免的体验。
 - **渐进渲染**：客户端的 `GuncatUiParts.build()` 每次拿到新文本就重新解析并物化整棵树；`root = Card([...])` 第一行就让外壳出现，后续语句逐一补齐。未写完时 `complete=false`，控件置灰。
@@ -1133,6 +1138,7 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 - 参考项目与语言的两份实现级规格存于 `docs/reference/`（`open-intelligent-ui-spec.md`、`openui-lang-spec.md`）。
 - **观感修正（同日）**：① 界面文字左右各留 16vp 内边距，与正文行宽对齐（表格与文字同宽；图表/图片/轮播顶层通栏）；② 提示词改为**"程序之外不写任何文字"**——之前允许模型写 1~2 句引导语，实际得到的是界面旁边多一段重复又松散的聊天气泡；现在开场白/过渡句/总结一律禁止，文字必须用组件放进界面里，并在提示词里给出 ❌/✅ 对照示例。纯逻辑单测 430 → 433 项。
 - **交互修正（同日第二次）**：① `SectionBlock` / `Accordion` 的折叠箭头改用系统矢量图标 `sys.symbol.chevron_up/down`（原来的 Unicode 字形 `⌃`/`⌄` 在不同字体下大小与基线差异极大，真机上是"右下角一个小小的尖、又没和标题对齐"），并与标题垂直居中对齐；② **表格不再通栏**（表头底色让整块显得偏左）；③ 修掉**选中态点击后不刷新**的真机问题——根因是 ArkUI 的 `ForEach` 在键值不变时直接复用子组件、连 item builder 都不执行，现在所有 `ForEach` 的 key 都拼上页面版本号 `rev`，代价是 Slider 改为松手才重新物化（拖动中重建会销毁正在拖的组件、手势丢失）；④ **在卡片里操作不再突然置底**——本地调参（`kind='state'`）既不整页刷新也不滚动，只有需要模型重算的 `action` 才追加消息并滚到底部。
+- **图表修正（同日第三次）**：按真机截图修掉三处图表渲染问题 —— ① **折线图太小、盒子又高又空**：`Shape` + `aspectRatio` 推导出的尺寸不可靠，改为 `onAreaChange` 量出真实宽度、按 vp 绝对坐标绘制，高度显式给 160vp；② **饼图显示不全**（被裁成半圆）：`strokeWidth` 不随 `viewPort` 缩放，`strokeWidth(100)` 画出的是 100vp 宽的巨型圆环，改为**实心扇形** `wedgeAt`；③ **径向图比例不对**（又小又粗的色块、数字被挤出圈外）：改为固定 72vp 盒子 + 绝对坐标，环半径 28 / 环宽 8，百分比放圈心。同时把"不用 `viewPort`"写成硬约定（见架构章节）。纯逻辑单测 433 → 443 项。
 
 ## 6.3.0 更新（交互模式 · Intelligent UI）
 

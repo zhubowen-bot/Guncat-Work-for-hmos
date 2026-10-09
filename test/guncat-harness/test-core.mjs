@@ -47,7 +47,7 @@ import {
   GuncatUiTrailer
 } from './gen/GuncatUiRuntime.ts';
 import { GuncatUiParts, GuncatUiSegType } from './gen/GuncatUiParts.ts';
-import { UiChartGeom, UiNum, UiPalette, UiPoint, UiScale } from './gen/GuncatUiPaint.ts';
+import { UiChartGeom, UiBox, UiNum, UiPalette, UiPoint, UiScale } from './gen/GuncatUiPaint.ts';
 import { GuncatUiPrompt } from './gen/GuncatUiPrompt.ts';
 
 let passed = 0;
@@ -1500,16 +1500,36 @@ console.log('[图表几何与数值格式]');
   const ratios = UiChartGeom.ratios([1, 3, 0]);
   check('占比计算忽略 0', ratios[0] === 0.25 && ratios[1] === 0.75 && ratios[2] === 0);
   check('起始占比累加', UiChartGeom.startRatios(ratios).join(',') === '0,0.25,1');
-  const arc = UiChartGeom.arcPath(0, 0.5, 50);
+  const arc = UiChartGeom.arcAt(60, 60, 50, 0, 0.5);
   check('圆弧为 A 指令', arc.indexOf('A50 50') > 0);
-  check('整圈留缺口不退化', UiChartGeom.arcPath(0, 1, 50).length > 0);
-  check('零占比不画', UiChartGeom.arcPath(0, 0, 50) === '');
+  check('整圈留缺口不退化', UiChartGeom.arcAt(60, 60, 50, 0, 1).length > 0);
+  check('零占比不画', UiChartGeom.arcAt(60, 60, 50, 0, 0) === '');
+  check('零半径不画', UiChartGeom.arcAt(60, 60, 0, 0, 0.5) === '');
+  // 实心扇形: 从圆心出发 + 闭合(饼图不再依赖 strokeWidth 填满)
+  const wedge = UiChartGeom.wedgeAt(60, 60, 50, 0, 0.25);
+  check('扇形从圆心出发', wedge.indexOf('M60 60') === 0);
+  check('扇形闭合', wedge.endsWith('Z'));
+  check('扇形含外弧', wedge.indexOf('A50 50') > 0);
+  check('零占比扇形不画', UiChartGeom.wedgeAt(60, 60, 50, 0, 0) === '');
+  const circle = UiChartGeom.circleAt(30, 30, 20);
+  check('整圆以 M 开头且闭合', circle.indexOf('M10 30') === 0 && circle.endsWith('Z'));
+  // 绝对坐标绘制: 用真实盒尺寸算出的折线要落在盒内
+  const box = UiBox.of(240, 140);
+  check('盒内边距按比例收缩', box.padL < 240 * 0.2 && box.innerW() > 0 && box.innerH() > 0);
+  const boxLine = UiChartGeom.linePath([1, 5, 3], sc, 'linear', false, box);
+  check('盒内折线可生成', boxLine.indexOf('M') === 0);
+  check('盒内网格线不超过 6 条', UiChartGeom.gridPaths(sc, 4, box).length === 5);
+  const boxPts = UiChartGeom.points([10, 20, 30], sc, box);
+  check('盒内坐标点在盒内',
+    boxPts[0].x >= 0 && boxPts[0].x <= 240 && boxPts[0].y >= 0 && boxPts[0].y <= 140);
 
   const poly = UiChartGeom.polygonPath(UiChartGeom.radarPoints([0.5, 0.5, 0.5, 0.5], 50));
   check('雷达多边形闭合', poly.indexOf('Z') > 0);
   check('雷达网格圈数', UiChartGeom.radarGrid(5, 50, 4).length === 4);
   check('雷达轴线条数', UiChartGeom.radarSpokes(5, 50).length === 5);
-  check('径向弧闭合圈不退化', UiChartGeom.radialArc(1, 40, true).length > 0);
+  // 自定义盒尺寸: 圆心应在盒中心
+  const radarSmall = UiChartGeom.radarGrid(4, 40, 1, 100);
+  check('雷达改用自定义盒尺寸', radarSmall.length === 1 && radarSmall[0].indexOf('Z') > 0);
 
   check('千分位', UiNum.thousands(1284) === '1,284');
   check('千分位负数', UiNum.thousands(-1234567) === '-1,234,567');

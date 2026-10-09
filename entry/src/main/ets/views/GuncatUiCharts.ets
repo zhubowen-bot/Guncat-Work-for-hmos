@@ -8,6 +8,7 @@
 // (ArkUI 的 @Prop 对嵌套对象做深拷贝, 既慢又容易丢状态)。
 import {
   UiPoint,
+  UiBox,
   UiChartGeom,
   UiPalette,
   UiNum,
@@ -226,6 +227,10 @@ export struct GuncatUiBarChart {
 }
 
 // ===== 折线图 / 面积图 =====
+//
+// 尺寸策略: 折线图宽度必须自适应, 而 ArkUI 的 Shape+viewPort 会把内容缩放到组件尺寸、
+// strokeWidth 却不跟着缩放(真机上出现过"图只画了一小块、剩下大片空白"), 因此这里改为
+// **先量出真实宽度, 再按 vp 绝对坐标画** —— onAreaChange 拿到宽度后重算路径, 无 viewPort 缩放。
 @Component
 export struct GuncatUiLineChart {
   @Prop labels: string[] = [];
@@ -234,6 +239,10 @@ export struct GuncatUiLineChart {
   @Prop smooth: boolean = false;
   @Prop area: boolean = false;
   @Prop showDots: boolean = true;
+  // 绘图高度(vp); 由调用方按 chart 的 height 参数给, 默认 150
+  @Prop chartHeight: number = 150;
+  // 实测宽度(vp): 首帧用默认值, onAreaChange 后修正
+  @State private boxW: number = 300;
 
   build() {
     Column({ space: 6 }) {
@@ -278,8 +287,14 @@ export struct GuncatUiLineChart {
         }
       }
       .width('100%')
-      .aspectRatio(2)
-      .viewPort({ x: 0, y: 0, width: UiChartGeom.LINE_W, height: UiChartGeom.LINE_H })
+      .height(this.chartHeight)
+      .onAreaChange((_old: Area, next: Area) => {
+        // 只在宽度真的变化时重算, 避免 onAreaChange → 重绘 → onAreaChange 抖动
+        let w: number = GuncatUiLineChart.len(next.width, this.boxW);
+        if (Math.abs(w - this.boxW) > 1) {
+          this.boxW = w;
+        }
+      })
 
       Row() {
         Text(this.rangeText())
@@ -289,6 +304,7 @@ export struct GuncatUiLineChart {
         Text(this.xRangeText())
           .fontSize(10)
           .fontColor($r('app.color.text_tertiary'))
+          .flexShrink(0)
       }
       .width('100%')
 
@@ -298,6 +314,22 @@ export struct GuncatUiLineChart {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
+  }
+
+  // Area.width 是 Length(string|number|Resource), 统一转成 vp 数值
+  private static len(value: Object, fallback: number): number {
+    if (typeof value === 'number') {
+      return value as number;
+    }
+    if (typeof value === 'string') {
+      let n: number = parseFloat(value as string);
+      return isNaN(n) ? fallback : n;
+    }
+    return fallback;
+  }
+
+  private box(): UiBox {
+    return UiBox.of(this.boxW, this.chartHeight);
   }
 
   private allValues(): number[] {
@@ -316,19 +348,21 @@ export struct GuncatUiLineChart {
   }
 
   private gridPaths(): string[] {
-    return UiChartGeom.gridPaths(this.axisScale(), 4);
+    return UiChartGeom.gridPaths(this.axisScale(), 4, this.box());
   }
 
   private linePathFor(values: number[]): string {
-    return UiChartGeom.linePath(values, this.axisScale(), this.smooth ? 'natural' : 'linear', false);
+    return UiChartGeom.linePath(values, this.axisScale(), this.smooth ? 'natural' : 'linear',
+      false, this.box());
   }
 
   private areaPathFor(values: number[]): string {
-    return UiChartGeom.areaPath(values, this.axisScale(), this.smooth ? 'natural' : 'linear');
+    return UiChartGeom.areaPath(values, this.axisScale(), this.smooth ? 'natural' : 'linear',
+      this.box());
   }
 
   private dotsFor(values: number[]): string[] {
-    let pts: UiPoint[] = UiChartGeom.points(values, this.axisScale());
+    let pts: UiPoint[] = UiChartGeom.points(values, this.axisScale(), this.box());
     let out: string[] = [];
     for (let i: number = 0; i < pts.length; i++) {
       out.push(UiChartGeom.dotPath(pts[i], 2.6));
@@ -355,6 +389,12 @@ export struct GuncatUiLineChart {
 // ===== 饼图 / 环形图 =====
 @Component
 export struct GuncatUiPieChart {
+  // 绘图盒与内外半径(全部 vp): 固定尺寸 + 绝对坐标绘制, 不依赖 viewPort 缩放
+  static readonly BOX: number = 128;
+  static readonly OUTER: number = 58;
+  static readonly INNER: number = 34;
+  static readonly RING: number = 24;
+
   @Prop labels: string[] = [];
   @Prop values: number[] = [];
   @Prop donut: boolean = true;
@@ -365,17 +405,26 @@ export struct GuncatUiPieChart {
         Stack() {
           Shape() {
             ForEach(this.ratios(), (ratio: number, i: number) => {
-              Path()
-                .commands(this.arcAt(i))
-                .stroke(UiPalette.category(i))
-                .strokeWidth(this.donut ? 26 : 100)
-                .fill(Color.Transparent)
-                .strokeLineCap(LineCapStyle.Butt)
+              if (this.donut) {
+                // 环形: 用描边画弧(半径与描边宽度都是 vp, 不再受 viewPort 缩放影响)
+                Path()
+                  .commands(this.donutArcAt(i))
+                  .stroke(UiPalette.category(i))
+                  .strokeWidth(GuncatUiPieChart.RING)
+                  .fill(Color.Transparent)
+                  .strokeLineCap(LineCapStyle.Butt)
+              } else {
+                // 饼图: **实心扇形**。旧实现用 strokeWidth(100) 想把扇形填满, 但 strokeWidth
+                // 不随 viewPort 缩放 → 实际画出一条 100vp 宽的巨型圆环, 被容器裁成半圆。
+                Path()
+                  .commands(this.wedgeAt(i))
+                  .fill(UiPalette.category(i))
+                  .stroke(Color.Transparent)
+              }
             }, (ratio: number, i: number) => 'arc' + i.toString())
           }
-          .width('100%')
-          .height('100%')
-          .viewPort({ x: 0, y: 0, width: UiChartGeom.PIE_SIZE, height: UiChartGeom.PIE_SIZE })
+          .width(GuncatUiPieChart.BOX)
+          .height(GuncatUiPieChart.BOX)
 
           if (this.donut) {
             Column({ space: 1 }) {
@@ -389,8 +438,11 @@ export struct GuncatUiPieChart {
             }
           }
         }
-        .width(124)
-        .height(124)
+        .width(GuncatUiPieChart.BOX)
+        .height(GuncatUiPieChart.BOX)
+        .constraintSize({ minWidth: GuncatUiPieChart.BOX, minHeight: GuncatUiPieChart.BOX })
+        .flexShrink(0)
+        .clip(false)
 
         Column({ space: 6 }) {
           ForEach(this.labels, (label: string, i: number) => {
@@ -429,14 +481,27 @@ export struct GuncatUiPieChart {
     return UiChartGeom.ratios(this.values);
   }
 
-  private arcAt(i: number): string {
+  // 环形的一段(描边弧): 半径取内外半径中线, 描边宽度 = 环宽
+  private donutArcAt(i: number): string {
     let ratios: number[] = this.ratios();
     if (i >= ratios.length) {
       return '';
     }
     let starts: number[] = UiChartGeom.startRatios(ratios);
-    let radius: number = this.donut ? 74 : 46;
-    return UiChartGeom.arcPath(starts[i], ratios[i], radius);
+    let c: number = GuncatUiPieChart.BOX / 2;
+    let mid: number = (GuncatUiPieChart.OUTER + GuncatUiPieChart.INNER) / 2;
+    return UiChartGeom.arcAt(c, c, mid, starts[i], ratios[i]);
+  }
+
+  // 饼图的一段(实心扇形), 半径 = 外半径
+  private wedgeAt(i: number): string {
+    let ratios: number[] = this.ratios();
+    if (i >= ratios.length) {
+      return '';
+    }
+    let starts: number[] = UiChartGeom.startRatios(ratios);
+    let c: number = GuncatUiPieChart.BOX / 2;
+    return UiChartGeom.wedgeAt(c, c, GuncatUiPieChart.OUTER, starts[i], ratios[i]);
   }
 
   private totalText(): string {
@@ -468,40 +533,56 @@ export struct GuncatUiPieChart {
 }
 
 // ===== 径向条形图(多个达成率) =====
+//
+// 尺寸策略: 圆圈固定 72vp + 绝对坐标绘制(不设 viewPort)。旧实现用 52vp 盒子 + 200 的 viewPort,
+// 内容是按 0.26 倍缩放的, 但 strokeWidth(8) 按 vp 画 → 环宽是半径的好几倍, 真机上就成了一圈
+// 又小又粗、几乎看不出比例的色块, 百分比数字也被挤到圈外。
 @Component
 export struct GuncatUiRadialChart {
+  static readonly BOX: number = 72;
+  static readonly RING_R: number = 28;
+  static readonly RING_W: number = 8;
+
   @Prop labels: string[] = [];
   @Prop values: number[] = [];
 
   build() {
-    Column({ space: 10 }) {
+    Column({ space: 12 }) {
       ForEach(this.labels, (label: string, i: number) => {
-        Row({ space: 10 }) {
+        Row() {
           Stack() {
             Shape() {
+              // 轨道(整圈) + 进度弧, 都是绝对坐标
               Path()
-                .commands(UiChartGeom.radialArc(1, 40, true))
+                .commands(UiChartGeom.circleAt(GuncatUiRadialChart.BOX / 2,
+                  GuncatUiRadialChart.BOX / 2, GuncatUiRadialChart.RING_R))
                 .stroke($r('app.color.surface_secondary'))
-                .strokeWidth(8)
+                .strokeWidth(GuncatUiRadialChart.RING_W)
                 .fill(Color.Transparent)
               Path()
-                .commands(UiChartGeom.radialArc(this.ratioAt(i), 40, false))
+                .commands(UiChartGeom.arcAt(GuncatUiRadialChart.BOX / 2,
+                  GuncatUiRadialChart.BOX / 2, GuncatUiRadialChart.RING_R, 0, this.ratioAt(i)))
                 .stroke(UiPalette.category(i))
-                .strokeWidth(8)
+                .strokeWidth(GuncatUiRadialChart.RING_W)
                 .fill(Color.Transparent)
                 .strokeLineCap(LineCapStyle.Round)
             }
-            .width(52)
-            .height(52)
-            .viewPort({ x: 0, y: 0, width: UiChartGeom.PIE_SIZE, height: UiChartGeom.PIE_SIZE })
+            .width(GuncatUiRadialChart.BOX)
+            .height(GuncatUiRadialChart.BOX)
 
-            Text(String(Math.round(this.ratioAt(i) * 100)))
-              .fontSize(11)
+            // 百分比放在圈心(半径 28 的圈内, 字号 12 放得下两位数)
+            Text(String(Math.round(this.ratioAt(i) * 100)) + '%')
+              .fontSize(12)
               .fontWeight(FontWeight.Medium)
               .fontColor($r('app.color.text_primary'))
           }
-          .width(52)
-          .height(52)
+          .width(GuncatUiRadialChart.BOX)
+          .height(GuncatUiRadialChart.BOX)
+          .constraintSize({
+            minWidth: GuncatUiRadialChart.BOX,
+            minHeight: GuncatUiRadialChart.BOX
+          })
+          .flexShrink(0)
 
           Column({ space: 2 }) {
             Text(label)
@@ -516,9 +597,11 @@ export struct GuncatUiRadialChart {
               .width('100%')
           }
           .layoutWeight(1)
+          .margin({ left: 10 })
           .alignItems(HorizontalAlign.Start)
         }
         .width('100%')
+        .alignItems(VerticalAlign.Center)
       }, (label: string, i: number) => 'rd' + i.toString() + label)
     }
     .width('100%')
@@ -608,6 +691,10 @@ export struct GuncatUiStackedBar {
 // ===== 雷达图 =====
 @Component
 export struct GuncatUiRadarChart {
+  static readonly BOX: number = 220;
+  static readonly R: number = 84;
+  static readonly RINGS: number = 4;
+
   @Prop labels: string[] = [];
   @Prop seriesNames: string[] = [];
   // 每个序列已归一化到 0..1 的数值
@@ -617,7 +704,9 @@ export struct GuncatUiRadarChart {
     Column({ space: 8 }) {
       Stack() {
         Shape() {
-          ForEach(UiChartGeom.radarGrid(this.labels.length, 76, 4), (path: string, i: number) => {
+          // 与饼图/径向同理: 固定 220vp 的盒子 + 绝对坐标, 不设 viewPort(1 单位 = 1vp)
+          ForEach(UiChartGeom.radarGrid(this.labels.length, GuncatUiRadarChart.R,
+            GuncatUiRadarChart.RINGS, GuncatUiRadarChart.BOX), (path: string, i: number) => {
             Path()
               .commands(path)
               .stroke(UiPalette.GRID)
@@ -625,7 +714,8 @@ export struct GuncatUiRadarChart {
               .fill(Color.Transparent)
           }, (path: string, i: number) => 'rg' + i.toString())
 
-          ForEach(UiChartGeom.radarSpokes(this.labels.length, 76), (path: string, i: number) => {
+          ForEach(UiChartGeom.radarSpokes(this.labels.length, GuncatUiRadarChart.R,
+            GuncatUiRadarChart.BOX), (path: string, i: number) => {
             Path()
               .commands(path)
               .stroke(UiPalette.GRID)
@@ -635,19 +725,23 @@ export struct GuncatUiRadarChart {
 
           ForEach(this.seriesNorm, (values: number[], si: number) => {
             Path()
-              .commands(UiChartGeom.polygonPath(UiChartGeom.radarPoints(values, 76)))
+              .commands(UiChartGeom.polygonPath(UiChartGeom.radarPoints(values,
+                GuncatUiRadarChart.R, GuncatUiRadarChart.BOX)))
               .stroke(UiPalette.series(si))
               .strokeWidth(2)
               .fill(UiPalette.series(si))
               .opacity(0.18)
           }, (values: number[], si: number) => 'rp' + si.toString())
         }
-        .width('100%')
-        .height('100%')
-        .viewPort({ x: 0, y: 0, width: UiChartGeom.RADAR_SIZE, height: UiChartGeom.RADAR_SIZE })
+        .width(GuncatUiRadarChart.BOX)
+        .height(GuncatUiRadarChart.BOX)
       }
-      .width(200)
-      .height(200)
+      .width(GuncatUiRadarChart.BOX)
+      .height(GuncatUiRadarChart.BOX)
+      .constraintSize({
+        minWidth: GuncatUiRadarChart.BOX,
+        minHeight: GuncatUiRadarChart.BOX
+      })
 
       Flex({ wrap: FlexWrap.Wrap }) {
         ForEach(this.labels, (label: string, i: number) => {

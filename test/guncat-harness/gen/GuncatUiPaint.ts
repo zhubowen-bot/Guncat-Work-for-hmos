@@ -167,8 +167,51 @@ export class UiScale {
   }
 }
 
+// 绘图盒(绝对坐标, 单位 vp)。
+//
+// 为什么需要它: ArkUI 的 `Shape` + `viewPort` 会把 viewport 坐标系缩放到组件尺寸, 而
+// **`strokeWidth` 不参与这个缩放**(它按 vp 解释)。真机后果:
+//   - 饼图用 strokeWidth(100) 想把扇形填满, 实际画出一条 100vp 宽的巨型圆环 → 被容器裁掉;
+//   - 刻度/网格只落在 viewport 映射出的一小块区域里。
+// 因此除了"宽度自适应"的折线/面积图(先量出真实宽度再按 vp 画), 其余图表一律**不用 viewPort**:
+// 直接在真实 vp 坐标里画, 尺寸与描边宽度语义一致。
+export class UiBox {
+  w: number = UiChartGeom.LINE_W;
+  h: number = UiChartGeom.LINE_H;
+  padL: number = UiChartGeom.LINE_PAD_L;
+  padR: number = UiChartGeom.LINE_PAD_R;
+  padT: number = UiChartGeom.LINE_PAD_T;
+  padB: number = UiChartGeom.LINE_PAD_B;
+
+  // 按真实尺寸造盒: 内边距按比例收缩, 窄屏时不会把绘图区挤没
+  static of(w: number, h: number): UiBox {
+    let box: UiBox = new UiBox();
+    box.w = w > 40 ? w : 40;
+    box.h = h > 40 ? h : 40;
+    box.padL = Math.min(UiChartGeom.LINE_PAD_L, box.w * 0.13);
+    box.padR = Math.min(UiChartGeom.LINE_PAD_R, box.w * 0.04);
+    box.padT = Math.min(UiChartGeom.LINE_PAD_T, box.h * 0.08);
+    box.padB = Math.min(UiChartGeom.LINE_PAD_B, box.h * 0.15);
+    return box;
+  }
+
+  innerW(): number {
+    let v: number = this.w - this.padL - this.padR;
+    return v > 1 ? v : 1;
+  }
+
+  innerH(): number {
+    let v: number = this.h - this.padT - this.padB;
+    return v > 1 ? v : 1;
+  }
+
+  baseY(): number {
+    return this.h - this.padB;
+  }
+}
+
 export class UiChartGeom {
-  // ===== 折线/面积 =====
+  // ===== 折线/面积(默认盒尺寸; 实际绘制请用 UiBox.of(实测宽, 高)) =====
   static readonly LINE_W: number = 320;
   static readonly LINE_H: number = 160;
   static readonly LINE_PAD_L: number = 34;
@@ -176,44 +219,40 @@ export class UiChartGeom {
   static readonly LINE_PAD_T: number = 10;
   static readonly LINE_PAD_B: number = 20;
 
-  static lineInnerW(): number {
-    return UiChartGeom.LINE_W - UiChartGeom.LINE_PAD_L - UiChartGeom.LINE_PAD_R;
-  }
-
-  static lineInnerH(): number {
-    return UiChartGeom.LINE_H - UiChartGeom.LINE_PAD_T - UiChartGeom.LINE_PAD_B;
-  }
-
   // 第 i 个数据点的 x 坐标
-  static lineX(index: number, count: number): number {
-    let inner: number = UiChartGeom.lineInnerW();
+  static lineX(index: number, count: number, box: UiBox | null = null): number {
+    let b: UiBox = box === null ? new UiBox() : box;
+    let inner: number = b.innerW();
     if (count <= 1) {
-      return UiChartGeom.LINE_PAD_L + inner / 2;
+      return b.padL + inner / 2;
     }
-    return UiChartGeom.LINE_PAD_L + (inner * index) / (count - 1);
+    return b.padL + (inner * index) / (count - 1);
   }
 
   // 数值 v 的 y 坐标
-  static lineY(v: number, scale: UiScale): number {
-    let inner: number = UiChartGeom.lineInnerH();
-    return UiChartGeom.LINE_PAD_T + inner * (1 - scale.norm(v));
+  static lineY(v: number, scale: UiScale, box: UiBox | null = null): number {
+    let b: UiBox = box === null ? new UiBox() : box;
+    return b.padT + b.innerH() * (1 - scale.norm(v));
   }
 
-  static points(values: number[], scale: UiScale): UiPoint[] {
+  static points(values: number[], scale: UiScale, box: UiBox | null = null): UiPoint[] {
     let out: UiPoint[] = [];
     for (let i: number = 0; i < values.length; i++) {
-      out.push(new UiPoint(UiChartGeom.lineX(i, values.length), UiChartGeom.lineY(values[i], scale)));
+      out.push(new UiPoint(UiChartGeom.lineX(i, values.length, box),
+        UiChartGeom.lineY(values[i], scale, box)));
     }
     return out;
   }
 
   // 折线路径; variant=natural 时用三次贝塞尔平滑
-  static linePath(values: number[], scale: UiScale, variant: string, close: boolean): string {
+  static linePath(values: number[], scale: UiScale, variant: string, close: boolean,
+    box: UiBox | null = null): string {
     if (values.length === 0) {
       return '';
     }
-    let pts: UiPoint[] = UiChartGeom.points(values, scale);
-    let base: number = UiChartGeom.LINE_H - UiChartGeom.LINE_PAD_B;
+    let b: UiBox = box === null ? new UiBox() : box;
+    let pts: UiPoint[] = UiChartGeom.points(values, scale, b);
+    let base: number = b.baseY();
     let path: string = '';
     if (variant === 'step' && pts.length > 1) {
       path = 'M' + UiChartGeom.n(pts[0].x) + ' ' + UiChartGeom.n(pts[0].y);
@@ -245,17 +284,19 @@ export class UiChartGeom {
   }
 
   // 面积填充路径(线 + 回到底边闭合)
-  static areaPath(values: number[], scale: UiScale, variant: string): string {
-    return UiChartGeom.linePath(values, scale, variant, true);
+  static areaPath(values: number[], scale: UiScale, variant: string,
+    box: UiBox | null = null): string {
+    return UiChartGeom.linePath(values, scale, variant, true, box);
   }
 
   // y 轴网格线路径
-  static gridPaths(scale: UiScale, count: number): string[] {
+  static gridPaths(scale: UiScale, count: number, box: UiBox | null = null): string[] {
+    let b: UiBox = box === null ? new UiBox() : box;
     let out: string[] = [];
-    let x0: number = UiChartGeom.LINE_PAD_L;
-    let x1: number = UiChartGeom.LINE_W - UiChartGeom.LINE_PAD_R;
+    let x0: number = b.padL;
+    let x1: number = b.w - b.padR;
     for (let i: number = 0; i <= count; i++) {
-      let y: number = UiChartGeom.lineY(scale.min + (scale.max - scale.min) * (i / count), scale);
+      let y: number = UiChartGeom.lineY(scale.min + (scale.max - scale.min) * (i / count), scale, b);
       out.push('M' + UiChartGeom.n(x0) + ' ' + UiChartGeom.n(y) + ' L' + UiChartGeom.n(x1) + ' ' + UiChartGeom.n(y));
     }
     return out;
@@ -263,22 +304,26 @@ export class UiChartGeom {
 
   // 数据点圆圈路径(折线图上的点)
   static dotPath(p: UiPoint, r: number): string {
-    let left: number = p.x - r;
-    let right: number = p.x + r;
-    return 'M' + UiChartGeom.n(left) + ' ' + UiChartGeom.n(p.y) +
-      ' A' + UiChartGeom.n(r) + ' ' + UiChartGeom.n(r) + ' 0 1 1 ' + UiChartGeom.n(right) + ' ' + UiChartGeom.n(p.y) +
-      ' A' + UiChartGeom.n(r) + ' ' + UiChartGeom.n(r) + ' 0 1 1 ' + UiChartGeom.n(left) + ' ' + UiChartGeom.n(p.y) + ' Z';
+    return UiChartGeom.circleAt(p.x, p.y, r);
   }
 
-  // ===== 饼图 / 环形 =====
-  static readonly PIE_SIZE: number = 200;
+  // 以 (cx, cy) 为圆心、半径 r 的整圆(闭合路径)
+  static circleAt(cx: number, cy: number, r: number): string {
+    let left: number = cx - r;
+    let right: number = cx + r;
+    return 'M' + UiChartGeom.n(left) + ' ' + UiChartGeom.n(cy) +
+      ' A' + UiChartGeom.n(r) + ' ' + UiChartGeom.n(r) + ' 0 1 1 ' + UiChartGeom.n(right) + ' ' + UiChartGeom.n(cy) +
+      ' A' + UiChartGeom.n(r) + ' ' + UiChartGeom.n(r) + ' 0 1 1 ' + UiChartGeom.n(left) + ' ' + UiChartGeom.n(cy) + ' Z';
+  }
 
-  // 单段圆弧(极坐标 → SVG 弧)
-  static arcPath(startRatio: number, sweepRatio: number, radius: number): string {
-    if (sweepRatio <= 0) {
+  // ===== 饼图 / 环形 / 径向(全部绝对坐标, 单位 vp) =====
+  // 不用 viewPort 的原因见 UiBox 注释: strokeWidth 不随 viewPort 缩放, 用它会画出巨型圆环被裁掉。
+
+  // 从 12 点方向开始的一段圆弧(描边用)
+  static arcAt(cx: number, cy: number, r: number, startRatio: number, sweepRatio: number): string {
+    if (sweepRatio <= 0 || r <= 0) {
       return '';
     }
-    let c: number = UiChartGeom.PIE_SIZE / 2;
     let sweep: number = sweepRatio;
     // 整圈时起点终点重合会不渲染: 留出极小缺口
     if (sweep >= 0.99999) {
@@ -286,14 +331,33 @@ export class UiChartGeom {
     }
     let a0: number = startRatio * Math.PI * 2 - Math.PI / 2;
     let a1: number = (startRatio + sweep) * Math.PI * 2 - Math.PI / 2;
-    let x0: number = c + radius * Math.cos(a0);
-    let y0: number = c + radius * Math.sin(a0);
-    let x1: number = c + radius * Math.cos(a1);
-    let y1: number = c + radius * Math.sin(a1);
+    let x0: number = cx + r * Math.cos(a0);
+    let y0: number = cy + r * Math.sin(a0);
+    let x1: number = cx + r * Math.cos(a1);
+    let y1: number = cy + r * Math.sin(a1);
     let large: number = sweep > 0.5 ? 1 : 0;
     return 'M' + UiChartGeom.n(x0) + ' ' + UiChartGeom.n(y0) +
-      ' A' + UiChartGeom.n(radius) + ' ' + UiChartGeom.n(radius) + ' 0 ' + large.toString() + ' 1 ' +
+      ' A' + UiChartGeom.n(r) + ' ' + UiChartGeom.n(r) + ' 0 ' + large.toString() + ' 1 ' +
       UiChartGeom.n(x1) + ' ' + UiChartGeom.n(y1);
+  }
+
+  // 实心扇形(饼图用: 从圆心出发, 不依赖 strokeWidth)
+  static wedgeAt(cx: number, cy: number, r: number, startRatio: number, sweepRatio: number): string {
+    if (sweepRatio <= 0 || r <= 0) {
+      return '';
+    }
+    let sweep: number = sweepRatio >= 0.99999 ? 0.99999 : sweepRatio;
+    let a0: number = startRatio * Math.PI * 2 - Math.PI / 2;
+    let a1: number = (startRatio + sweep) * Math.PI * 2 - Math.PI / 2;
+    let x0: number = cx + r * Math.cos(a0);
+    let y0: number = cy + r * Math.sin(a0);
+    let x1: number = cx + r * Math.cos(a1);
+    let y1: number = cy + r * Math.sin(a1);
+    let large: number = sweep > 0.5 ? 1 : 0;
+    return 'M' + UiChartGeom.n(cx) + ' ' + UiChartGeom.n(cy) +
+      ' L' + UiChartGeom.n(x0) + ' ' + UiChartGeom.n(y0) +
+      ' A' + UiChartGeom.n(r) + ' ' + UiChartGeom.n(r) + ' 0 ' + large.toString() + ' 1 ' +
+      UiChartGeom.n(x1) + ' ' + UiChartGeom.n(y1) + ' Z';
   }
 
   // 每段占比(忽略非正数)
@@ -330,9 +394,10 @@ export class UiChartGeom {
   static readonly RADAR_SIZE: number = 220;
 
   // 归一化值(0..1) → 多边形顶点
-  static radarPoints(normValues: number[], radius: number): UiPoint[] {
+  static radarPoints(normValues: number[], radius: number, size: number = 0): UiPoint[] {
     let out: UiPoint[] = [];
-    let c: number = UiChartGeom.RADAR_SIZE / 2;
+    let box: number = size > 0 ? size : UiChartGeom.RADAR_SIZE;
+    let c: number = box / 2;
     let count: number = normValues.length;
     for (let i: number = 0; i < count; i++) {
       let angle: number = (i / count) * Math.PI * 2 - Math.PI / 2;
@@ -355,22 +420,23 @@ export class UiChartGeom {
   }
 
   // 雷达网格(同心多边形)
-  static radarGrid(count: number, radius: number, rings: number): string[] {
+  static radarGrid(count: number, radius: number, rings: number, size: number = 0): string[] {
     let out: string[] = [];
     for (let r: number = 1; r <= rings; r++) {
       let values: number[] = [];
       for (let i: number = 0; i < count; i++) {
         values.push(r / rings);
       }
-      out.push(UiChartGeom.polygonPath(UiChartGeom.radarPoints(values, radius)));
+      out.push(UiChartGeom.polygonPath(UiChartGeom.radarPoints(values, radius, size)));
     }
     return out;
   }
 
   // 雷达轴线
-  static radarSpokes(count: number, radius: number): string[] {
+  static radarSpokes(count: number, radius: number, size: number = 0): string[] {
     let out: string[] = [];
-    let c: number = UiChartGeom.RADAR_SIZE / 2;
+    let box: number = size > 0 ? size : UiChartGeom.RADAR_SIZE;
+    let c: number = box / 2;
     for (let i: number = 0; i < count; i++) {
       let angle: number = (i / count) * Math.PI * 2 - Math.PI / 2;
       let x: number = c + radius * Math.cos(angle);
@@ -378,28 +444,6 @@ export class UiChartGeom {
       out.push('M' + UiChartGeom.n(c) + ' ' + UiChartGeom.n(c) + ' L' + UiChartGeom.n(x) + ' ' + UiChartGeom.n(y));
     }
     return out;
-  }
-
-  // 径向条形: 每个值的进度弧(0..1)
-  static radialArc(ratio: number, radius: number, track: boolean): string {
-    let c: number = UiChartGeom.PIE_SIZE / 2;
-    let sweep: number = ratio;
-    if (sweep <= 0) {
-      return track ? UiChartGeom.arcPath(0, 0.99999, radius) : '';
-    }
-    if (sweep >= 0.99999) {
-      sweep = 0.99999;
-    }
-    let a0: number = -Math.PI / 2;
-    let a1: number = sweep * Math.PI * 2 - Math.PI / 2;
-    let x0: number = c + radius * Math.cos(a0);
-    let y0: number = c + radius * Math.sin(a0);
-    let x1: number = c + radius * Math.cos(a1);
-    let y1: number = c + radius * Math.sin(a1);
-    let large: number = sweep > 0.5 ? 1 : 0;
-    return 'M' + UiChartGeom.n(x0) + ' ' + UiChartGeom.n(y0) +
-      ' A' + UiChartGeom.n(radius) + ' ' + UiChartGeom.n(radius) + ' 0 ' + large.toString() + ' 1 ' +
-      UiChartGeom.n(x1) + ' ' + UiChartGeom.n(y1);
   }
 
   // 数字 → 路径文本(最多 1 位小数, 保证路径字符串短)

@@ -1125,7 +1125,8 @@ export struct GuncatUiView {
           seriesValues: this.seriesValues(el),
           smooth: UiNode.str(el, 'variant', 'linear') === 'natural',
           area: el.type === 'AreaChart',
-          showDots: UiNode.strList(el, 'labels').length <= 12
+          showDots: UiNode.strList(el, 'labels').length <= 12,
+          chartHeight: this.chartHeight(el)
         })
       } else if (el.type === 'HorizontalBarChart') {
         GuncatUiHorizontalBars({
@@ -1164,8 +1165,20 @@ export struct GuncatUiView {
     .margin(this.bleed(topLevel))
   }
 
-  private seriesNames(el: UiElement): string[] {
-    let series: UiElement[] = UiNode.elementList(el, 'series');
+  // 折线/面积图的绘图高度: 模型给的 height 参数优先, 否则 160vp
+  // (旧实现用 aspectRatio 让 ArkUI 推导高度, 真机上推出来的盒子又高又空、内容只画了一小块)
+  private chartHeight(el: UiElement): number {
+    let h: number = UiNode.num(el, 'height', 0);
+    if (h < 80) {
+      return 160;
+    }
+    if (h > 320) {
+      return 320;
+    }
+    return h;
+  }
+
+  private seriesNames(el: UiElement): string[] {    let series: UiElement[] = UiNode.elementList(el, 'series');
     let out: string[] = [];
     for (let i: number = 0; i < series.length; i++) {
       out.push(UiNode.str(series[i], 'category', '系列' + (i + 1).toString()));
