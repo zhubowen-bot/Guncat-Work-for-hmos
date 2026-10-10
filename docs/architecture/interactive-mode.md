@@ -23,7 +23,7 @@ ChatViewModel.executeWorkLoop(conv)
 
 `buildInteractiveSystemPrompt()` = `GuncatUiPrompt.promptSection()`（guncat-ui lang 语法 + 组件清单 + **丰富度/组件选择优先级** + 交互闭环 + 输出顺序纪律 + 示例 + 反例）+ **快车道底座** `PromptBuilder.buildInteractive()`（身份"快" + 工作区=素材区 + **裁剪后**工具名索引 + 真实数据纪律 + **极小技能索引**）+ `GuncatUiPrompt.INTERACTIVE_DUTY`（交付形态职责，收尾并拥有最终解释权）。三段拼接后**整体静态**、进程内缓存一次，KV 缓存前缀与工作模式同样逐字节稳定。
 
-**为什么不复用工作模式的提示词底座**（这是本节最需要维护者记住的一条）：`PromptBuilder.build()` 里的身份/四步法/工作流程/输出丰富性/Mermaid/交付前自检清单，全都是为「多轮工具循环 + 长程交付」写的——"复杂任务先用 `todo_write` 建清单""命中技能第一步必须 `load_skill`""交付前用 `list_files` 核验""最终总结必附 mermaid 导图"。这些规则放在工作模式里是对的，放在交互模式里就变成模型**先跑一串和界面无关的工具调用**，用户干等一个本可以直接渲染的卡片。所以交互模式只保留四块底座：**身份（快）＋工作区（素材区，文件树已在运行时快照里）＋工具名索引（`PromptBuilder.buildToolNameIndex`，取的是裁剪后的工具面，与请求里真正下发的定义同源，只列名字不写用法规则）＋真实数据纪律**；行为约束集中成一句"默认零工具，工具是破例"。界面的语言契约、丰富度、示例、反例仍全部来自 `GuncatUiPrompt`，两处不重复。实测提示词从 **36.7k 字符降到 22.8k 字符**（其中行为纪律段 15.6k → 1.7k），首答 TTFT 与输入 token 同步下降。
+**为什么不复用工作模式的提示词底座**（这是本节最需要维护者记住的一条）：`PromptBuilder.build()` 里的身份/四步法/工作流程/输出丰富性/Mermaid/交付前自检清单，全都是为「多轮工具循环 + 长程交付」写的——"复杂任务先用 `todo_write` 建清单""命中技能第一步必须 `load_skill`""交付前用 `list_files` 核验""最终总结必附 mermaid 导图"。这些规则放在工作模式里是对的，放在交互模式里就变成模型**先跑一串和界面无关的工具调用**，用户干等一个本可以直接渲染的卡片。所以交互模式只保留四块底座：**身份（快）＋工作区（素材区，文件树已在运行时快照里）＋工具名索引（`PromptBuilder.buildToolNameIndex`，取的是裁剪后的工具面，与请求里真正下发的定义同源，只列名字不写用法规则）＋真实数据纪律**；行为约束集中成一句"默认零工具，工具是破例"。身份段里还带一段 **`# 思考纪律: 短`**：交付物是界面，**思考是纯延迟**，所以它只做三件事（定界面骨架 → 定数据来源 → 定标题与结论），并明确禁止在思考里复述界面语法与组件清单、先草拟正文、逐位心算数字、反复权衡"要不要再画一个图"，长度目标是几句话或几个短条目。此前这一侧没有任何思考预算——正文与工具纪律写得很紧，唯独推理过程没说长度，模型就把语法与组件清单在思考里重念一遍。界面的语言契约、丰富度、示例、反例仍全部来自 `GuncatUiPrompt`，两处不重复。实测提示词从 **36.7k 字符降到 22.8k 字符**（其中行为纪律段 15.6k → 1.7k），首答 TTFT 与输入 token 同步下降。
 
 ### 2.1 工具面物理裁剪（45 → 27）
 
@@ -237,7 +237,7 @@ B. 回传助手（发一条消息, 触发新一轮回答）
 | 交互模式能用哪些技能 | `common/SkillDirectoryFormatter.ts` 的 `INTERACTIVE_SKILL_IDS` |
 
 > **回归护栏（三层，缺一不可）**
-> 1. 纯逻辑单测：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`（516 项，含 guncat-ui lang 的词法/语法/前向引用/流式补齐/绑定重算/`@Each`/内置函数/`Action`/片段切分/状态序列化/图表几何/组件库与提示词，以及交互模式快车道与工具面 45→27 的裁剪断言）。
+> 1. 纯逻辑单测：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`（517 项，含 guncat-ui lang 的词法/语法/前向引用/流式补齐/绑定重算/`@Each`/内置函数/`Action`/片段切分/状态序列化/图表几何/组件库与提示词，以及交互模式快车道、思考纪律与工具面 45→27 的裁剪断言）。
 > 2. 服务层类型检查：`node check-setup.mjs && npx tsc -p check/tsconfig.json`。
 > 3. **真实 ArkTS 编译**：`powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`（调用 DevEco 自带的 hvigor）。
 > 第 3 层不能省：ArkUI 有一批**只有编译器才知道**的规则——`@Builder` 方法体内不允许声明局部变量、自定义组件属性名不能与内置属性同名（`size` / `scale`）、`@Prop` 的 null 需要显式联合类型。这些在 node 侧 harness 里全都测不出来（harness 只覆盖 `common/**` 与 `service/**` 的纯 TS，不解析 `.ets`）。

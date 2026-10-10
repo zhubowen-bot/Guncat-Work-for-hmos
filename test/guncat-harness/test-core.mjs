@@ -1725,6 +1725,12 @@ console.log('[组件库与提示词]');
   check('快车道底座把长程工具点名为"一律不用"',
     fastLane.indexOf('todo_write / goal_* / schedule_* / subagent / session_search') > 0 &&
     fastLane.indexOf('不要 ask_user_question') > 0);
+  check('快车道底座给出"思考也要短"的纪律',
+    fastLane.indexOf('# 思考纪律: 短') > 0 &&
+    fastLane.indexOf('思考只做三件事') > 0 &&
+    fastLane.indexOf('不要在思考里复述界面语法与组件清单') > 0 &&
+    fastLane.indexOf('几句话或几个短条目') > 0 &&
+    fastLane.indexOf('思考时间同样算进用户等待') > 0);
   check('快车道底座注入工具名索引(与裁剪后工具面同源)',
     PromptBuilder.buildInteractive('', 'list_files, read_file, run_js')
       .indexOf('全部可用工具: list_files, read_file, run_js') > 0);

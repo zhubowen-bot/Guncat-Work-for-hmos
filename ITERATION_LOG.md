@@ -15,11 +15,13 @@ R69 把纪律写进了提示词（"默认一次回答直接给界面、不调用
 - **`common/PromptBuilder.ts` 文案同源**：`interactiveTools(toolIndex)` 从"工具面与工作模式完全相同"改为"工具面**已经裁剪过**：只保留四类…这些工具在交互模式下**不下发**，你也调不到"；`buildInteractive()` 的 `skillsSection` 改为原样拼上（技能段自带标题与纪律，不再套一层"技能库"说明）；交互模式段落的分块注释与底座说明同步。
 - **`common/SkillDirectoryFormatter.ts` 新增交互模式极小技能索引**：`INTERACTIVE_SKILL_IDS = ['docx', 'xlsx', 'ppt', 'svg', 'data']` + `interactiveIndex(list)` —— 只列"真要出文件时才会用到"的格式技能，并写明"做界面不需要任何技能 / 其余技能一律不用 / 不要为了看看有什么而 `list_skills`"。
 - **`service/WorkSkillService.ts`**：新增 `interactiveIndex()`（走 `visibleSkillList()`，与工具白名单同一口径）。
+- **补上思考预算（同日追加）**：交互模式提示词此前对**思考长度没有任何要求**——正文与工具纪律都写得很紧，唯独推理过程没说预算，模型就把界面语法、组件清单、甚至准备写进界面的文字在思考里整段重念一遍（真机反馈："思考又臭又长"）。`PromptBuilder.interactiveIdentity()` 新增一段 `# 思考纪律: 短（思考时间同样算进用户等待）`：思考只做三件事 —— **定界面骨架**(哪几层、选哪些组件) → **定数据来源**(哪些是真实数据、要不要破例调工具) → **定标题与结论**；不要在思考里复述界面语法与组件清单、不要先草拟正文；不要逐位心算数字(要算就 `run_js`)、不要反复权衡"要不要再画一个图 / 再多给一层"(按「丰富度」的分层配方直接给)；长度目标**几句话或几个短条目**，不分节、不长篇推演、不自问自答。放在身份段(而不是 `INTERACTIVE_DUTY`)是因为它是**行为纪律**，与"第一纪律: 快"同源；`INTERACTIVE_DUTY` 继续只管交付形态。
 
 ### 验证
-- `cd test/guncat-harness && node setup.mjs && node test-core.mjs`：**passed=516 failed=0**（新增 9 条断言：45→27 的裁剪数量、四类保留、长程/维护/改稿/问询类被裁、裁剪保持原有顺序、白名单里的名字都是真实工具、`interactiveDropped` 与保留集互补、技能段只列格式技能、"做界面不需要任何技能"、底座写明工具面已裁剪）。
+- `cd test/guncat-harness && node setup.mjs && node test-core.mjs`：**passed=517 failed=0**（新增 10 条断言：45→27 的裁剪数量、四类保留、长程/维护/改稿/问询类被裁、裁剪保持原有顺序、白名单里的名字都是真实工具、`interactiveDropped` 与保留集互补、技能段只列格式技能、"做界面不需要任何技能"、底座写明工具面已裁剪、底座给出"思考纪律: 短"）。
 - `node check-setup.mjs && tsc -p check/tsconfig.json`：**exit 0**（`ToolRegistry` / `PromptBuilder` / `SkillDirectoryFormatter` / `AgentLoopService` / `WorkSkillService` 都在这个 tsc 工程里）。
 - DevEco `assembleHap`（`powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`）：**BUILD SUCCESSFUL in 24 s 879 ms**，`CompileArkTS` 无报错（只剩既有的三方库 `sourceMapsPath` 与 `AgentLoader` 的 `Cannot find name 'Context'` 告警）——这一层专门覆盖 harness 测不到的 `.ets` 调用点（`ChatViewModel` 的两处 `runTurnWithRetry` 位置参数）。
+  - 追加思考纪律后重跑：`CompileArkTS` **Finished after 5 s 220 ms**（强制重编，无 ArkTS 报错）；其后 `SignHap` 报 `00303074 Configuration Error`，指向本机未提交的 `build-profile.json5`（Release 签名配置），与本次改动无关。
 
 ### 已知取舍
 - **裁掉的是"下发"，不是"能力"**。`edit` / `edit_docx` / `edit_xlsx` / `edit_ppt` / `str_replace_editor` 这类改稿工具、以及 `delete_file` / `move_file` 这类文件维护工具，在交互模式里不再出现：要产出文件时走 `write_*` 重新生成（提示词本就要求导出走简化流程），要改用户上传的原件则不在交互模式的职责里。若某天确需在交互模式里改已有产出物，把对应工具加回 `INTERACTIVE_TOOL_WHITELIST` 即可（白名单是正表）。

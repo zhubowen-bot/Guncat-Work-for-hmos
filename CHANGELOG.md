@@ -14,7 +14,8 @@
 - **三个消费点共用同一个工具面**：主循环与溢出重试（`ChatViewModel.runStepWithOverflowRetry` → `runTurnWithRetry(..., toolOverrides)`）和上下文压缩（`compactWorkHistoryIfNeeded` → `summarizeHistory(..., toolOverrides)`，新增该参数）都取 `toolDefsForMode()`。压缩请求刻意复用上一请求的完整前缀以命中 KV 缓存，工具面若不一致，整段前缀的缓存全部作废。裁剪只做过滤、不重排，工具的物理顺序保持不变。
 - **提示词跟着同源**：`buildInteractiveSystemPrompt()` 的工具名索引改用**裁剪后**的定义（`interactiveToolDefs()`），`PromptBuilder.interactiveTools()` 的文案从"工具面与工作模式完全相同"改为"工具面已经裁剪过 / 这些工具不下发，你也调不到"；`buildInteractive()` 不再套一层"技能库"说明。
 - **技能段降为极小索引**：新增 `SkillDirectoryFormatter.interactiveIndex()`（`INTERACTIVE_SKILL_IDS = docx / xlsx / ppt / svg / data`）替换原来的整段技能目录——交互模式的产出是界面，做界面不需要任何技能，只有"用户明确要出文件 / 转换数据"时才 `load_skill`。
-- **回归护栏**：`test-core.mjs` 新增一组断言守住 45 → 27——只下发 27 个、保留四类场景、裁掉长程/维护/改稿/问询类、裁剪保持原有顺序、白名单里没有拼错的死名字、技能段只列格式技能。纯逻辑单测 **507 → 516 项**，全绿。
+- **补上"思考纪律: 短"**：此前交互模式提示词**没有任何思考预算**——思考与正文都被要求极简，唯独推理过程没说长度，模型就把界面语法、组件清单、准备写进界面的文字在思考里重念一遍（思考时间同样算进用户等待）。`PromptBuilder.interactiveIdentity()` 新增一段：思考只做三件事（**定界面骨架 → 定数据来源 → 定标题与结论**）；不要在思考里复述界面语法与组件清单、不要先草拟正文；不要逐位心算数字（要算就 `run_js`）、不要反复权衡"要不要再画一个图"；长度目标**几句话或几个短条目**，不分节、不长篇推演、不自问自答。
+- **回归护栏**：`test-core.mjs` 新增一组断言守住 45 → 27——只下发 27 个、保留四类场景、裁掉长程/维护/改稿/问询类、裁剪保持原有顺序、白名单里没有拼错的死名字、技能段只列格式技能；另加一条守住"思考纪律: 短"在位。纯逻辑单测 **507 → 517 项**，全绿。
 
 ### 启动默认进入交互模式 + 空态大标题换成模式切换胶囊
 
