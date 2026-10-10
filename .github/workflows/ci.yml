@@ -80,6 +80,7 @@ jobs:
       - name: Word 生成器
         working-directory: test/docx-harness
         run: |
+          python makepng.py > png.b64
           node setup.mjs
           node test-build.mjs
           test -f gen/out_all.docx || { echo "构建未产出 gen/out_all.docx"; exit 1; }

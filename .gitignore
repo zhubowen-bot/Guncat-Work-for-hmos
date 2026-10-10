@@ -10,3 +10,12 @@
 /.clang-tidy
 **/.test
 /.appanalyzer
+
+# harness 生成物：全部可由 `node setup.mjs` / `node check-setup.mjs` /
+# `node test-build.mjs` / `python makepng.py` 重建，不进版本控制
+test/*/gen/
+test/*/check/
+test/*/png.b64
+test/*/_check.txt
+test/*/_docsize.txt
+test/.npm-cache/
