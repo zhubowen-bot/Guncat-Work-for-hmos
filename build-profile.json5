@@ -5,13 +5,13 @@
         "name": "default",
         "type": "HarmonyOS",
         "material": {
-          "certpath": "C:\\Users\\a1519\\.ohos\\config\\default_GuncatAI_HMOS-APP_NE_YZdBseeMWacHDZLUHozDZ0VCnMjuNlerOwc7XekM=.cer",
+          "certpath": "C:\\Users\\a1519\\.ohos\\config\\default_Guncat-Work-for-hmos_80z6WuF6FeKF_cT36SFINBTntF-8o4Jml1A8D_xDZ0U=.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "0000001B20A787B8E015E13491E0BDE561DD129F8D9E6376EF3C221E61388592FEF5D5DE8360418E6198D1",
-          "profile": "C:\\Users\\a1519\\.ohos\\config\\default_GuncatAI_HMOS-APP_NE_YZdBseeMWacHDZLUHozDZ0VCnMjuNlerOwc7XekM=.p7b",
+          "keyPassword": "0000001B9488DC92FE90B33372DEB4D4C9509CB1D6389AE6EB69D42D787BAC957006E443CA0752E8913C1F",
+          "profile": "C:\\Users\\a1519\\.ohos\\config\\default_Guncat-Work-for-hmos_80z6WuF6FeKF_cT36SFINBTntF-8o4Jml1A8D_xDZ0U=.p7b",
           "signAlg": "SHA256withECDSA",
-          "storeFile": "C:\\Users\\a1519\\.ohos\\config\\default_GuncatAI_HMOS-APP_NE_YZdBseeMWacHDZLUHozDZ0VCnMjuNlerOwc7XekM=.p12",
-          "storePassword": "0000001BAB6BE26DFFCC98941DF13A63F29CD5460F50B2983B2D95F689047C480CE500CE15F326F2F82310"
+          "storeFile": "C:\\Users\\a1519\\.ohos\\config\\default_Guncat-Work-for-hmos_80z6WuF6FeKF_cT36SFINBTntF-8o4Jml1A8D_xDZ0U=.p12",
+          "storePassword": "0000001BABD21036F2D42C1BFFAA0E9883FB9A968AACDEDF149398A64161926EB1FB50A5FDDABFF219A620"
         }
       }
     ],

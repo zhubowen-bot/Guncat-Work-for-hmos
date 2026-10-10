@@ -4,7 +4,7 @@
       "id": "guncat-3.1-flash",
       "name": "轻简模式",
       "description": "Guncat 3.1-Flash：专为日常聊天开发的智能体，Guncat系列首个Flash独立基座，适用于简单聊天或简单知识查询",
-      "shortDescription": "Guncat 3.1-Flash「新」",
+      "shortDescription": "Guncat 3.1-Flash",
       "icon": "icons/guncat-3.1-flash.png",
       "category": "通用智能体",
       "promptFile": "Guncat 3.1-Flash_prompt_EN.md"

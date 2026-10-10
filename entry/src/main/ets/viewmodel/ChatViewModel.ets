@@ -211,24 +211,23 @@ export class ChatViewModel {
 
   // 输入框占位与工具行文案
   get loopToolLabel(): string {
-    return this.interactiveMode ? '交互界面' : '工作区';
+    return this.interactiveMode ? '工作区' : '工作区';
   }
 
   get loopModeHint(): string {
     if (this.interactiveMode) {
-      return this.isStreaming ? '正在生成界面…' : 'Intelligent UI 就绪 · 问它问题，或让它在工作区里算给你看';
+      return this.isStreaming ? '正在生成界面…' : 'Canvas 就绪 · 生成可交互的卡片和面板';
     }
-    return this.isStreaming ? '任务执行中...' : 'Agent 就绪, 描述任务或上传文件';
+    return this.isStreaming ? '任务执行中...' : 'Harness 就绪 · 配合数十种工具和技能交付结果';
   }
 
   get loopInputPlaceholder(): string {
-    return this.interactiveMode ? '描述你想要的界面或问题…' : '描述任务...';
+    return this.interactiveMode ? '描述问题…' : '描述任务...';
   }
 
   get loopEmptyDescription(): string {
     if (this.interactiveMode) {
-      return 'Intelligent UI：回答不再是"一段文字"，而是一个能操作的原生界面——图表、表格、卡片、表单都在其中。' +
-        '拖动滑块/点选选项会立刻重算；需要换数据或换算法时点按钮，助手会重新给一份更新后的界面。';
+      return 'Guncat Canvas：回答不再只是文字，而是能操作的界面。图表、卡片、表单，布局有层次；拖拽、点选、输入，结果马上跟着变。';
     }
     return 'Guncat Harness：自主调度数十种工具，直接读写工作区文件，单次任务可连续运行上百轮会话，独立完成编程级复杂度的长程任务。';
   }
@@ -628,7 +627,7 @@ export class ChatViewModel {
   private buildWorkAgent(): Agent {
     let agent: Agent = Agent.of(Constants.WORK_AGENT_ID, '工作模式',
       'Agent Loop 工作台: 自动调用工具、读写沙箱工作区文件, 完成复杂长程任务', '系统', '', '');
-    agent.shortDescription = 'Guncat Harness「新」';
+    agent.shortDescription = 'Guncat Harness';
     agent.icon = '';
     return agent;
   }
@@ -638,7 +637,7 @@ export class ChatViewModel {
     let agent: Agent = Agent.of(Constants.INTERACTIVE_AGENT_ID, '交互模式',
       'Intelligent UI 交互台: 每一轮回答都交付成一个原生可操作界面——图表 / 表格 / 卡片 / 表单, ' +
       '拖动参数即时重算, 需要换算法时点按钮让助手重新生成', '系统', '', '');
-    agent.shortDescription = 'Intelligent UI「新」';
+    agent.shortDescription = 'Guncat Canvas「新」';
     agent.icon = '';
     return agent;
   }
@@ -710,8 +709,10 @@ export class ChatViewModel {
   }
 
   // 从系统选择器上传文件到工作区根目录(重名自动追加序号)
+  // 工作模式与交互模式共用同一个沙箱工作区, 门禁必须用 agentLoopMode:
+  // 之前写的是 workMode, 交互模式下点"上传"会在这里静默返回 —— 按钮看起来完全没反应。
   async uploadToWorkspace(): Promise<void> {
-    if (this.context === null || !this.workMode) {
+    if (this.context === null || !this.agentLoopMode) {
       return;
     }
     let conv: Conversation | null = this.currentConversation;
@@ -1195,10 +1196,11 @@ export class ChatViewModel {
       promptAction.showToast({ message: '无法读取分享的文件', duration: 2000 });
       return;
     }
-    // 工作模式: 分享文件在进入预览区的同时写入沙箱工作区(工作模式发送只消费工作区文件)。
-    // 预览区照常保留: 之后切回聊天模式, 分享文件仍可作为附件发送。
+    // 工作模式/交互模式: 分享文件在进入预览区的同时写入沙箱工作区。
+    // 门禁用 agentLoopMode —— 之前用 workMode, 交互模式下分享的图片只停在预览区, 从不落到工作区。
+    // 发送时 Agent Loop 会把等待发送区的附件一并带给模型(见 sendMessage), 预览区随发送清空。
     let workspaceSynced: number = -1;
-    if (this.workMode && this.context !== null) {
+    if (this.agentLoopMode && this.context !== null) {
       let conv: Conversation | null = this.currentConversation;
       if (conv !== null) {
         let saved: string[] = WorkFileService.savePickedFiles(this.context, conv.id, files);
@@ -1608,14 +1610,32 @@ export class ChatViewModel {
 
     // ===== Agent Loop 模式(工作模式 / 交互模式): 走同一个循环, 系统提示词按会话模式选择 =====
     if (conv.mode === Constants.MODE_WORK || conv.mode === Constants.MODE_INTERACTIVE) {
-      let workFullText: string = userText;
+      let notes: string[] = [];
       if (this.workspaceJustAdded.length > 0) {
-        let note: string = '【已上传到工作区的文件】' + this.workspaceJustAdded.join(', ');
-        workFullText = note + '\n\n' + userText;
+        notes.push('【已上传到工作区的文件】' + this.workspaceJustAdded.join(', '));
         this.workspaceJustAdded = [];
       }
-      let workUserMsg: Message = Message.ofUser(generateMessageId(), workFullText, userText, []);
+      // 等待发送区的附件必须一并送达模型: 这条分支以前完全没有消费 pendingFiles,
+      // 系统分享/拍照进来的图片会一直挂在预览条上 —— 既没同步工作区, 也没进请求,
+      // 交互模式下就表现为"分享了图片但模型看不到"。文本附件把解析结果拼进正文,
+      // 图片附件随本条消息走多模态(在循环历史里展开为带图的 user 消息)。
+      let ready: FileItem[] = this.pendingFiles.filter((f: FileItem): boolean =>
+        !f.isParsing && !f.error && (f.parsedText !== '' || f.dataUrl !== ''));
+      let attachments: Attachment[] = [];
+      for (let i: number = 0; i < ready.length; i++) {
+        let f: FileItem = ready[i];
+        if (f.parsedText !== '') {
+          notes.push('【文件解析：' + f.name + '】\n' + f.parsedText);
+        }
+        let type: string = f.type.startsWith('image/') ? 'image' : 'file';
+        attachments.push(Attachment.of(f.name, f.parsedText, type, f.thumbnail, f.dataUrl, ''));
+      }
+      let workFullText: string = notes.length > 0 ? notes.join('\n\n') + '\n\n' + userText : userText;
+      let workUserMsg: Message = Message.ofUser(generateMessageId(), workFullText, userText, attachments);
       conv.messages.push(workUserMsg);
+      // 附件已随本条消息送出, 预览区同步清空(与聊天模式发送后一致), 避免后续每一轮重复携带
+      this.pendingFiles = [];
+      this.fileBuffers.clear();
       if (conv.title === '') {
         conv.title = userText.length > 24 ? userText.substring(0, 24) + '...' : userText;
       }
@@ -1680,6 +1700,20 @@ export class ChatViewModel {
   // 「运行时上下文」快照 user 消息追加到历史末尾且仅在内容变化时追加; 历史严格
   // 追加式增长(压缩是唯一改写历史的操作)。相邻两轮请求因此共享逐字节相同的前缀,
   // 模型侧 KV 缓存可跨轮命中, 每轮只有真正新增的尾部需要重新计算。
+  // 把用户消息随附的图片附件展开成多模态循环消息。
+  // LoopMessage 一条 user 消息只能带一张图(imageDataUrl 单值), 所以每张图各追加一条带说明的消息,
+  // 与 view_image 工具注入图片的方式保持一致。
+  private pushUserImageMessages(messages: LoopMessage[], m: Message): void {
+    for (let i: number = 0; i < m.attachments.length; i++) {
+      let att: Attachment = m.attachments[i];
+      if (att.type === 'image' && att.dataUrl !== '') {
+        messages.push(LoopMessage.userImage(
+          '【用户上传的图片】' + att.name + '\n这是用户随本条消息发来的图片, 请结合图片内容处理当前请求。',
+          att.dataUrl));
+      }
+    }
+  }
+
   private async executeWorkLoop(conv: Conversation): Promise<void> {
     if (Constants.WORK_USE_DRIVER_LOOP) {
       await this.executeWorkLoopDriver(conv);
@@ -1719,6 +1753,7 @@ export class ChatViewModel {
         let m: Message = conv.messages[i];
         if (m.role === 'user' && m.content !== '') {
           messages.push(LoopMessage.user(m.content));
+          this.pushUserImageMessages(messages, m);
         } else if (m.role === 'assistant' && (m.content !== '' || m.toolCalls.length > 0)) {
           // 中断遗留的空结果标记为已中断, 避免模型把空串当成功
           let calls: ToolCallRecord[] = m.toolCalls;
@@ -2193,6 +2228,7 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
         let m: Message = conv.messages[i];
         if (m.role === 'user' && m.content !== '') {
           messages.push(LoopMessage.user(m.content));
+          this.pushUserImageMessages(messages, m);
         } else if (m.role === 'assistant' && (m.content !== '' || m.toolCalls.length > 0)) {
           // 中断遗留的空结果标记为已中断, 避免模型把空串当成功
           let calls: ToolCallRecord[] = m.toolCalls;

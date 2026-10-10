@@ -116,7 +116,7 @@ export struct AgentDrawerView {
 
         // Agent引擎分组(独立小节, 置于「聊天模式」标题上方; 小标题与条目样式和聊天模式完全一致)
         Column() {
-          Text('Agent引擎')
+          Text('Agent引擎（推荐）')
             .fontSize(12)
             .fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.text_secondary'))
