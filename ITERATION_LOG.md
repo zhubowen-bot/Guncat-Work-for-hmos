@@ -1,5 +1,25 @@
 # ITERATION_LOG
 
+## 2026-10-10 R71: 侧边栏「聊天引擎」分组默认折叠
+
+### 需求
+侧边栏抽屉里的「聊天引擎」板块做成可折叠，**默认折叠**，点击后才展开。
+
+### 变更
+- **`views/AgentDrawerView.ets`**：新增 `@State chatEngineOpen = false`；原来的 `Text('聊天引擎')` 小标题换成**整行可点**的 `Row`（左标题 + 右折叠箭头，高 36vp、左右内边距 20vp，与其它小标题左对齐一致），箭头随状态在 `sys.symbol.chevron_down` / `chevron_up` 之间切换；9 个聊天智能体的 `List` 包进 `if (this.chatEngineOpen)`；分组 `Column` 的 `layoutWeight` 由固定 `1` 改为 `this.chatEngineOpen ? 1 : 0` —— 展开时照旧与「历史对话」平分剩余高度，折叠时高度只由那 36vp 标题行决定，省出的空间全部让给历史对话列表。
+- 箭头**内联 `SymbolGlyph`** 而不复用 `views/GuncatUiIcons.ets` 的 `GuncatUiChevron`：后者的 `color` 是 string 字面量（默认 `#8F8F8F`），跟随不了深色主题（深色下 `text_secondary` 是 `#CFD3D6`）；内联版本用 `$r('app.color.text_secondary')` 取色，并照抄该组件里 `flexShrink(0)` + `constraintSize` 的防挤压约束（真机事故：Row 内固定尺寸图标被压到 0 会与相邻文本重叠）。
+- 折叠状态只存在组件内 `@State`，**不做持久化**：抽屉关闭即销毁组件，再次打开回到默认折叠 —— 正是「默认折叠」的要求。
+- **未改**宽屏左侧栏 `views/DswSidebar.ets`：它的小节叫「引擎」，工作模式 / 交互模式与聊天智能体合并在同一个列表里，没有独立的「聊天引擎」板块可折叠。
+
+### 验证
+- `node test/guncat-harness/test-core.mjs`：**passed=507 failed=0**（纯逻辑回归，本轮未动公共逻辑）。
+- DevEco `assembleHap`（`hvigorw.js assembleHap --no-daemon --mode module -p product=default`；需 `DEVECO_SDK_HOME=C:\Program Files\Huawei\DevEco Studio\sdk`）：**BUILD SUCCESSFUL in 18 s 292 ms**，产出 `entry/build/default/outputs/default/entry-default-signed.hap`（74,052,011 bytes）。`CompileArkTS` 仅报既有的 `private property` 告警。
+- 构建环境备注：`hvigorw.js` 通过 `fork` + 管道收集子进程输出，在受限文件沙箱里会立刻 `spawn EPERM`（与代码改动无关），因此本轮构建在非受限模式下执行。
+
+### 已知取舍
+- 折叠后看不到「当前选中的是不是某个聊天智能体」（选中高亮只在展开后可见）。按需求保持默认折叠，不做「当前是聊天智能体时自动展开」。
+- 未做展开态记忆：想跨会话记住展开状态需要落 Preferences，本轮按「默认折叠」从简。
+
 ## 2026-10-10 R70: 纯文本生成不再闪烁 —— 渲染路径按「有无界面片段」分叉
 
 ### 现象

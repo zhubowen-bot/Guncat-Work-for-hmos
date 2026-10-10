@@ -168,6 +168,8 @@ Work mode is an **independent identity parallel to the chat agents** — the �
 
 Agents are managed through `resources/rawfile/agents.json` and separate Markdown prompt files. The sidebar supports per-agent custom icons (`icon` field pointing to a PNG named by agent id under `icons/`, falling back to the cat avatar when unset) and dual descriptions: the sidebar shows `shortDescription`, while the new-conversation page shows the full `description`:
 
+The narrow-screen drawer (`AgentDrawerView`) splits agents into two sections: **"Agent engines (recommended)"** (Work Mode / Interactive Mode) and **"Chat engines"** (4 general + 5 expert agents). The **"Chat engines" section is collapsed by default** — tap its title row to expand it — so the default view keeps its room for Agent modes and conversation history.
+
 | Agent                 | Category   | Purpose                                                                                                                                               |
 | --------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 轻简模式 (Light & Simple) | General    | Guncat 3.1-Flash base: Guncat's first Flash-dedicated independent foundation, the lightest agent built for everyday chat and simple knowledge queries |

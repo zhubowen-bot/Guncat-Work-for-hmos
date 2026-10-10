@@ -12,6 +12,9 @@ export struct AgentDrawerView {
   @Prop conversations: ConversationListItem[] = [];
   @Prop currentAgentId: string = '';
   @Prop currentConversationId: string = '';
+  // 「聊天引擎」分组默认折叠: 抽屉每次打开只露出分组标题, 点标题行才展开 9 个聊天智能体,
+  // 让默认视野留给「Agent引擎（推荐）」与「历史对话」。状态只存在本组件内, 关闭重开抽屉即回到折叠。
+  @State private chatEngineOpen: boolean = false;
   private onSelectAgent: (id: string) => void = (_id: string): void => {};
   private onSelectConversation: (id: string) => void = (_id: string): void => {};
   private onDeleteConversation: (id: string) => void = (_id: string): void => {};
@@ -133,30 +136,51 @@ export struct AgentDrawerView {
         }
         .width('100%')
 
-        // 聊天引擎列表
+        // 聊天引擎列表(可折叠, 默认折叠): 标题行整行可点, 右侧箭头指示当前状态
         Column() {
-          Text('聊天引擎')
-            .fontSize(12)
-            .fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.text_secondary'))
-            .letterSpacing(0.5)
-            .width('100%')
-            .padding({ left: 20, right: 20, top: 4, bottom: 10 })
-          List() {
-            ForEach(this.chatAgents(), (agent: Agent) => {
-              ListItem() {
-                this.buildAgentItem(agent);
-              }
-            }, (agent: Agent) => agent.id)
+          Row() {
+            Text('聊天引擎')
+              .fontSize(12)
+              .fontWeight(FontWeight.Medium)
+              .fontColor($r('app.color.text_secondary'))
+              .letterSpacing(0.5)
+              .layoutWeight(1)
+            // 折叠箭头内联 SymbolGlyph 而不是复用 GuncatUiChevron: 后者的 color 是 string 字面量,
+            // 跟随不了深浅色主题; 这里用 $r('app.color.text_secondary'), 并照抄 GuncatUiIcons 里的
+            // flexShrink(0) + 最小尺寸约束(真机上 Row 里的图标被挤压会与相邻文本重叠)。
+            SymbolGlyph(this.chatEngineOpen ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
+              .fontSize(14)
+              .fontColor([$r('app.color.text_secondary')])
+              .flexShrink(0)
+              .constraintSize({ minWidth: 14, minHeight: 14 })
           }
           .width('100%')
-          .layoutWeight(1)
-          .listDirection(Axis.Vertical)
-          .divider({ strokeWidth: 0 })
-          .padding({ left: 14, right: 14 })
+          .height(36)
+          .padding({ left: 20, right: 20 })
+          .alignItems(VerticalAlign.Center)
+          .onClick(() => {
+            this.chatEngineOpen = !this.chatEngineOpen;
+          })
+
+          if (this.chatEngineOpen) {
+            List() {
+              ForEach(this.chatAgents(), (agent: Agent) => {
+                ListItem() {
+                  this.buildAgentItem(agent);
+                }
+              }, (agent: Agent) => agent.id)
+            }
+            .width('100%')
+            .layoutWeight(1)
+            .listDirection(Axis.Vertical)
+            .divider({ strokeWidth: 0 })
+            .padding({ left: 14, right: 14 })
+          }
         }
         .width('100%')
-        .layoutWeight(1)
+        // 展开时与「历史对话」平分剩余高度; 折叠时 layoutWeight 0 = 高度由那 36vp 标题行决定,
+        // 省下的空间自动让给历史对话列表
+        .layoutWeight(this.chatEngineOpen ? 1 : 0)
 
         // 分割
         Divider().color($r('app.color.divider')).margin({ top: 8, left: 20, right: 20 })
