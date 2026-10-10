@@ -1288,7 +1288,9 @@ struct ChatPage {
         .fontColor($r('app.color.text_secondary'))
         .textAlign(TextAlign.Center)
         .lineHeight(22)
-        .padding({ left: 32, right: 32 })
+        // 左右留白从 32 收到 52: 这一句只有 30 来字, 按 32 的宽度断行会断成"满行 + 只剩几个字",
+        // 第二行看着空; 收窄后两行字数接近, 居中读起来才是一个完整的小段落。
+        .padding({ left: 52, right: 52 })
       Blank()
     }
     .layoutWeight(1)

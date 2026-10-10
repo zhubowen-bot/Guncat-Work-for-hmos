@@ -228,9 +228,9 @@ export class ChatViewModel {
 
   get loopEmptyDescription(): string {
     if (this.interactiveMode) {
-      return 'Guncat Canvas：回答不再只是文字，而是能操作的界面。图表、卡片、表单，布局有层次；拖拽、点选、输入，结果马上跟着变。';
+      return '回答即界面，可视可交互。适用于生活中的大部分提问-回答场景。';
     }
-    return 'Guncat Harness：自主调度数十种工具，直接读写工作区文件，单次任务可连续运行上百轮会话，独立完成编程级复杂度的长程任务。';
+    return '数十种工具和技能，端到端交付成果。适用于复杂长程任务。';
   }
 
   async init(): Promise<void> {
