@@ -1,5 +1,34 @@
 # ITERATION_LOG
 
+## 2026-10-10 R70: 纯文本生成不再闪烁 —— 渲染路径按「有无界面片段」分叉
+
+### 现象
+工作模式 / 聊天模式的**纯文本回答在生成过程中不停闪烁**（内容一整块地闪、像是被反复重建），交互模式的界面卡片本身正常。
+
+### 根因（定位到提交）
+`4f6f877`（"卡片后面的正文只显示一两个字"）给**文本片段**加了 `renderKey`：内容一变就递增，逼 `ForEach` 换键重建那个 `RichTextView`。同时 `bddf3da` 之后 `GuncatUiParts.build()` **永远至少产出一个文本片段**，于是 `uiSegs` 对任何消息都不为空 —— 纯文本也走上了分段 `ForEach` 路径：
+
+```text
+33ms 节流定时器 → refreshUiParts() → applyUiSegs() → 文本 renderKey++
+     → ForEach 键变化 → 销毁并重建 RichTextView（整块正文）
+```
+
+`ForEach` 键不变的项**连 item builder 都不重跑**，所以卡片旁的文本确实需要换键；但纯文本没有卡片（不需要分段），换键带来的"每 33ms 重建整块正文"就只剩副作用 —— 真机表现即闪烁。改前（`4f6f877^`）纯文本时 `uiSegs` 恒为空、走单个 `RichTextView` 快车道，所以不闪；`bddf3da` 保留的那条 `uiSegs.length === 0 → RichTextView` 快车道分支此后再没被走到过（成了死代码）。
+
+### 变更
+- **`views/ChatBubbleView.ets` / `views/WorkTurnView.ets` 新增 `commitParts(content, finalized)`**（两视图各自实现，逻辑一致）：解析结果里**一个界面片段都没有时，把 `uiSegs` 清空并丢掉按片段记账的 `textKeySeq`**，正文交回 `uiSegs.length === 0` 的单 `RichTextView` 快车道 —— 组件实例始终是同一个，内容靠 `@Prop` 更新，`@luvi/lv-markdown-in` 自带流式增量渲染，生成过程中不重建、不闪。有界面片段时**照旧**走分段 `ForEach`（含文本片段 `renderKey`，卡片与卡片旁文本的刷新逻辑一字未动）。
+- 判定用**切分结果里的片段类型**（`seg.type === UI`），不用 `GuncatUiParts.hasProgram(content)`：后者对整段正文计语句行（上限 60 行），与 `build()` 按**围栏切分后的片段**判定（上限 120 行）存在分歧场景（例如 60 行开外的程序），用结果判定不会出现"该出卡片却走了快车道"的回归。
+- 注释与 README 中英文的「刷新机制」段同步改写：把"两类 key"升级为「三条渲染路径」，明确 **纯文本必须走快车道、`uiSegs.length === 0` 那条分支不要删**，并把 33ms 定时器这个共同触发源写清楚。
+
+### 验证
+- `node test/guncat-harness/test-core.mjs`：**passed=507 failed=0**。
+- DevEco `assembleHap`（`hvigorw.js assembleHap --no-daemon --mode module -p product=default`）：**BUILD SUCCESSFUL in 22 s 450 ms**，产出 `entry/build/default/outputs/default/entry-default-signed.hap`（74,042,820 bytes）。仅剩既有的 `private property` 告警。
+
+### 已知取舍
+- **界面卡片旁的文本仍按内容换键**（保留原刷新逻辑，未动）：卡片**前面**的引导语在卡片出现后就稳定了，不闪；卡片**后面**若模型仍在续写，那段文本仍会重建 —— 交互模式提示词本就要求"只要程序不要正文"，属罕见形态；要根治需让文本片段脱离 `ForEach`（另一次结构性改动），本轮不做。
+- 纯文本时 `refreshUiParts()` 仍会解析一次正文（文中无程序 → 无界面片段 → 清空并返回），没有额外代价；`startUiSettleTimer()` 对无程序正文本来就是空转（`hasProgram === false` 直接 return）。
+
+
 ## 2026-10-10 R69: 交互模式快车道 —— 默认零工具、一轮直出界面（速度优先）
 
 ### 动机

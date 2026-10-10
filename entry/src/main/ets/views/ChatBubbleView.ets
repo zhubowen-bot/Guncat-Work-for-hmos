@@ -285,8 +285,9 @@ export struct ChatBubbleView {
 
   // 正文切分(文本片段 + 界面程序片段)。
   // 注意: **不能**再用"正文里有没有 guncat-ui 围栏"当开关 —— 交互模式的主形态是
-  // 非围栏的整段界面程序; 而且普通回答也必须照样走文本片段路径(历史事故: 早期版本
-  // 在这里提前 return, 导致聊天模式里所有不含界面块的回答正文一个字都不显示)。
+  // 非围栏的整段界面程序; 而普通回答也不许整段跳过渲染(历史事故: 早期版本在这里提前
+  // return, 导致聊天模式里不含界面块的回答正文一个字都不显示)。没有界面片段时由
+  // commitParts 交回单个 RichTextView 快车道。
   private refreshUiParts(): void {
     let content: string = this.isStreaming ? this.visibleText : this.message.content;
     if (content === this.lastUiSeen && this.uiBuildFinalized === !this.isStreaming) {
@@ -294,23 +295,42 @@ export struct ChatBubbleView {
     }
     this.lastUiSeen = content;
     this.uiBuildFinalized = !this.isStreaming;
-    let parts: GuncatUiParts = GuncatUiParts.build(content, this.uiBuildFinalized);
-    let next: GuncatUiSeg[] = [];
-    for (let i: number = 0; i < parts.segments.length; i++) {
-      next.push(parts.segments[i]);
-    }
-    this.applyUiSegs(next);
+    this.commitParts(content, this.uiBuildFinalized);
   }
 
-  // 按"已结束"语义重建一次界面片段
+  // 按"已结束"语义重建一次正文片段
   private refreshUiPartsFinal(): void {
     let content: string = this.message.content;
     this.lastUiSeen = content;
     this.uiBuildFinalized = true;
-    let parts: GuncatUiParts = GuncatUiParts.build(content, true);
+    this.commitParts(content, true);
+  }
+
+  // 把切分结果落进 uiSegs。
+  //
+  // 关键规则(勿改): **消息里没有界面程序片段时, uiSegs 必须保持为空**。
+  //   为何: 有界面程序时文本片段的渲染 key 必须随内容递增(否则卡片后面的正文不刷新), 而 key 一变
+  //   ForEach 就销毁重建那个 RichTextView。纯文本若也走分段路径, 生成过程中每 33ms 就会把整块正文
+  //   重建一次 —— 真机表现就是工作模式 / 聊天模式"不停闪烁"。纯文本走 buildAIContent 里
+  //   `uiSegs.length === 0` 的快车道(单个 RichTextView, 库自带流式增量渲染), 组件实例不换, 不闪。
+  private commitParts(content: string, finalized: boolean): void {
+    let parts: GuncatUiParts = GuncatUiParts.build(content, finalized);
     let next: GuncatUiSeg[] = [];
+    let hasUi: boolean = false;
     for (let i: number = 0; i < parts.segments.length; i++) {
-      next.push(parts.segments[i]);
+      let seg: GuncatUiSeg = parts.segments[i];
+      next.push(seg);
+      if (seg.type === GuncatUiSegType.UI) {
+        hasUi = true;
+      }
+    }
+    if (!hasUi) {
+      // 纯文本: 清空片段(回到快车道), 同时丢掉按片段记账的文本 key
+      if (this.uiSegs.length > 0) {
+        this.uiSegs = [];
+        this.textKeySeq = new Map<number, number>();
+      }
+      return;
     }
     this.applyUiSegs(next);
   }
@@ -571,7 +591,9 @@ export struct ChatBubbleView {
 
   // 消息内容渲染: 把消息体切成「Markdown 文本片段 + guncat-ui 界面程序片段」。
   // - 命中界面程序时: 文本片段走 RichTextView, 界面片段走 GuncatUiView 原生交互渲染;
-  // - 未命中时: 单个 RichTextView —— 这一分支必须存在, 否则普通回答会一个字都不显示。
+  // - 未命中时(纯文本): 单个 RichTextView —— 这一分支是纯文本的**快车道**, 必须存在:
+  //   它既保证普通回答能显示(历史事故: 跳过整段渲染导致一个字都不显示),
+  //   又保证生成过程中正文不被 ForEach 换 key 销毁重建(那正是纯文本闪烁的根因, 见 commitParts)。
   @Builder
   buildAIContent() {
     if (this.uiSegs.length === 0) {

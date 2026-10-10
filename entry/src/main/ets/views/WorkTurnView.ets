@@ -87,7 +87,8 @@ export struct WorkTurnView {
 
   // 正文切分(文本片段 + 界面程序片段)。
   // 注意: 这里**不能**再用"正文里有没有 guncat-ui 围栏"当开关 —— 交互模式的主形态是
-  // 非围栏的整段界面程序, 而且普通回答也必须照样走文本片段渲染。
+  // 非围栏的整段界面程序; 而普通回答也不许整段跳过渲染(历史事故: 一个字都不显示),
+  // 没有界面片段时由 commitParts 交回单个 RichTextView 快车道。
   // finalized = 本轮产出已结束(不再流式): 未写完的界面据此从"生成中"转为"未完成"静态展示。
   private refreshUiParts(): void {
     let content: string = this.isStreaming ? this.visibleText : this.message.content;
@@ -97,12 +98,7 @@ export struct WorkTurnView {
     this.lastUiSeen = content;
     this.lastUiFinalized = !this.isStreaming;
     this.uiBuildFinalized = this.lastUiFinalized;
-    let parts: GuncatUiParts = GuncatUiParts.build(content, this.lastUiFinalized);
-    let next: GuncatUiSeg[] = [];
-    for (let i: number = 0; i < parts.segments.length; i++) {
-      next.push(parts.segments[i]);
-    }
-    this.applyUiSegs(next);
+    this.commitParts(content, this.lastUiFinalized);
   }
 
   // 按"已结束"语义重建一次正文片段
@@ -111,10 +107,34 @@ export struct WorkTurnView {
     this.lastUiSeen = content;
     this.lastUiFinalized = true;
     this.uiBuildFinalized = true;
-    let parts: GuncatUiParts = GuncatUiParts.build(content, true);
+    this.commitParts(content, true);
+  }
+
+  // 把切分结果落进 uiSegs。
+  //
+  // 关键规则(勿改): **正文里没有界面程序片段时, uiSegs 必须保持为空**。
+  //   为何: 有界面程序时文本片段的渲染 key 必须随内容递增(否则卡片后面的正文不刷新), 而 key 一变
+  //   ForEach 就销毁重建那个 RichTextView。工作模式/聊天模式的纯文本若也走分段路径, 生成过程中
+  //   每 33ms 就把整块正文重建一次 —— 真机表现正是"不停闪烁"。纯文本走 buildTurnContent 里
+  //   `uiSegs.length === 0` 的快车道(单个 RichTextView, 库自带流式增量渲染), 组件实例不换, 不闪。
+  private commitParts(content: string, finalized: boolean): void {
+    let parts: GuncatUiParts = GuncatUiParts.build(content, finalized);
     let next: GuncatUiSeg[] = [];
+    let hasUi: boolean = false;
     for (let i: number = 0; i < parts.segments.length; i++) {
-      next.push(parts.segments[i]);
+      let seg: GuncatUiSeg = parts.segments[i];
+      next.push(seg);
+      if (seg.type === GuncatUiSegType.UI) {
+        hasUi = true;
+      }
+    }
+    if (!hasUi) {
+      // 纯文本: 清空片段(回到快车道), 同时丢掉按片段记账的文本 key
+      if (this.uiSegs.length > 0) {
+        this.uiSegs = [];
+        this.textKeySeq = new Map<number, number>();
+      }
+      return;
     }
     this.applyUiSegs(next);
   }
@@ -290,6 +310,8 @@ export struct WorkTurnView {
   }
 
   // 正文渲染: 文本片段走 Markdown; 界面程序片段走原生交互渲染。
+  // `uiSegs.length === 0` 是纯文本的快车道(单个 RichTextView, 流式增量渲染, 不重建不闪烁),
+  // 见 commitParts 的说明。
   // 界面片段的 key **不含程序文本**: 流式期间每来一段新文本只更新 @Prop, 由 GuncatUiView
   // 自己重新解析并重绘; 若把文本放进 key, 每 33ms 就会销毁重建整块界面(闪烁 + 掉交互状态)。
   @Builder
