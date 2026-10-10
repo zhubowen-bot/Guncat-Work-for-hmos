@@ -1183,7 +1183,8 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 ### 启动默认进入交互模式 + 空态大标题换成模式切换胶囊
 
 - **启动落点固定为交互模式**：`ChatViewModel.restoreState()` 不再读 `guncat_current_agent_id` 去恢复"上次使用的智能体"，而是固定把 `currentAgent` 设为 `interactive` 虚拟智能体（只有在它意外缺失时才回退到第一个聊天智能体），并把该 id 落盘保持一致。打开应用的第一屏就是"能操作的界面"，而不是上次偶然停在的那个智能体。
-- **空态大标题位置换成模式切换胶囊**（对齐豆包首页的「对话 / 工作」大按钮）：Agent Loop 模式下，原来那行 22pt 的模式名标题（「交互模式」/「工作模式」）换成一颗双段胶囊 —— 选中段白底 + 1px 描边 + 轻阴影，未选中段透明；点另一段即 `setInteractiveMode(true)` / `setWorkMode(true)`（内部就是 `selectAgent`，会切到该模式的最新会话、没有就新建空会话；流式/解析中由 VM 弹「请等待当前任务完成后再切换模式」并拒绝）。它本身就是"当前在哪个模式"的标题，比一行死文字多一个动作；聊天智能体（轻简/效率/专家…）仍显示自己的名字，它们不属于这两个模式。
+- **空态大标题位置换成模式切换胶囊**（对齐豆包首页的「对话 / 工作」大按钮）：Agent Loop 模式下，原来那行 22pt 的模式名标题（「交互模式」/「工作模式」）换成一颗双段胶囊 —— 选中段白底 + 1px 描边 + 轻阴影，未选中段透明；点另一段即 `setInteractiveMode(true)` / `setWorkMode(true)`（内部就是 `selectAgent`，会切到该模式的最新会话、没有就新建空会话；流式/解析中弹提示并拒绝）。它本身就是"当前在哪个模式"的标题，比一行死文字多一个动作；聊天智能体（轻简/效率/专家…）仍显示自己的名字，它们不属于这两个模式。
+- **点击即落选中态（`pendingModeTab`），且不做过渡动画**：选中态本来完全派生自 `vm.interactiveMode` / `vm.workMode`（当前**会话**的 mode），而 `selectAgent` 要**先**写盘**再**切/建会话 —— 在会话 mode 变过来之前，深色滑块会先留在"被点走"的那一档上（真机反馈："我点工作模式，交互模式却先闪了个深色"）。现在点击时同步记下目标档、由 `modeTabActive()` 优先采用，换挡 promise 落地后清空交回 vm（切换被拒也不会留下错误高亮）；同时去掉了背景上的 180ms `.animation`，深色瞬移。`switchLoopMode()` 还负责：连点忽略（避免两次 `selectAgent` 交叉）、点当前档直接返回（不重开会话）、流式/解析中拒绝。
 - 两个 Tab **刻意不抽成带参 `@Builder`**：ArkUI 的 `@Builder` 传值参数不会自己刷新 UI，只能靠父组件重渲染重跑；选中态完全由 `vm.interactiveMode` / `vm.workMode` 决定，内联写死最不容易踩坑（本项目在 ArkUI 刷新机制上已栽过几次）。深色下选中段用的 `surface`(#232324) 与轨道 `surface_secondary`(#2C2C2E) 只差 9 级灰，所以选中段额外加了一圈 `app.color.border` 描边，浅色下它就是白底滑块上一道几乎看不见的边。
 
 ### 侧边栏：「聊天引擎」分组默认折叠

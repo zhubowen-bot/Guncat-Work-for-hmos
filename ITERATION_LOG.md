@@ -1,5 +1,25 @@
 # ITERATION_LOG
 
+## 2026-10-10 R73: 模式胶囊换挡时, 深色滑块不再闪在旧档位上
+
+### 现象
+从交互模式点「工作模式」换挡时，**交互模式那一档先亮了一下深色**；用户点的是工作模式，深色就该立刻落到工作模式上。
+
+### 根因
+胶囊的选中态完全派生自 `vm.interactiveMode` / `vm.workMode`（= **当前会话**的 mode）。换挡链路是 `setWorkMode(true)` → `setWorkMode` 内 `selectAgent('work')`，而 `selectAgent` 是**先** `await StorageManager.saveString(...)`、**再**才切/建会话 —— 在会话 mode 变过来之前，`interactiveMode` 仍是 true、`workMode` 仍是 false，于是深色滑块先留在被点走的那一档上。再叠加选中背景上的 `.animation({ duration: 180, curve: Curve.EaseOut })`，深色从旧档位淡出又拖了一小段，观感就是"交互模式闪了一个深色"。
+
+### 变更
+- **`pages/ChatPage.ets` 新增 `@State pendingModeTab: string`**（点击时**同步**记下目标档）+ 派生方法 `modeTabActive(agentId)`：`pendingModeTab` 非空时以**手点的那一档**为准，换挡 promise 落地后清空、交回 vm 的真实模式（切换万一被拒也不会留下错误高亮）。
+- **新增 `switchLoopMode(agentId)`** 统一处理点击：连点直接忽略（避免两次 `selectAgent` 交叉）；点当前已经在的那一档直接返回 —— 尤其**不能重开一次 `selectAgent`**，那会把用户从正在看的会话带到"该智能体的最新会话"上去；流式/解析中弹「请等待当前任务完成后再切换模式」拒绝（与 VM 内守卫同一口径）。
+- **去掉胶囊上的 `.animation(...)`**：深色滑块改成瞬移，不再在"被点走"的那一档上淡出一小会儿。
+
+### 验证
+- DevEco `assembleHap`：**BUILD SUCCESSFUL in 21 s 68 ms**，`CompileArkTS` 无报错。
+- `node test/guncat-harness/test-core.mjs`：**passed=507 failed=0**（纯 UI 交互修复，未动 harness 覆盖的逻辑）。
+
+### 已知取舍
+- 换挡是"点击即变 + 后台异步落会话"：胶囊立刻到位，会话数据随后跟上（实测无感知）。不做过渡动画是刻意的 —— 用户明确要求"只有点的那一档有深色"。
+
 ## 2026-10-10 R72: 启动默认进入交互模式 + 空态大标题换成「交互模式 / 工作模式」切换胶囊
 
 ### 需求

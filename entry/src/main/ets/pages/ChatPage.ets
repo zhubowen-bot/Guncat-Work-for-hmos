@@ -14,6 +14,7 @@ import { WorkspaceBar, WorkspaceFileIcons } from '../views/WorkspaceBar';
 import { WorkTurnView } from '../views/WorkTurnView';
 import { WorkArtifactsCard } from '../views/WorkArtifactsCard';
 import { WorkArtifactFile, WorkArtifactSummary, WorkArtifactUtil } from '../common/WorkArtifacts';
+import { Constants } from '../common/Constants';
 import { GuncatUiEvent } from '../common/GuncatUiRuntime';
 import { GuncatUiParts } from '../common/GuncatUiParts';
 import { Message } from '../model/Message';
@@ -119,6 +120,9 @@ struct ChatPage {
   @State private toastVisible: boolean = false;
   @State private isListening: boolean = false;
   @State private refreshTick: number = 0;
+  // 空态模式胶囊"正在切往哪一档"(agentId, 空串 = 没有换挡在飞, 完全跟随 vm 的真实模式)。
+  // 存在的理由见 switchLoopMode(): 点击后深色滑块必须**立刻**落到手点的那一档, 不能等会话切过来。
+  @State private pendingModeTab: string = '';
   // 详情面板统计快照: rebuildWorkStats 整体重建后赋值, 统计区只读这份快照
   @State private workStats: WorkPanelStats = new WorkPanelStats();
   // 工作模式工作区弹层开关(挂在"工作模式"胶囊上方)
@@ -1139,61 +1143,108 @@ struct ChatPage {
   // 两个 Tab 刻意**不抽成带参 Builder**: ArkUI 的 @Builder 传值参数不会自己刷新 UI, 只能靠
   // 父组件重渲染重跑; 而这里"谁被选中"完全由 vm 的 mode 决定, 内联写死最不容易踩坑
   // (本项目在 ArkUI 刷新机制上已经栽过几次, 见 README「ArkUI 刷新机制」)。
-  // 点击走 vm.setInteractiveMode / setWorkMode: 内部即 selectAgent, 会切到该模式的最新会话
-  // (没有就新建空会话), 流式/解析中由 VM 弹「请等待当前任务完成后再切换模式」并拒绝。
+  //
+  // 选中态 = pendingModeTab 非空时以"手点的那一档"为准(换挡途中), 否则以 vm 的真实模式为准;
+  // **不加 .animation**: 之前给背景加了 180ms 过渡, 深色滑块在"被点走"的那一档上会淡出一小会儿
+  // —— 用户看到的就是"我点的明明是工作模式, 交互模式却先亮了个深色"。现在深色是瞬移的。
   @Builder
   buildModeSwitch() {
     Row() {
       // 交互模式(左): 选中段是白底滑块 + 轻阴影, 未选中段透明
       Text('交互模式')
         .fontSize(15)
-        .fontWeight(this.vm.interactiveMode ? FontWeight.Medium : FontWeight.Normal)
-        .fontColor(this.vm.interactiveMode ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
+        .fontWeight(this.modeTabActive(Constants.INTERACTIVE_AGENT_ID) ? FontWeight.Medium : FontWeight.Normal)
+        .fontColor(this.modeTabActive(Constants.INTERACTIVE_AGENT_ID) ?
+          $r('app.color.text_primary') : $r('app.color.text_secondary'))
         .textAlign(TextAlign.Center)
         .height(38)
         .padding({ left: 20, right: 20 })
         .borderRadius(19)
-        .backgroundColor(this.vm.interactiveMode ? $r('app.color.surface') : Color.Transparent)
+        .backgroundColor(this.modeTabActive(Constants.INTERACTIVE_AGENT_ID) ?
+          $r('app.color.surface') : Color.Transparent)
         // 深色模式下 surface(#232324) 与轨道 surface_secondary(#2C2C2E) 只差 9 级灰, 加一圈
         // border 才看得出"这一格是选中的"; 浅色模式它就是白底滑块上一道几乎看不见的描边
-        .border({ width: 1, color: this.vm.interactiveMode ? $r('app.color.border') : Color.Transparent })
-        .shadow(this.vm.interactiveMode
+        .border({
+          width: 1,
+          color: this.modeTabActive(Constants.INTERACTIVE_AGENT_ID) ?
+            $r('app.color.border') : Color.Transparent
+        })
+        .shadow(this.modeTabActive(Constants.INTERACTIVE_AGENT_ID)
           ? { radius: 8, color: '#14000000', offsetX: 0, offsetY: 2 }
           : { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 })
-        .animation({ duration: 180, curve: Curve.EaseOut })
         .onClick(() => {
-          this.vm.setInteractiveMode(true).then(() => {
-            this.refreshTick++;
-            this.scrollToBottomDelayed();
-          });
+          this.switchLoopMode(Constants.INTERACTIVE_AGENT_ID);
         })
 
       // 工作模式(右)
       Text('工作模式')
         .fontSize(15)
-        .fontWeight(this.vm.workMode ? FontWeight.Medium : FontWeight.Normal)
-        .fontColor(this.vm.workMode ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
+        .fontWeight(this.modeTabActive(Constants.WORK_AGENT_ID) ? FontWeight.Medium : FontWeight.Normal)
+        .fontColor(this.modeTabActive(Constants.WORK_AGENT_ID) ?
+          $r('app.color.text_primary') : $r('app.color.text_secondary'))
         .textAlign(TextAlign.Center)
         .height(38)
         .padding({ left: 20, right: 20 })
         .borderRadius(19)
-        .backgroundColor(this.vm.workMode ? $r('app.color.surface') : Color.Transparent)
-        .border({ width: 1, color: this.vm.workMode ? $r('app.color.border') : Color.Transparent })
-        .shadow(this.vm.workMode
+        .backgroundColor(this.modeTabActive(Constants.WORK_AGENT_ID) ?
+          $r('app.color.surface') : Color.Transparent)
+        .border({
+          width: 1,
+          color: this.modeTabActive(Constants.WORK_AGENT_ID) ? $r('app.color.border') : Color.Transparent
+        })
+        .shadow(this.modeTabActive(Constants.WORK_AGENT_ID)
           ? { radius: 8, color: '#14000000', offsetX: 0, offsetY: 2 }
           : { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 })
-        .animation({ duration: 180, curve: Curve.EaseOut })
         .onClick(() => {
-          this.vm.setWorkMode(true).then(() => {
-            this.refreshTick++;
-            this.scrollToBottomDelayed();
-          });
+          this.switchLoopMode(Constants.WORK_AGENT_ID);
         })
     }
     .padding(3)
     .borderRadius(22)
     .backgroundColor($r('app.color.surface_secondary'))
     .margin({ bottom: 18 })
+  }
+
+  // 空态胶囊换挡: 先**同步**把深色落到手点的那一档, 再走 VM 的 setInteractiveMode / setWorkMode。
+  //
+  // 为什么需要本地 pending: 换挡要经过 selectAgent → (异步写盘之后)切/建会话, 而胶囊的选中态原本
+  // 完全派生自 vm.interactiveMode / vm.workMode(即当前会话的 mode)。会话 mode 变过来之前那两个值
+  // 还是旧的 —— 深色滑块会先留在"被点走"的那一档上, 用户看到的就是"我点工作模式, 交互模式却先亮了
+  // 一个深色"。这里在点击时同步记下目标档, 让深色立刻到位; 切换完成后清空, 交回 vm 派生 —— 最后
+  // 高亮的仍然是 VM 的真实状态(切换万一被拒也不会留下错误的高亮)。
+  private switchLoopMode(agentId: string): void {
+    if (this.pendingModeTab !== '') {
+      // 上一次换挡还没落地: 忽略连点, 避免两次 selectAgent 交叉
+      return;
+    }
+    if (this.modeTabActive(agentId)) {
+      // 点的是当前已经在的那一档: 什么都不做。尤其不能重开一次 selectAgent ——
+      // 那会把用户从正在看的会话带到"该智能体的最新会话"上去。
+      return;
+    }
+    if (this.vm.isStreaming || this.vm.isParsing) {
+      this.showToast('请等待当前任务完成后再切换模式');
+      return;
+    }
+    this.pendingModeTab = agentId;
+    let switching: Promise<void> = agentId === Constants.INTERACTIVE_AGENT_ID
+      ? this.vm.setInteractiveMode(true)
+      : this.vm.setWorkMode(true);
+    switching.then(() => {
+      this.pendingModeTab = '';
+      this.refreshTick++;
+      this.scrollToBottomDelayed();
+    });
+  }
+
+  // 胶囊某一档是否高亮: 换挡途中(pending 非空)以手点的那一档为准, 否则以 vm 的真实模式为准。
+  // 这是 build() 期间读取的派生方法 —— 只读 @State / @Observed, 无副作用; 两处状态任一变化
+  // (pendingModeTab 是 @State, vm 的模式变化走 refreshTick++) 都会让 ChatPage 重跑 build 重新求值。
+  private modeTabActive(agentId: string): boolean {
+    if (this.pendingModeTab !== '') {
+      return this.pendingModeTab === agentId;
+    }
+    return agentId === Constants.INTERACTIVE_AGENT_ID ? this.vm.interactiveMode : this.vm.workMode;
   }
 
   @Builder
