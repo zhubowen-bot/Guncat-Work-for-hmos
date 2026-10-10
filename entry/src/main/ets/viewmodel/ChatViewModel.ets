@@ -228,9 +228,9 @@ export class ChatViewModel {
 
   get loopEmptyDescription(): string {
     if (this.interactiveMode) {
-      return '回答即界面，可视可交互。适用于生活中的大部分提问-回答场景。';
+      return '回答即界面，可视可交互。适用于生活中的大部分场景。';
     }
-    return '数十种工具和技能，端到端交付成果。适用于复杂长程任务。';
+    return '数十种工具和技能，端到端交付成果。适用于对质量要求较高的复杂长程任务。';
   }
 
   async init(): Promise<void> {

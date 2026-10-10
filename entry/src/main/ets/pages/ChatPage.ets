@@ -1207,6 +1207,16 @@ struct ChatPage {
     .margin({ top: 22, bottom: 18 })
   }
 
+  // 空态说明文案。Agent Loop 模式(交互/工作)的说明是"两句话"结构, 这里在**第一个句号后强制换行**,
+  // 让两句各占一行 —— 自动换行会按屏幕宽度断在句子中间, 出来是"满行 + 第二行只剩半句"。
+  // 聊天智能体的 description 是长段介绍, 不强行断行(它们本来就要占三四行), 交给自动换行。
+  private emptyDescriptionText(): string {
+    if (this.vm.agentLoopMode) {
+      return this.vm.loopEmptyDescription.replace('。', '。\n');
+    }
+    return this.vm.currentAgent !== null ? this.vm.currentAgent.description : '选择一个智能体开始对话';
+  }
+
   // 空态胶囊换挡: 先**同步**把深色落到手点的那一档, 再走 VM 的 setInteractiveMode / setWorkMode。
   //
   // 为什么需要本地 pending: 换挡要经过 selectAgent → (异步写盘之后)切/建会话, 而胶囊的选中态原本
@@ -1281,16 +1291,15 @@ struct ChatPage {
           .fontColor($r('app.color.text_primary'))
           .margin({ bottom: 12 })
       }
-      Text(this.vm.agentLoopMode ?
-        this.vm.loopEmptyDescription :
-        (this.vm.currentAgent !== null ? this.vm.currentAgent.description : '选择一个智能体开始对话'))
+      Text(this.emptyDescriptionText())
         .fontSize(14)
         .fontColor($r('app.color.text_secondary'))
         .textAlign(TextAlign.Center)
         .lineHeight(22)
-        // 左右留白从 32 收到 52: 这一句只有 30 来字, 按 32 的宽度断行会断成"满行 + 只剩几个字",
-        // 第二行看着空; 收窄后两行字数接近, 居中读起来才是一个完整的小段落。
-        .padding({ left: 52, right: 52 })
+        // 左右留白 36: 断行已由「按第一个句号换行」决定(见 emptyDescriptionText()), 这里只需保证
+        // 最长的那句(20 字 ≈ 273vp)不被迫二次折行 —— 360vp 级屏幕下 36 留下约 300vp, 刚好够。
+        // 早先为了凑匀两行曾收到 52, 那是在自动断行下凑数, 有了强制断行就不需要了。
+        .padding({ left: 36, right: 36 })
       Blank()
     }
     .layoutWeight(1)
