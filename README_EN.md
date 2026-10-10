@@ -108,7 +108,7 @@ Multimodal pre-parsing can be configured separately with its own model, endpoint
 
 ### Verification
 
-- Pure-logic regression (currently **518 tests**, all green): `cd test/guncat-harness && node setup.mjs && node test-core.mjs`
+- Pure-logic regression (currently **521 tests**, all green): `cd test/guncat-harness && node setup.mjs && node test-core.mjs`
 - Service-layer type check: `cd test/guncat-harness && node check-setup.mjs && npx tsc -p check/tsconfig.json`
 - PPT / Word / Excel offline verification environments: `test/pptx-harness`, `test/docx-harness`, `test/xlsx-harness`
 - Real ArkTS compilation (requires DevEco locally): `powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`

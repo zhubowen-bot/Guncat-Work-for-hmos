@@ -21,7 +21,9 @@ ChatViewModel.executeWorkLoop(conv)
       mode === 'work'        → buildWorkSystemPrompt()
 ```
 
-`buildInteractiveSystemPrompt()` = `GuncatUiPrompt.promptSection()`（guncat-ui lang 语法 + 组件清单 + **丰富度/组件选择优先级** + 交互闭环 + 输出顺序纪律 + 示例 + 反例）+ **快车道底座** `PromptBuilder.buildInteractive()`（身份"快" + 工作区=素材区 + **裁剪后**工具名索引 + 真实数据纪律 + **极小技能索引**）+ `GuncatUiPrompt.INTERACTIVE_DUTY`（交付形态职责，收尾并拥有最终解释权）。三段拼接后**整体静态**、进程内缓存一次，KV 缓存前缀与工作模式同样逐字节稳定。
+`buildInteractiveSystemPrompt()` = **`PromptBuilder.interactivePrime()`（最前方的一级标题「最高优先级 · 快」：身份 + 第一纪律 + 思考纪律）** + `GuncatUiPrompt.promptSection()`（guncat-ui lang 语法 + 组件清单 + **丰富度/组件选择优先级** + 交互闭环 + 输出顺序纪律 + 示例 + 反例）+ **快车道底座** `PromptBuilder.buildInteractive()`（工作区=素材区 + **裁剪后**工具名索引 + 真实数据纪律 + **极小技能索引**）+ `GuncatUiPrompt.INTERACTIVE_DUTY`（交付形态职责，收尾并给出回到开头的指针）。四段的**顺序由 `PromptBuilder.assembleInteractiveSystemPrompt()` 固定**（服务层只负责把四份文本传进去），拼接后**整体静态**、进程内缓存一次，KV 缓存前缀与工作模式同样逐字节稳定。
+
+**为什么纪律必须放在最前方**（R76）：交互模式的提示词里有 **8.3k 的组件清单**，而模型是**顺序读**的 —— "要快"原来写在底座的 85% 处，等于先让模型读完一整套语言契约才开始考虑纪律。现在把它抽成唯一的一级标题放在第 0 段，并写明"与下文任何内容冲突时以本节为准"：**先立规矩，再给语言能力**；同时 `INTERACTIVE_DUTY` 末尾保留一句指针（"速度与工具纪律以开头那一节为准"），首尾各出现一次、中间不复述。顺序本身有断言钉住（`assembleInteractiveSystemPrompt()` 放在纯逻辑层而不是服务层，就是为了能被 `test-core.mjs` 测到）。
 
 **为什么不复用工作模式的提示词底座**（这是本节最需要维护者记住的一条）：`PromptBuilder.build()` 里的身份/四步法/工作流程/输出丰富性/Mermaid/交付前自检清单，全都是为「多轮工具循环 + 长程交付」写的——"复杂任务先用 `todo_write` 建清单""命中技能第一步必须 `load_skill`""交付前用 `list_files` 核验""最终总结必附 mermaid 导图"。这些规则放在工作模式里是对的，放在交互模式里就变成模型**先跑一串和界面无关的工具调用**，用户干等一个本可以直接渲染的卡片。所以交互模式只保留四块底座：**身份（快）＋工作区（素材区，文件树已在运行时快照里）＋工具名索引（`PromptBuilder.buildToolNameIndex`，取的是裁剪后的工具面，与请求里真正下发的定义同源，只列名字不写用法规则）＋真实数据纪律**；行为约束集中成一句"默认零工具，工具是破例"。身份段里还带一段 **`# 思考纪律: 短`**：交付物是界面，**思考是纯延迟**，所以它只做三件事（定界面骨架 → 定数据来源 → 定标题与结论），并明确禁止在思考里复述界面语法与组件清单、先草拟正文、逐位心算数字、反复权衡"要不要再画一个图"，长度目标是几句话或几个短条目。此前这一侧没有任何思考预算——正文与工具纪律写得很紧，唯独推理过程没说长度，模型就把语法与组件清单在思考里重念一遍。界面的语言契约、丰富度、示例、反例仍全部来自 `GuncatUiPrompt`，两处不重复。实测提示词从 **36.7k 字符降到 22.8k 字符**（其中行为纪律段 15.6k → 1.7k），首答 TTFT 与输入 token 同步下降。
 
@@ -39,16 +41,37 @@ ChatViewModel.executeWorkLoop(conv)
 | --- | --- |
 | 语法（root/位置参数/引用/表达式/`$变量`展开） | `SYNTAX` + 组件清单开头的两句 |
 | 组件怎么选、丰富度分层配方 | `RICHNESS` |
-| 行为纪律（快、零工具、思考预算、长程工具一律不用） | 底座 `PromptBuilder.buildInteractive()` |
+| 行为纪律（快、零工具、思考预算、长程工具一律不用） | **最前方的一级标题** `interactivePrime()`（R76 起；末端只留指针） |
 | 真实数据、绝不编造 | 底座 `interactiveTruth()` |
 | 入口按需给 | `INTERACTION`（讲清何时给）+ `ANTI_PATTERNS`（给判定标准） |
-| 交付形态（只有程序、不要仪式、往丰富靠） | `INTERACTIVE_DUTY` |
+| 交付形态（只有程序、往丰富靠） | `INTERACTIVE_DUTY` |
 
 按这条规则做的三件事：**① `ANTI_PATTERNS` 只留"别处没说过的失败模式"**（JSON 当程序、代码围栏截断、组件名不在清单、数字带单位字符串、Markdown 写回答），把复述 SYNTAX/RICHNESS 的 7 条删掉或压成一行（1544 → 840）；**② `INTERACTIVE_DUTY` 收敛回"只讲交付形态"**，删掉入口/真实数据/文字怎么放/连续调参/mermaid 这些别处已有权威表述的条目（1457 → 650）；**③ `EXAMPLES` 的示例 1 与 `RICHNESS` 的"✅ 合格"示例本是同一个"季度销售复盘"程序**，只保留其中唯一示范的部分（分组柱状图 + 双 `Series`），KPI 三卡与表单由 `RICHNESS` 承担（3068 → 2205）。合计 **23865 → 21361 字符（−10.5%）**。
 
 **不动的部分**：组件清单（能力）、`SYNTAX`（语言契约）、`RICHNESS` 优先级表（对抗"文字 + 表格"的主要抓手）、`EXAMPLES` 的 ❌/✅ 对照与另外两个示例（各是唯一示范）。
 
 > **权衡**：没有评测集，这类删减只能靠"每条规则都还有唯一的权威表述"来保证不丢规则（并有断言钉住），**recency 上的重复reinforcement 是会变少的** —— 真机若发现某条老毛病复发，把那一句加回它最合适的家即可，不要重新铺到所有段落。
+
+### 2.3 纪律前置：「快」是整段提示词第 0 段的一级标题（R76）
+
+**问题**：精简之后，"快"这条第一纪律仍然待在**底座的 85% 处** —— 前面隔着 8.3k 的组件清单、3.5k 的丰富度、2.2k 的示例。模型是**顺序读**的：它先读完一整套语言契约，才开始看"默认零工具、思考要短"，等于纪律被放在了长上下文的尾部。
+
+**做法**：把纪律整体抽成 `PromptBuilder.interactivePrime()`，由 `PromptBuilder.assembleInteractiveSystemPrompt()` 固定为**第 0 段**（服务层只传四份文本，顺序不在服务层）：
+
+| 位置 | 段 | 内容 |
+| --- | --- | --- |
+| 第 0 段 | `interactivePrime()` | 唯一的一级标题 `# 最高优先级 · 快（本模式第一纪律）` + `> 本节与下文任何内容冲突时, 以本节为准。` + 身份一句话 + 零工具/破例四类/一律不用/不要 ask_user_question/导出简化流程 + `## 思考纪律: 短` |
+| ② 起 | `GuncatUiPrompt.promptSection()` | 语言契约（语法/组件/丰富度/交互/示例/反例）—— **先立规矩，再给语言能力** |
+| ⑩ 起 | 底座 `buildInteractive()` | 素材区 / 裁剪后工具面 / 真实数据 / 技能索引 |
+| ⑭ | `INTERACTIVE_DUTY` | 交付形态 + 一句**回到开头的指针**（"速度与工具纪律以开头那一节为准"）|
+
+配套的三点：
+
+1. **底座不再重复纪律**：`interactiveIdentity()` 已删除，其内容全部上移；底座只剩工作区/工具面/真实数据/技能索引。
+2. **尾段只留指针**：`INTERACTIVE_DUTY` 删掉"快"与"一律不用"清单（1544 那轮已先收敛一次，这里再 650 → 449），改成"见本文档最开头的「最高优先级 · 快」"。于是纪律**首尾各出现一次**（前端立规 + 末端收口），中间不复述 —— 既拿到开头的"宪法"位置，也保留尾部的 recency。
+3. **顺序进断言**：`assembleInteractiveSystemPrompt()` 放在纯逻辑层（`common/PromptBuilder.ts`）而不是服务层，`test-core.mjs` 才能断言 `assembled.indexOf('# 最高优先级 · 快') === 0` 以及"快 → 契约 → 素材区 → 职责"的先后关系。**谁把 primer 挪走或让别的段插到它前面，测试立刻红。**
+
+体量：21361 → **21287** 字符（移除 identity 1044、新增 prime 1171、DUTY 650 → 449）。本轮**不追求变小**，追求的是"纪律在模型读到语言契约之前就已经立下"。
 
 ### 2.1 工具面物理裁剪（45 → 27）
 
@@ -261,9 +284,10 @@ B. 回传助手（发一条消息, 触发新一轮回答）
 | 交互模式能用哪些工具 | `common/ToolRegistry.ts` 的 `INTERACTIVE_TOOL_WHITELIST`（**正表**，新工具默认不进；改完同步本节 2.1 的表格与 `test-core.mjs` 的 45→27 断言） |
 | 交互模式能用哪些技能 | `common/SkillDirectoryFormatter.ts` 的 `INTERACTIVE_SKILL_IDS` |
 | 想加一条提示词约束 | 先看本节 2.2 的"家"表 —— **加在它唯一的家里**，不要为了强调再铺一遍到其他段落（重复表述会变成模型的思考负担） |
+| 想改"快"的纪律 | 只改 `PromptBuilder.interactivePrime()`（它固定在第 0 段）；**不要**把纪律再抄进底座或职责段 —— 顺序与唯一性都有断言钉住（见 2.3） |
 
 > **回归护栏（三层，缺一不可）**
-> 1. 纯逻辑单测：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`（518 项，含 guncat-ui lang 的词法/语法/前向引用/流式补齐/绑定重算/`@Each`/内置函数/`Action`/片段切分/状态序列化/图表几何/组件库与提示词，以及交互模式快车道、思考纪律、提示词单一家规则与工具面 45→27 的裁剪断言）。
+> 1. 纯逻辑单测：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`（521 项，含 guncat-ui lang 的词法/语法/前向引用/流式补齐/绑定重算/`@Each`/内置函数/`Action`/片段切分/状态序列化/图表几何/组件库与提示词，以及交互模式提示词的**段序**（快在最前）、快车道纪律、思考纪律、单一家规则与工具面 45→27 的裁剪断言）。
 > 2. 服务层类型检查：`node check-setup.mjs && npx tsc -p check/tsconfig.json`。
 > 3. **真实 ArkTS 编译**：`powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`（调用 DevEco 自带的 hvigor）。
 > 第 3 层不能省：ArkUI 有一批**只有编译器才知道**的规则——`@Builder` 方法体内不允许声明局部变量、自定义组件属性名不能与内置属性同名（`size` / `scale`）、`@Prop` 的 null 需要显式联合类型。这些在 node 侧 harness 里全都测不出来（harness 只覆盖 `common/**` 与 `service/**` 的纯 TS，不解析 `.ets`）。

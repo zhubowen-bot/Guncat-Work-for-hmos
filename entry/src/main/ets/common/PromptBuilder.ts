@@ -270,32 +270,45 @@ export class PromptBuilder {
   //   - 交互模式是「一句话进来, 一张能操作的界面出去」, **速度就是产品力**。上面那套纪律
   //     放在这里会原样变成一串无用工具调用(todo_write / list_files / load_skill / 终验 …),
   //     用户干等的是本该直接渲染出来的卡片。
-  // 因此交互模式**不复用** build() 的任何一段行为纪律, 底座只保留四块:
-  //   身份(快) + 工作区(素材区) + 裁剪后的工具面(与请求里真正下发的工具定义同源) + 真实数据纪律。
+  // 因此交互模式**不复用** build() 的任何一段行为纪律, 底座只保留三块:
+  //   工作区(素材区) + 裁剪后的工具面(与请求里真正下发的工具定义同源) + 真实数据纪律;
+  // 而**纪律(快 / 思考预算 / 一律不用的长程工具)单独抽成 `interactivePrime()`,
+  // 由 assembleInteractiveSystemPrompt() 放在整段提示词的**最前方** —— 见那里的说明。
   // 其中工具面是**物理裁剪**(ToolRegistry.INTERACTIVE_TOOL_WHITELIST, 45 → 27): 光靠纪律压不住
   // "工具就摆在那儿"的诱惑, 把长程工具从请求里拿掉才是根治。
   // 界面语言契约(语法/组件库/交互闭环/示例/反例)仍由 GuncatUiPrompt 提供, 两者互不重复。
-  static interactiveIdentity(): string {
+
+  // 整段交互模式提示词的**第 0 段**: 唯一的一级标题, 声明最高优先级。
+  //
+  // 为什么必须放在最前(而不是像原来那样埋在底座的 85% 处): 交互模式的提示词有 8.3k 的组件清单,
+  // 模型是**顺序读**的 —— 把"要快"写在组件目录、丰富度、示例、反例之后, 它先读完一整套语言契约
+  // 才开始考虑纪律, 于是"零工具、思考短"这类要求实际是在长上下文的尾部才被看见。
+  // 放在最前者是**宪法**: 先立规矩, 再给语言能力; 同时保留 INTERACTIVE_DUTY 末尾的一句指针,
+  // 让首尾各出现一次(前端立规 + 末端收口), 中间不再重复。
+  static interactivePrime(): string {
     let lines: string[] = [];
-    lines.push('# 你是谁（交互模式 · 快车道）');
+    lines.push('# 最高优先级 · 快（本模式第一纪律）');
+    lines.push('> 本节与下文任何内容冲突时, **以本节为准**。');
+    lines.push('');
     lines.push('你是 Guncat Work 的「交互模式」智能体: 把用户的一句话**直接变成一个能看、能点、能拖的原生界面**。');
     lines.push('你的回答主体永远是一份 guncat-ui lang 界面程序 —— 图表、指标卡、表格、表单、卡片。');
     lines.push('');
-    lines.push('# 第一纪律: 快（本模式最重要的指标）');
     lines.push('- 速度就是交互模式的产品力: 用户在等的是**界面**, 不是执行过程。');
     lines.push('- **默认一次回答直接给界面, 不调用任何工具。** 通用知识、估算、示例、方案对比、概念解释都不需要工具。');
     lines.push('- 工具是**破例**, 不是流程: 只有"界面里的数字必须来自工作区真实数据或真实计算"时才允许调用;');
     lines.push('  且**一轮最多 1~2 次、优先只读** —— 拿到结果立刻出界面, 不要连续探索、不要"再看一眼确认"。');
-    lines.push('- 不要 todo_write / goal_* / schedule_* / subagent / session_search: 一句话的界面需求没有长程流程。');
+    lines.push('- 破例只限四类: 读用户上传的文件 / 算真实数字 / 核实外部事实 / 用户**明确**要导出文件。');
+    lines.push('- **一律不用**: todo_write / goal_* / schedule_* / subagent / session_search / record_search,');
+    lines.push('  以及交付前自检、mermaid 导图 —— 一句话的界面需求没有长程流程, 界面本身就是交付物与可视化。');
     lines.push('- 不要 ask_user_question: 要问就用界面问(`Form` / `OptionCards` / `Chips`) —— 用户点一下比回答问题框快。');
-    lines.push('- 例外: 用户**明确**要导出文档/文件时, 按工具说明先 load_skill 再用 write_docx / write_xlsx / write_pptx / write_svg,');
+    lines.push('- 例外: 只有用户**明确**要导出文档/文件时, 才按工具说明先 load_skill 再用 write_docx / write_xlsx / write_pptx / write_svg,');
     lines.push('  并在界面里用 `Callout` 或 `Button` 告知产出位置。导出走**简化**流程: 不做技能里的前置提问, 用合理默认值直接产出,');
     lines.push('  也不写自检报告 —— 要确认参数就在界面里放 `Form` / `OptionCards`(比开问题框快)。');
     lines.push('');
     // 思考纪律: 交付物是界面, 思考是纯延迟 —— 不给预算时模型会把语法/组件清单/正文在思考里重念一遍。
-    lines.push('# 思考纪律: 短（思考时间同样算进用户等待）');
+    lines.push('## 思考纪律: 短（思考时间同样算进用户等待）');
     lines.push('- 思考只做三件事: **定界面骨架**(哪几层、选哪些组件) → **定数据来源**(哪些是真实数据、要不要破例调工具) → **定标题与结论**。想清楚就立刻开始写程序。');
-    lines.push('- **不要在思考里复述界面语法与组件清单**(上面已经给了), 也不要把准备写进界面的文字先草拟一遍 —— 正文只进界面。');
+    lines.push('- **不要在思考里复述界面语法与组件清单**(下面给了), 也不要把准备写进界面的文字先草拟一遍 —— 正文只进界面。');
     lines.push('- 不要逐位心算数字(要算就 run_js); 不要反复权衡"要不要再画一个图 / 再多给一层": 按「丰富度」的分层配方直接给。');
     lines.push('- 长度目标: **几句话或几个短条目**, 不分节、不长篇推演、不自问自答。一句话的界面需求不值得一段推理。');
     return lines.join('\n');
@@ -359,12 +372,33 @@ export class PromptBuilder {
     return names.join(', ');
   }
 
-  // 交互模式 System Prompt 底座(不含 GuncatUiPrompt 的界面语言契约与 INTERACTIVE_DUTY)
+  // 交互模式 System Prompt 的**组装顺序(单一事实源)**。
+  //
+  // 顺序本身就是设计: `interactivePrime()` 必须**第一段**出现 —— 它是唯一的一级标题、
+  // 声明最高优先级; 界面语言契约随后(先立规矩, 再给语言能力); 底座的素材区/工具面/
+  // 真实数据在契约之后(写程序时才需要); `INTERACTIVE_DUTY` 收尾并给出回到开头那一节的指针。
+  // 组装放在这里(而不是服务层)是为了让"快必须在最前"这条能被纯逻辑单测钉住 —— 服务层
+  // 有 HarmonyOS 依赖, 进不了 test/guncat-harness; 改顺序的人在这里会被断言拦下。
+  static assembleInteractiveSystemPrompt(uiContract: string, skillsSection: string = '',
+    toolIndex: string = '', duty: string = ''): string {
+    let parts: string[] = [];
+    parts.push(PromptBuilder.interactivePrime());   // ← 必须在最前(最高优先级 · 快)
+    parts.push(uiContract);
+    let base: string = PromptBuilder.buildInteractive(skillsSection, toolIndex);
+    if (base !== '') {
+      parts.push(base);
+    }
+    if (duty !== '') {
+      parts.push(duty);
+    }
+    return parts.join('\n\n');
+  }
+
+  // 交互模式 System Prompt 底座(不含 `interactivePrime()`、GuncatUiPrompt 的界面语言契约与 INTERACTIVE_DUTY)
   // skillsSection 传入的是 SkillDirectoryFormatter.interactiveIndex() 的**极小索引**(只列格式技能,
   // 自带标题与纪律), 这里原样拼上, 不再套一层"技能库"说明; toolIndex 传入的是**裁剪后**工具面的名字。
   static buildInteractive(skillsSection: string = '', toolIndex: string = ''): string {
     let sections: string[] = [];
-    sections.push(PromptBuilder.interactiveIdentity());
     sections.push(PromptBuilder.interactiveWorkspace());
     sections.push(PromptBuilder.interactiveTools(toolIndex));
     sections.push(PromptBuilder.interactiveTruth());

@@ -1703,13 +1703,12 @@ console.log('[组件库与提示词]');
   check('提示词给出"只要程序"的正反例对照',
     prompt.indexOf('## 输出形态: 只要程序, 不要正文') > 0 &&
     prompt.indexOf('❌ 错误') > 0 && prompt.indexOf('✅ 正确') > 0);
-  check('职责段要求不写聊天文字',
-    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('程序之外不写任何文字') > 0 &&
-    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('不要开场白、不要过渡句') > 0);
-  check('职责段把文件交付降为"用户明确要求才做"',
-    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('只有用户**明确**要导出文件时') > 0 &&
-    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('不画 mermaid 导图') > 0);
-  // 交互模式快车道底座: **不复用**工作模式的行为纪律(那套纪律会变成一串无用工具调用)。
+  check('交付形态与"明确要文件才导出"的纪律在位',
+    PromptBuilder.interactivePrime().indexOf('用户**明确**要导出文件') > 0 &&
+    PromptBuilder.interactivePrime().indexOf('只有用户**明确**要导出文档/文件时') > 0 &&
+    PromptBuilder.interactivePrime().indexOf('也不写自检报告') > 0 &&
+    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('程序之外不写任何文字') > 0);
+  // 交互模式快车道: **不复用**工作模式的行为纪律(那套纪律会变成一串无用工具调用)。
   // 这几条断言是"速度优先"的守门员 —— 谁把工作模式的段落拼回交互模式, 这里就会红。
   const fastLane = PromptBuilder.buildInteractive();
   check('快车道底座不复用工作模式的行为纪律',
@@ -1718,19 +1717,38 @@ console.log('[组件库与提示词]');
     fastLane.indexOf('交付前自检清单') < 0 &&
     fastLane.indexOf('# 输出丰富性原则') < 0 &&
     fastLane.indexOf('上下文压缩（长任务自动触发）') < 0);
-  check('快车道底座给出"默认零工具"纪律',
-    fastLane.indexOf('# 第一纪律: 快') > 0 &&
-    fastLane.indexOf('默认一次回答直接给界面, 不调用任何工具') > 0 &&
-    fastLane.indexOf('一轮最多 1~2 次') > 0);
-  check('快车道底座把长程工具点名为"一律不用"',
-    fastLane.indexOf('todo_write / goal_* / schedule_* / subagent / session_search') > 0 &&
-    fastLane.indexOf('不要 ask_user_question') > 0);
-  check('快车道底座给出"思考也要短"的纪律',
-    fastLane.indexOf('# 思考纪律: 短') > 0 &&
-    fastLane.indexOf('思考只做三件事') > 0 &&
-    fastLane.indexOf('不要在思考里复述界面语法与组件清单') > 0 &&
-    fastLane.indexOf('几句话或几个短条目') > 0 &&
-    fastLane.indexOf('思考时间同样算进用户等待') > 0);
+  // 「快」是整段提示词的**第 0 段**: 唯一的一级标题 + 最高优先级声明。
+  // 它必须在最前 —— 交互模式的提示词有 8.3k 组件清单, 模型是顺序读的, 把纪律写在后面等于没说。
+  const prime = PromptBuilder.interactivePrime();
+  check('「快」是唯一的一级标题且自我声明最高优先级',
+    prime.indexOf('# 最高优先级 · 快') === 0 &&
+    prime.indexOf('本模式第一纪律') > 0 &&
+    prime.indexOf('以本节为准') > 0);
+  const assembled = PromptBuilder.assembleInteractiveSystemPrompt('【契约】', '', 'list_files', '【职责】');
+  check('「快」在组装后的提示词里就是第一段(顺序被断言钉住)',
+    assembled.indexOf('# 最高优先级 · 快') === 0);
+  check('组装顺序: 快 → 界面语言契约 → 素材区/工具面 → 职责收尾',
+    assembled.indexOf('# 最高优先级 · 快') < assembled.indexOf('【契约】') &&
+    assembled.indexOf('【契约】') < assembled.indexOf('# 工作区（素材区, 不是交付区）') &&
+    assembled.indexOf('# 工作区（素材区, 不是交付区）') < assembled.indexOf('【职责】'));
+  check('「快」给出"默认零工具"纪律',
+    prime.indexOf('默认一次回答直接给界面, 不调用任何工具') > 0 &&
+    prime.indexOf('一轮最多 1~2 次') > 0 &&
+    prime.indexOf('破例只限四类') > 0);
+  check('「快」把长程工具点名为"一律不用"',
+    prime.indexOf('todo_write / goal_* / schedule_* / subagent / session_search') > 0 &&
+    prime.indexOf('不要 ask_user_question') > 0);
+  check('「快」给出"思考也要短"的纪律',
+    prime.indexOf('## 思考纪律: 短') > 0 &&
+    prime.indexOf('思考只做三件事') > 0 &&
+    prime.indexOf('不要在思考里复述界面语法与组件清单') > 0 &&
+    prime.indexOf('几句话或几个短条目') > 0 &&
+    prime.indexOf('思考时间同样算进用户等待') > 0);
+  check('「快」上移后底座不再重复它(只有首尾两处)',
+    fastLane.indexOf('默认一次回答直接给界面') < 0 &&
+    fastLane.indexOf('思考只做三件事') < 0 &&
+    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('默认零工具直接出界面') < 0 &&
+    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('最高优先级') > 0);
   check('快车道底座注入工具名索引(与裁剪后工具面同源)',
     PromptBuilder.buildInteractive('', 'list_files, read_file, run_js')
       .indexOf('全部可用工具: list_files, read_file, run_js') > 0);

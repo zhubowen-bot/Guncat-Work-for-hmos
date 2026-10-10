@@ -23,22 +23,31 @@ const skills = SkillDirectoryFormatter.interactiveIndex(skillList);
 const defs = ToolRegistry.INTERACTIVE_TOOL_WHITELIST.map((n) => ({ 'name': n }));
 const toolIndex = PromptBuilder.buildToolNameIndex(defs);
 
+// 段序与 PromptBuilder.assembleInteractiveSystemPrompt() 一致 —— 顺序本身就是设计:
+// 最高优先级·快 必须第一段, 界面语言契约随后, 底座(素材区/工具面/真数据/技能)再后, 职责收尾。
 const segs = [
-  ['① 身份与输出形态(开场)', GuncatUiPrompt.PREAMBLE],
-  ['② 语法规则 + 表达式能力', GuncatUiPrompt.SYNTAX],
-  ['③ 组件清单(76 个, 由 GuncatUiLibrary 生成)', GuncatUiLibrary.promptSection()],
-  ['④ 丰富度(选择优先级 + 分层配方 + 合格/不合格对照)', GuncatUiPrompt.RICHNESS],
-  ['⑤ 交互闭环(本地绑定 / 回传助手 / Action / 表单)', GuncatUiPrompt.INTERACTION],
-  ['⑥ 输出顺序与流式渲染', GuncatUiPrompt.STREAMING],
-  ['⑦ 输出形态正反例 + 完整示例 ×2', GuncatUiPrompt.EXAMPLES],
-  ['⑧ 最常见的错误(自查清单)', GuncatUiPrompt.ANTI_PATTERNS],
-  ['⑨ 快车道底座 · 身份(你是谁 / 第一纪律: 快 / 思考纪律: 短)', PromptBuilder.interactiveIdentity()],
+  ['① 最高优先级 · 快（唯一的一级标题 / 思考纪律）', PromptBuilder.interactivePrime()],
+  ['② 身份与输出形态(界面语言契约开场)', GuncatUiPrompt.PREAMBLE],
+  ['③ 语法规则 + 表达式能力', GuncatUiPrompt.SYNTAX],
+  ['④ 组件清单(76 个, 由 GuncatUiLibrary 生成)', GuncatUiLibrary.promptSection()],
+  ['⑤ 丰富度(选择优先级 + 分层配方 + 合格/不合格对照)', GuncatUiPrompt.RICHNESS],
+  ['⑥ 交互闭环(本地绑定 / 回传助手 / Action / 表单)', GuncatUiPrompt.INTERACTION],
+  ['⑦ 输出顺序与流式渲染', GuncatUiPrompt.STREAMING],
+  ['⑧ 输出形态正反例 + 完整示例 ×2', GuncatUiPrompt.EXAMPLES],
+  ['⑨ 最常见的错误(自查清单)', GuncatUiPrompt.ANTI_PATTERNS],
   ['⑩ 快车道底座 · 工作区(素材区)', PromptBuilder.interactiveWorkspace()],
   ['⑪ 快车道底座 · 可用工具(裁剪后 27 个)', PromptBuilder.interactiveTools(toolIndex)],
   ['⑫ 快车道底座 · 真实数据纪律', PromptBuilder.interactiveTruth()],
   ['⑬ 技能库(极小索引: 5 支格式技能)', skills],
-  ['⑭ 交互模式职责(交付形态, 最后解释权)', GuncatUiPrompt.INTERACTIVE_DUTY]
+  ['⑭ 交互模式职责(交付形态, 最后解释权) + 回到开头的指针', GuncatUiPrompt.INTERACTIVE_DUTY]
 ];
+
+// 自检: 真实组装入口产出的提示词, 第一段必须就是 ①
+const assembled = PromptBuilder.assembleInteractiveSystemPrompt(
+  GuncatUiPrompt.promptSection(), skills, toolIndex, GuncatUiPrompt.INTERACTIVE_DUTY);
+if (assembled.indexOf('# 最高优先级 · 快') !== 0) {
+  throw new Error('组装顺序错误: 「最高优先级 · 快」不在最前方');
+}
 
 let total = 0;
 const out = [];
@@ -52,11 +61,15 @@ out.push('| # | 段 | 来源 | 字符 |');
 out.push('| ---: | --- | --- | ---: |');
 for (let i = 0; i < segs.length; i++) {
   total += segs[i][1].length;
-  out.push('| ' + (i + 1) + ' | ' + segs[i][0] + ' | `' + (i < 8 ? 'GuncatUiPrompt' : (i < 12 ? 'PromptBuilder' : (i === 12 ? 'SkillDirectoryFormatter' : 'GuncatUiPrompt'))) + '` | ' + segs[i][1].length + ' |');
+  const src = i === 0 ? 'PromptBuilder.interactivePrime' :
+    (i < 9 ? 'GuncatUiPrompt' :
+      (i < 12 ? 'PromptBuilder' : (i === 12 ? 'SkillDirectoryFormatter' : 'GuncatUiPrompt')));
+  out.push('| ' + (i + 1) + ' | ' + segs[i][0] + ' | `' + src + '` | ' + segs[i][1].length + ' |');
 }
 out.push('| | **合计** | | **' + total + '** |');
 out.push('');
-out.push('> 拼接方式：`AgentLoopService.buildInteractiveSystemPrompt()` = ① ~ ⑧ + 底座的 ⑨ ~ ⑬ + ⑭（段间以空行相连），整体静态、进程内缓存一次。');
+out.push('> 拼接方式：`PromptBuilder.assembleInteractiveSystemPrompt(uiContract, skills, toolIndex, duty)` —— 顺序由它固定（`AgentLoopService.buildInteractiveSystemPrompt()` 只是把四份文本传进去），段间以空行相连，整体静态、进程内缓存一次。');
+out.push('> **① 必须永远在第一段**：模型是顺序读提示词的，而契约段有 8k+ 的组件清单；纪律写在后面等于没写。`test-core.mjs` 里有断言钉住这个顺序。');
 out.push('');
 out.push('---');
 out.push('');

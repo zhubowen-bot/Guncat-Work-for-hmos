@@ -1291,7 +1291,9 @@ export class AgentLoopService {
   // 工作模式的提示词是「多轮工具循环 + 长程交付」的(建清单/先加载技能/反复核验/落盘成文),
   // 那套纪律放进交互模式会直接变成一串无用工具调用 —— 交互模式要的是"一句话进来, 一张界面出去",
   // 所以底座改走 PromptBuilder.buildInteractive()(快车道), 不再拼接工作模式的 build()。
-  // 三分段: 界面语言契约(GuncatUiPrompt) + 快车道底座(PromptBuilder) + 职责收尾(INTERACTIVE_DUTY)。
+  // 四分段(顺序由 PromptBuilder.assembleInteractiveSystemPrompt() 固定, 那里有断言钉住):
+  //   最高优先级·快(interactivePrime, **必须第一段**) + 界面语言契约(GuncatUiPrompt)
+  //   + 素材区/工具面/真实数据/技能索引(快车道底座) + 职责收尾(INTERACTIVE_DUTY)。
   // 同样保持 100% 静态 + 进程内缓存, 以维持相邻轮次的 KV 缓存前缀一致。
   private static cachedInteractivePrompt: string = '';
 
@@ -1304,10 +1306,9 @@ export class AgentLoopService {
     // 提示词里列出的工具与请求里真正下发的工具定义严格同源, 不会出现"提示词里有、实际调不到"的漂移。
     // 这里固定传 false 只影响 local_web_search 的**描述**文字, 名字不随联网开关变化, 索引是稳定的。
     let defs: Record<string, Object>[] = AgentLoopService.interactiveToolDefs(false);
-    AgentLoopService.cachedInteractivePrompt =
-      GuncatUiPrompt.promptSection() + '\n\n' +
-      PromptBuilder.buildInteractive(skillsSection, PromptBuilder.buildToolNameIndex(defs)) + '\n\n' +
-      GuncatUiPrompt.INTERACTIVE_DUTY;
+    AgentLoopService.cachedInteractivePrompt = PromptBuilder.assembleInteractiveSystemPrompt(
+      GuncatUiPrompt.promptSection(), skillsSection,
+      PromptBuilder.buildToolNameIndex(defs), GuncatUiPrompt.INTERACTIVE_DUTY);
     AgentLoopService.lastPromptBudget = PromptBudget.fromPrompt(AgentLoopService.cachedInteractivePrompt);
     return AgentLoopService.cachedInteractivePrompt;
   }
