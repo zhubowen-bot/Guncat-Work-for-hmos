@@ -1134,6 +1134,68 @@ struct ChatPage {
     .zIndex(this.launchVisible ? 101 : 0)
   }
 
+  // 模式切换胶囊: 交互模式 ⇄ 工作模式 一键换挡(对齐豆包首页的「对话 / 工作」大按钮)。
+  //
+  // 两个 Tab 刻意**不抽成带参 Builder**: ArkUI 的 @Builder 传值参数不会自己刷新 UI, 只能靠
+  // 父组件重渲染重跑; 而这里"谁被选中"完全由 vm 的 mode 决定, 内联写死最不容易踩坑
+  // (本项目在 ArkUI 刷新机制上已经栽过几次, 见 README「ArkUI 刷新机制」)。
+  // 点击走 vm.setInteractiveMode / setWorkMode: 内部即 selectAgent, 会切到该模式的最新会话
+  // (没有就新建空会话), 流式/解析中由 VM 弹「请等待当前任务完成后再切换模式」并拒绝。
+  @Builder
+  buildModeSwitch() {
+    Row() {
+      // 交互模式(左): 选中段是白底滑块 + 轻阴影, 未选中段透明
+      Text('交互模式')
+        .fontSize(15)
+        .fontWeight(this.vm.interactiveMode ? FontWeight.Medium : FontWeight.Normal)
+        .fontColor(this.vm.interactiveMode ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
+        .textAlign(TextAlign.Center)
+        .height(38)
+        .padding({ left: 20, right: 20 })
+        .borderRadius(19)
+        .backgroundColor(this.vm.interactiveMode ? $r('app.color.surface') : Color.Transparent)
+        // 深色模式下 surface(#232324) 与轨道 surface_secondary(#2C2C2E) 只差 9 级灰, 加一圈
+        // border 才看得出"这一格是选中的"; 浅色模式它就是白底滑块上一道几乎看不见的描边
+        .border({ width: 1, color: this.vm.interactiveMode ? $r('app.color.border') : Color.Transparent })
+        .shadow(this.vm.interactiveMode
+          ? { radius: 8, color: '#14000000', offsetX: 0, offsetY: 2 }
+          : { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 })
+        .animation({ duration: 180, curve: Curve.EaseOut })
+        .onClick(() => {
+          this.vm.setInteractiveMode(true).then(() => {
+            this.refreshTick++;
+            this.scrollToBottomDelayed();
+          });
+        })
+
+      // 工作模式(右)
+      Text('工作模式')
+        .fontSize(15)
+        .fontWeight(this.vm.workMode ? FontWeight.Medium : FontWeight.Normal)
+        .fontColor(this.vm.workMode ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
+        .textAlign(TextAlign.Center)
+        .height(38)
+        .padding({ left: 20, right: 20 })
+        .borderRadius(19)
+        .backgroundColor(this.vm.workMode ? $r('app.color.surface') : Color.Transparent)
+        .border({ width: 1, color: this.vm.workMode ? $r('app.color.border') : Color.Transparent })
+        .shadow(this.vm.workMode
+          ? { radius: 8, color: '#14000000', offsetX: 0, offsetY: 2 }
+          : { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 })
+        .animation({ duration: 180, curve: Curve.EaseOut })
+        .onClick(() => {
+          this.vm.setWorkMode(true).then(() => {
+            this.refreshTick++;
+            this.scrollToBottomDelayed();
+          });
+        })
+    }
+    .padding(3)
+    .borderRadius(22)
+    .backgroundColor($r('app.color.surface_secondary'))
+    .margin({ bottom: 18 })
+  }
+
   @Builder
   buildEmptyState() {
     Column() {
@@ -1154,11 +1216,18 @@ struct ChatPage {
             (typeof py === 'string' ? parseFloat(py) : (typeof py === 'number' ? py : this.anchorGlobalY));
           this.recomputeHeroTarget();
         })
-      Text(this.vm.currentAgent !== null ? this.vm.currentAgent.name : 'Guncat Work')
-        .fontSize(22)
-        .fontWeight(FontWeight.Bold)
-        .fontColor($r('app.color.text_primary'))
-        .margin({ bottom: 12 })
+      // 大标题的位置: Agent Loop 模式下换成「交互模式 ⇄ 工作模式」切换胶囊(对齐豆包「对话/工作」大按钮)。
+      // 它本身就是"当前在哪个模式"的标题 —— 比一行死文字多一个动作, 也是启动默认落在交互模式后的换挡入口。
+      // 聊天智能体(轻简/效率/专家…)仍显示自己的名字, 它们不属于这两个模式。
+      if (this.vm.agentLoopMode) {
+        this.buildModeSwitch()
+      } else {
+        Text(this.vm.currentAgent !== null ? this.vm.currentAgent.name : 'Guncat Work')
+          .fontSize(22)
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.text_primary'))
+          .margin({ bottom: 12 })
+      }
       Text(this.vm.agentLoopMode ?
         this.vm.loopEmptyDescription :
         (this.vm.currentAgent !== null ? this.vm.currentAgent.description : '选择一个智能体开始对话'))

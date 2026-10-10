@@ -1,5 +1,28 @@
 # ITERATION_LOG
 
+## 2026-10-10 R72: 启动默认进入交互模式 + 空态大标题换成「交互模式 / 工作模式」切换胶囊
+
+### 需求
+1. 打开应用**默认进入交互模式**（不再恢复"上次使用的智能体"）；
+2. 在交互模式与工作模式之间做一个像豆包首页「对话 / 工作」那样的大按钮，**点一下就换挡**，位置放在现在的大标题处。
+
+### 变更
+- **`viewmodel/ChatViewModel.ets`**：`restoreState()` 不再读 `guncat_current_agent_id` 决定启动智能体，改为**固定取 `interactive` 虚拟智能体**（只有它意外缺失时才回退到第一个聊天智能体），并把该 id 写回存储保持一致。原来"恢复上次智能体"的那段查找循环与 `firstAgent` 兜底一并重写为一个循环同时取出 `interactiveAgent` / `firstAgent`。
+- **`pages/ChatPage.ets` 空态**：Agent Loop 模式下，原来那行 22pt 的模式名标题（「交互模式」/「工作模式」）换成 `buildModeSwitch()` 双段胶囊；聊天智能体（轻简/效率/专家…）仍显示自己的名字 —— 它们不属于这两个模式。
+  - 选中段：`surface` 底 + 1px `border` 描边 + 轻阴影；未选中段透明；`.animation({ duration: 180, curve: Curve.EaseOut })` 让滑块切换有过渡。
+  - 点击走 `vm.setInteractiveMode(true)` / `vm.setWorkMode(true)`（内部即 `selectAgent`：切到该模式的最新会话、没有就新建空会话；流式/解析中由 VM 弹「请等待当前任务完成后再切换模式」拒绝），随后 `refreshTick++` + 置底。
+  - 两个 Tab **刻意不抽成带参 `@Builder`**：ArkUI 的传值 Builder 不会自己刷新 UI，而选中态完全由 `vm.interactiveMode` / `vm.workMode` 派生，内联写死最不容易踩坑（沿用本项目在 ArkUI 刷新机制上已有的教训）。
+  - 深色下 `surface`(#232324) 与轨道 `surface_secondary`(#2C2C2E) 只差 9 级灰，因此选中段额外加了一圈 `app.color.border` 描边。
+- **文档**：README 中英「交互模式」段与「使用指南」的工作/交互模式入口步骤改写（默认落点 + 胶囊换挡），6.3.0 更新段最前面新增本节；`玩转应用` 的「布置一个任务的流程」第 ① 步同步。
+
+### 验证
+- DevEco `assembleHap`（`hvigorw.js assembleHap --no-daemon --mode module -p product=default`，`DEVECO_SDK_HOME` 指向 DevEco 自带 SDK）：**BUILD SUCCESSFUL in 19 s 885 ms**，`CompileArkTS` 无报错，仅剩既有的三方库 / `private property` 告警。
+- `node test/guncat-harness/test-core.mjs`：**passed=507 failed=0**（本轮未动 harness 覆盖的纯逻辑）。
+
+### 已知取舍
+- 胶囊只出现在**空态**（该会话还没有消息时）——它就是"当前在哪个模式"的标题本身；进入对话后标题回到顶部 Header 的一行小字，换挡改走侧边栏。要在对话中也常驻换挡入口，可以再加到 Header（本轮未做）。
+- "启动即交互模式"是**每次冷启动**行为：应用退到后台再回来不会重跑 `ChatPage.aboutToAppear`，所以不会打断进行中的工作模式会话。
+
 ## 2026-10-10 R71: 侧边栏「聊天引擎」分组默认折叠
 
 ### 需求

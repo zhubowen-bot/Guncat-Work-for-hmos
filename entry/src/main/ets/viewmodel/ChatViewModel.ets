@@ -311,26 +311,25 @@ export class ChatViewModel {
       }
     }
 
-    // 恢复当前智能体(默认取第一个真实智能体, 跳过 work/interactive 虚拟项)
-    let agentId: string = await StorageManager.loadString(this.context, Constants.LS_KEY_CURRENT_AGENT_ID, '');
+    // 启动落点: 固定进入交互模式(Intelligent UI), 不再恢复"上次使用的智能体"。
+    // 打开应用的第一屏就是"能操作的界面"; 想用工作模式或某个聊天智能体, 走空态大标题处的
+    // 模式切换胶囊(setInteractiveMode / setWorkMode)或侧边栏, 而不是靠上次偶然停在的那个智能体。
     let firstAgent: Agent | null = null;
+    let interactiveAgent: Agent | null = null;
     for (let i: number = 0; i < this.agents.length; i++) {
-      if (this.agents[i].id !== Constants.WORK_AGENT_ID &&
+      if (this.agents[i].id === Constants.INTERACTIVE_AGENT_ID) {
+        interactiveAgent = this.agents[i];
+      }
+      if (firstAgent === null && this.agents[i].id !== Constants.WORK_AGENT_ID &&
         this.agents[i].id !== Constants.INTERACTIVE_AGENT_ID) {
         firstAgent = this.agents[i];
-        break;
       }
     }
-    if (agentId !== '') {
-      for (let i: number = 0; i < this.agents.length; i++) {
-        if (this.agents[i].id === agentId) {
-          this.currentAgent = this.agents[i];
-          break;
-        }
-      }
-    }
-    if (this.currentAgent === null && firstAgent !== null) {
-      this.currentAgent = firstAgent;
+    // interactiveAgent 必然存在(上面已 splice 进列表), firstAgent 只是极端兜底
+    this.currentAgent = interactiveAgent !== null ? interactiveAgent : firstAgent;
+    if (this.currentAgent !== null) {
+      // 落盘保持与实际一致(其他路径只读不依赖它, 但别让存档停在一个过期的智能体上)
+      await StorageManager.saveString(this.context, Constants.LS_KEY_CURRENT_AGENT_ID, this.currentAgent.id);
     }
 
     // 每次重新打开应用都自动新建对话；若该智能体最后一条对话还是空的则直接复用
