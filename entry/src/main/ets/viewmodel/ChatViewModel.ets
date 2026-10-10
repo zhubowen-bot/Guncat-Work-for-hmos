@@ -285,9 +285,11 @@ export class ChatViewModel {
 
     // 热加载 rawfile/plugins 插件(注册进 ToolRegistry, 工作模式动态目录自动包含)
     await PluginHotLoader.loadAll(this.context);
-    this.agents.unshift(this.buildWorkAgent());
-    // 交互模式(Intelligent UI)与工作模式平行, 固定排在「Agent模式」分组第二位
-    this.agents.splice(1, 0, this.buildInteractiveAgent());
+    // 交互模式 / 工作模式两个虚拟项注入到列表最前, 顺序 = 侧边栏「Agent引擎（推荐）」/「引擎」分组的显示顺序:
+    // **交互模式在上、工作模式在下** —— 应用的启动落点就是交互模式, 侧边栏第一项与它一致;
+    // 空态那颗模式胶囊也是「交互模式 | 工作模式」的同一顺序, 上下与左右不会打架。
+    this.agents.unshift(this.buildInteractiveAgent());
+    this.agents.splice(1, 0, this.buildWorkAgent());
     // 记录第一个真实智能体(退出工作/交互模式时回切)
     for (let i: number = 0; i < this.agents.length; i++) {
       if (this.agents[i].id !== Constants.WORK_AGENT_ID &&
