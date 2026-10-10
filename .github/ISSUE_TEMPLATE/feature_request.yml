@@ -1,0 +1,62 @@
+name: 功能建议
+description: 提出一个新功能、改进或新的工具 / 技能
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        欢迎提想法。为了让讨论更有效率，请说明**你遇到的是什么问题**，
+        而不只是"我想要一个 X 功能"——同一个问题往往有更好的解法。
+
+        也可以先看 [`BACKLOG.md`](https://github.com/zhubowen-bot/Guncat-Work-for-hmos/blob/main/BACKLOG.md)，
+        里面已列了不少待办，也许你想提的正在其中。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解决的问题
+      description: 现在这样做有什么不便？在什么场景下？
+      placeholder: |
+        例如：每次让它做长任务，我都不知道进度，只能盯着时间线滚。
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 你的设想
+      description: 你希望它怎么工作？（有方案更好，没有也没关系）
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及范围
+      description: 你觉得这个改动落在哪一块？
+      options:
+        - 交互模式（Intelligent UI）
+        - 工作模式（Agent Loop / 工具 / 技能）
+        - 聊天模式与智能体
+        - Office 生成（PPT / Word / Excel）
+        - 界面与交互体验
+        - 工程 / 构建 / 测试
+        - 文档
+        - 其他 / 不确定
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 你考虑过的替代方案
+      description: 有没有别的做法能达到同样目的？
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: 参与意愿
+      options:
+        - label: 我愿意提交 PR 实现它（可以先在 Issue 里对齐方案）
+        - label: 我只提建议，暂时没时间动手

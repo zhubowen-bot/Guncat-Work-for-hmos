@@ -1,0 +1,19 @@
+# 允许自由开 Issue（不强制套模板，降低提问题的门槛）
+blank_issues_enabled: true
+
+contact_links:
+  - name: 常见问题与排障
+    url: https://github.com/zhubowen-bot/Guncat-Work-for-hmos/blob/main/docs/guides/faq.md
+    about: API Key 无效、文件解析失败、流式输出中断、交互模式界面没出来 / 参数调了没变等
+
+  - name: 架构与设计文档
+    url: https://github.com/zhubowen-bot/Guncat-Work-for-hmos/tree/main/docs
+    about: 改代码之前先看这里：Agent Loop、工具系统、交互模式语言契约、Office 生成链路
+
+  - name: 参与贡献（开发环境与三层验证）
+    url: https://github.com/zhubowen-bot/Guncat-Work-for-hmos/blob/main/CONTRIBUTING.md
+    about: 环境要求、编码规范（ArkTS 硬约束）、怎么跑测试、PR 流程
+
+  - name: 待办清单
+    url: https://github.com/zhubowen-bot/Guncat-Work-for-hmos/blob/main/BACKLOG.md
+    about: 已规划的迭代方向与当前待办

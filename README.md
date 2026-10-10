@@ -12,6 +12,7 @@
 ![tools](https://img.shields.io/badge/%E5%86%85%E7%BD%AE%E5%B7%A5%E5%85%B7-45-informational)
 ![skills](https://img.shields.io/badge/%E6%8A%80%E8%83%BD-32-informational)
 [![license](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
+[![CI](https://github.com/zhubowen-bot/Guncat-Work-for-hmos/actions/workflows/ci.yml/badge.svg)](https://github.com/zhubowen-bot/Guncat-Work-for-hmos/actions/workflows/ci.yml)
 
 <p align="center">
   <a href="docs/images/interactive-home.jpg"><img src="docs/images/interactive-home.jpg" width="23%" alt="交互模式首页" /></a>
@@ -114,6 +115,8 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 
 最后一层不能省：ArkUI 有一批**只有编译器才知道**的规则（`@Builder` 方法体内不允许声明局部变量、自定义组件属性名不能与内置属性同名、`@Prop` 的 null 需要显式联合类型），而 node 侧 harness 只覆盖 `common/**` 与 `service/**` 的纯 TS，不解析 `.ets`。
 
+前两层与三个 Office 生成器验证**已接 CI**，每次 push 与 PR 自动跑（见顶部 CI 徽章）；第三层需要本机 DevEco Studio，请在提交前自行跑一次。
+
 ## 文档
 
 | 文档 | 内容 |
@@ -155,7 +158,7 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 
 ## 贡献
 
-欢迎提交 Issue 和 Pull Request。
+欢迎提交 Issue 和 Pull Request。开发环境、编码规范（ArkTS 硬约束）、三层验证怎么跑、PR 流程 → **[CONTRIBUTING.md](CONTRIBUTING.md)**。
 
 1. Fork 仓库。
 2. 创建功能分支。

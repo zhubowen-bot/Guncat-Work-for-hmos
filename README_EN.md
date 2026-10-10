@@ -12,6 +12,7 @@
 ![tools](https://img.shields.io/badge/built--in%20tools-45-informational)
 ![skills](https://img.shields.io/badge/skills-32-informational)
 [![license](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
+[![CI](https://github.com/zhubowen-bot/Guncat-Work-for-hmos/actions/workflows/ci.yml/badge.svg)](https://github.com/zhubowen-bot/Guncat-Work-for-hmos/actions/workflows/ci.yml)
 
 <p align="center">
   <a href="docs/images/interactive-home.jpg"><img src="docs/images/interactive-home.jpg" width="23%" alt="Interactive Mode home screen" /></a>
@@ -114,6 +115,8 @@ Multimodal pre-parsing can be configured separately with its own model, endpoint
 
 The last layer is not optional: ArkUI has a set of rules that **only the compiler knows** (no local variable declarations inside a `@Builder` method body, custom component property names must not collide with built-in property names, `@Prop` nulls need an explicit union type), and the Node-side harness only covers the pure TS in `common/**` and `service/**` — it never parses `.ets`.
 
+The first two layers and the three Office generator harnesses **run in CI** on every push and pull request (see the CI badge at the top); the third layer requires DevEco Studio locally, so please run it yourself before submitting.
+
 ## Documentation
 
 | Document | Contents |
@@ -157,7 +160,7 @@ If something goes wrong, start with the [FAQ](docs/guides/faq.md): invalid API K
 
 ## Contributing
 
-Issues and pull requests are welcome.
+Issues and pull requests are welcome. For the dev environment, coding conventions (ArkTS hard constraints), how to run the three verification layers and the PR flow, see **[CONTRIBUTING.md](CONTRIBUTING.md)** (Chinese).
 
 1. Fork the repository.
 2. Create a feature branch.
