@@ -20,6 +20,10 @@
   5. 换图标 ──── 顶部应用图标是 assets/app-icon.png, 直接替换图片文件。
                  列表里的图标是单色实心 SVG, 换新图标去
                  https://fonts.google.com/icons 选 Filled 风格复制路径即可。
+  6. 图片占位 ── 本次修订新增的两页 (交互模式 view-009 / Version 6.3 新功能体验 view-010)
+                 图片尚未提供, <img src> 用的是占位文件名 (009-N.png / 010-N.png)。
+                 每页顶部注释写明「第 N 张该放什么」, 截图做好后按名放进 assets/ 即可。
+                 原有页面的图片引用一律没动。
   ════════════════════════════════════════════════════════════════
 -->
 <html lang="zh-CN">
@@ -44,9 +48,20 @@
         <p class="hero-sub">Version 6.3.0 (630_1)</p>
       </header>
 
-      <!-- 新功能体验面板: 首页入口卡, 点击进入 Version 6.2 新功能子页 -->
+      <!-- 新功能体验面板: 首页入口卡, 点击分别进入 Version 6.3 / Version 6.2 新功能子页 -->
       <section class="toc toc-gap">
         <div class="toc-header">新功能体验</div>
+
+        <a class="card" href="#/010">
+          <div class="card-icon">
+            <svg viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></svg>
+          </div>
+          <div class="card-body">
+            <div class="card-title">探索 Version 6.3 的重磅功能更新</div>
+            <div class="card-text">Agent 引擎新增「交互模式」：回答不再是文字，而是一张能看、能点、能拖的原生界面——图表、指标卡、表格与表单都在里面，拖动参数即时重算，还能让助手按新参数重出界面。</div>
+          </div>
+          <div class="card-arrow"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
+        </a>
 
         <a class="card" href="#/008">
           <div class="card-icon">
@@ -72,7 +87,7 @@
           </div>
           <div class="card-body">
             <div class="card-title">了解 Guncat Work</div>
-            <div class="card-text">了解 Guncat Work 不同模式的能力，以及擅长完成什么不同类型的任务。</div>
+            <div class="card-text">了解 Guncat Work 的三大能力体系——交互模式、工作模式与聊天引擎，以及各自擅长完成什么类型的任务。</div>
           </div>
           <div class="card-arrow"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
         </a>
@@ -113,6 +128,18 @@
           <div class="card-arrow"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
         </a>
 
+        <!-- 目录项: 交互模式 -->
+        <a class="card" href="#/009">
+          <div class="card-icon">
+            <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+          </div>
+          <div class="card-body">
+            <div class="card-title">交互模式</div>
+            <div class="card-text">交互模式全解：一句话如何变成一张能看、能点、能拖的原生界面，以及参数绑定、回传重算与流式成形。</div>
+          </div>
+          <div class="card-arrow"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
+        </a>
+
         <!-- 目录项: 工作模式 -->
         <a class="card" href="#/005">
           <div class="card-icon">
@@ -132,7 +159,7 @@
           </div>
           <div class="card-body">
             <div class="card-title">聊天引擎</div>
-            <div class="card-text">聊天引擎全解：轻简、效率、专家、经典四大通用模式与五位专家智能体的详细说明。</div>
+            <div class="card-text">聊天引擎全解：轻简、效率、专家、经典四大通用模式与五位专家智能体；日常问答推荐改用交互模式。</div>
           </div>
           <div class="card-arrow"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
         </a>
@@ -175,8 +202,7 @@
       <div class="gallery">
         <div class="gallery-track">
           <img src="assets/001-1.png" alt="了解 Guncat Work">
-          <img src="assets/001-2.png" alt="聊天引擎">
-          <img src="assets/001-3.png" alt="Agent引擎(工作模式)">
+          <img src="assets/001-2.png" alt="三大能力体系：交互模式 / 工作模式 / 聊天引擎">
           <img src="assets/001-4.png" alt="插件">
         </div>
         <div class="gallery-dots"></div>
@@ -187,29 +213,25 @@
         <div class="card card-prose">
         <div class="card-body">
           <div class="card-title">关于 Guncat Work</div>
-          <div class="card-text">Guncat Work 是整合多项前沿技术打造的新一代智能体平台，旗下包含多款定位各异、能力独立的智能体：</div>
-          <div class="card-text">① 轻量化掌上工作台，拥有数十种工具集与多轮任务执行能力；② 单体超级智能体，面向通用会话；③ 对话智能体，主打日常闲聊交互；⑤ 反幻觉智能体，依托 RAR 架构；⑥ 专家智能体，覆盖通用问答、资料检索、文本改写、法律服务、模型评测等垂直场景。</div>
+          <div class="card-text">Guncat Work 是整合多项前沿技术打造的新一代智能体平台，能力分为三条主线：</div>
+          <div class="card-text">① 交互模式（Agent 引擎 · 推荐）：把一句话直接变成能看、能点、能拖的原生界面——图表、指标卡、表格、表单，调参即时重算，也是应用启动后的默认入口；</div>
+          <div class="card-text">② 工作模式（Agent 引擎）：同一套引擎的另一种交付形态，调用数十种工具与技能，端到端产出 Word、Excel、PPT 等成品文件；</div>
+          <div class="card-text">③ 聊天引擎：4 个通用对话智能体 + 5 个专家智能体，体验是传统的「提出问题→给出回答」，一轮问答即交付。</div>
           <div class="card-text">适配网页端、安卓端、鸿蒙手机、鸿蒙PC等多端，为用户提供便捷的智能体服务。</div>
         </div>
       </div>
 
-      <!-- 聊天引擎 -->
+      <!-- 三大能力体系的分工 -->
       <div class="card">
         <div class="card-body">
-          <div class="card-title">聊天引擎</div>
-          <div class="card-text">聊天引擎对话体验和豆包类似：提出问题→给出回答。</div>
-          <div class="card-text">共包含4个通用对话智能体和5个专家智能体，交付速度快、效率高，不适宜执行复杂长程任务。</div>
+          <div class="card-title">三大能力体系怎么分工</div>
+          <div class="card-text">应用的能力分成两套引擎：Agent 引擎（交互模式 + 工作模式）与聊天引擎。</div>
+          <div class="card-text">交互模式与工作模式共用同一套 Agent 循环、同一个沙箱工作区与同一套数十种工具，差别在「交付什么」和「怎么干」：交互模式的交付物是界面，默认零工具、一轮直出；工作模式的交付物是文件成品，多轮工具循环、长程推进。</div>
+          <div class="card-text">聊天引擎是另一条线：不读写工作区文件、不产出成品文件，只把问题答好，适合想要一段纯文字回答的场合。</div>
+          <div class="card-text">一句话选型：日常提问、试算、对比、看数据 → 交互模式；要正式文件的长程任务 → 工作模式；只想聊天式问答或指定某位专家 → 聊天引擎。</div>
         </div>
       </div>
 
-      <!-- Agent引擎（工作模式） -->
-      <div class="card">
-        <div class="card-body">
-          <div class="card-title">Agent引擎（工作模式）</div>
-          <div class="card-text">Agent引擎（工作模式）的使用体验和专业编程智能体相近：布置任务→交付结果。</div>
-          <div class="card-text">它能调用几十种工具，进行多轮校验反思。不用你一步步指挥，就能处理文件、搜集资料、做调研、分析数据、写长文，搞定整套复杂的长线工作，但工作时长较长。</div>
-        </div>
-      </div>
 
       <!-- 表格识别 -->
       <div class="card">
@@ -240,8 +262,8 @@
       <!-- 顶部图片轮播: 一张 <img> 对应下面一张介绍卡, 顺序一一对应 -->
       <div class="gallery">
         <div class="gallery-track">
-          <img src="assets/002-1.png" alt="开关深度思考（聊天引擎）">
-          <img src="assets/002-2.png" alt="控制思考强度（工作模式）">
+          <img src="assets/002-1.png" alt="思考强度：按模式分档（Agent 引擎）">
+          <img src="assets/002-2.png" alt="开关深度思考（聊天引擎）">
           <img src="assets/002-3.png" alt="联网搜索：建议开启">
           <img src="assets/002-4.png" alt="图片与文件的支持能力">
           <img src="assets/002-5.png" alt="语音输入：自动入框，离线也能用">
@@ -253,19 +275,22 @@
 
       <!-- 与轮播联动的介绍卡: 第 N 张图对应第 N 张卡, 只显示当前那张 -->
       <div class="gallery-cards">
+
         <div class="card">
           <div class="card-body">
             <div class="card-title">开关深度思考（聊天引擎）</div>
-            <div class="card-text">开启深度思考更擅长应对高复杂度问题，处理数学计算、文稿撰写、资料调研、数据分析等任务时，以及使用垂直专家智能体时，建议启用该能力。</div>
+            <div class="card-text">聊天引擎保留可手动开关的「深度思考」。开启后更擅长应对高复杂度问题，处理数学计算、文稿撰写、资料调研、数据分析等任务时，以及使用垂直专家智能体时，建议启用该能力。</div>
             <div class="card-text">聊天引擎中的三种通用智能体可自动管理深度思考能力：轻简模式与效率模式自动关闭，专家模式则自动开启。其他智能体不支持自动开关深度思考。</div>
           </div>
         </div>
 
         <div class="card">
           <div class="card-body">
-            <div class="card-title">控制思考强度（工作模式）</div>
-            <div class="card-text">工作模式的深度思考强制开启，提供更细化的思考档位：极高（Max）、均衡（High）、快速（Low）。在模型选择按钮处可切换不同的思考强度档位。</div>
-            <div class="card-text">选择极高档位可获得极致的交付质量，但交付时间较长。选择快速档位可获得快速的交付时间，但交付质量会下降。</div>
+            <div class="card-title">思考强度：按模式分档（Agent 引擎）</div>
+            <div class="card-text">交互模式与工作模式的深度思考都强制开启（工具行不再显示该开关），思考强度在模型胶囊的「能力预设」里切换。两个模式的档位各自保存、互不影响。</div>
+            <div class="card-text">工作模式提供三档：极高（Max）、均衡（High）、快速（Low）。极高档追求极致的交付质量，但交付时间较长；快速档交付更快，质量有所下降。</div>
+            <div class="card-text">交互模式提供三档：均衡（High）、快速（Low）、关闭（Off），并且默认落在快速档——它的交付物是界面，「快」比「多思考两秒」更重要。</div>
+            <div class="card-text">「关闭」只作用于交互模式，不会把工作模式或聊天引擎的深度思考一起关掉。</div>
           </div>
         </div>
 
@@ -284,10 +309,10 @@
       <div class="card">
         <div class="card-body">
           <div class="card-title">图片与文件的支持能力</div>
-          <div class="card-text">点击拍照按钮可拍照上传照片，点击文件按钮可上传本地图片和文件。工作模式还可在工作区面板上传文件。</div>
+          <div class="card-text">点击拍照按钮可拍照上传照片，点击文件按钮可上传本地图片和文件。交互模式与工作模式还可在工作区面板上传文件。</div>
           <div class="card-text">对于聊天引擎，由于大多数模型不具备直接理解文件的能力，建议只上传图片，若上传文件模型可能报错。</div>
-          <div class="card-text">对于工作模式，上传的文件会被保存到工作区沙箱，模型可调用工具对文件进行读写操作，你可以自由上传图片、PDF、Office 文档或代码文件等任意文件。</div>
-          <div class="card-text">请确保你使用的模型为多模态模型，如Deepseek-V4-Flash-Vision-Exp，而非Deepseek-V4-Flash，否则模型无法理解图片内容。</div>
+          <div class="card-text">对于交互模式与工作模式，上传的文件会被保存到工作区沙箱，模型可调用工具对文件进行读写操作，你可以自由上传图片、PDF、Office 文档或代码文件等任意文件。</div>
+          <div class="card-text">请确保你使用的模型为多模态模型，如Deepseek-V4.1-Flash，而非Deepseek-V4-Flash，否则模型无法理解图片内容。</div>
         </div>
       </div>
 
@@ -342,7 +367,7 @@
       <!-- 顶部图片轮播: 一张 <img> 对应下面一张介绍卡, 顺序一一对应 -->
       <div class="gallery">
         <div class="gallery-track">
-          <img src="assets/003-1.png" alt="新功能-全局自由复制">
+          <img src="assets/003-1.png" alt="全局自由复制">
           <img src="assets/003-2.png" alt="复制纯文本和MD格式">
           <img src="assets/003-3.png" alt="输入消息便捷回填">
           <img src="assets/003-4.png" alt="一键导出 Word">
@@ -358,7 +383,7 @@
         <!-- 功能: 新功能-全局自由复制 -->
         <div class="card">
           <div class="card-body">
-            <div class="card-title">新功能-全局自由复制</div>
+            <div class="card-title">全局自由复制</div>
             <div class="card-text">所有回答文本都能直接自由复制，无需再手动点击复制局部按钮，想复制哪里就复制哪里，随心所欲更方便！</div>
           </div>
         </div>
@@ -386,6 +411,7 @@
           <div class="card-body">
             <div class="card-title">一键导出 Word</div>
             <div class="card-text">在回答下方点击 Word 按钮，长回答秒变排版精良的Word文档，标题、加粗、斜体、表格、公式、代码块原样保留，无需手动复制。</div>
+            <div class="card-text">交互模式的回答主体是界面程序，导出时不会把界面源码写进文档，而是导出界面里真正可见的文字（表格会还原成 Markdown 表格）；需要正式文件时，直接在对话里说明要导出成什么格式更合适。</div>
           </div>
         </div>
 
@@ -404,6 +430,7 @@
         <div class="card-body">
           <div class="card-title">工作模式后台可继续工作</div>
           <div class="card-text">工作模式下，退出应用到后台、熄灭屏幕等，智能体会继续在后台工作，任务不会被打断，你可以自由刷视频、看新闻，等待时间也不无聊！</div>
+          <div class="card-text">交互模式的回答通常秒级返回（默认零工具、一轮直出），一般不需要后台等待；需要长时间执行的多文件任务请交给工作模式。</div>
           <div class="card-text">注意：请不要关闭应用，也不要关闭消息通知中的任务气泡，否则任务会被中断。</div>
           <div class="card-text">熄屏、休眠状态下的任务后台运行还与系统在熄屏状态下的网络连接状态有关。若您的设备在熄屏状态下没有网络连接，任务会被中断。</div>
           <div class="card-text">若任务被中断，可重新启动应用，发送“继续任务”，任务会接着之前的进度继续进行。</div>
@@ -429,8 +456,7 @@
       <!-- 顶部图片轮播: 一张 <img> 对应下面一张介绍卡, 顺序一一对应 -->
       <div class="gallery">
         <div class="gallery-track">
-          <img src="assets/004-1.png" alt="日常对话聊天：选择轻简模式">
-          <img src="assets/004-2.png" alt="轻任务求解：效率模式或专家模式">
+          <img src="assets/004-1.png" alt="日常提问与试算：交互模式">
           <img src="assets/004-3.png" alt="长程任务交付：工作模式">
           <img src="assets/004-4.png" alt="四大专业领域：垂直专家智能体">
         </div>
@@ -442,19 +468,13 @@
         
         <div class="card">
           <div class="card-body">
-            <div class="card-title">日常对话聊天：轻简模式</div>
-            <div class="card-text">猪更聪明还是猫更聪明？椰子树有多高？面包放多久会变质？月亮为什么会跟着人走？</div>
-            <div class="card-text">这类问题不需要复杂工具调用与深度推理，轻简模式优先给出快速高效、通俗易懂的生活化回答，满足碎片化闲聊与小科普需求。</div>
+            <div class="card-title">日常提问与试算：交互模式</div>
+            <div class="card-text">帮我算一下 30 万房贷在不同利率下的月供；对比这三个方案并让我调参数；把这段数据做成能筛选的表格——这类问题的答案本来就是「一张表、一张图、一个能拖的滑块」，用文字描述既啰嗦又不好用。</div>
+            <div class="card-text">交互模式把答案直接交付成界面：指标卡给结论、图表给趋势、表格给明细，滑块和选项就地调参、界面即时重算。应用启动默认就落在交互模式，打开即用。</div>
+            <div class="card-text">它默认不调用任何工具、一轮直出，所以响应很快；只有界面里的数字必须来自工作区真实文件时，才会破例读一次文件或算一次。</div>
           </div>
         </div>
 
-        <div class="card">
-          <div class="card-body">
-            <div class="card-title">轻任务：效率&专家模式</div>
-            <div class="card-text">效率模式、专家模式相比轻简模式，回答更详细、更全面、更准确。面对同一个问题时，它会补充关键背景信息、原理说明与实用细节，逻辑完整，论据清晰。适合需要获取完整信息、做简单参考的场景，适度调用必要能力保证回答严谨充实，兼顾信息深度与回复效率。</div>
-            <div class="card-text">其中，效率模式默认不开启深度思考，回答更快速。专家模式默认开启深度思考，回答质量更高。专家模式还包括了四大垂直领域专家智能体，擅长解决专业问题。</div>
-          </div>
-        </div>
 
         <div class="card">
           <div class="card-body">
@@ -463,18 +483,17 @@
             <div class="card-text">- 请根据根据这些电脑的价格截图，为我判断哪一款性价比最高。</div>
             <div class="card-text">- 请结合现有法律法规和标准体系，为我创作关于人工智能合规性审查的调研报告和对应的PPT。</div>
             <div class="card-text">- 请为我做一个从峨眉坐火车到青海五天四晚游的行程攻略。</div>
-            <div class="card-text">这些任务需要涉及到多样的参考资料，或是多步骤拆解、分段执行的复杂目标，依靠单次简短对话完成无法实现理想的效果。工作模式下将自主梳理任务流程、分阶段完成信息整理、对比分析与内容创作，持续推进直至交付一份结构完整、结果可用的成品方案。适合报告撰写、方案规划、对比研判等具备完整交付目标的工作场景。</div>
+            <div class="card-text">这些任务需要涉及多样的参考资料，或是多步骤拆解、分段执行的复杂目标，依靠单次简短对话无法完成。工作模式下将自主梳理任务流程、分阶段完成信息整理、对比分析与内容创作，持续推进直至交付一份结构完整、结果可用的成品文件（docx / xlsx / pptx）。适合报告撰写、方案规划、对比研判等具备完整交付目标的工作场景。</div>
           </div>
         </div>
 
         <div class="card">
           <div class="card-body">
-            <div class="card-title">专业领域：垂直专家智能体</div>
-            <div class="card-text">转换专家-论文 专用于将非论文问题转换为符合学术规范的论文格式；</div>
-            <div class="card-text">检索专家-法律 通过多轮检索给出国企法律知识结构化权威分析；</div>
-            <div class="card-text">检索专家-筛滤 通过RAR反幻觉推理结构，精准过滤搜索结果中的虚假信息与AI信息，提供真实可信的知识；</div>
-            <div class="card-text">检索专家-研究 通过多轮推理与跨领域交叉验证，研究无法直接通过搜索得出的疑难知识。</div>
-            <div class="card-text">这四大专家的能力已经包含在专家模式中，但单独选择使用时，会获得更专业的回答。</div>
+            <div class="card-title">使用聊天引擎（不推荐）</div>
+            <div class="card-text">* 自 6.3.0 版本开始，不再推荐使用聊天引擎的所有模式。</div>
+            <div class="card-text">对于日常生活问答，交互模式提供可视化和交互性都更强的体验，同时兼顾快速与准确性；</div>
+            <div class="card-text">对于专业任务，工作模式提供更强的处理能力和更高的生成质量，还能实现Office等文件端到端交付；</div>
+            <div class="card-text">原有五大专家智能体的能力也已经包含在交互模式和工作模式的技能中，面对专业知识可获得更加专业的回答。</div>
           </div>
         </div>
 
@@ -537,7 +556,7 @@
         <div class="card">
           <div class="card-body">
             <div class="card-title">工作模式是什么</div>
-            <div class="card-text">工作模式是 Guncat Work 与聊天引擎并列的另一套工作方式：聊天引擎是「提出问题→给出回答」，工作模式则是「布置任务→交付结果」。</div>
+            <div class="card-text">工作模式是 Agent 引擎下的第二种交付形态：交互模式是「一句话→一张界面」，工作模式则是「布置任务→交付结果」；再往下的聊天引擎则是「提出问题→给出回答」。它们并列存在，随时切换。</div>
             <div class="card-text">它拥有一个本地沙箱工作区和数十种工具，接到任务后按「思考→调用工具→观察结果→更新清单」的多轮循环自主推进，不用你一步步指挥，就能处理文件、搜集资料、分析数据、写长文，搞定整套复杂的长线工作。</div>
             <div class="card-text">适合报告撰写、方案规划、资料调研、数据分析等具备完整交付目标的场景。虽然工作时长较长，但是支持后台运行——交完任务你可以去干别的，回来验收成品即可。</div>
           </div>
@@ -547,7 +566,7 @@
         <div class="card">
           <div class="card-body">
             <div class="card-title">布置一个任务的流程</div>
-            <div class="card-text">① 点空态大标题处的「工作模式」一档即可换挡（应用启动默认进入交互模式；也可以走侧边栏的「工作模式」），页面标题与空态随之切换为工作模式。</div>
+            <div class="card-text">① 点空态大标题处的「工作模式」一档即可换挡（应用启动默认落在交互模式；也可以走侧边栏「Agent引擎（推荐）」分组里的「工作模式」，它排在「交互模式」下方），页面标题与空态随之切换为工作模式。</div>
             <div class="card-text">② 需要材料时，通过工作区面板「上传」添加文件。上传的文件保存到工作区沙箱，智能体可用工具读写。</div>
             <div class="card-text">③ 在输入框描述任务，越具体越好：目标是什么、材料在哪里、要什么格式、有什么口径。遇到影响方向的关键选择，它也会主动弹出问题卡片问你（见「向你提问」一节）。</div>
             <div class="card-text">④ 复杂任务会先建立任务清单，再逐项调用工具执行；时间线实时展示每一步的思考、工具调用与产出，点击任意工具步骤可展开参数与结果。</div>
@@ -593,7 +612,7 @@
         <div class="card">
           <div class="card-body">
             <div class="card-title">思考档位：质量与速度</div>
-            <div class="card-text">工作模式的深度思考强制开启（工具行不再显示该开关），并提供更细的思考档位：极高（Max）、均衡（High）、快速（Low），在模型选择按钮处切换。</div>
+            <div class="card-text">工作模式的深度思考强制开启（工具行不再显示该开关），并提供更细的思考档位：极高（Max）、均衡（High）、快速（Low），在模型选择按钮处切换。交互模式有自己的一套档位（均衡 / 快速 / 关闭），两者各自保存、互不影响。</div>
             <div class="card-text">极高档位追求极致交付质量，耗时更长；快速档位交付更快，质量有所下降；多数任务建议均衡档位。</div>
             <div class="card-text">经验法则：写长报告、做 PPT、多文件处理这类大任务用极高；查资料、改文档等中等任务用均衡；轻量小任务用快速。</div>
           </div>
@@ -861,7 +880,8 @@
           <div class="card-body">
             <div class="card-title">聊天引擎是什么</div>
             <div class="card-text">侧边栏「聊天引擎」分组下的智能体统称聊天引擎，目前包含 4 个通用对话智能体和 5 个专家智能体。该分组默认折叠，点击标题行即可展开或收起。对话体验是「提出问题→给出回答」：一轮问答即交付，速度快、效率高。</div>
-            <div class="card-text">聊天引擎不执行复杂长程任务——需要多轮工具调用、文件产出与过程管理的工作，请交给工作模式；两种模式在侧边栏中并列，随时切换。</div>
+            <div class="card-text">聊天引擎不执行复杂长程任务——它不读写沙箱工作区、不产出成品文件。需要多轮工具调用、文件产出与过程管理的工作，请交给 Agent 引擎（要成品文件走工作模式，要能操作的界面走交互模式）；三条线在侧边栏中并列，随时切换。</div>
+            <div class="card-text">推荐：日常提问、试算、对比、看数据，优先用「交互模式」——回答可直接点、可调参、可回传重算；聊天引擎更适合想要一段纯文字回答，或需要指定某位专家智能体的场合。</div>
             <div class="card-text">深度思考默认值：轻简模式与效率模式默认关闭，专家模式默认开启，新建对话时自动重置；其他智能体不自动管理这个开关，可在工具行手动切换。</div>
             <div class="card-text">超过 200 字的正式回答都会以一张 Mermaid 结构图开篇（流程图或时序图，专为手机竖屏优化），先看清全局骨架，再进入正文。</div>
           </div>
@@ -871,6 +891,7 @@
         <div class="card">
           <div class="card-body">
             <div class="card-title">怎么选模式</div>
+            <div class="card-text">先想一句：如果答案本来就是一张表、一张图或一个能拖的参数，直接用「交互模式」更划算；下面这些模式适合「要一段文字」的场合。</div>
             <div class="card-text">① 日常闲聊、快问快答、生活小科普 → 轻简模式。</div>
             <div class="card-text">② 高质量日常问答、轻量任务，想要详尽又不想等太久 → 效率模式。</div>
             <div class="card-text">③ 硬核复杂问题、专业领域分析、追求最强质量 → 专家模式。</div>
@@ -1175,6 +1196,281 @@
             <div class="card-text">工作模式下，退出应用到后台、熄灭屏幕等，智能体会继续在后台工作，任务不会被打断，你可以自由刷视频、看新闻，等待时间也不无聊！</div>
           </div>
         </div>
+
+      </div>
+
+    </main>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       子页 · 交互模式 (Agent 引擎 · 新增)
+       ═══════════════════════════════════════════════════ -->
+  <section class="view" id="view-009">
+    <main class="page">
+
+      <div class="pagebar">
+        <a class="back" href="#/" aria-label="返回目录">
+          <svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg>
+        </a>
+        <div class="pagebar-title">交互模式</div>
+      </div>
+
+      <!-- 顶部图片轮播: 本页共 14 张图, 占位文件名 009-1.png ~ 009-14.png (截图做好后放进 assets/ 即可);
+           每张图对应下面一张介绍卡, 增删时图和卡必须成对同步修改。
+           占位图对应内容:
+           009-1 交互模式是什么   009-2 模式切换胶囊   009-3 界面组件示例   009-4 快车道/零工具
+           009-5 拖动滑块即时重算 009-6 回传按钮/表单  009-7 流式成形         009-8 历史界面置灰归档
+           009-9 能力预设思考档位 009-10 活动折叠栏    009-11 工作区上传      009-12 导出 Word/Excel/PPT
+           009-13 适用场景        009-14 提问示例 -->
+      <div class="gallery">
+        <div class="gallery-track">
+          <img src="assets/009-1.png" alt="交互模式是什么">
+          <img src="assets/009-2.png" alt="怎么进入、怎么换挡">
+          <img src="assets/009-3.png" alt="回答即界面：界面里能有什么">
+          <img src="assets/009-4.png" alt="快车道：默认零工具、一轮直出">
+          <img src="assets/009-5.png" alt="本地交互：拖动即重算">
+          <img src="assets/009-6.png" alt="回传重算：让模型重出一版界面">
+          <img src="assets/009-7.png" alt="边写边成形：流式渲染与「界面未写完」">
+          <img src="assets/009-8.png" alt="只有最新界面可交互，参数会保存">
+          <img src="assets/009-9.png" alt="思考强度：均衡 / 快速 / 关闭">
+          <img src="assets/009-10.png" alt="过程怎么看：活动折叠栏与原始输出">
+          <img src="assets/009-11.png" alt="需要材料：上传到工作区">
+          <img src="assets/009-12.png" alt="需要正式文件：Word / Excel / PPT 照常落盘">
+          <img src="assets/009-13.png" alt="什么时候用它、什么时候换别的模式">
+          <img src="assets/009-14.png" alt="试试这样问">
+        </div>
+        <div class="gallery-dots"></div>
+      </div>
+
+      <!-- 与轮播联动的介绍卡: 第 N 张图对应第 N 张卡, 只显示当前那张 -->
+      <div class="gallery-cards">
+
+        <!-- 1 交互模式是什么 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">交互模式是什么</div>
+            <div class="card-text">交互模式是 Agent 引擎下与工作模式并列的第二种交付形态，也是应用启动后的默认落点：它的回答不是一段文字，而是一份界面程序，应用把它渲染成原生可操作的界面——图表、指标卡、表格、卡片、表单。</div>
+            <div class="card-text">它与工作模式共用同一套 Agent 循环、同一个沙箱工作区和同一套数十种工具，差别在纪律：工作模式是「多轮工具循环 + 长程交付」，交互模式是「一句话进来，一张能操作的界面出去」。</div>
+            <div class="card-text">适合日常提问、试算、对比、看数据这类「答案本来就是一个面板」的场景——用文字描述一张表，既啰嗦又不好改参数。</div>
+          </div>
+        </div>
+
+        <!-- 2 怎么进入、怎么换挡 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">怎么进入、怎么换挡</div>
+            <div class="card-text">打开应用默认就落在交互模式。要换挡，点空态大标题处的「交互模式 | 工作模式」胶囊的另一档即可；也可以走侧边栏「Agent引擎（推荐）」分组里的「交互模式」项——它是该分组的第一项，排在「工作模式」上方（宽屏左侧栏里这一节叫「引擎」，两个模式与聊天智能体并列）。</div>
+            <div class="card-text">换挡本质上是切换会话：切过去会打开该模式最近的一个会话，没有就新建一个空会话。</div>
+            <div class="card-text">正在生成或解析中会拒绝换挡，并提示「请等待当前任务完成后再切换模式」；连续点击也会被忽略，避免两次切换交叉。</div>
+          </div>
+        </div>
+
+        <!-- 3 界面里能有什么 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">回答即界面：界面里能有什么</div>
+            <div class="card-text">文字与结构：标题、小节标题、正文、提示条（Callout）、代码块、标签块、图片与图片墙。</div>
+            <div class="card-text">布局：分节（SectionBlock）、选项卡（Tabs）、折叠面板（Accordion）、轮播（Carousel）、步骤条（Steps）。</div>
+            <div class="card-text">数据：表格（Table + Col，可逐行核对明细）、实体列表（EntityList）。</div>
+            <div class="card-text">图表 8 种：柱状、折线、面积、横向条、饼环、径向、雷达、堆叠条。</div>
+            <div class="card-text">指标与卡片：指标卡（OverviewCardBlock + MetricIndicatorInline，涨跌自带箭头与颜色）、上下文卡片块、摘要卡片块、组合卡片块、视觉卡片块。</div>
+            <div class="card-text">表单控件：滑块、开关、单选、多选、下拉、标签选择（Chips）、选项卡、输入框、文本域，以及按钮与图标。</div>
+            <div class="card-text">组件共 70 个（9 组），全部原生渲染：图表用系统绘图能力现场绘制，不引入图表库、也不会产生图片文件。</div>
+          </div>
+        </div>
+
+        <!-- 4 快车道 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">快车道：默认零工具、一轮直出</div>
+            <div class="card-text">交互模式默认一次回答直接给界面，不调用任何工具。通用知识、估算、示例、方案对比、概念解释，都不需要工具。</div>
+            <div class="card-text">只有四种情况会破例：① 你点名要读上传的文件；② 界面里的数字必须来自工作区里的真实文件，需要读一次或算一次；③ 你问的是需要核实的外部事实（联网搜索 / 抓取网页）；④ 你明确要导出文件（Word / Excel / PPT / SVG）。</div>
+            <div class="card-text">破例同样克制：一轮最多 1~2 次、优先只读，拿到结果立刻出界面，不会连续探索、反复核对；宁可把界面做小一点，也不为了凑数据去跑工具链。</div>
+            <div class="card-text">所以它比工作模式快得多：工具是例外，不是流程。它也不会建任务清单、立目标、定时提醒、派子代理、写自检报告或画 mermaid 导图。</div>
+          </div>
+        </div>
+
+        <!-- 5 本地交互 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">本地交互：拖动即重算，不发请求</div>
+            <div class="card-text">界面里的控件可以绑定到一个变量。你拖动滑块、切换开关、勾选选项，界面会立刻用新值重新计算整棵界面——数字、文案、图表一起刷新，不发请求、不等模型。</div>
+            <div class="card-text">适合：拖动滑块看图表变化、切换口径看同一份数据的另一种切法、在几个方案之间来回对比。</div>
+            <div class="card-text">边界：本地绑定只负责「换一个已经算好的结果」，不会替你做数学；要换算法、换数据，用下一节的回传按钮。</div>
+          </div>
+        </div>
+
+        <!-- 6 回传重算 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">回传重算：让模型重出一版界面</div>
+            <div class="card-text">形如「按这个方案重新测算」的按钮，会把你的设置与诉求打包成一条消息回传，助手随即产出更新后的完整界面——界面因此可以反复操作，而不是一张死图。</div>
+            <div class="card-text">表单（Form）提交会把全部字段值一起带上；选项卡（OptionCards）和标签选择（Chips）点一下就回传，比打字描述快。</div>
+            <div class="card-text">回传的内容就是你看到的那句诉求（例如「按金额 120 万、期限 20 年重新测算」），会作为一条消息出现在对话里，随时可查、可重新生成。</div>
+            <div class="card-text">入口按需给：只有确实存在和当前数据直接相关、点一下就推进的动作时，才会给 1~2 条；没有就不给——不会每轮都在末尾塞一组收尾按钮。</div>
+          </div>
+        </div>
+
+        <!-- 7 流式成形 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">边写边成形：流式渲染与「界面未写完」</div>
+            <div class="card-text">界面在你读完整答案之前就开始出现了：输出的第一行就是界面外壳，随后每一行语句逐条补齐，标题、指标、图表、表格一个个长出来。</div>
+            <div class="card-text">未写完时控件是置灰、不可点的，避免你在残缺界面上误操作；写完后才恢复可交互。</div>
+            <div class="card-text">如果输出被模型长度上限截断，已经写完的部分照常渲染，底部会标注「界面未写完」——不会整块作废，也不会永远停在生成中。</div>
+            <div class="card-text">界面里不会出现程序之外的大段文字：标题、结论、说明都由界面组件承载，观感始终是一张完整的卡片。</div>
+          </div>
+        </div>
+
+        <!-- 8 最新界面可交互 + 参数保存 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">只有最新界面可交互，参数会保存</div>
+            <div class="card-text">只有最新一条界面可以操作，历史界面会自动置灰归档，避免你改到上一轮的旧参数上。</div>
+            <div class="card-text">你调整过的参数会随消息一起保存：滚动、切换会话、重启应用之后，参数还在原处。</div>
+            <div class="card-text">下一轮请求前，应用会把当前界面上的设置翻译成一句人话交给模型（例如「用户在当前交互界面上的设置：金额=45；口径=customers」），所以助手知道你正在调什么，不用每次重复说明。</div>
+          </div>
+        </div>
+
+        <!-- 9 思考强度 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">思考强度：均衡 / 快速 / 关闭</div>
+            <div class="card-text">交互模式的深度思考强制开启（工具行不再显示该开关），强度在模型胶囊的「能力预设」里选择：均衡（High）、快速（Low）、关闭（Off），默认落在快速档。</div>
+            <div class="card-text">它没有工作模式的「极高（Max）」档：交付物是界面，长思考的收益有限，「快」比「多思考两秒」更重要。</div>
+            <div class="card-text">选「关闭」只会让交互模式响应更快，不会把工作模式或聊天引擎的深度思考一起关掉；两套档位各自保存、互不影响。</div>
+          </div>
+        </div>
+
+        <!-- 10 过程怎么看 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">过程怎么看：活动折叠栏与原始输出</div>
+            <div class="card-text">交互模式的产出是界面，过程信息不该和界面抢版面：正文开始输出后，本回合的思考与全部工具调用会自动收成一条「✓ 已完成 · 思考 + N 个工具 · 12.4s」折叠栏，点开可看完整思考与每次工具调用的输入输出。</div>
+            <div class="card-text">一个用户任务往往要跑好几轮，但只会合并成一条折叠栏（不是每轮一条）；里面每轮的思考默认收起，需要时单独展开，跑动中的那一轮会在标题行滚动显示最新一句。</div>
+            <div class="card-text">界面底部还有「查看原始输出」，可以展开界面程序源码，排查模型到底写了什么；有解析诊断时会显示「诊断 · N 条」。</div>
+          </div>
+        </div>
+
+        <!-- 11 需要材料 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">需要材料：上传到工作区</div>
+            <div class="card-text">和工作模式一样：通过「工作区」面板上传文件，文件会进入本会话的沙箱工作区；拍照的图片也可以直接进工作区。</div>
+            <div class="card-text">上传后，界面里的数字可以来自这些真实文件——助手会读一次或算一次，再画进指标卡、图表与表格。</div>
+            <div class="card-text">真实数据纪律：图表、表格、指标里的数字必须来自工作区真实文件、刚拿到的工具结果或你自己给出的数字；给不出时会缩小界面并用提示条说明缺口，绝不编造。</div>
+          </div>
+        </div>
+
+        <!-- 12 需要正式文件 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">需要正式文件：Word / Excel / PPT 照常落盘</div>
+            <div class="card-text">交互模式并不取消文件能力：直接说「把这个结果导出成 Word / Excel / PPT」，助手会照常产出文件，并在界面里用一个提示或按钮告诉你文件放在哪。</div>
+            <div class="card-text">这条路径走简化流程：不追问一堆前置参数（要确认参数就在界面里给一个表单或选项），也不写自检报告。</div>
+            <div class="card-text">只用回答下方的「导出 Word」按钮时，导出的是界面里可见的文字（表格会还原成 Markdown 表格），不会把界面源码写进文档。</div>
+          </div>
+        </div>
+
+        <!-- 13 什么时候用 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">什么时候用它、什么时候换别的模式</div>
+            <div class="card-text">适合：计算与试算（房贷月供、利率对比、收益测算）；方案对比与选择（选项卡 + 对比表）；数据看板（指标卡 + 图表 + 明细表）；参数调优（拖动滑块即时看变化）；结构化知识呈现（步骤条、卡片块、分节）。</div>
+            <div class="card-text">该换模式的时候：要交付正式文件、要处理多份材料、任务要跑很久 → 工作模式；只想要一段文字回答、或需要指定某位专家智能体 → 聊天引擎；图片里的表格转 Excel → 表格识别插件。</div>
+            <div class="card-text">简单判断：回答的终点是「一份能点的东西」就用交互模式，是「一个文件」就用工作模式，是「一段话」就用聊天引擎。</div>
+          </div>
+        </div>
+
+        <!-- 14 试试这样问 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">试试这样问</div>
+            <div class="card-text">「帮我算一下 30 万房贷在不同利率下的月供，我想拖动利率看变化」</div>
+            <div class="card-text">「对比这三个方案，让我调参数看看不同选择」</div>
+            <div class="card-text">「把这段数据做成能筛选的表格」</div>
+            <div class="card-text">「给我一个能调预算的装修清单」</div>
+            <div class="card-text">「这几个季度的营收，给我一个能一眼看懂的看板」</div>
+            <div class="card-text">提示：说得越具体（口径、单位、可选范围、想看哪些对比），出来的界面越贴近你要的那一版。</div>
+          </div>
+        </div>
+
+      </div>
+
+    </main>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       子页 · Version 6.3 新功能体验
+       ═══════════════════════════════════════════════════ -->
+  <section class="view" id="view-010">
+    <main class="page">
+
+      <div class="pagebar">
+        <a class="back" href="#/" aria-label="返回目录">
+          <svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg>
+        </a>
+        <div class="pagebar-title">Version 6.3 新功能体验</div>
+      </div>
+
+      <!-- 顶部图片轮播: 本页共 10 张图, 占位文件名 010-1.png ~ 010-10.png (截图做好后放进 assets/ 即可);
+           每张图对应下面一张介绍卡, 增删时图和卡必须成对同步修改。
+           占位图对应内容:
+           010-1 交互模式总览      010-2 界面组件示例     010-3 拖动即时重算    010-4 回传重算按钮
+           010-5 启动落点/模式胶囊 010-6 侧边栏分组       010-7 快车道零工具    010-8 能力预设思考档位
+           010-9 活动折叠栏        010-10 界面渐进成形 -->
+      <div class="gallery">
+        <div class="gallery-track">
+          <img src="assets/010-1.png" alt="全新「交互模式」上线">
+          <img src="assets/010-2.png" alt="70 个原生组件">
+          <img src="assets/010-3.png" alt="拖动即重算">
+          <img src="assets/010-5.png" alt="启动默认进入交互模式 + 模式切换胶囊">
+        </div>
+        <div class="gallery-dots"></div>
+      </div>
+
+      <!-- 与轮播联动的介绍卡: 第 N 张图对应第 N 张卡, 只显示当前那张 -->
+      <div class="gallery-cards">
+
+        <!-- 1 交互模式上线 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">全新「交互模式」上线：回答即界面</div>
+            <div class="card-text">Agent 引擎新增第二种身份——交互模式（Guncat Canvas）：你的每一轮提问，得到的不是一段文字，而是一张能看、能点、能拖的原生界面。</div>
+            <div class="card-text">它与工作模式并列，共用同一套 Agent 循环、同一个沙箱工作区与同一套数十种工具；差别在交付形态与行为纪律：工作模式交付文件成品，交互模式交付可操作的界面。</div>
+          </div>
+        </div>
+
+        <!-- 2 70 个原生组件 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">70 个原生组件：图表、指标卡、表格、表单一次到位</div>
+            <div class="card-text">界面语言重写为声明式的界面程序，可用的原生组件扩展到 70 个（9 组）：8 种图表（柱状 / 折线 / 面积 / 横向条 / 饼环 / 径向 / 雷达 / 堆叠条）、表格与实体列表、指标卡、卡片块、分节 / 选项卡 / 折叠面板 / 步骤条 / 轮播，以及一整套表单控件。</div>
+            <div class="card-text">全部原生渲染：图表用系统绘图能力现场绘制，不引入图表库、不产生图片文件；组件清单与解析、渲染共用同一份事实源，模型能写出来的就是应用能画出来的。</div>
+          </div>
+        </div>
+
+        <!-- 3 拖动即重算 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">拖动即重算：参数绑定界面即时刷新</div>
+            <div class="card-text">把控件的值绑定到变量，拖动滑块、切换开关、勾选选项时，界面立刻用新值重新计算——数字、文案、图表同步变化，不发请求、不等模型。</div>
+            <div class="card-text">于是「调参看效果」第一次变得和本地 Excel 一样顺滑：利率、金额、期限、口径，拖一下就换一版结果。</div>
+          </div>
+        </div>
+
+
+        <!-- 5 体验全新升级 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">应用核心功能重组</div>
+            <div class="card-text">* 重要更新：自 6.3.0 版本开始，聊天引擎停止维护，不再推荐使用聊天引擎的所有模式。</div>
+            <div class="card-text">对于日常生活问答，交互模式提供可视化和交互性都更强的体验，同时兼顾快速与准确性；对于专业任务，工作模式提供更强的处理能力和更高的生成质量，还能实现Office等文件端到端交付。</div>
+            <div class="card-text">打开应用默认进入交互模式，新增交互模式、工作模式双段切换胶囊</div>
+            <div class="card-text">侧边栏「聊天引擎」默认折叠，点击标题行才展开，把默认视野留给 Agent 引擎与历史对话。</div>
+          </div>
+        </div>
+
 
       </div>
 
