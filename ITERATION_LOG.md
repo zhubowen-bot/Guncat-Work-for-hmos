@@ -33,6 +33,7 @@
   - 点击走 `vm.setInteractiveMode(true)` / `vm.setWorkMode(true)`（内部即 `selectAgent`：切到该模式的最新会话、没有就新建空会话；流式/解析中由 VM 弹「请等待当前任务完成后再切换模式」拒绝），随后 `refreshTick++` + 置底。
   - 两个 Tab **刻意不抽成带参 `@Builder`**：ArkUI 的传值 Builder 不会自己刷新 UI，而选中态完全由 `vm.interactiveMode` / `vm.workMode` 派生，内联写死最不容易踩坑（沿用本项目在 ArkUI 刷新机制上已有的教训）。
   - 深色下 `surface`(#232324) 与轨道 `surface_secondary`(#2C2C2E) 只差 9 级灰，因此选中段额外加了一圈 `app.color.border` 描边。
+  - 与上方 hero 图标的间距：图标占位自身 12vp 下边距之外，胶囊再加 **22vp 上边距** —— 原来那 12vp 会让胶囊贴着图标，看着像图标的一部分。
 - **文档**：README 中英「交互模式」段与「使用指南」的工作/交互模式入口步骤改写（默认落点 + 胶囊换挡），6.3.0 更新段最前面新增本节；`玩转应用` 的「布置一个任务的流程」第 ① 步同步。
 
 ### 验证

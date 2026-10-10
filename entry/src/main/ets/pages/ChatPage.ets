@@ -1202,7 +1202,9 @@ struct ChatPage {
     .padding(3)
     .borderRadius(22)
     .backgroundColor($r('app.color.surface_secondary'))
-    .margin({ bottom: 18 })
+    // 与上方的 hero 图标拉开距离: 图标占位本身还有 12vp 下边距, 这里再给 22vp —— 原来只有 12vp
+    // 时胶囊贴着图标, 视觉上像图标的一部分; 拉开后它才像一颗独立的"换挡"控件。
+    .margin({ top: 22, bottom: 18 })
   }
 
   // 空态胶囊换挡: 先**同步**把深色落到手点的那一档, 再走 VM 的 setInteractiveMode / setWorkMode。
