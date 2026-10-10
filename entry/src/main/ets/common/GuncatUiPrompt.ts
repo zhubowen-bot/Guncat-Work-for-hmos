@@ -84,7 +84,8 @@ export class GuncatUiPrompt {
     '- 要用户填参数: 用 `Form(name, buttons, fields)`, 字段用 `FormControl(标签, 控件)` 包起来,',
     '  提交按钮用 `Button("提交", Action([@ToAssistant("按这些参数重算")]))`。',
     '- 要用户在几个方案里挑: 用 `OptionCards` 或 `Chips`(点一下就回传, 比让用户打字快)。',
-    '- 想引导下一步: 用 `Buttons` / `OptionCards` 给出**和当前数据直接相关**的具体动作。'
+    '- 只有确实存在「和当前数据直接相关、点一下就推进」的动作时, 才用 `Buttons` / `OptionCards` 给入口;',
+    '  没有就不要加 —— **每轮都在末尾塞一组收尾按钮是最容易被吐槽的模板感**。'
   ].join('\n');
 
   // 输出顺序: 流式观感完全取决于它
@@ -96,7 +97,7 @@ export class GuncatUiPrompt {
     '',
     '1. **第 1 行必须是 `root = Card([...])`**, 先列出全部子项的变量名, 界面外壳立刻出现;',
     '2. 然后是 `$变量` 声明(绑定先就位);',
-    '3. 然后是各个区块, **按"分层配方"的顺序**(抬头 → 结论指标 → 可视化 → 明细 → 操作入口);',
+    '3. 然后是各个区块, **按"分层配方"的顺序**(抬头 → 结论指标 → 可视化 → 明细 → 操作入口(确有才给));',
     '4. 数据细节(长文本、长数组)放到最后。',
     '',
     '因为程序被截断时只有"最后一条没写完的语句"会丢, 前面的全部保留, 所以:',
@@ -133,7 +134,7 @@ export class GuncatUiPrompt {
     '| 让用户选方案 | `OptionCards` / `CompositeCardBlock` | 让用户打字描述 |',
     '| 属性 / 标签 / 关键词 | `TagBlock` / `Tag` | 逗号分隔的一句话 |',
     '| 结论与提醒 | `Callout` / `TextCallout` | 夹在正文里的括号说明 |',
-    '| 下一步入口 | `Buttons` / `OptionCards`(具体动作) | 只给一个静态结论就结束 |',
+    '| 需要用户操作时 | `Form` / `Buttons` / `OptionCards`(具体动作) | 每轮都硬塞一组收尾按钮 |',
     '| 图片展示 | `ImageGallery` / `Carousel` / `VisualCardBlock` | 一张小图 + 一行说明 |',
     '',
     '**表格只用于"需要逐行精确核对"的场合**, 而且必须有一个"看得懂"的上层:',
@@ -146,7 +147,8 @@ export class GuncatUiPrompt {
     '2. **结论层**: `OverviewCardBlock` 指标卡 或 `Callout` —— 最重要的数字先出现',
     '3. **可视化层**: 图表 / `ImageGallery` / `RadialChart` / `Steps` / `TagBlock`',
     '4. **明细层**: `Table` / `EntityList` / `ListBlock`(逐行细节放这里)',
-    '5. **操作层**: `Form` / `OptionCards` / `Buttons`(每轮都要有, 但一条具体动作就够, 不要凑数)',
+    '5. **操作层(可选)**: `Form` / `OptionCards` / `Buttons` —— **只有用户真的需要操作时才给**(要调参数就走 `Form`)。',
+    '   大多数回答在明细层结束就够了; 每轮硬塞收尾按钮 = 模板感。',
     '',
     '**典型 8~14 个组件是常态**, 不是"越少越好"; 但也**不是越多越好**:',
     '同一份数据不要在指标卡、图表、表格里原样说三遍 —— 三者必须互补',
@@ -155,7 +157,7 @@ export class GuncatUiPrompt {
     '',
     '### 对照示例: 同一份数据, 不合格 vs 合格',
     '',
-    '❌ 不合格(只有文字 + 表格, 信息密度低、没有可视化、没有操作入口):',
+    '❌ 不合格(只有文字 + 表格, 信息密度低、没有可视化):',
     '```guncat-ui',
     'root = Card([header, text, table])',
     'header = CardHeader("季度销售")',
@@ -179,7 +181,10 @@ export class GuncatUiPrompt {
     'tuneBtn = Buttons([Button("换口径重算", Action([@ToAssistant("按客户数口径重新分析这四个季度")]), "primary")])',
     '```',
     '对比可见: 结论(指标卡)、趋势(折线)、构成(环形)、明细(表格)、操作(表单)各司其职,',
-    '同一份数据被"翻译"成了四种互补的读法, 而不是在一张表里重复。'
+    '同一份数据被"翻译"成了四种互补的读法, 而不是在一张表里重复。',
+    '',
+    '⚠️ 示例里末尾那个 `tune*`(表单/按钮)是**因为确实存在"换口径重算"这个可执行动作**才有的, 不是格式要求。',
+    '**不要照抄成"每轮都在末尾挂一组按钮"** —— 用户问的是一句简单问题、或者只是看一眼渲染效果时, 干净结束即可。'
   ].join('\n');
 
   static readonly EXAMPLES: string = [
@@ -224,7 +229,7 @@ export class GuncatUiPrompt {
     'tuneBtn = Buttons([Button("换口径重算", Action([@ToAssistant("按客户数口径重新分析这四个季度")]), "primary")])',
     '```',
     '',
-    '### 示例 2: 方案对比与决策(选项卡 + 具体动作按钮)',
+    '### 示例 2: 方案对比与决策(选项卡 + 用户确实要推进时的动作按钮)',
     '```guncat-ui',
     'root = Card([header, note, options, compare, ask])',
     'header = CardHeader("三种出行方案对比")',
@@ -284,8 +289,10 @@ export class GuncatUiPrompt {
     '  应该拆成 `OverviewCardBlock` + 多个 `MetricIndicatorInline`, 每个指标一张卡、涨跌自带颜色与箭头。',
     '- ❌ **为了显得丰富而重复数据**: 同一份数字在指标卡、图表、表格里原样出现三遍。三者要互补',
     '  (指标卡给总量与同比、图表给趋势与分布、表格给逐行明细), 不互补就是噪音。',
-    '- ❌ **给一堆空泛的收尾按钮**: 下一步入口必须是**和当前数据直接相关**的具体动作',
-    '  (例如"按 30 天口径重算"), **1~2 条就够**。凑数量、猜用户想问什么, 都会被当成模板。'
+    '- ❌ **每轮都在末尾塞一组收尾按钮/入口**: 只有当**确实**存在和当前数据直接相关的下一步动作时才给',
+    '  (例如"按 30 天口径重算"), 1~2 条; 用户没要方向、也没有可执行动作时**不要给** —— 凑数量最像模板。',
+    '  判断标准不是"和内容相关", 而是"**用户大概率真会点它**": 像"再读一次文件""把刚才的再跑一遍"这种',
+    '  为了凑格式造出来的动作, 一律不要加 —— 用户会直接反问"你给我这个干嘛"。'
   ].join('\n');
 
   // 交互模式专有职责: 覆盖共享 Agent Loop 提示词里的「文件交付优先」
@@ -303,13 +310,13 @@ export class GuncatUiPrompt {
     '   算出真实数值, 再把结果写进 `Table` / `Chart` / `MetricIndicatorInline`。绝不用看起来合理的假数字。',
     '3. **数据不足时不要停**: 用 `TextCallout` 说明缺口, 用 `Form` / `OptionCards` 让用户补齐参数, ',
     '   收到回传后再算再画 —— 界面本身就是收集参数的工具。',
-    '4. **每轮都要给"下一步的入口", 但入口必须具体**: 用 `Buttons` / `OptionCards` 给出和当前数据直接',
-    '   相关的动作(点一下就回传), 1~2 条即可。凑数量、猜用户想问什么都会被当成模板。',
+    '4. **入口按需给, 不按轮给**: 只有**确实**存在和当前数据直接相关、点一下就推进的动作时, 才用',
+    '   `Buttons` / `OptionCards` 给出 1~2 条; 没有就**不要**为了凑格式加收尾按钮 —— 每轮都塞一组是最明显的模板感。',
     '5. **连续调参是常态**: 收到界面回传后, 你要产出**更新后的完整界面**(新数值), ',
     '   让界面成为可以反复操作的仪表盘, 而不是一次性快照。',
     '6. **文字怎么放进界面**: 需要说明、引导、给结论时一律用组件承载 ——',
     '   `CardHeader` 当标题、`InlineHeader` 当小节标题、`TextContent` 当正文、`Callout` 当提示、',
-    '   `EntityList` / `Table` 当数据、`Buttons` / `OptionCards` 当下一步入口。',
+    '   `EntityList` / `Table` 当数据; 确有可执行动作时才用 `Buttons` / `OptionCards`。',
     '   不要把这些内容写成程序之外的聊天文字。',
     '7. **默认往"丰富"那一侧靠**: 能画图就不要只列表格, 能拆成指标卡就不要把数字写进句子,',
     '   能分节/分页就不要一路平铺。每次回答都按「丰富度」一节的分层配方组织',
@@ -347,18 +354,18 @@ export class GuncatUiPrompt {
     '第 1 行必须是 `root = Card([...])`; 参数是位置参数; 每个定义的标识符都必须被引用。',
     '数值必须来自上文已给出的真实结果, 不要编造。',
     '回答要有层次: 抬头(CardHeader) → 结论指标(OverviewCardBlock/MetricIndicatorInline) → ',
-    '可视化(图表) → 明细(Table/EntityList) → 操作入口(Form/OptionCards/Buttons)。',
+    '可视化(图表) → 明细(Table/EntityList); 只有确有可执行动作时才加操作入口(Form/OptionCards/Buttons)。',
     '不要只输出一段文字加一张表格。'
   ].join('\n');
 
   static readonly REPAIR_INSTRUCTION: string = [
     '把上一条回答的内容转成一份 guncat-ui lang 界面程序(不要围栏、不要解释文字)。',
-    '要求: root 第一行; 按"抬头 → 结论指标 → 可视化 → 明细 → 操作入口"分层组织, 6~12 个元素; ',
+    '要求: root 第一行; 按"抬头 → 结论指标 → 可视化 → 明细"分层组织(确有可执行动作才加操作入口), 6~12 个元素; ',
     '结论里的关键数字用 OverviewCardBlock + MetricIndicatorInline(带同比涨跌)而不是写进句子; ',
     '有趋势就给 LineChart/AreaChart, 有构成就给 PieChart/SingleStackedBarChart, 有排名就给 HorizontalBarChart, ',
     '有达成率就给 RadialChart; 表格只用于逐行精确核对, 不要一上来就是一张表; ',
-    '需要用户调节参数就给 Form + 控件, 需要用户选择就给 OptionCards 或 Buttons; ',
-    '结尾给 1~2 个和当前数据直接相关的可点动作(Buttons/OptionCards)。',
+    '需要用户调节参数就给 Form + 控件, 需要用户选择就给 OptionCards 或 Buttons(按需, 不要凑); ',
+    '确有可执行动作时才在结尾给 1~2 个和当前数据直接相关的可点动作(Buttons/OptionCards), 没有就干净结束。',
     '不要只输出一段文字加一张表格。'
   ].join('\n');
 }

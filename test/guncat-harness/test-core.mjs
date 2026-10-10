@@ -1754,7 +1754,7 @@ console.log('[组件库与提示词]');
     GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('默认往"丰富"那一侧靠') > 0 &&
     GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('8~14 个组件是常态') > 0);
   check('补救提示词也要求分层与图表',
-    GuncatUiPrompt.REPAIR_INSTRUCTION.indexOf('抬头 → 结论指标 → 可视化 → 明细 → 操作入口') > 0 &&
+    GuncatUiPrompt.REPAIR_INSTRUCTION.indexOf('抬头 → 结论指标 → 可视化 → 明细') > 0 &&
     GuncatUiPrompt.REPAIR_INSTRUCTION.indexOf('不要只输出一段文字加一张表格') > 0);
   check('补救系统提示要求层次',
     GuncatUiPrompt.REPAIR_SYSTEM.indexOf('不要只输出一段文字加一张表格') > 0);
@@ -1763,20 +1763,26 @@ console.log('[组件库与提示词]');
   // 模型根本看不到(提示词里连名字都不出现、组件清单里也不列), 但组件仍在注册表里做接口兜底。
   check('提示词全篇不再出现 FollowUpBlock/FollowUpItem',
     GuncatUiPrompt.promptSection().indexOf('FollowUp') < 0);
-  check('语法段仍要求入口具体(Buttons/OptionCards)',
-    GuncatUiPrompt.INTERACTION.indexOf('`Buttons` / `OptionCards` 给出**和当前数据直接相关**的具体动作') > 0);
+  // 入口是"按需给", 不再是"每轮都要给" —— 用户明确反感每轮末尾那组凑格式的按钮
+  check('语法段把入口改成按需给',
+    GuncatUiPrompt.INTERACTION.indexOf('只有确实存在「和当前数据直接相关、点一下就推进」的动作时') > 0 &&
+    GuncatUiPrompt.INTERACTION.indexOf('每轮都在末尾塞一组收尾按钮是最容易被吐槽的模板感') > 0);
+  check('全篇不再有"每轮都要给入口"的硬性要求',
+    GuncatUiPrompt.promptSection().indexOf('每轮都要有') < 0 &&
+    GuncatUiPrompt.promptSection().indexOf('每轮都要给') < 0 &&
+    GuncatUiPrompt.promptSection().indexOf('下一步的入口') < 0);
   check('丰富度优先级把下一步入口收敛到 Buttons/OptionCards',
     GuncatUiPrompt.RICHNESS.indexOf('`Buttons` / `OptionCards`(具体动作)') > 0 &&
     GuncatUiPrompt.RICHNESS.indexOf('| 下一步入口 | `Buttons` / `FollowUpBlock` |') < 0);
-  check('分层配方不再列 FollowUpBlock',
-    GuncatUiPrompt.RICHNESS.indexOf('`Form` / `OptionCards` / `Buttons`(每轮都要有') > 0 &&
+  check('分层配方把操作层标为可选',
+    GuncatUiPrompt.RICHNESS.indexOf('**操作层(可选)**') > 0 &&
     GuncatUiPrompt.RICHNESS.indexOf('`Form` / `OptionCards` / `Buttons` / `FollowUpBlock`') < 0);
-  check('反例要求入口具体、1~2 条就够',
-    GuncatUiPrompt.ANTI_PATTERNS.indexOf('下一步入口必须是**和当前数据直接相关**的具体动作') > 0 &&
-    GuncatUiPrompt.ANTI_PATTERNS.indexOf('**1~2 条就够**') > 0);
-  check('职责段要求入口具体',
-    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('但入口必须具体') > 0 &&
-    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('凑数量') > 0);
+  check('反例点名"每轮都塞收尾按钮"并给出判定标准',
+    GuncatUiPrompt.ANTI_PATTERNS.indexOf('每轮都在末尾塞一组收尾按钮/入口') > 0 &&
+    GuncatUiPrompt.ANTI_PATTERNS.indexOf('用户大概率真会点它') > 0);
+  check('职责段把入口改成按需给',
+    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('**入口按需给, 不按轮给**') > 0 &&
+    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('每轮都塞一组是最明显的模板感') > 0);
   check('示例不再使用 FollowUpBlock',
     GuncatUiPrompt.EXAMPLES.indexOf('FollowUpBlock') < 0 &&
     GuncatUiPrompt.EXAMPLES.indexOf('FollowUpItem') < 0);
