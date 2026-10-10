@@ -4,7 +4,7 @@
 
 **Codex in your pocket, on HarmonyOS** — a native HarmonyOS AI client built from scratch in ArkTS / ArkUI. **Both of today's hottest agent forms run on real devices, fully on-device**: **Intelligent UI** (one sentence in, a fully operable interface out — modelled on GPT's Intelligent UI) and **Harness** (a Codex-style multi-turn Agent Loop with a sandboxed workspace, a port of DeepSeek Harness to the device). Modular kernel + three-protocol streaming + 45 built-in tools + 32 skills, producing PPT / Word / Excel / SVG right on the device.
 
-<!-- Demo slot: put a real-device screen recording (30–60s) here — enter work mode → generate a PPT from one sentence → expand the artifact card → switch to interactive mode and drag a slider to recompute. A GIF beats any amount of prose. -->
+<!-- Demo slot (optional upgrade): a 30–60s real-device screen recording — enter work mode → generate a PPT from one sentence → expand the artifact card → switch to interactive mode and drag a slider to recompute. A moving GIF beats static screenshots. -->
 
 ![HarmonyOS](https://img.shields.io/badge/HarmonyOS-API%2024%20(6.1.1)-blue)
 ![version](https://img.shields.io/badge/version-6.3.0-blue)
@@ -12,6 +12,15 @@
 ![tools](https://img.shields.io/badge/built--in%20tools-45-informational)
 ![skills](https://img.shields.io/badge/skills-32-informational)
 [![license](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
+
+<p align="center">
+  <a href="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/001-1.png"><img src="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/001-1.png" width="23%" alt="Interactive Mode home screen" /></a>
+  <a href="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/010-2.png"><img src="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/010-2.png" width="23%" alt="Interactive Mode delivering an operable interface" /></a>
+  <a href="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/001-3.png"><img src="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/001-3.png" width="23%" alt="Work Mode delivering a long-horizon task" /></a>
+  <a href="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/008-2.png"><img src="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/008-2.png" width="23%" alt="run_js on-device JavaScript sandbox" /></a>
+</p>
+
+<p align="center"><sub>Interactive Mode home · an interface delivered by Interactive Mode · a long-horizon task delivered by Work Mode · the <code>run_js</code> on-device JS sandbox　(click any image to view it full size)</sub></p>
 
 ## Two headline agent forms, both running on-device
 

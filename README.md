@@ -4,7 +4,7 @@
 
 **鸿蒙掌上 Codex** —— 用 ArkTS / ArkUI 从零构建的原生 HarmonyOS AI 客户端。**两个当红形态都在端侧真机跑通**：**Intelligent UI**（一句话直出可操作界面，对标 GPT 的 Intelligent UI）与 **Harness**（Codex 式多轮 Agent Loop + 沙箱工作区，DeepSeek Harness 的端侧移植）。模块化内核 + 三协议流式对话 + 45 个内置工具 + 32 个技能，设备端直出 PPT / Word / Excel / SVG。
 
-<!-- 演示位：真机录屏（30–60 秒）放这里 —— 进工作模式 → 一句话生成 PPT → 产物卡片展开 → 切到交互模式拖滑块重算。GIF 比任何文案都有效。 -->
+<!-- 演示位（可选升级）：真机录屏 30–60 秒 —— 进工作模式 → 一句话生成 PPT → 产物卡片展开 → 切到交互模式拖滑块重算。动态 GIF 比静态截图更有说服力。 -->
 
 ![HarmonyOS](https://img.shields.io/badge/HarmonyOS-API%2024%20(6.1.1)-blue)
 ![version](https://img.shields.io/badge/version-6.3.0-blue)
@@ -12,6 +12,15 @@
 ![tools](https://img.shields.io/badge/%E5%86%85%E7%BD%AE%E5%B7%A5%E5%85%B7-45-informational)
 ![skills](https://img.shields.io/badge/%E6%8A%80%E8%83%BD-32-informational)
 [![license](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
+
+<p align="center">
+  <a href="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/001-1.png"><img src="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/001-1.png" width="23%" alt="交互模式首页" /></a>
+  <a href="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/010-2.png"><img src="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/010-2.png" width="23%" alt="交互模式直出的可操作界面" /></a>
+  <a href="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/001-3.png"><img src="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/001-3.png" width="23%" alt="工作模式长程任务交付" /></a>
+  <a href="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/008-2.png"><img src="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/008-2.png" width="23%" alt="run_js 设备内 JS 执行沙箱" /></a>
+</p>
+
+<p align="center"><sub>交互模式首页 · 交互模式直出的可操作界面 · 工作模式长程任务交付 · <code>run_js</code> 设备内 JS 沙箱　（点击任意一张查看原图）</sub></p>
 
 ## 两个当红形态，都在端侧真机跑通
 
