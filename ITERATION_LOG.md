@@ -1,5 +1,45 @@
 # ITERATION_LOG
 
+## 2026-10-10 R69: 交互模式快车道 —— 默认零工具、一轮直出界面（速度优先）
+
+### 动机
+用户反馈：现在的交互模式基础复用了工作模式的**结构、工具、技能**，但交互模式的主要意义是**快速交互式对话**，着重点在"精确生成交互面板结构"，而不是交付产物。因此要**减少不必要的工具调用、把思考重心移到生成交互卡片上**，相比工作模式要强调快。
+
+### 现状（改前）
+`AgentLoopService.buildInteractiveSystemPrompt()` = `GuncatUiPrompt.promptSection()`（界面语言契约）+ `PromptBuilder.build()`（**工作模式完整底座**）+ `INTERACTIVE_DUTY`。工具面本就与工作模式同源，问题出在底座：那整段都是为「多轮工具循环 + 长程交付」写的纪律 ——
+- `identity()`：四合一体角色、"宁可多验一次，不可交付错误"、"亲自调用工具、亲自阅读、亲自验证"；
+- `methodology()`：四步法、"**技能是第一动作**（命中即 `load_skill`）"、"大块独立工作外包 `subagent`"、"不充分时迭代逼近"；
+- `workflow()`：7 步流程（需求分析 → `todo_write` 建清单 → 执行 → 观察更新 → 三级失败重试 → `list_files` 终验 → 收口）；
+- `output()` / `mermaid()` / `preDeliveryChecklist()`：交付格式优先落 `docx/xlsx/pptx`、"**最终总结必附 mermaid 导图**"、"**必须输出逐项 PASS/FAIL 自检报告**"；
+- 静态手写工具目录（约 9k 字符）：每条都带"先 `load_skill`""生成后必须 `view_image` 预览确认"这类流程要求。
+放进交互模式后，这些规则原样变成**一串和界面无关的工具调用**（建清单 → 加载技能 → 反复核验 → 自检报告），用户干等一个本可以直接渲染的卡片；系统提示词也被推到 36.7k 字符，首答 TTFT 与输入 token 一起变差。
+
+### 变更
+- **`common/PromptBuilder.ts` 新增交互模式快车道底座**（与工作模式底座并列，互不引用）：
+  - `interactiveIdentity()`：身份 + **第一纪律: 快** —— 默认一次回答直接给界面、不调用任何工具；工具是**破例**、一轮最多 1~2 次且优先只读，拿到结果立刻出界面；宁可缩小界面规模也不要用工具链凑数据；**不要** `todo_write` / `goal_*` / `schedule_*` / `subagent` / `session_search`；**不要** `ask_user_question`（要问就用界面问：`Form` / `OptionCards` / `Chips`）；不写"交付前自检"、不画 mermaid 导图；只有用户**明确**要导出文件时才 `load_skill` + `write_*`，且走简化流程（不做技能里的前置提问、不写自检报告）。
+  - `interactiveWorkspace()`：工作区 = **素材区**（用户上传的文件 + 运行时快照里已有的文件树，不要为确认现状去 `list_files` / `glob`）；不移动/删除原件；压缩消息的口径。
+  - `interactiveTools(toolIndex)`：工具面与工作模式**完全相同**，但"默认一个都不用"；破例只列四类场景（读上传文件 / 算真实数字 / 核实外部事实 / 明确要导出文件）；工具结果截断时"缩小界面规模"而不是连续翻页。
+  - `interactiveTruth()`：界面里的数字必须来自真实文件 / 工具结果 / 用户输入；给不出就缩小界面 + `TextCallout` 说明缺口，绝不编造。
+  - `buildToolNameIndex(defs)`：从 `WorkFileService.toolRegistryDefs()` 生成**工具名索引**（排序、只列名字，不含用法规则）—— 与请求里真正下发的工具定义同源，插件工具自动在内，参数与说明交给工具定义本身，两处不会漂移。
+  - `buildInteractive(skillsSection, toolIndex)`：组装上述四块 + 技能库（前缀一句"交互模式默认用不到技能，只有明确要文件时才 `load_skill`"）+ 收尾句。
+- **`common/GuncatUiPrompt.ts` 的 `INTERACTIVE_DUTY` 重写**：原来 9 条是"覆盖共享提示词里的文件优先要求"（含 `覆盖上文` 措辞，第 8 条还写着"长任务仍需 `todo_write` 建清单"）；底座里已经没有需要覆盖的段落，因此收敛成**交付形态职责**（9 条：交付形态只有界面程序、速度优先于过程、不要交付物仪式、只能真实数据、入口按需给、连续调参产出完整新界面、文字怎么放进界面、默认往丰富那一侧靠、不用 mermaid）。
+- **`service/AgentLoopService.ts`**：`buildInteractiveSystemPrompt()` 不再拼接 `PromptBuilder.build()`，改为 `GuncatUiPrompt.promptSection()` + `PromptBuilder.buildInteractive(skillsSection, buildToolNameIndex(defs))` + `GuncatUiPrompt.INTERACTIVE_DUTY`；注释写明"工具面照旧共享、行为纪律相反"与"不跟随 `WORK_PROMPT_TOOL_DIRECTORY_MODE`"。仍 100% 静态 + 进程内缓存（KV 前缀逐字节稳定）。
+- **默认思考强度「均衡(High)」→「快速(Low)」**：`ChatViewModel.interactiveEffort` 初值与 `Constants.LS_KEY_INTERACTIVE_EFFORT` 的读取默认值同步改为 `low`；`ChatPage` 档位注释、`Constants` 注释同步。已有存档的 `high` 不受影响，用户仍可在能力预设里切回均衡或关闭。
+- **回归护栏**：`test/guncat-harness/test-core.mjs` 新增 7 条断言 —— 快车道底座**不复用**工作模式的行为纪律（`# 工作流程` / `四步法` / `交付前自检清单` / `# 输出丰富性原则` / 压缩段都不得出现）、"默认零工具"纪律在位、长程工具被点名为一律不用、工具名索引与工具面同源（含排序与非法项过滤）、技能库降级为"明确要文件才用"；原"职责段覆盖文件优先"断言改为"职责段把文件交付降为'用户明确要求才做'"。
+- **文档**：`README.md` / `README_EN.md` 的交互模式特性、架构「2. 提示词分叉」、使用步骤、排障各同步；本节即 `ITERATION_LOG.md`。
+
+### 验证
+- `node test/guncat-harness/setup.mjs && node test/guncat-harness/test-core.mjs`：**passed=507 failed=0**（新增 7 条快车道断言全绿）。
+- `node check-setup.mjs && npx -p typescript@5.5.4 tsc -p check/tsconfig.json`：**TYPECHECK OK**（退出码 0）。
+- 提示词实测（同环境构建三段字符串）：`uiSpec=19627 + duty=1457`，底座 `15603 → 1735`，系统提示词 **36687 → 22819 字符（-38%）**；行为纪律段 **-89%**。工具面未变（`toolDefs()` 未改，45 个工具照旧下发）。
+- 未跑 `assembleHap`（本轮只改提示词字符串、注释与一个默认值，无 ArkUI/ArkTS 结构变化；`ChatViewModel` 仅字面量默认值变更）。
+
+### 已知取舍
+- **工具面刻意不动**（用户明确选择"只改提示词，工具面不动"）：45 个工具照旧全量下发，交互模式里说"要 Word/Excel/PPT"仍能落盘；不引入工具白名单机制，避免与插件/子代理/`ToolRegistry` 共享的工具面逻辑打架。想进一步省 token 时再考虑按 mode 裁剪工具定义。
+- **失败路径的兜底不动**：未闭合界面块的自动续写（`needsUiContinuation` / `UI_CONTINUE_MAX_ROUNDS`）与 `generateUiProgram` 补救请求保持原样 —— 它们只在主回答没产出界面时触发，属失败路径，不是常规延迟来源。
+- **快是首要指标，但不以编造数据换速度**：纪律里明确"宁可缩小界面，也不要用假数字填满"，真实数据纪律整段保留。
+
+
 ## 2026-10-09 R68: 交互模式（Intelligent UI）——Agent Loop 的第二种交付形态
 
 ### 目标

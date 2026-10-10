@@ -1252,8 +1252,11 @@ export class AgentLoopService {
   }
 
   // ===== 交互模式 (Intelligent UI) 系统提示词 =====
-  // 与工作模式的区别只有「交付形态」: 仍然拥有完整工具面与沙箱工作区, 但每一轮的回答
-  // 必须交付为 ```guncat-ui 交互界面块(由 GuncatUiView 原生渲染并回传用户操作)。
+  // 与工作模式的区别**不只是**「交付形态」: 工具面与沙箱工作区照旧共享, 但**行为纪律相反**。
+  // 工作模式的提示词是「多轮工具循环 + 长程交付」的(建清单/先加载技能/反复核验/落盘成文),
+  // 那套纪律放进交互模式会直接变成一串无用工具调用 —— 交互模式要的是"一句话进来, 一张界面出去",
+  // 所以底座改走 PromptBuilder.buildInteractive()(快车道), 不再拼接工作模式的 build()。
+  // 三分段: 界面语言契约(GuncatUiPrompt) + 快车道底座(PromptBuilder) + 职责收尾(INTERACTIVE_DUTY)。
   // 同样保持 100% 静态 + 进程内缓存, 以维持相邻轮次的 KV 缓存前缀一致。
   private static cachedInteractivePrompt: string = '';
 
@@ -1262,22 +1265,19 @@ export class AgentLoopService {
       return AgentLoopService.cachedInteractivePrompt;
     }
     let skillsSection: string = WorkSkillService.promptSectionWithMode(Constants.WORK_PROMPT_SKILL_DIRECTORY_MODE);
+    // 工具面与工作模式完全一致(同一份 ToolRegistry 定义), 这里只取名字做索引;
+    // 交互模式不跟随 WORK_PROMPT_TOOL_DIRECTORY_MODE: 它不携带工作模式的静态工具目录,
+    // 参数与完整说明由随请求下发的工具定义提供(同一事实源, 不会漂移)。
     let defs: Record<string, Object>[] = WorkFileService.toolRegistryDefs();
-    let staticDir: string = PromptBuilder.toolsDirectory();
-    let missing: string[] = PromptBuilder.missingToolNames(staticDir, defs);
-    let extraTools: string = missing.length > 0 ?
-      PromptBuilder.buildToolDirectory(PromptBuilder.defsByNames(defs, missing)) : '';
-    let base: string = Constants.WORK_PROMPT_TOOL_DIRECTORY_MODE === 'dynamic_only' ?
-      PromptBuilder.buildWithToolDirectoryMode(skillsSection, staticDir,
-        PromptBuilder.buildToolDirectory(defs), 'dynamic_only') :
-      PromptBuilder.build(skillsSection, extraTools);
     AgentLoopService.cachedInteractivePrompt =
-      GuncatUiPrompt.promptSection() + '\n\n' + base + '\n\n' + GuncatUiPrompt.INTERACTIVE_DUTY;
+      GuncatUiPrompt.promptSection() + '\n\n' +
+      PromptBuilder.buildInteractive(skillsSection, PromptBuilder.buildToolNameIndex(defs)) + '\n\n' +
+      GuncatUiPrompt.INTERACTIVE_DUTY;
     AgentLoopService.lastPromptBudget = PromptBudget.fromPrompt(AgentLoopService.cachedInteractivePrompt);
     return AgentLoopService.cachedInteractivePrompt;
   }
 
-  // 交互模式下替换工作模式「最终交付」章节的职责声明(交付形态由界面块承载)
+  // 按会话模式选择系统提示词(交互模式 = 界面语言契约 + 快车道底座 + 交付形态职责)
   static buildWorkSystemPromptFor(mode: string): string {
     if (mode === Constants.MODE_INTERACTIVE) {
       return AgentLoopService.buildInteractiveSystemPrompt();

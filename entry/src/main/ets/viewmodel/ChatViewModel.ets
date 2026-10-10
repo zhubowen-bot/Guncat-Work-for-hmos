@@ -84,8 +84,9 @@ export class ChatViewModel {
   // 注意: 工作模式与交互模式都强制开启深度思考(工具行不显示开关), 档位在模型弹层里选。
   reasoningEffort: string = 'high';
   // 交互模式的推理强度('high' / 'low' / 'off'), 与工作模式分开保存:
-  // 交互模式的交付物是界面、追求响应快, 所以不给 极高(max)、多了 关闭(off)。
-  interactiveEffort: string = 'high';
+  // 交互模式的交付物是界面、追求响应快, 所以不给 极高(max)、多了 关闭(off), 且**默认「快速(low)」** ——
+  // 这个模式的产品力是"一句话进来, 一张界面出去", 首答速度比多思考两秒更重要(用户仍可手动切回均衡)。
+  interactiveEffort: string = 'low';
   webSearchEnabled: boolean = true;
   autoReadEnabled: boolean = false;
   pendingFiles: FileItem[] = [];
@@ -267,7 +268,7 @@ export class ChatViewModel {
       this.context, Constants.LS_KEY_REASONING_EFFORT, 'high');
     this.reasoningEffort = (savedEffort === 'max' || savedEffort === 'low') ? savedEffort : 'high';
     let savedInteractiveEffort: string = await StorageManager.loadString(
-      this.context, Constants.LS_KEY_INTERACTIVE_EFFORT, 'high');
+      this.context, Constants.LS_KEY_INTERACTIVE_EFFORT, 'low');
     this.interactiveEffort = (savedInteractiveEffort === 'off' || savedInteractiveEffort === 'low') ?
       savedInteractiveEffort : 'high';
     this.webSearchEnabled = await StorageManager.loadBoolean(this.context, Constants.LS_KEY_WEB_SEARCH_ENABLED, true);

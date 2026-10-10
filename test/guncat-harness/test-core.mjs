@@ -1706,7 +1706,33 @@ console.log('[组件库与提示词]');
   check('职责段要求不写聊天文字',
     GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('程序之外不写任何文字') > 0 &&
     GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('不要开场白、不要过渡句') > 0);
-  check('职责段覆盖文件优先', GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('覆盖上文') > 0);
+  check('职责段把文件交付降为"用户明确要求才做"',
+    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('只有用户**明确**要导出文件时') > 0 &&
+    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('不画 mermaid 导图') > 0);
+  // 交互模式快车道底座: **不复用**工作模式的行为纪律(那套纪律会变成一串无用工具调用)。
+  // 这几条断言是"速度优先"的守门员 —— 谁把工作模式的段落拼回交互模式, 这里就会红。
+  const fastLane = PromptBuilder.buildInteractive();
+  check('快车道底座不复用工作模式的行为纪律',
+    fastLane.indexOf('# 工作流程') < 0 &&
+    fastLane.indexOf('四步法') < 0 &&
+    fastLane.indexOf('交付前自检清单') < 0 &&
+    fastLane.indexOf('# 输出丰富性原则') < 0 &&
+    fastLane.indexOf('上下文压缩（长任务自动触发）') < 0);
+  check('快车道底座给出"默认零工具"纪律',
+    fastLane.indexOf('# 第一纪律: 快') > 0 &&
+    fastLane.indexOf('默认一次回答直接给界面, 不调用任何工具') > 0 &&
+    fastLane.indexOf('一轮最多 1~2 次') > 0);
+  check('快车道底座把长程工具点名为"一律不用"',
+    fastLane.indexOf('todo_write / goal_* / schedule_* / subagent / session_search') > 0 &&
+    fastLane.indexOf('不要 ask_user_question') > 0);
+  check('快车道底座注入工具名索引(与工具面同源)',
+    PromptBuilder.buildInteractive('', '- list_files, read_file, run_js')
+      .indexOf('工具面与工作模式完全相同: - list_files, read_file, run_js') > 0);
+  check('工具名索引只取真实工具名并排序',
+    PromptBuilder.buildToolNameIndex([{ 'name': 'b_tool' }, { 'name': 'a_tool' }, { 'name': 5 }]) === 'a_tool, b_tool');
+  check('技能库在交互模式降为"明确要文件才用"',
+    PromptBuilder.buildInteractive('【技能】test-skill').indexOf('只在用户明确要文件时才用') > 0 &&
+    PromptBuilder.buildInteractive('【技能】test-skill').indexOf('【技能】test-skill') > 0);
   check('补救提示词要求 root 第一行',
     GuncatUiPrompt.REPAIR_SYSTEM.indexOf('root = Card') > 0);
   check('组件清单列出 Card 签名', prompt.indexOf('Card(children: 组件[]') > 0);

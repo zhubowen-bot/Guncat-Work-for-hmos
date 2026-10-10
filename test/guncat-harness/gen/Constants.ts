@@ -15,7 +15,8 @@ export class Constants {
   // 工作模式的推理强度('max' / 'high' / 'low'), 作为 reasoning 强度参数下发
   static readonly LS_KEY_REASONING_EFFORT: string = 'guncat_reasoning_effort';
   // 交互模式的推理强度('high' / 'low' / 'off'): 与工作模式分开保存。
-  // 交互模式要"快", 所以去掉 极高(max)、多了 关闭(off); 两个模式各有各的档位, 互不影响。
+  // 交互模式要"快", 所以去掉 极高(max)、多了 关闭(off), 且默认档位是 low(见 ChatViewModel.interactiveEffort);
+  // 两个模式各有各的档位, 互不影响。
   static readonly LS_KEY_INTERACTIVE_EFFORT: string = 'guncat_interactive_effort';
   static readonly LS_KEY_WEB_SEARCH_ENABLED: string = 'guncat_web_search_enabled';
   static readonly LS_KEY_AUTO_READ_ENABLED: string = 'guncat_auto_read_enabled';
@@ -175,8 +176,11 @@ export class Constants {
 
   // ===== Guncat Work 6.4 交互模式 (Intelligent UI) =====
   // 交互模式虚拟智能体 id: 与 work 平行的第三个身份, 会话 mode 取 'interactive'。
-  // 与工作模式共用 Agent Loop 与沙箱工作区, 但系统提示词要求模型把回答交付为
-  // **guncat-ui lang 界面程序**(图表/表格/表单/卡片), 由 GuncatUiView 原生渲染并回传用户操作。
+  // 与工作模式共用 Agent Loop 与沙箱工作区, 但**行为纪律相反**(快车道):
+  //   - 系统提示词不拼接工作模式的 build()(那套"建清单/先加载技能/反复核验/落盘成文"的纪律
+  //     会变成一串无用工具调用), 改走 PromptBuilder.buildInteractive();
+  //   - 工具面照旧与工作模式完全相同(同一份 ToolRegistry 定义), 但要求**默认零调用**;
+  //   - 交付形态是一份 guncat-ui lang 界面程序, 由 GuncatUiView 原生渲染并回传用户操作。
   static readonly INTERACTIVE_AGENT_ID: string = 'interactive';
   // 会话模式字符串('chat' | 'work' | 'interactive')
   static readonly MODE_CHAT: string = 'chat';
