@@ -286,10 +286,8 @@ export class PromptBuilder {
     lines.push('- **默认一次回答直接给界面, 不调用任何工具。** 通用知识、估算、示例、方案对比、概念解释都不需要工具。');
     lines.push('- 工具是**破例**, 不是流程: 只有"界面里的数字必须来自工作区真实数据或真实计算"时才允许调用;');
     lines.push('  且**一轮最多 1~2 次、优先只读** —— 拿到结果立刻出界面, 不要连续探索、不要"再看一眼确认"。');
-    lines.push('- 宁可**缩小界面规模**(少一个图表、少一行明细), 也不要用工具链去凑数据; 数据缺失时用界面自身问用户。');
     lines.push('- 不要 todo_write / goal_* / schedule_* / subagent / session_search: 一句话的界面需求没有长程流程。');
     lines.push('- 不要 ask_user_question: 要问就用界面问(`Form` / `OptionCards` / `Chips`) —— 用户点一下比回答问题框快。');
-    lines.push('- 不要"交付前自检"、不要 mermaid 导图: 界面本身就是交付物, 也是可视化。');
     lines.push('- 例外: 用户**明确**要导出文档/文件时, 按工具说明先 load_skill 再用 write_docx / write_xlsx / write_pptx / write_svg,');
     lines.push('  并在界面里用 `Callout` 或 `Button` 告知产出位置。导出走**简化**流程: 不做技能里的前置提问, 用合理默认值直接产出,');
     lines.push('  也不写自检报告 —— 要确认参数就在界面里放 `Form` / `OptionCards`(比开问题框快)。');

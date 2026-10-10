@@ -108,7 +108,7 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 
 ### 验证
 
-- 纯逻辑回归（当前 **517 项**全绿）：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`
+- 纯逻辑回归（当前 **518 项**全绿）：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`
 - 服务层类型检查：`cd test/guncat-harness && node check-setup.mjs && npx tsc -p check/tsconfig.json`
 - PPT / Word / Excel 离线验证环境：`test/pptx-harness`、`test/docx-harness`、`test/xlsx-harness`
 - 真实 ArkTS 编译（需本机 DevEco）：`powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`

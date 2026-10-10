@@ -1872,9 +1872,20 @@ console.log('[组件库与提示词]');
   check('反例点名"每轮都塞收尾按钮"并给出判定标准',
     GuncatUiPrompt.ANTI_PATTERNS.indexOf('每轮都在末尾塞一组收尾按钮/入口') > 0 &&
     GuncatUiPrompt.ANTI_PATTERNS.indexOf('用户大概率真会点它') > 0);
-  check('职责段把入口改成按需给',
-    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('**入口按需给, 不按轮给**') > 0 &&
-    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('每轮都塞一组是最明显的模板感') > 0);
+  // "入口按需给"这条规则曾经在 INTERACTION / RICHNESS / ANTI_PATTERNS / INTERACTIVE_DUTY 里
+  // 各写了一遍(共 5 处)。提示词精简后它只有两个家: 语法段讲清"什么时候给", 反例段给出判定标准。
+  // 断言跟着家走 —— 规则本身仍然被钉住, 只是不再要求"职责段复述一遍"。
+  check('入口按需给的规则在语法段与反例段各有一个家',
+    GuncatUiPrompt.INTERACTION.indexOf('只有确实存在「和当前数据直接相关、点一下就推进」的动作时') > 0 &&
+    GuncatUiPrompt.INTERACTION.indexOf('每轮都在末尾塞一组收尾按钮是最容易被吐槽的模板感') > 0 &&
+    GuncatUiPrompt.ANTI_PATTERNS.indexOf('每轮都在末尾塞一组收尾按钮/入口') > 0 &&
+    GuncatUiPrompt.ANTI_PATTERNS.indexOf('用户大概率真会点它') > 0);
+  check('职责段不再复述语法/丰富度/真实数据(精简后只讲交付形态)',
+    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('入口按需给') < 0 &&
+    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('界面里只能出现真实数据') < 0 &&
+    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('连续调参是常态') < 0 &&
+    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('文字怎么放进界面') < 0 &&
+    GuncatUiPrompt.INTERACTIVE_DUTY.indexOf('不使用 mermaid 导图交付') < 0);
   check('示例不再使用 FollowUpBlock',
     GuncatUiPrompt.EXAMPLES.indexOf('FollowUpBlock') < 0 &&
     GuncatUiPrompt.EXAMPLES.indexOf('FollowUpItem') < 0);
