@@ -1,5 +1,31 @@
 # ITERATION_LOG
 
+## 2026-10-10 R74: 交互模式工具面物理裁剪 —— 45 → 27 个工具、技能段降为极小索引
+
+### 需求
+交互模式的主要意义是**快速交互式对话**，着重点在**精确生成交互的面板结构**，不是交付产物。上一轮（R69「快车道」）已经把提示词分叉出去，但工具面照旧全量下发，模型仍然会顺手调一串和界面无关的工具。所以这一轮：**删去不必要的工具调用，把思考重心移到生成交互卡片上**。
+
+### 根因
+R69 把纪律写进了提示词（"默认一次回答直接给界面、不调用任何工具；不要 `todo_write` / `goal_*` / `schedule_*` / `subagent` / `session_search`；不要 `ask_user_question`…），但 `WorkFileService.toolDefs()` 仍然把 **45 个工具的完整 schema** 随每个请求下发。模型看到的可用工具列表里就摆着清单、目标、定时、委派、日志检索、改稿这些长程工具；提示词里的"请不要用"和眼前的工具清单打的是对手仗——**模型调不到的工具，比提示词里写十遍"请不要用"有效得多**。技能段同理：整段技能目录（几十支技能的触发词）每轮都注入，而做界面根本不需要任何技能。
+
+### 变更
+- **`common/ToolRegistry.ts` 新增交互模式工具面白名单（单一事实源）**：`INTERACTIVE_TOOL_WHITELIST`（**正表**，27 个工具）+ `interactiveAllows()` + `filterInteractive(defs)`（只过滤、不重排，保持工具物理顺序 → 请求前缀稳定）+ `interactiveDropped()`（诊断/回归用）。四类保留场景：**读素材**（`list_files` / `read_file` / `search_files` / `glob` / `grep` / `parse_document` / `search_pdf` / `pdf_to_images` / `view_image` / `read_docx` / `read_xlsx` / `read_ppt`）、**算真实数字**（`run_js` / `transform_file`）、**核实外部事实**（`web_fetch` / `local_web_search`）、**出文件**（`write_file` / `append_file` / `create_dir` / `write_csv` / `write_svg` / `write_docx` / `write_xlsx` / `write_pptx` / `download_file` / `list_skills` / `load_skill`）。裁掉的 18 个：`todo_write`、`goal_*`、`schedule_*`、`subagent`、`session_search`、`ask_user_question`、`edit`、`str_replace_editor`、`delete_file`、`move_file`、`edit_docx` / `edit_xlsx` / `edit_ppt`、`record_search`。白名单是**正表**：新增工具默认不进交互模式，要用必须显式登记。
+- **`service/AgentLoopService.ts` 下发裁剪后的工具面**：新增 `interactiveToolDefs(webSearchEnabled)`（按联网搜索开关分档缓存的 `getToolDefs()` 过滤结果，避免热路径每轮重复过滤）与 `toolDefsForMode(mode, webSearchEnabled)`（交互模式返回裁剪后的定义，其余模式返回 `null` 走全量）。`summarizeHistory()` 新增 `toolOverrides` 参数——**上下文压缩刻意复用上一请求的完整前缀以命中 KV 缓存**，工具面不一致会让整段前缀作废，所以压缩请求必须拿同一个工具面。`buildInteractiveSystemPrompt()` 的工具名索引改用裁剪后的定义，技能段改用 `WorkSkillService.interactiveIndex()`。
+- **`viewmodel/ChatViewModel.ets` 三个消费点接上同一个工具面**：`runStepWithOverflowRetry()` 先算一次 `toolOverride = AgentLoopService.toolDefsForMode(loopMode, this.webSearchEnabled)`，主循环请求与溢出重试请求都用它（`runTurnWithRetry(..., true, Constants.WORK_LLM_RETRY_MAX, toolOverride)`）；`compactWorkHistoryIfNeeded()` 把它传给 `summarizeHistory(..., toolOverride)`。
+- **`common/PromptBuilder.ts` 文案同源**：`interactiveTools(toolIndex)` 从"工具面与工作模式完全相同"改为"工具面**已经裁剪过**：只保留四类…这些工具在交互模式下**不下发**，你也调不到"；`buildInteractive()` 的 `skillsSection` 改为原样拼上（技能段自带标题与纪律，不再套一层"技能库"说明）；交互模式段落的分块注释与底座说明同步。
+- **`common/SkillDirectoryFormatter.ts` 新增交互模式极小技能索引**：`INTERACTIVE_SKILL_IDS = ['docx', 'xlsx', 'ppt', 'svg', 'data']` + `interactiveIndex(list)` —— 只列"真要出文件时才会用到"的格式技能，并写明"做界面不需要任何技能 / 其余技能一律不用 / 不要为了看看有什么而 `list_skills`"。
+- **`service/WorkSkillService.ts`**：新增 `interactiveIndex()`（走 `visibleSkillList()`，与工具白名单同一口径）。
+
+### 验证
+- `cd test/guncat-harness && node setup.mjs && node test-core.mjs`：**passed=516 failed=0**（新增 9 条断言：45→27 的裁剪数量、四类保留、长程/维护/改稿/问询类被裁、裁剪保持原有顺序、白名单里的名字都是真实工具、`interactiveDropped` 与保留集互补、技能段只列格式技能、"做界面不需要任何技能"、底座写明工具面已裁剪）。
+- `node check-setup.mjs && tsc -p check/tsconfig.json`：**exit 0**（`ToolRegistry` / `PromptBuilder` / `SkillDirectoryFormatter` / `AgentLoopService` / `WorkSkillService` 都在这个 tsc 工程里）。
+- DevEco `assembleHap`（`powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`）：**BUILD SUCCESSFUL in 24 s 879 ms**，`CompileArkTS` 无报错（只剩既有的三方库 `sourceMapsPath` 与 `AgentLoader` 的 `Cannot find name 'Context'` 告警）——这一层专门覆盖 harness 测不到的 `.ets` 调用点（`ChatViewModel` 的两处 `runTurnWithRetry` 位置参数）。
+
+### 已知取舍
+- **裁掉的是"下发"，不是"能力"**。`edit` / `edit_docx` / `edit_xlsx` / `edit_ppt` / `str_replace_editor` 这类改稿工具、以及 `delete_file` / `move_file` 这类文件维护工具，在交互模式里不再出现：要产出文件时走 `write_*` 重新生成（提示词本就要求导出走简化流程），要改用户上传的原件则不在交互模式的职责里。若某天确需在交互模式里改已有产出物，把对应工具加回 `INTERACTIVE_TOOL_WHITELIST` 即可（白名单是正表）。
+- **没有加"硬拦截"**：执行层（`WorkFileService.findToolDef` / `ToolRegistry`）仍认得全部工具，被裁掉的工具只是不下发。这是刻意的——历史消息里可能残留旧工具调用记录，硬拦会把"回放历史"变成报错；而以当前做法，模型看不到那些定义就不会主动调。
+- **白名单的默认方向是"不进"**：以后新增的工具（含插件工具）默认只有工作模式看得到。这是有意的默认值——交互模式的价值是快，不是能力全集；真要加，改一处常量 + 文档表格 + 一条测试断言即可。
+
 ## 2026-10-10 R73: 模式胶囊换挡时, 深色滑块不再闪在旧档位上
 
 ### 现象

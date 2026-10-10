@@ -271,7 +271,9 @@ export class PromptBuilder {
   //     放在这里会原样变成一串无用工具调用(todo_write / list_files / load_skill / 终验 …),
   //     用户干等的是本该直接渲染出来的卡片。
   // 因此交互模式**不复用** build() 的任何一段行为纪律, 底座只保留四块:
-  //   身份(快) + 工作区(素材区) + 工具面(与请求里真正下发的工具同源) + 真实数据纪律。
+  //   身份(快) + 工作区(素材区) + 裁剪后的工具面(与请求里真正下发的工具定义同源) + 真实数据纪律。
+  // 其中工具面是**物理裁剪**(ToolRegistry.INTERACTIVE_TOOL_WHITELIST, 45 → 27): 光靠纪律压不住
+  // "工具就摆在那儿"的诱惑, 把长程工具从请求里拿掉才是根治。
   // 界面语言契约(语法/组件库/交互闭环/示例/反例)仍由 GuncatUiPrompt 提供, 两者互不重复。
   static interactiveIdentity(): string {
     let lines: string[] = [];
@@ -305,21 +307,26 @@ export class PromptBuilder {
     return lines.join('\n');
   }
 
-  // 工具面: 交互模式的工具与工作模式**完全相同**(同一份 ToolRegistry 定义), 但纪律相反 ——
-  // 工作模式是"工具优先", 交互模式是"默认一个都不用"。索引只列名字, 参数与说明由随请求
+  // 工具面: 交互模式的工具定义**与工作模式不同** —— 下发前已按
+  // ToolRegistry.INTERACTIVE_TOOL_WHITELIST **物理裁剪**, 长程工具(清单/目标/定时/委派/日志检索)、
+  // 改稿工具(edit / str_replace_editor)与文件维护工具(delete_file / move_file)根本不出现。
+  // 模型调不到的工具, 比提示词里写十遍"请不要用"有效得多; 索引只列名字, 参数与说明由随请求
   // 一起下发的工具定义给出(同一事实源, 不会漂移)。
   static interactiveTools(toolIndex: string = ''): string {
     let lines: string[] = [];
-    lines.push('# 可用工具（默认一个都不用）');
-    lines.push('工具面与工作模式完全相同: ' + (toolIndex !== '' ? toolIndex : '(见随请求下发的工具定义)'));
+    lines.push('# 可用工具（只有下面这些, 默认一个都不用）');
+    lines.push('工具面**已经裁剪过**: 只保留"读素材 / 算真实数字 / 核实外部事实 / 出文件"四类, ' +
+      '清单、目标、定时、委派、日志检索、改稿类工具在交互模式下**不下发**, 你也调不到。');
+    if (toolIndex !== '') {
+      lines.push('全部可用工具: ' + toolIndex);
+    }
     lines.push('（每个工具的参数与完整说明随请求一起下发, 这里只列名字。）');
     lines.push('');
     lines.push('破例前先问自己一句: **"不调它, 我能不能把这个界面画出来?"** 能, 就不要调。值得破例的只有四类:');
     lines.push('1. 用户点名要读上传的文件 → read_file / search_files / parse_document;');
     lines.push('2. 界面必须引用工作区里的真实数字 → run_js / transform_file / read_file（算一次就够, 不要反复核对）;');
-    lines.push('3. 用户问的是需要核实的外部事实 → 服务端联网搜索(已开启时直接用它的结果) / web_fetch;');
+    lines.push('3. 用户问的是需要核实的外部事实 → 服务端联网搜索(已开启时直接用它的结果) / local_web_search / web_fetch;');
     lines.push('4. 用户明确要导出文件 → load_skill + write_docx / write_xlsx / write_pptx / write_svg。');
-    lines.push('其余工具(文件维护、任务清单、目标、定时、委派、日志检索)在交互模式里一律不用。');
     lines.push('工具返回超过约 1.2 万字符会被截断并标注: 遇到截断就**缩小界面规模**, 不要为了读全而连续翻页。');
     return lines.join('\n');
   }
@@ -348,6 +355,8 @@ export class PromptBuilder {
   }
 
   // 交互模式 System Prompt 底座(不含 GuncatUiPrompt 的界面语言契约与 INTERACTIVE_DUTY)
+  // skillsSection 传入的是 SkillDirectoryFormatter.interactiveIndex() 的**极小索引**(只列格式技能,
+  // 自带标题与纪律), 这里原样拼上, 不再套一层"技能库"说明; toolIndex 传入的是**裁剪后**工具面的名字。
   static buildInteractive(skillsSection: string = '', toolIndex: string = ''): string {
     let sections: string[] = [];
     sections.push(PromptBuilder.interactiveIdentity());
@@ -355,9 +364,7 @@ export class PromptBuilder {
     sections.push(PromptBuilder.interactiveTools(toolIndex));
     sections.push(PromptBuilder.interactiveTruth());
     if (skillsSection !== '') {
-      sections.push('# 技能库（只在用户明确要文件时才用）\n' +
-        '技能是工作模式的长程能力, 交互模式**默认用不到**: 做界面不需要加载任何技能。\n' +
-        '只有"用户明确要产出文档 / 文件"时才按工具说明 load_skill; 界面类回答一律跳过技能。\n\n' + skillsSection);
+      sections.push(skillsSection);
     }
     sections.push('现在开始: 用户给你要求, 你直接给界面 —— 不解释过程, 不写程序之外的文字。');
     return sections.join('\n\n');

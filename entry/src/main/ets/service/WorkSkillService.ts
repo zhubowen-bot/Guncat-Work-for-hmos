@@ -940,6 +940,13 @@ export class WorkSkillService {
     return SkillDirectoryFormatter.format(WorkSkillService.visibleSkillList(), mode);
   }
 
+  // 交互模式的技能段: **极小索引**(只列格式技能) —— 交互模式的产出是界面, 做界面不需要任何技能。
+  // 与工具面白名单同一口径: 技能库在交互模式下不再整段注入, 只有"明确要出文件"时才 load_skill。
+  static interactiveIndex(): string {
+    WorkSkillService.ensureToolSkills();
+    return SkillDirectoryFormatter.interactiveIndex(WorkSkillService.visibleSkillList());
+  }
+
   // 【新增】物理目录路径映射：分支 Skill 已归入主 Skill 子目录；返回相对 skills/ 的目录，空串表示仍用 id 作为顶层目录。
   private static skillPath(id: string): string {
     switch (id) {

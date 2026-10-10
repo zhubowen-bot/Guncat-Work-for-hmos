@@ -291,6 +291,62 @@ export class ToolRegistry {
     return ToolRegistry.findEntry(name) !== null;
   }
 
+  // ===== 交互模式工具面白名单 =====
+  //
+  // 交互模式的产出是「一张能操作的界面」, 不是长程交付物 —— **速度就是它的产品力**。
+  // 工作模式那 45 个工具全量下发时, 模型每一轮都看得见 todo_write / goal_* / schedule_* /
+  // subagent / session_search 这些长程工具; 提示词里再怎么写"默认零工具", 也挡不住
+  // "既然工具就摆在这儿, 顺手用一下" —— 用户等来的仍是与界面无关的工具调用。
+  // 所以这里做**物理裁剪**: 交互模式只下发真正需要工具的四类场景 ——
+  //   读素材(上传的文件) / 算真实数字 / 核实外部事实 / 出文件(用户明确要导出)。
+  // **新增工具默认不进交互模式**(有意为之): 想让某个新工具在交互模式里可用, 必须显式加进本白名单。
+  // 维护口径见 docs/architecture/interactive-mode.md。
+  static readonly INTERACTIVE_TOOL_WHITELIST: string[] = [
+    // 读素材: 用户上传的文件 / 工作区已有的素材
+    'list_files', 'read_file', 'search_files', 'glob', 'grep',
+    'parse_document', 'search_pdf', 'pdf_to_images', 'view_image',
+    'read_docx', 'read_xlsx', 'read_ppt',
+    // 算真实数字: 界面里的数字必须来自真实计算, 不是编出来的好看数字
+    'run_js', 'transform_file',
+    // 核实外部事实
+    'web_fetch', 'local_web_search',
+    // 出文件: 只在用户明确要导出时破例; 生成后从工作区引用素材
+    'write_file', 'append_file', 'create_dir', 'write_csv', 'write_svg',
+    'write_docx', 'write_xlsx', 'write_pptx', 'download_file',
+    // 技能名册(导出走简化流程, 只加载对应格式技能)
+    'list_skills', 'load_skill'
+  ];
+
+  // 交互模式是否允许下发该工具
+  static interactiveAllows(name: string): boolean {
+    return ToolRegistry.INTERACTIVE_TOOL_WHITELIST.indexOf(name) !== -1;
+  }
+
+  // 按交互模式白名单裁剪工具定义。**保持原有顺序** —— 工具的物理顺序即请求前缀的一部分,
+  // 顺序稳定才能让相邻轮次的 KV 缓存命中。
+  static filterInteractive(defs: Record<string, Object>[]): Record<string, Object>[] {
+    let out: Record<string, Object>[] = [];
+    for (let i: number = 0; i < defs.length; i++) {
+      let nameObj: Object | undefined = defs[i]['name'];
+      if (typeof nameObj === 'string' && ToolRegistry.interactiveAllows(nameObj as string)) {
+        out.push(defs[i]);
+      }
+    }
+    return out;
+  }
+
+  // 被交互模式裁掉的工具名(供诊断/日志/回归断言; 顺序与传入定义一致)
+  static interactiveDropped(defs: Record<string, Object>[]): string[] {
+    let out: string[] = [];
+    for (let i: number = 0; i < defs.length; i++) {
+      let nameObj: Object | undefined = defs[i]['name'];
+      if (typeof nameObj === 'string' && !ToolRegistry.interactiveAllows(nameObj as string)) {
+        out.push(nameObj as string);
+      }
+    }
+    return out;
+  }
+
   // 测试/热更新用: 清空注册中心
   static clear(): void {
     ToolRegistry.entries = [];

@@ -55,7 +55,7 @@ for step in 1..WORK_MAX_STEPS(200, 防失控保险):
 - **错误/重试**：`RetryPolicy`（指数退避+jitter+retry-after+可重试 kind）、`RetryAfterParser`（Retry-After 头解析）、`ToolRetryPolicy`（工具级重试）、`LoopError`（显式 `retryable`/`userMessage`，纯层可单测）。
 - **插件/技能**：`ToolRegistry`（工具+技能元数据单一事实源）、`PluginManifestLoader`（manifest 解析/apply/unload）、`PluginHotLoader`（rawfile 热加载/reloadAll）、`PluginToolExecutor`（插件工具声明式实现注册）、`SkillDirectoryFormatter`（技能目录 full_index/trigger_only A/B）。
 - **可观测**：`LoopMetrics`（重试/压缩/max_tokens 计数）、`SessionLogAggregator`（协议维度 + 工具延迟 p50/p90/p99 + 跨会话聚合）、`PromptBudget`（token 预算估算）。
-- **测试**：`test/guncat-harness` 纯逻辑用例 **507 项全绿**；改 `common/` 后跑 `node setup.mjs && node test-core.mjs`，再 `node check-setup.mjs && tsc -p check/tsconfig.json`，最后 `assembleHap` 真机构建。
+- **测试**：`test/guncat-harness` 纯逻辑用例 **516 项全绿**；改 `common/` 后跑 `node setup.mjs && node test-core.mjs`，再 `node check-setup.mjs && tsc -p check/tsconfig.json`，最后 `assembleHap` 真机构建。
 
 每轮改动与验证记录在 `ITERATION_LOG.md`；当前待办见 `BACKLOG.md`；dsh 移植对照见 `PORT_NOTES.md`。
 

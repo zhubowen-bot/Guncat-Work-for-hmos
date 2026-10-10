@@ -10,7 +10,8 @@
 - [x] 回归护栏：`GuncatUiSpec` / `GuncatUiParts` 纳入 `test/guncat-harness`（分词、渐进解析、非法 JSON、未知 kind、限额、回传组装）；`test-core` 328 项全绿；`assembleHap` BUILD SUCCESSFUL。
 
 ## 交互模式后续待办
-- [x] 快车道（速度优先，R69）：系统提示词不再复用工作模式底座，改走 `PromptBuilder.buildInteractive()` —— **默认零工具、一轮直出界面**，工具只在"界面必须引用真实数据"时破例（一轮 ≤1~2 次、优先只读）；禁 `todo_write`/`goal_*`/`schedule_*`/`subagent`/`session_search`/`ask_user_question`（要问就用界面问）；不写自检报告、不画 mermaid 导图；默认思考强度改「快速(Low)」。提示词 36.7k → 22.8k 字符（行为纪律段 15.6k → 1.7k），工具面刻意未动。
+- [x] 快车道（速度优先，R69）：系统提示词不再复用工作模式底座，改走 `PromptBuilder.buildInteractive()` —— **默认零工具、一轮直出界面**，工具只在"界面必须引用真实数据"时破例（一轮 ≤1~2 次、优先只读）；禁 `todo_write`/`goal_*`/`schedule_*`/`subagent`/`session_search`/`ask_user_question`（要问就用界面问）；不写自检报告、不画 mermaid 导图；默认思考强度改「快速(Low)」。提示词 36.7k → 22.8k 字符（行为纪律段 15.6k → 1.7k）。
+- [x] 工具面物理裁剪（R74）：交互模式下发前按 `ToolRegistry.INTERACTIVE_TOOL_WHITELIST` 裁到 **27 个**（读素材 / 算真实数字 / 核实外部事实 / 出文件），长程与维护类工具**不在请求里**（提示词纪律之外再加物理保证）；技能段同步降为极小索引（`SkillDirectoryFormatter.interactiveIndex()`，只列 docx/xlsx/ppt/svg/data）。三个消费点（主循环 / 溢出重试 / 上下文压缩）共用 `AgentLoopService.toolDefsForMode()` 的同一份工具面。
 - [ ] 速度度量：按 mode 采样"首答 TTFT + 本轮工具调用数"（复用 `LoopMetrics` / `tool_latency` 事件），用数据持续验证快车道效果，并作为回归基线。
 - [ ] 交互状态归档：把用户提交过的控件取值随消息持久化（当前仅存于组件内 @State，重启后回到默认值）。
 - [ ] 数据集绑定：让界面元素可绑定工作区数据文件（如 `table` 直接引用 `data.csv` 列），改参数由本地管道重算而不必再过模型。

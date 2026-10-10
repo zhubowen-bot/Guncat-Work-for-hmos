@@ -21,6 +21,7 @@ import { ToolCallRecord } from '../model/ToolCallRecord';
 import { AbortSignal } from '../common/Types';
 import { Constants } from '../common/Constants';
 import { PromptBuilder } from '../common/PromptBuilder';
+import { ToolRegistry } from '../common/ToolRegistry';
 import { PromptBudget, PromptBudgetSnapshot } from '../common/PromptBudget';
 import { LLMProtocol } from '../common/LLMProtocol';
 import { ToolDefAdapter } from '../common/ToolDefAdapter';
@@ -141,6 +142,36 @@ export class AgentLoopService {
       AgentLoopService.cachedToolDefsFlag = webSearchEnabled;
     }
     return AgentLoopService.cachedToolDefs;
+  }
+
+  // ===== 交互模式工具面(裁剪) =====
+  // 交互模式与工作模式共用同一份工具定义, 但下发前按 ToolRegistry.INTERACTIVE_TOOL_WHITELIST
+  // **物理裁剪**(45 → 27): todo_write / goal_* / schedule_* / subagent / session_search /
+  // ask_user_question / edit / str_replace_editor / delete_file / move_file / record_search
+  // 等长程与维护类工具**根本不出现在请求里**。提示词里的"默认零工具"是纪律, 这里是物理保证。
+  // 缓存键与 getToolDefs 同因(联网搜索开关会改 local_web_search 的描述)。
+  private static cachedInteractiveToolDefs: Record<string, Object>[] = [];
+  private static cachedInteractiveToolDefsFlag: boolean = false;
+
+  // 交互模式的工具面。**主循环(含溢出重试)与上下文压缩必须取同一个返回值** ——
+  // 压缩请求刻意复用上一请求的前缀(系统提示词 + 工具定义 + 历史)以命中 KV 缓存,
+  // 工具面不一致会让整段前缀作废。(界面补救请求 includeTools=false, 不涉及工具面。)
+  static interactiveToolDefs(webSearchEnabled: boolean): Record<string, Object>[] {
+    if (AgentLoopService.cachedInteractiveToolDefs.length === 0 ||
+      AgentLoopService.cachedInteractiveToolDefsFlag !== webSearchEnabled) {
+      AgentLoopService.cachedInteractiveToolDefs =
+        ToolRegistry.filterInteractive(AgentLoopService.getToolDefs(webSearchEnabled));
+      AgentLoopService.cachedInteractiveToolDefsFlag = webSearchEnabled;
+    }
+    return AgentLoopService.cachedInteractiveToolDefs;
+  }
+
+  // 按会话模式取工具面: 交互模式返回裁剪后的定义, 其余模式返回 null(调用方走全量工具面)
+  static toolDefsForMode(mode: string, webSearchEnabled: boolean): Record<string, Object>[] | null {
+    if (mode === Constants.MODE_INTERACTIVE) {
+      return AgentLoopService.interactiveToolDefs(webSearchEnabled);
+    }
+    return null;
   }
 
   // 执行循环中的一轮: 流式返回文本/思考, 并累积工具调用; 结束后由调用方检查 toolCalls 决定继续或收尾。
@@ -654,14 +685,18 @@ export class AgentLoopService {
   // 关键设计(对齐 DeepSeek Harness 的 buildSummarizationInput): 摘要请求复用真实请求的
   // 完整前缀(静态系统提示词 + 相同工具定义 + 相同历史消息), 仅在末尾追加压缩指令——
   // 对模型侧 KV 缓存而言这是上一个请求的延续而非冷启动, 前缀部分按缓存命中计价。
+  // toolOverrides 必须由调用方传**该模式实际下发的工具面**(交互模式传入裁剪后的定义),
+  // 否则工具定义与上一请求不一致, 这段前缀的缓存全部作废。
   static async summarizeHistory(config: ApiConfig, messages: LoopMessage[],
     thinkingEnabled: boolean, reasoningEffort: string, webSearchEnabled: boolean,
-    abortSignal: AbortSignal): Promise<string> {
+    abortSignal: AbortSignal,
+    toolOverrides: Record<string, Object>[] | null = null): Promise<string> {
     let input: LoopMessage[] = messages.slice();
     input.push(LoopMessage.user(AgentLoopService.COMPACTION_INSTRUCTION));
     let callbacks: LoopTurnCallbacks = new LoopTurnCallbacks();
     let turn: LoopTurnResult = await AgentLoopService.runTurnWithRetry(
-      config, input, thinkingEnabled, reasoningEffort, webSearchEnabled, callbacks, abortSignal, true, 2);
+      config, input, thinkingEnabled, reasoningEffort, webSearchEnabled, callbacks, abortSignal,
+      true, 2, toolOverrides);
     return turn.content.trim();
   }
 
@@ -1264,11 +1299,11 @@ export class AgentLoopService {
     if (AgentLoopService.cachedInteractivePrompt !== '') {
       return AgentLoopService.cachedInteractivePrompt;
     }
-    let skillsSection: string = WorkSkillService.promptSectionWithMode(Constants.WORK_PROMPT_SKILL_DIRECTORY_MODE);
-    // 工具面与工作模式完全一致(同一份 ToolRegistry 定义), 这里只取名字做索引;
-    // 交互模式不跟随 WORK_PROMPT_TOOL_DIRECTORY_MODE: 它不携带工作模式的静态工具目录,
-    // 参数与完整说明由随请求下发的工具定义提供(同一事实源, 不会漂移)。
-    let defs: Record<string, Object>[] = WorkFileService.toolRegistryDefs();
+    let skillsSection: string = WorkSkillService.interactiveIndex();
+    // 工具面**按交互模式白名单裁剪**(45 → 27), 索引取的是裁剪后的名字 ——
+    // 提示词里列出的工具与请求里真正下发的工具定义严格同源, 不会出现"提示词里有、实际调不到"的漂移。
+    // 这里固定传 false 只影响 local_web_search 的**描述**文字, 名字不随联网开关变化, 索引是稳定的。
+    let defs: Record<string, Object>[] = AgentLoopService.interactiveToolDefs(false);
     AgentLoopService.cachedInteractivePrompt =
       GuncatUiPrompt.promptSection() + '\n\n' +
       PromptBuilder.buildInteractive(skillsSection, PromptBuilder.buildToolNameIndex(defs)) + '\n\n' +

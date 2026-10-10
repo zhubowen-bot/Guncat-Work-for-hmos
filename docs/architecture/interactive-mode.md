@@ -3,7 +3,7 @@
 > [← 返回 README](../../README.md)
 
 
-交互模式不是第二套循环，而是**同一套 Agent Loop 的第二种交付形态**。维护时先记住这条边界：**循环、工具、沙箱工作区、上下文压缩全部复用；只有「系统提示词」与「正文渲染」两处按模式分叉。** 而提示词这一侧的分叉是**纪律分叉**（不是措辞微调）：工作模式的提示词是「多轮工具循环 + 长程交付」，交互模式的是「默认零工具、一轮直出界面」。
+交互模式不是第二套循环，而是**同一套 Agent Loop 的第二种交付形态**。维护时先记住这条边界：**循环、沙箱工作区、上下文压缩全部复用；按模式分叉的只有「系统提示词」「下发到请求里的工具面」与「正文渲染」三处。** 而分叉的重点是**纪律**（不是措辞微调）：工作模式是「多轮工具循环 + 长程交付」，交互模式是「默认零工具、一轮直出界面」—— 纪律既写进提示词，也**物理落实在下发的工具定义上**（见 [2.1](#21-工具面物理裁剪45--27)）。
 
 ## 1. 身份与会话模型
 
@@ -21,11 +21,35 @@ ChatViewModel.executeWorkLoop(conv)
       mode === 'work'        → buildWorkSystemPrompt()
 ```
 
-`buildInteractiveSystemPrompt()` = `GuncatUiPrompt.promptSection()`（guncat-ui lang 语法 + 组件清单 + **丰富度/组件选择优先级** + 交互闭环 + 输出顺序纪律 + 示例 + 反例）+ **快车道底座** `PromptBuilder.buildInteractive()`（身份"快" + 工作区=素材区 + 工具名索引 + 真实数据纪律 + 技能库"只在明确要文件时才用"）+ `GuncatUiPrompt.INTERACTIVE_DUTY`（交付形态职责，收尾并拥有最终解释权）。三段拼接后**整体静态**、进程内缓存一次，KV 缓存前缀与工作模式同样逐字节稳定。
+`buildInteractiveSystemPrompt()` = `GuncatUiPrompt.promptSection()`（guncat-ui lang 语法 + 组件清单 + **丰富度/组件选择优先级** + 交互闭环 + 输出顺序纪律 + 示例 + 反例）+ **快车道底座** `PromptBuilder.buildInteractive()`（身份"快" + 工作区=素材区 + **裁剪后**工具名索引 + 真实数据纪律 + **极小技能索引**）+ `GuncatUiPrompt.INTERACTIVE_DUTY`（交付形态职责，收尾并拥有最终解释权）。三段拼接后**整体静态**、进程内缓存一次，KV 缓存前缀与工作模式同样逐字节稳定。
 
-**为什么不复用工作模式的提示词底座**（这是本节最需要维护者记住的一条）：`PromptBuilder.build()` 里的身份/四步法/工作流程/输出丰富性/Mermaid/交付前自检清单，全都是为「多轮工具循环 + 长程交付」写的——"复杂任务先用 `todo_write` 建清单""命中技能第一步必须 `load_skill`""交付前用 `list_files` 核验""最终总结必附 mermaid 导图"。这些规则放在工作模式里是对的，放在交互模式里就变成模型**先跑一串和界面无关的工具调用**，用户干等一个本可以直接渲染的卡片。所以交互模式只保留四块底座：**身份（快）＋工作区（素材区，文件树已在运行时快照里）＋工具名索引（`PromptBuilder.buildToolNameIndex`，与请求里真正下发的工具定义同源，只列名字不写用法规则）＋真实数据纪律**；行为约束集中成一句"默认零工具，工具是破例"。界面的语言契约、丰富度、示例、反例仍全部来自 `GuncatUiPrompt`，两处不重复。实测提示词从 **36.7k 字符降到 22.8k 字符**（其中行为纪律段 15.6k → 1.7k），首答 TTFT 与输入 token 同步下降。
+**为什么不复用工作模式的提示词底座**（这是本节最需要维护者记住的一条）：`PromptBuilder.build()` 里的身份/四步法/工作流程/输出丰富性/Mermaid/交付前自检清单，全都是为「多轮工具循环 + 长程交付」写的——"复杂任务先用 `todo_write` 建清单""命中技能第一步必须 `load_skill`""交付前用 `list_files` 核验""最终总结必附 mermaid 导图"。这些规则放在工作模式里是对的，放在交互模式里就变成模型**先跑一串和界面无关的工具调用**，用户干等一个本可以直接渲染的卡片。所以交互模式只保留四块底座：**身份（快）＋工作区（素材区，文件树已在运行时快照里）＋工具名索引（`PromptBuilder.buildToolNameIndex`，取的是裁剪后的工具面，与请求里真正下发的定义同源，只列名字不写用法规则）＋真实数据纪律**；行为约束集中成一句"默认零工具，工具是破例"。界面的语言契约、丰富度、示例、反例仍全部来自 `GuncatUiPrompt`，两处不重复。实测提示词从 **36.7k 字符降到 22.8k 字符**（其中行为纪律段 15.6k → 1.7k），首答 TTFT 与输入 token 同步下降。
 
-**工具面刻意不动**：交互模式下发的工具定义与工作模式**逐字相同**（同一份 `WorkFileService.toolDefs()`），45 个工具一个不少 —— 只是提示词不再推着模型去用它们。这样"用户明确要 Word/Excel/PPT"这类请求在交互模式里照样能落盘，而"给我看看这个数据"会直接得到界面。`test/guncat-harness/test-core.mjs` 里的"快车道底座不复用工作模式的行为纪律"一组断言就是这条边界的守门员：谁把 `# 工作流程` / `四步法` / `交付前自检清单` / `# 输出丰富性原则` 拼回交互模式，测试立刻变红。
+### 2.1 工具面物理裁剪（45 → 27）
+
+**纪律挡不住"工具就摆在那儿"。** R69 那一轮只改了提示词——工具定义照旧 45 个全量下发，靠一句"默认零工具"约束模型。真机反馈是：模型仍然会顺手调 `todo_write` 建清单、`load_skill` 加载技能、甚至 `subagent` 派子代理——因为这些 schema 就摆在它的可用工具列表里，提示词里的"请不要用"和眼前的工具清单打的是对手仗。所以这一轮改成**物理裁剪**：`AgentLoopService.interactiveToolDefs()` 在下发前把工具定义过一遍 `ToolRegistry.filterInteractive()`，白名单**只留四类场景**（`common/ToolRegistry.ts` 的 `INTERACTIVE_TOOL_WHITELIST`）：
+
+| 场景 | 保留的工具 |
+|---|---|
+| 读素材（用户上传的文件） | `list_files` `read_file` `search_files` `glob` `grep` `parse_document` `search_pdf` `pdf_to_images` `view_image` `read_docx` `read_xlsx` `read_ppt` |
+| 算真实数字 | `run_js` `transform_file` |
+| 核实外部事实 | `web_fetch` `local_web_search` |
+| 出文件（用户明确要导出） | `write_file` `append_file` `create_dir` `write_csv` `write_svg` `write_docx` `write_xlsx` `write_pptx` `download_file` `list_skills` `load_skill` |
+
+被裁掉的 18 个：`todo_write`、`goal_create` / `goal_get` / `goal_update`、`schedule_create` / `schedule_list` / `schedule_delete`、`subagent`、`session_search`、`ask_user_question`、`edit`、`str_replace_editor`、`delete_file`、`move_file`、`edit_docx` / `edit_xlsx` / `edit_ppt`、`record_search`。
+
+维护这条边界要注意三件事：
+
+1. **三个消费点必须取同一个返回值**。工具定义是请求前缀的一部分，`ChatViewModel.runStepWithOverflowRetry()`（主循环 + 溢出重试）与上下文压缩 `compactWorkHistoryIfNeeded()` → `summarizeHistory(..., toolOverrides)` 都传 `AgentLoopService.toolDefsForMode(conv.mode, webSearchEnabled)`；其中压缩请求刻意复用上一请求的完整前缀以命中 KV 缓存，工具面一旦不一致，整段前缀的缓存全部作废。`interactiveToolDefs()` 内部做了按联网开关分档的缓存，避免热路径上每轮重复过滤。
+2. **新增工具默认不进交互模式**。白名单是**正表**：新工具想出现在交互模式，必须显式加进 `INTERACTIVE_TOOL_WHITELIST`（并同步这里的表格），否则默认只有工作模式看得到。这是有意的默认方向——交互模式的价值是快，不是能力全集。
+3. **顺序不能变**。`filterInteractive()` 保持定义原有的物理顺序（只做过滤、不重排），否则相邻轮次的请求前缀会抖动。
+
+同一口径也用在**技能段**上：`SkillDirectoryFormatter.interactiveIndex()`（`INTERACTIVE_SKILL_IDS = docx / xlsx / ppt / svg / data`）替代原来的整段技能目录 —— 交互模式的产出是界面，做界面不需要任何技能，只有"用户明确要产出文件/转换数据"时才 `load_skill`。技能段自带标题与纪律，`PromptBuilder.buildInteractive()` 原样拼上、不再套一层"技能库"说明。
+
+**回归护栏**（两组，`test/guncat-harness/test-core.mjs`）：
+
+- **提示词纪律**："快车道底座不复用工作模式的行为纪律"——谁把 `# 工作流程` / `四步法` / `交付前自检清单` / `# 输出丰富性原则` 拼回交互模式，测试立刻变红；
+- **工具面裁剪**："45 个工具只下发 27 个""保留四类场景""裁掉长程/维护/改稿/问询类""裁剪保持原有顺序""白名单里的工具都是真实工具名""技能段只列格式技能"——谁把长程工具放回白名单，同样立刻变红。
 
 **「丰富度」一节（`GuncatUiPrompt.RICHNESS`，约 3.3k 字符）是引导模型产出复杂界面的主要抓手**：只写"一段文字 + 一张表格"在语法上完全合法、但在体验上等于退回普通聊天，而这是模型最容易偷懒的地方，所以单独成段并给了强对照。它包含四块：
 
@@ -209,9 +233,11 @@ B. 回传助手（发一条消息, 触发新一轮回答）
 | 新增图标 | `views/GuncatUiIcons.ets` 的 `glyph()` 映射表（**用 Unicode 字形而不是 SymbolGlyph**：SymbolGlyph 的名字在不同 ROM 上可用集合不一致，缺失时渲染成空白且静默失败）。唯一的例外是折叠箭头 `GuncatUiChevron`：`⌃`/`⌄` 这类字符在不同字体下大小与基线差异极大，真机上是"右下角一个小小的尖、又没对齐"，所以那里特意改用 `sys.symbol.chevron_up/down` |
 | 交互模式专属文案 | `ChatViewModel` 的 `loopModeTitle` / `loopModeHint` / `loopInputPlaceholder` / `loopEmptyDescription` / `loopToolLabel` |
 | 模式常量 | `Constants.INTERACTIVE_AGENT_ID` / `MODE_*` / `UI_BLOCK_LANG` / `UI_CONTINUE_MESSAGE` / `UI_CONTINUE_MAX_ROUNDS` |
+| 交互模式能用哪些工具 | `common/ToolRegistry.ts` 的 `INTERACTIVE_TOOL_WHITELIST`（**正表**，新工具默认不进；改完同步本节 2.1 的表格与 `test-core.mjs` 的 45→27 断言） |
+| 交互模式能用哪些技能 | `common/SkillDirectoryFormatter.ts` 的 `INTERACTIVE_SKILL_IDS` |
 
 > **回归护栏（三层，缺一不可）**
-> 1. 纯逻辑单测：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`（507 项，含 guncat-ui lang 的词法/语法/前向引用/流式补齐/绑定重算/`@Each`/内置函数/`Action`/片段切分/状态序列化/图表几何/组件库与提示词）。
+> 1. 纯逻辑单测：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`（516 项，含 guncat-ui lang 的词法/语法/前向引用/流式补齐/绑定重算/`@Each`/内置函数/`Action`/片段切分/状态序列化/图表几何/组件库与提示词，以及交互模式快车道与工具面 45→27 的裁剪断言）。
 > 2. 服务层类型检查：`node check-setup.mjs && npx tsc -p check/tsconfig.json`。
 > 3. **真实 ArkTS 编译**：`powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`（调用 DevEco 自带的 hvigor）。
 > 第 3 层不能省：ArkUI 有一批**只有编译器才知道**的规则——`@Builder` 方法体内不允许声明局部变量、自定义组件属性名不能与内置属性同名（`size` / `scale`）、`@Prop` 的 null 需要显式联合类型。这些在 node 侧 harness 里全都测不出来（harness 只覆盖 `common/**` 与 `service/**` 的纯 TS，不解析 `.ets`）。

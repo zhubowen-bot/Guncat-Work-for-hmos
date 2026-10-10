@@ -25,7 +25,7 @@
 ```bash
 cd test/guncat-harness
 node setup.mjs        # 把 entry/src/main/ets 下的纯逻辑模块移植为 Node 可运行的 .ts
-node test-core.mjs    # 当前 507 项
+node test-core.mjs    # 当前 516 项
 ```
 
 覆盖 `PathMatcher` / `DiffUtil` / `EditCore` / `FileSearchCore` / `ToolRegistry` / `PromptBuilder` / `LoopDecisions` / `SSEProtocolAdapter` / `GuncatUiLang` 等纯逻辑，以及**大量提示词断言**。

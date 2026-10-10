@@ -6,6 +6,16 @@
 
 > 6.3.0 期间交互模式做了**两轮**大改：先上线初版（严格 JSON DSL），随后**全面重写**为声明式界面语言 `guncat-ui lang`。两轮都属于 6.3.0（**不单列 6.4.0**，应用版本号保持 `6.3.0` / versionCode 720），下面按"由新到旧"合并记录。
 
+### 优化：交互模式工具面物理裁剪（45 → 27）+ 技能段降为极小索引
+
+> 上一轮（「交互模式快车道」）只改了提示词，工具定义照旧 45 个全量下发，靠一句"默认零工具"约束模型。实际效果有限：`todo_write`、`goal_*`、`subagent`、`load_skill` 这些 schema 就摆在模型的可用工具列表里，提示词里的"请不要用"和眼前的工具清单打的是对手仗。这一轮把纪律**落到请求本身上**。
+
+- **工具面按模式物理裁剪**：新增 `ToolRegistry.INTERACTIVE_TOOL_WHITELIST`（正表）与 `filterInteractive()`；`AgentLoopService.toolDefsForMode(mode, webSearchEnabled)` 是唯一入口，交互模式只下发 **27 个**工具——四类场景：读素材（`list_files` / `read_file` / `search_files` / `glob` / `grep` / `parse_document` / `search_pdf` / `pdf_to_images` / `view_image` / `read_docx` / `read_xlsx` / `read_ppt`）、算真实数字（`run_js` / `transform_file`）、核实外部事实（`web_fetch` / `local_web_search`）、出文件（`write_file` / `append_file` / `create_dir` / `write_csv` / `write_svg` / `write_docx` / `write_xlsx` / `write_pptx` / `download_file` / `list_skills` / `load_skill`）。被裁掉的 18 个是 `todo_write`、`goal_create` / `goal_get` / `goal_update`、`schedule_create` / `schedule_list` / `schedule_delete`、`subagent`、`session_search`、`ask_user_question`、`edit`、`str_replace_editor`、`delete_file`、`move_file`、`edit_docx` / `edit_xlsx` / `edit_ppt`、`record_search`。**新增工具默认不进交互模式**（必须显式加进白名单）。
+- **三个消费点共用同一个工具面**：主循环与溢出重试（`ChatViewModel.runStepWithOverflowRetry` → `runTurnWithRetry(..., toolOverrides)`）和上下文压缩（`compactWorkHistoryIfNeeded` → `summarizeHistory(..., toolOverrides)`，新增该参数）都取 `toolDefsForMode()`。压缩请求刻意复用上一请求的完整前缀以命中 KV 缓存，工具面若不一致，整段前缀的缓存全部作废。裁剪只做过滤、不重排，工具的物理顺序保持不变。
+- **提示词跟着同源**：`buildInteractiveSystemPrompt()` 的工具名索引改用**裁剪后**的定义（`interactiveToolDefs()`），`PromptBuilder.interactiveTools()` 的文案从"工具面与工作模式完全相同"改为"工具面已经裁剪过 / 这些工具不下发，你也调不到"；`buildInteractive()` 不再套一层"技能库"说明。
+- **技能段降为极小索引**：新增 `SkillDirectoryFormatter.interactiveIndex()`（`INTERACTIVE_SKILL_IDS = docx / xlsx / ppt / svg / data`）替换原来的整段技能目录——交互模式的产出是界面，做界面不需要任何技能，只有"用户明确要出文件 / 转换数据"时才 `load_skill`。
+- **回归护栏**：`test-core.mjs` 新增一组断言守住 45 → 27——只下发 27 个、保留四类场景、裁掉长程/维护/改稿/问询类、裁剪保持原有顺序、白名单里没有拼错的死名字、技能段只列格式技能。纯逻辑单测 **507 → 516 项**，全绿。
+
 ### 启动默认进入交互模式 + 空态大标题换成模式切换胶囊
 
 - **启动落点固定为交互模式**：`ChatViewModel.restoreState()` 不再读 `guncat_current_agent_id` 去恢复"上次使用的智能体"，而是固定把 `currentAgent` 设为 `interactive` 虚拟智能体（只有在它意外缺失时才回退到第一个聊天智能体），并把该 id 落盘保持一致。打开应用的第一屏就是"能操作的界面"，而不是上次偶然停在的那个智能体。

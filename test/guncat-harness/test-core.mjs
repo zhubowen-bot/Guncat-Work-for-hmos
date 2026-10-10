@@ -1725,14 +1725,74 @@ console.log('[组件库与提示词]');
   check('快车道底座把长程工具点名为"一律不用"',
     fastLane.indexOf('todo_write / goal_* / schedule_* / subagent / session_search') > 0 &&
     fastLane.indexOf('不要 ask_user_question') > 0);
-  check('快车道底座注入工具名索引(与工具面同源)',
-    PromptBuilder.buildInteractive('', '- list_files, read_file, run_js')
-      .indexOf('工具面与工作模式完全相同: - list_files, read_file, run_js') > 0);
+  check('快车道底座注入工具名索引(与裁剪后工具面同源)',
+    PromptBuilder.buildInteractive('', 'list_files, read_file, run_js')
+      .indexOf('全部可用工具: list_files, read_file, run_js') > 0);
+  check('快车道底座写明工具面已物理裁剪',
+    fastLane.indexOf('工具面**已经裁剪过**') > 0 &&
+    fastLane.indexOf('不下发') > 0 &&
+    fastLane.indexOf('你也调不到') > 0);
   check('工具名索引只取真实工具名并排序',
     PromptBuilder.buildToolNameIndex([{ 'name': 'b_tool' }, { 'name': 'a_tool' }, { 'name': 5 }]) === 'a_tool, b_tool');
-  check('技能库在交互模式降为"明确要文件才用"',
-    PromptBuilder.buildInteractive('【技能】test-skill').indexOf('只在用户明确要文件时才用') > 0 &&
-    PromptBuilder.buildInteractive('【技能】test-skill').indexOf('【技能】test-skill') > 0);
+  check('技能段在交互模式降为极小索引(自带纪律, 不再套一层说明)',
+    PromptBuilder.buildInteractive('【技能】test-skill').indexOf('【技能】test-skill') > 0 &&
+    PromptBuilder.buildInteractive('【技能】test-skill').indexOf('只在用户明确要文件时才用') < 0);
+
+  // ===== 交互模式工具面物理裁剪 =====
+  // 纪律挡不住"工具就摆在那儿"的诱惑, 所以交互模式的工具定义在**下发前**就被裁掉。
+  // 这几条是 45 → 27 的守门员: 谁把长程/维护/改稿类工具放回白名单, 这里立刻变红。
+  const allToolNames = [
+    'list_files', 'read_file', 'write_file', 'append_file', 'delete_file', 'create_dir', 'move_file',
+    'search_files', 'write_csv', 'download_file', 'write_svg', 'write_docx', 'read_docx', 'edit_docx',
+    'write_xlsx', 'read_xlsx', 'edit_xlsx', 'transform_file', 'write_pptx', 'read_ppt', 'edit_ppt',
+    'parse_document', 'search_pdf', 'pdf_to_images', 'view_image', 'todo_write', 'local_web_search',
+    'record_search', 'list_skills', 'load_skill',
+    'glob', 'grep', 'edit', 'str_replace_editor', 'web_fetch', 'ask_user_question',
+    'schedule_create', 'schedule_list', 'schedule_delete',
+    'goal_create', 'goal_get', 'goal_update', 'subagent', 'session_search', 'run_js'
+  ];
+  const allDefs = allToolNames.map((name) => ({ 'name': name }));
+  const keptNames = ToolRegistry.filterInteractive(allDefs).map((d) => d['name']);
+  check('交互模式工具面裁剪: 工作模式 45 个工具只下发 27 个',
+    allToolNames.length === 45 && keptNames.length === 27);
+  check('交互模式工具面保留"读素材 / 算数字 / 查事实 / 出文件"四类',
+    keptNames.indexOf('read_file') >= 0 && keptNames.indexOf('run_js') >= 0 &&
+    keptNames.indexOf('web_fetch') >= 0 && keptNames.indexOf('write_docx') >= 0 &&
+    keptNames.indexOf('load_skill') >= 0);
+  check('交互模式工具面裁掉长程 / 维护 / 改稿 / 问询类工具',
+    keptNames.indexOf('todo_write') < 0 && keptNames.indexOf('goal_create') < 0 &&
+    keptNames.indexOf('goal_get') < 0 && keptNames.indexOf('goal_update') < 0 &&
+    keptNames.indexOf('schedule_create') < 0 && keptNames.indexOf('schedule_list') < 0 &&
+    keptNames.indexOf('schedule_delete') < 0 && keptNames.indexOf('subagent') < 0 &&
+    keptNames.indexOf('session_search') < 0 && keptNames.indexOf('ask_user_question') < 0 &&
+    keptNames.indexOf('edit') < 0 && keptNames.indexOf('str_replace_editor') < 0 &&
+    keptNames.indexOf('delete_file') < 0 && keptNames.indexOf('move_file') < 0 &&
+    keptNames.indexOf('record_search') < 0);
+  check('交互模式工具面裁剪保持原有顺序(请求前缀稳定, KV 缓存不失效)',
+    ToolRegistry.filterInteractive(allDefs).map((d) => allToolNames.indexOf(d['name']))
+      .every((v, i, arr) => i === 0 || arr[i - 1] < v));
+  check('交互模式工具面裁剪与"被裁掉的工具名"互补',
+    ToolRegistry.interactiveDropped(allDefs).length === allToolNames.length - keptNames.length &&
+    ToolRegistry.interactiveDropped(allDefs).indexOf('todo_write') >= 0);
+  check('交互模式白名单里的工具都是真实工具(没有拼错的死名字)',
+    ToolRegistry.INTERACTIVE_TOOL_WHITELIST.every((n) => allToolNames.indexOf(n) >= 0));
+
+  // ===== 交互模式技能段: 极小索引 =====
+  const skillListAll = [
+    { id: 'ppt', name: '演示文稿', description: '触发: 做 PPT', files: [] },
+    { id: 'docx', name: 'Word 文档', description: '触发: 写文档', files: [] },
+    { id: 'research', name: '深度研究', description: '触发: 调研', files: [] },
+    { id: 'data', name: '数据清洗与转换', description: '触发: 转换数据', files: [] }
+  ];
+  const skillIdx = SkillDirectoryFormatter.interactiveIndex(skillListAll);
+  check('交互模式技能段只列"出文件 / 数据转换"几支',
+    skillIdx.indexOf('- ppt —') > 0 && skillIdx.indexOf('- docx —') > 0 &&
+    skillIdx.indexOf('- data —') > 0 && skillIdx.indexOf('research') < 0);
+  check('交互模式技能段写明"做界面不需要任何技能"',
+    skillIdx.indexOf('# 技能库（默认一个都不加载）') >= 0 &&
+    skillIdx.indexOf('做界面不需要任何技能') > 0 &&
+    skillIdx.indexOf('一律不用') > 0);
+
   check('补救提示词要求 root 第一行',
     GuncatUiPrompt.REPAIR_SYSTEM.indexOf('root = Card') > 0);
   check('组件清单列出 Card 签名', prompt.indexOf('Card(children: 组件[]') > 0);

@@ -30,7 +30,7 @@
 | ✦ **交互模式** | GPT 的 **Intelligent UI** | 一句话进来，一张**能拖、能点、能改参数并即时重算**的原生界面出去：图表 / 表格 / 指标卡 / 选项卡 / 表单控件全部原生渲染，默认零工具调用、一轮直出 |
 | 🛠 **工作模式** | **DeepSeek Harness**（dsh，Codex 式 Agent Loop） | 多轮工具循环 + 每会话独立沙箱工作区 + 45 个内置工具，长程任务自主执行，端侧直出 PPT / Word / Excel / SVG，产物卡片附行级 diff |
 
-两个形态**共用同一套 Agent Loop、沙箱工作区与全部 45 个工具**，差别只在行为纪律——工作模式是「多轮工具循环 + 长程交付」，交互模式是「快车道、一轮直出界面」。应用启动默认落在交互模式，空态大标题处的「交互模式 / 工作模式」胶囊可一键换挡。
+两个形态**共用同一套 Agent Loop 与沙箱工作区**，差别在行为纪律与**下发的工具面**——工作模式是「45 个内置工具全量 + 多轮工具循环 + 长程交付」，交互模式只下发 **27 个**（读素材 / 算真实数字 / 核实外部事实 / 出文件），长程工具（`todo_write` / `goal_*` / `schedule_*` / `subagent` …）根本不出现在它的请求里，所以是「快车道、一轮直出界面」。应用启动默认落在交互模式，空态大标题处的「交互模式 / 工作模式」胶囊可一键换挡。
 
 交互模式复刻的是 GPT 那套 Intelligent UI 的交付方式：回答不再是纯文本，而是一份**界面程序**，由应用渲染成原生可操作界面——柱状 / 折线 / 面积 / 横向条 / 饼环 / 径向 / 雷达 / 堆叠条、表格、指标卡、图片墙、选项卡 / 折叠面板 / 步骤条 / 卡片块，以及整套表单控件（滑块 / 开关 / 单选 / 多选 / 下拉 / 标签选择 / 选项卡 / 输入框 / 文本域）；控件的取值还能回传模型触发重算。工作模式则把 DeepSeek Harness（dsh）的核心 Agent Loop 完整移植到了端侧。
 
@@ -108,7 +108,7 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 
 ### 验证
 
-- 纯逻辑回归（当前 **507 项**全绿）：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`
+- 纯逻辑回归（当前 **516 项**全绿）：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`
 - 服务层类型检查：`cd test/guncat-harness && node check-setup.mjs && npx tsc -p check/tsconfig.json`
 - PPT / Word / Excel 离线验证环境：`test/pptx-harness`、`test/docx-harness`、`test/xlsx-harness`
 - 真实 ArkTS 编译（需本机 DevEco）：`powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`

@@ -2779,10 +2779,16 @@ if (this.abortSignal.aborted) {
     compactNote: string, callbacks: LoopTurnCallbacks,
     ctx: common.UIAbilityContext, convId: string, loopMode: string,
     onForcedRetry: () => void): Promise<LoopTurnResult> {
+    // 工具面按会话模式取: 交互模式下发**裁剪后**的工具定义(只有 27 个, 长程/维护类工具不在请求里),
+    // 其余模式传 null 走全量工具面。主循环与下面的溢出重试、以及上下文压缩必须用同一份工具面 ——
+    // 请求前缀里工具定义不一致会让 KV 缓存整段失效, 也会让模型看到前后矛盾的工具清单。
+    let toolOverride: Record<string, Object>[] | null =
+      AgentLoopService.toolDefsForMode(loopMode, this.webSearchEnabled);
     try {
       return await AgentLoopService.runTurnWithRetry(
         this.apiConfig, messages, this.loopThinkingEnabled, this.loopEffortForRequest,
-        this.webSearchEnabled, callbacks, this.abortSignal);
+        this.webSearchEnabled, callbacks, this.abortSignal,
+        true, Constants.WORK_LLM_RETRY_MAX, toolOverride);
     } catch (e) {
       let err: Error = e as Error;
       if (LoopDecisions.shouldForceCompactOnOverflow(this.abortSignal.aborted,
@@ -2796,7 +2802,7 @@ if (this.abortSignal.aborted) {
           await this.appendRuntimeSnapshotIfNeeded(messages, ctx, convId);
           return await AgentLoopService.runTurnWithRetry(
             this.apiConfig, messages, this.loopThinkingEnabled, this.loopEffortForRequest, this.webSearchEnabled,
-            callbacks, this.abortSignal);
+            callbacks, this.abortSignal, true, Constants.WORK_LLM_RETRY_MAX, toolOverride);
         }
       }
       throw err;
@@ -2871,7 +2877,7 @@ if (this.abortSignal.aborted) {
       try {
         summary = await AgentLoopService.summarizeHistory(
           this.apiConfig, messages, this.loopThinkingEnabled, this.loopEffortForRequest, this.webSearchEnabled,
-          this.abortSignal);
+          this.abortSignal, AgentLoopService.toolDefsForMode(loopMode, this.webSearchEnabled));
       } catch (e) {
         // 压缩失败(网络/中断) → 回退为整条裁剪
         summary = '';

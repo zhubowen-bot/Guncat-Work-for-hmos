@@ -65,6 +65,30 @@ export class SkillDirectoryFormatter {
       '先用 list_skills 查看可用技能，再 load_skill 加载对应技能正文后按其方法论执行；技能正文优先于默认做法。\n';
   }
 
+  // ===== 交互模式: 极小技能索引 =====
+  //
+  // 工作模式的技能库整段注入(几十支技能的触发词)对交互模式毫无用处 —— 交互模式的产出是界面,
+  // **做界面不需要任何技能**。这里只留"真要产出文件时才会用到"的几支格式技能,
+  // 让模型连"我是不是该先加载个技能"这个念头都不会起。
+  // **新增技能默认不进交互模式**(与工具白名单同一口径)。
+  static readonly INTERACTIVE_SKILL_IDS: string[] = ['docx', 'xlsx', 'ppt', 'svg', 'data'];
+
+  // 交互模式技能段: 正常情况下**一个都不加载**, 只有明确要导出文件时才加载对应格式技能
+  static interactiveIndex(list: SkillMeta[]): string {
+    let out: string = '# 技能库（默认一个都不加载）\n' +
+      '交互模式的产出是界面, **做界面不需要任何技能**。只有用户**明确**要产出 Word / Excel / PPT / SVG 文件, ' +
+      '或明确要转换工作区里的数据文件时, 才 `load_skill` 加载下面这一支 —— 然后直接产出, 不要走技能里的前置提问。\n';
+    for (let i: number = 0; i < list.length; i++) {
+      let s: SkillMeta = list[i];
+      if (SkillDirectoryFormatter.INTERACTIVE_SKILL_IDS.indexOf(s.id) !== -1) {
+        out += '- ' + s.id + ' — ' + s.name + '\n';
+      }
+    }
+    out += '其余技能（研究 / 写作 / 法律 / AI 工程 …）在交互模式下一律不用; ' +
+      '也不要为了"看看有什么技能"去 `list_skills`。';
+    return out;
+  }
+
   static format(list: SkillMeta[], mode: string): string {
     if (mode === SkillDirectoryFormatter.MODE_TRIGGER_ONLY) {
       return SkillDirectoryFormatter.triggerOnly();
