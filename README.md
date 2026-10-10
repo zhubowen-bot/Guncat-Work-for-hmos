@@ -1176,11 +1176,14 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 - 原始附件不会作为永久文件复制到应用数据中。
 - 网络请求使用 HTTPS，实际数据处理政策以所配置的模型服务商为准。
 
-- **拖动绑定控件实时刷新（同日第十三次）**：真机缺陷 —— 拖动与 `$amount` 双向绑定的 `Slider` 时手柄会动，但引用该变量的 `Text` / 指标卡 / 图表 series **完全不刷新**，必须切走再切回（组件重挂载）才对。最终定位到三件事，缺一不可：① **`assignKeys` 只遍历了 `children` 列表与元素数组属性，漏了单元素属性**（`OverviewCardItem(top, bottom)`、`FormControl(control)`…）→ 真机上 19 个节点里 **7 个 key 为空** → 所有"按 key 定位元素"的机制时灵时不灵（`frz` 一会儿 5 一会儿 0 就是这个）；② 让界面跟上**不能靠"换 ForEach 键 ⇒ 重建该项"**（`.id(rev)`、方法内读 @State、恒真 `if` 包整棵树、`root` 改 `@State`+顶层取新树、拖动链指纹快照都试过，在这台设备上都不稳定），要靠**值节点自己重画**：`live(el)` 读 `sigTick` 登记依赖 + 按 key 从当前树取元素，全视图 234 处值读取都包了它；③ 但对 **Slider 本身**必须相反 —— 指纹是递归的，它的 `value` 一进指纹，拖动时它和它每一层祖先项都会换键重建、手势当场丢失，所以 Slider 的绑定值与状态值**常驻豁免**不进指纹。另外真机 `SliderChangeMode.End` 不一定来，收尾用 220ms **静默计时器**兜底（`End`/`Click` 也是信号，`finishDrag` 幂等）；**不要**给 Slider 挂 `.onTouch` —— 那会插手触摸派发，表现为"只能点选、不跟手"。新增 18 条断言，单测 479 → 497 项。
-
 ## 6.3.0 更新（交互模式 · Intelligent UI）
 
 > 6.3.0 期间交互模式做了**两轮**大改：先上线初版（严格 JSON DSL），随后**全面重写**为声明式界面语言 `guncat-ui lang`。两轮都属于 6.3.0（**不单列 6.4.0**，应用版本号保持 `6.3.0` / versionCode 710），下面按"由新到旧"合并记录。
+
+### 侧边栏：「聊天引擎」分组默认折叠
+
+- 窄屏抽屉（`views/AgentDrawerView.ets`）的**「聊天引擎」分组默认折叠**：抽屉打开时只露出 36vp 的标题行，**点标题行**才展开 4 个通用 + 5 个专家智能体，右侧箭头在 `chevron_down` / `chevron_up` 间切换。分组的 `layoutWeight` 随折叠态在 `1` / `0` 之间切换 —— 展开时照旧与「历史对话」平分剩余高度，折叠时省下的空间全部让给历史对话列表。
+- 折叠状态只放在组件内 `@State`、**不落盘**：抽屉关闭即销毁组件，再次打开回到默认折叠。宽屏左侧栏（`DswSidebar`）的「引擎」小节不分节，未改。
 
 ### 优化：交互模式快车道（默认零工具 + 默认快速档）
 
@@ -1243,6 +1246,8 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
   - **提示词加硬规则**：`PromptBuilder.capability()` 新增「联网搜索优先级」、`toolsDirectory()` 新增 `local_web_search` 条目（含"未开启服务端搜索时它就是唯一通道"，因为系统提示词要保持逐字节稳定、不能按开关分叉）。
   - **技能文档的口径修正做在投喂处**：技能散文是导入内容（20+ 处旧名），与其改散文、下次导入又带进来，不如在 `load_skill` 的返回前统一贴一条"联网口径"说明（`WorkFileService.LOAD_SKILL_SEARCH_NOTE`）。
   - 顺带：时间线里这个工具显示为「Local Search」+ 圆圈放大镜（此前落在 default 分支、显示原始工具名）；`AgentLoopService.buildWorkSystemPromptLegacy()` 标注 `@deprecated 未被调用`（活的是 `PromptBuilder`，避免以后改错文件）。新增 5 条断言，单测 474 → 479 项。
+
+- **拖动绑定控件实时刷新（同日第十三次）**：真机缺陷 —— 拖动与 `$amount` 双向绑定的 `Slider` 时手柄会动，但引用该变量的 `Text` / 指标卡 / 图表 series **完全不刷新**，必须切走再切回（组件重挂载）才对。最终定位到三件事，缺一不可：① **`assignKeys` 只遍历了 `children` 列表与元素数组属性，漏了单元素属性**（`OverviewCardItem(top, bottom)`、`FormControl(control)`…）→ 真机上 19 个节点里 **7 个 key 为空** → 所有"按 key 定位元素"的机制时灵时不灵（`frz` 一会儿 5 一会儿 0 就是这个）；② 让界面跟上**不能靠"换 ForEach 键 ⇒ 重建该项"**（`.id(rev)`、方法内读 @State、恒真 `if` 包整棵树、`root` 改 `@State`+顶层取新树、拖动链指纹快照都试过，在这台设备上都不稳定），要靠**值节点自己重画**：`live(el)` 读 `sigTick` 登记依赖 + 按 key 从当前树取元素，全视图 234 处值读取都包了它；③ 但对 **Slider 本身**必须相反 —— 指纹是递归的，它的 `value` 一进指纹，拖动时它和它每一层祖先项都会换键重建、手势当场丢失，所以 Slider 的绑定值与状态值**常驻豁免**不进指纹。另外真机 `SliderChangeMode.End` 不一定来，收尾用 220ms **静默计时器**兜底（`End`/`Click` 也是信号，`finishDrag` 幂等）；**不要**给 Slider 挂 `.onTouch` —— 那会插手触摸派发，表现为"只能点选、不跟手"。新增 18 条断言，单测 479 → 497 项。
 
 ### 初版：JSON DSL（交互模式上线）
 

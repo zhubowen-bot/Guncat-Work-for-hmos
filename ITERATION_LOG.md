@@ -10,6 +10,7 @@
 - 箭头**内联 `SymbolGlyph`** 而不复用 `views/GuncatUiIcons.ets` 的 `GuncatUiChevron`：后者的 `color` 是 string 字面量（默认 `#8F8F8F`），跟随不了深色主题（深色下 `text_secondary` 是 `#CFD3D6`）；内联版本用 `$r('app.color.text_secondary')` 取色，并照抄该组件里 `flexShrink(0)` + `constraintSize` 的防挤压约束（真机事故：Row 内固定尺寸图标被压到 0 会与相邻文本重叠）。
 - 折叠状态只存在组件内 `@State`，**不做持久化**：抽屉关闭即销毁组件，再次打开回到默认折叠 —— 正是「默认折叠」的要求。
 - **未改**宽屏左侧栏 `views/DswSidebar.ets`：它的小节叫「引擎」，工作模式 / 交互模式与聊天智能体合并在同一个列表里，没有独立的「聊天引擎」板块可折叠。
+- **文档**：`README.md` / `README_EN.md` 的「内置智能体」段补一句折叠说明，6.3.0 更新段（由新到旧）最前面新增本节；顺手修掉一处历史错位 —— 「拖动绑定控件实时刷新（同日第十三次）」原先孤零零挂在「隐私说明」下面（它属于 6.3.0 的 `guncat-ui lang` 修复清单），已移回「联网搜索（同日第十二次）」之后、`### 初版：JSON DSL` 之前，中英同步。
 
 ### 验证
 - `node test/guncat-harness/test-core.mjs`：**passed=507 failed=0**（纯逻辑回归，本轮未动公共逻辑）。
