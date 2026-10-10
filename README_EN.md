@@ -14,13 +14,13 @@
 [![license](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 
 <p align="center">
-  <a href="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/001-1.png"><img src="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/001-1.png" width="23%" alt="Interactive Mode home screen" /></a>
-  <a href="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/010-2.png"><img src="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/010-2.png" width="23%" alt="Interactive Mode delivering an operable interface" /></a>
-  <a href="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/001-3.png"><img src="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/001-3.png" width="23%" alt="Work Mode delivering a long-horizon task" /></a>
-  <a href="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/008-2.png"><img src="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/008-2.png" width="23%" alt="run_js on-device JavaScript sandbox" /></a>
+  <a href="docs/images/interactive-home.jpg"><img src="docs/images/interactive-home.jpg" width="23%" alt="Interactive Mode home screen" /></a>
+  <a href="docs/images/interactive-ui.jpg"><img src="docs/images/interactive-ui.jpg" width="23%" alt="Interactive Mode delivering an operable interface" /></a>
+  <a href="docs/images/work-delivery.jpg"><img src="docs/images/work-delivery.jpg" width="23%" alt="Work Mode delivering a long-horizon task" /></a>
+  <a href="docs/images/run-js.jpg"><img src="docs/images/run-js.jpg" width="23%" alt="run_js on-device JavaScript sandbox" /></a>
 </p>
 
-<p align="center"><sub>Interactive Mode home · an interface delivered by Interactive Mode · a long-horizon task delivered by Work Mode · the <code>run_js</code> on-device JS sandbox　(click any image to view it full size)</sub></p>
+<p align="center"><sub>Interactive Mode home · an interface delivered by Interactive Mode · a long-horizon task delivered by Work Mode · the <code>run_js</code> on-device JS sandbox　(click any image to enlarge)</sub></p>
 
 ## Two headline agent forms, both running on-device
 

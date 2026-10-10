@@ -14,13 +14,13 @@
 [![license](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 
 <p align="center">
-  <a href="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/001-1.png"><img src="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/001-1.png" width="23%" alt="交互模式首页" /></a>
-  <a href="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/010-2.png"><img src="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/010-2.png" width="23%" alt="交互模式直出的可操作界面" /></a>
-  <a href="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/001-3.png"><img src="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/001-3.png" width="23%" alt="工作模式长程任务交付" /></a>
-  <a href="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/008-2.png"><img src="entry/src/main/resources/rawfile/%E7%8E%A9%E8%BD%AC%E5%BA%94%E7%94%A8/assets/008-2.png" width="23%" alt="run_js 设备内 JS 执行沙箱" /></a>
+  <a href="docs/images/interactive-home.jpg"><img src="docs/images/interactive-home.jpg" width="23%" alt="交互模式首页" /></a>
+  <a href="docs/images/interactive-ui.jpg"><img src="docs/images/interactive-ui.jpg" width="23%" alt="交互模式直出的可操作界面" /></a>
+  <a href="docs/images/work-delivery.jpg"><img src="docs/images/work-delivery.jpg" width="23%" alt="工作模式长程任务交付" /></a>
+  <a href="docs/images/run-js.jpg"><img src="docs/images/run-js.jpg" width="23%" alt="run_js 设备内 JS 执行沙箱" /></a>
 </p>
 
-<p align="center"><sub>交互模式首页 · 交互模式直出的可操作界面 · 工作模式长程任务交付 · <code>run_js</code> 设备内 JS 沙箱　（点击任意一张查看原图）</sub></p>
+<p align="center"><sub>交互模式首页 · 交互模式直出的可操作界面 · 工作模式长程任务交付 · <code>run_js</code> 设备内 JS 沙箱　（点击任意一张放大）</sub></p>
 
 ## 两个当红形态，都在端侧真机跑通
 
