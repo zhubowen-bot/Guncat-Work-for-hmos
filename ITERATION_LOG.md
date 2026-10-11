@@ -1,5 +1,49 @@
 # ITERATION_LOG
 
+## 2026-10-11 R79: Agent Loop 的文件只进工作区 —— 交互模式拍照/系统分享不再掉进附件区当附件送模型
+
+### 需求
+"交互模式下点拍照按钮，拍的照片甚至会直接加在附件区域，而不进工作区，这是绝对不行的；拍的照片应该直接进工作区，只有系统分享过来的才可以暂存到附件区。另外，系统分享过来的也有概率不同步到工作区，或是同步到工作区后以附件发送，然后工作区的丢失了。"
+
+### 问题
+三处独立缺陷叠在一起，现象都表现为"文件没进工作区"：
+
+1. **拍照的门禁写错了一档**：`ChatViewModel.capturePhoto()` 里判断的是 `this.workMode`。交互模式不是工作模式，于是照片跳过"存工作区"分支，直接走 `FileService.readUri` → `enqueueFiles` → 附件区；发送时 `sendMessage()` 又把附件区的文件整批转成 `Message.attachments` 送给模型 —— 照片既没进工作区，还被当附件发了一趟。
+2. **系统分享的同步是"看运气"的**：`ChatPage.consumeSharedFiles()` 被 `@StorageLink @Watch` 与 `init().then()` 两条路径调用，而 EntryAbility 的 `publishSharedFiles()` 是异步的 —— 分享载荷可能早于 `vm.init()` 完成到达。此刻 `currentConversation` 还是 `null`，`acceptSharedFiles()` 里的 `if (conv !== null)` 静默跳过同步：文件只剩附件区里一个缩略图，没有任何提示（这就是"有概率不同步到工作区"）。另外分享到达时若还在聊天模式，之后切到工作/交互模式也不会补同步 —— 那份文件永远只以附件形式送达，"工作区里那份"压根不存在。
+3. **带文件的空会话会被清掉**：`cleanupEmptyConversation()` 只看 `messages.length === 0`。分享/拍照是**先落工作区、用户还没发消息**，这种"空对话"一旦被清理，会话 id 从列表里消失，沙箱目录变成孤儿 —— 用户看到的就是"工作区里那份丢了"。
+
+### 变更
+`entry/src/main/ets/service/WorkFileService.ts`：
+
+- **新增 `savePickedFile(context, convId, file)`**：单文件落盘、逐文件返回实际文件名（失败返回空串）；`savePickedFiles()` 改为循环调用它。逐文件结果是调用方"按来源去重 + 失败留痕"的前提 —— 只回一个名字数组时，中途某个文件写失败就会让下标与输入错位。
+
+`entry/src/main/ets/viewmodel/ChatViewModel.ets`：
+
+- **拍照门禁 `workMode` → `agentLoopMode`**：工作/交互模式拍的照片直接 `saveUriFile` 进工作区（会话缺失时给出提示，不再静默返回）；聊天模式没有沙箱工作区，照片照旧走聊天附件。
+- **`sendMessage()` 的 Agent Loop 分支不再消费附件区**：`pendingFiles` 只做"发送前兜底同步进工作区"，`Message.attachments` 传空；写盘失败的文件留在附件区并 toast，不静默丢弃。消息里改为写明"【已上传到工作区的文件】…"，图片另加一句"用 `view_image` 读"（附件区在这两个模式里只是**系统分享的暂存位**，存在的意义是让用户切回聊天模式后还能把它作为附件发出）。
+- **新增 `syncPickedFilesToWorkspace()` / `syncStagedFilesToWorkspace()`**：按 `会话id + 源 uri` 去重落盘（`workspaceSyncedSources`），并负责把"这次谁进了工作区"记进 `workspaceJustAdded`。分享到达时同步一次、发送前兜底再同步一次，同一份文件不会在工作区留下两份副本。
+- **`acceptSharedFiles()` 顺序与反馈**：先落工作区（不等解析），再进附件区解析；`conv === null` 这种漏同步情况明确报"未同步"，不再假装成功。
+- **`cleanupEmptyConversation()` 加护栏**：Agent Loop 会话的工作区里已有文件就不清（空对话 ≠ 空工作区）。新增 `conversationWorkspaceHasFiles()` / `keepBuffersFor()` / `isImageFileName()` 辅助方法；新增 `WorkspaceSyncOutcome` 结果类。
+
+`entry/src/main/ets/pages/ChatPage.ets`：
+
+- **`consumeSharedFiles()` 等 `vm.ready`**：VM 未恢复完状态时不消费、也不清空 AppStorage 里的载荷，`init().then()` 会再走一次 —— 直接掐掉"概率性不同步"的时序来源。
+
+### 效果
+- 交互模式（与工作模式一致）：拍照、上传只进沙箱工作区；系统分享进工作区 + 附件区暂存一份（切回聊天模式仍可作附件发出）。
+- 发送时模型只从工作区拿文件，不再收到同一份文件的附件副本；工作区里那份不会再因为"空会话被清理"而消失。
+- 分享早于初始化到达、以及"聊天模式收到分享后切到交互/工作模式再发送"这两条路径都会补写工作区。
+
+### 验证
+- `cd test/guncat-harness && node setup.mjs && node test-core.mjs`：**passed=521 failed=0**（本轮不动 `common/**` 纯逻辑，提示词与解析断言全绿）。
+- `node check-setup.mjs && npx -p typescript@5.5.4 tsc -p check/tsconfig.json`：**exit 0**。
+- DevEco `tools/build-check.ps1`：**BUILD SUCCESSFUL in 24 s 267 ms**（`CompileArkTS` 13 s 446 ms，0 条 ERROR；输出里的 `private ... can not be initialized through the component constructor` 与 `sourceMapsPath` warn 在改动前就存在）。
+- 手工回归口径（真机）：交互模式拍照 → 工作区面板出现 `IMG_*.jpg`、附件区为空；工作模式下从图库分享 → 工作区出现该文件、附件区也出现缩略图，发送后模型消息里只有「已上传到工作区的文件」；先分享再切到交互模式发送 → 工作区补上该文件。
+
+### 已知取舍
+- **Agent Loop 模式不再把附件区文件作为多模态附件下发**：图片改为"在工作区里 + 消息点一句用 `view_image` 读"，比原先直接随消息送达多一次工具往返（交互模式一次 1~2 次的破例额度内）。换来的是"文件只有一个入口、一个家"，也是用户明确要求的口径。
+- **`check-ui-copy.mjs` 式源码护栏没有加**：这次的两条不变式（拍照走 `agentLoopMode`、Agent Loop 分支不构造 attachments）是"分支选错"而不是"漏挂属性"，扫描器只能钉住某个具体写法，价值有限；改为把口径写进 `docs/architecture/interactive-mode.md` §1.1 的四条不变式。
+
 ## 2026-10-11 R78: Callout 灰字正文的行内 `**加粗**` 不生效（渲染端容忍模型的加粗习惯）
 
 ### 需求

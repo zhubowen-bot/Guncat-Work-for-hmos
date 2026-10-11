@@ -12,6 +12,23 @@
 - **界面跟随**：`ChatPage` 用 `vm.agentLoopMode`（work 或 interactive）代替原来的 `vm.workMode` 选择时间线、工作区面板、上传落盘路径等共享能力；只有文案类差异走 `loopModeTitle` / `loopModeHint` / `loopModeInputPlaceholder` / `loopModeEmptyDescription` / `loopToolLabel` 五个 getter。
 - **深度思考**：与工作模式一致，进入即强制开启（工具行不显示该开关）；档位默认「**快速(Low)**」（`ChatViewModel.interactiveEffort`，存储键 `guncat_interactive_effort`），可在能力预设里切到均衡或关闭。
 
+### 1.1 文件入口：工作区是唯一去处（与工作模式同一条口径）
+
+Agent Loop 模式（`work` 与 `interactive`）里**模型的文件入口是沙箱工作区，不是聊天附件**。三条入口都按这条口径走，门禁一律是 `vm.agentLoopMode`（**不是 `workMode`**——写成 `workMode` 时交互模式会掉进"附件分支"）：
+
+| 入口 | 去向 | 实现 |
+| --- | --- | --- |
+| 工作区面板「上传」/ 输入框回形针 | 直接写工作区，不进附件区 | `ChatViewModel.uploadToWorkspace()`（`ChatPage.handleFileUpload()` 在 `agentLoopMode` 时改道到这里） |
+| 输入框拍照按钮 | 直接写工作区，不进附件区 | `ChatViewModel.capturePhoto()` 的 `agentLoopMode` 分支（`saveUriFile`） |
+| 系统分享 | 附件区暂存**一份**（留给"切回聊天模式后仍能作为附件发出"这条退路）+ 工作区**一份** | `ChatViewModel.acceptSharedFiles()` → `syncPickedFilesToWorkspace()` |
+
+配套的四条不变式（改这块时不要破坏）：
+
+1. **附件区在 Agent Loop 模式只是暂存**：`sendMessage()` 的 Agent Loop 分支不把 `pendingFiles` 变成 `Message.attachments`，只把"文件已上传到工作区"写进消息（图片另附一句"用 `view_image` 读"）。此前这里会把暂存文件一并当附件送出，表现为"分享的文件同步过工作区、却像没同步"。
+2. **发送前兜底同步**：分享到达时若还在聊天模式（没有工作区可用），文件只暂存；用户随后切到交互/工作模式直接发送时，`sendMessage()` 会先把它补写进当前会话的工作区（`syncStagedFilesToWorkspace`），写失败的留在附件区并提示，不静默丢弃。
+3. **同一来源只落盘一次**：`ChatViewModel.workspaceSyncedSources`（`会话id\n源 uri → 工作区文件名`）挡住"分享到达同步一次 + 发送前兜底再同步一次"造成的重复副本。
+4. **带文件的空会话不能清**：`cleanupEmptyConversation()` 现在会先看该会话工作区是否已有文件——分享/拍照是先落工作区、用户还没发消息就有文件，删掉会话只会让目录变成孤儿（用户看到的正是"工作区里那份丢了"）。
+
 ## 2. 提示词分叉
 
 ```text

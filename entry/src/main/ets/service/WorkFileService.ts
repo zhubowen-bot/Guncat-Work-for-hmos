@@ -291,20 +291,31 @@ export class WorkFileService {
   // 把系统选择器选出的文件写入工作区根目录, 返回实际写入的文件名(重名自动追加序号)
   static savePickedFiles(context: common.UIAbilityContext, convId: string,
     files: PickedFile[]): string[] {
-    WorkFileService.ensureWorkspace(context, convId);
-    let root: string = WorkFileService.workspaceRoot(context, convId);
     let saved: string[] = [];
     for (let i: number = 0; i < files.length; i++) {
-      try {
-        let name: string = WorkFileService.sanitizeFileName(files[i].name);
-        name = WorkFileService.uniqueName(root, name);
-        WorkFileService.writeBytes(root + '/' + name, new Uint8Array(files[i].buffer));
+      let name: string = WorkFileService.savePickedFile(context, convId, files[i]);
+      if (name !== '') {
         saved.push(name);
-      } catch (e) {
-        hilog.error(DOMAIN, TAG, 'savePickedFiles failed: %{public}s', JSON.stringify(e));
       }
     }
     return saved;
+  }
+
+  // 把单个文件写入工作区根目录, 返回实际写入的文件名(重名自动追加序号); 失败返回空串。
+  // 逐文件返回结果是调用方"按来源去重 + 失败留痕"的前提: savePickedFiles 只回一个名字数组,
+  // 中途某个文件写失败就会让下标与输入错位, 调用方分不清哪一份没落盘(系统分享场景会静默丢文件)。
+  static savePickedFile(context: common.UIAbilityContext, convId: string, file: PickedFile): string {
+    WorkFileService.ensureWorkspace(context, convId);
+    let root: string = WorkFileService.workspaceRoot(context, convId);
+    try {
+      let name: string = WorkFileService.sanitizeFileName(file.name);
+      name = WorkFileService.uniqueName(root, name);
+      WorkFileService.writeBytes(root + '/' + name, new Uint8Array(file.buffer));
+      return name;
+    } catch (e) {
+      hilog.error(DOMAIN, TAG, 'savePickedFile failed: %{public}s', JSON.stringify(e));
+      return '';
+    }
   }
 
   // 把相机照片(uri)写入工作区, 返回文件名; 失败返回空串

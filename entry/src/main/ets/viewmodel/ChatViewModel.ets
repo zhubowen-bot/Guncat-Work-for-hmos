@@ -72,6 +72,14 @@ class WorkLoopStepState {
   finalAnswerText: string = '';
 }
 
+// 「等待发送区 → 沙箱工作区」的一次同步结果。
+// savedNames 是本次对应到工作区的文件名(含此前已同步过的); failedIds 是没能落盘的 FileItem id,
+// 调用方据此决定"哪些还留在附件区", 避免写失败的文件被静默清掉(系统分享场景会丢用户的文件)。
+class WorkspaceSyncOutcome {
+  savedNames: string[] = [];
+  failedIds: string[] = [];
+}
+
 @Observed
 export class ChatViewModel {
   agents: Agent[] = [];
@@ -127,6 +135,10 @@ export class ChatViewModel {
 
   // 文件解析内部状态
   private fileBuffers: Map<string, ArrayBuffer> = new Map();
+  // 已落进沙箱工作区的来源文件: '会话 id\n来源 uri(无 uri 时用文件名)' → 工作区文件名。
+  // 系统分享的文件有两条入口(分享到达即同步 / 发送前兜底同步), 没有这张表同一份文件会在工作区
+  // 留下两份重名副本(WorkFileService.uniqueName 只会追加序号, 不会判重)。
+  private workspaceSyncedSources: Map<string, string> = new Map();
   // 流式更新节流
   private streamTimer: number = -1;
   private pendingUIChange: boolean = false;
@@ -478,6 +490,12 @@ export class ChatViewModel {
   private async cleanupEmptyConversation(): Promise<void> {
     let conv: Conversation | null = this.currentConversation;
     if (conv !== null && conv.messages.length === 0) {
+      // 空对话不等于空工作区: 系统分享/拍照是先落工作区、用户还没发消息就有文件的。
+      // 这种"空对话"不能删 —— 删掉会话只是把它的 id 从列表里抹掉, 沙箱目录还在磁盘上,
+      // 但用户再也看不到那份文件了(报障现象就是"分享同步过, 工作区里却丢了")。
+      if (this.conversationWorkspaceHasFiles(conv)) {
+        return;
+      }
       // 闭包内不继承可空变量的收窄, 先落成非空局部量
       let emptyConv: Conversation = conv;
       this.conversations = this.conversations.filter((c: Conversation): boolean => c.id !== emptyConv.id);
@@ -742,6 +760,118 @@ export class ChatViewModel {
     }
     await this.refreshWorkspace();
     promptAction.showToast({ message: saved.length.toString() + ' 个文件已加入工作区', duration: 2000 });
+  }
+
+  // ===== 系统分享 / 拍照暂存文件 → 工作区 =====
+  //
+  // 交接口径(工作模式与交互模式一致, 由 agentLoopMode 判断):
+  //   - 拍照 / 工作区上传: 只落工作区, 从不进附件区(交互模式此前会落到附件区再当附件发给模型);
+  //   - 系统分享: 先暂存进附件区(保留给"切回聊天模式后继续发送"这条退路), 同时写一份进工作区;
+  //     若分享到达时不在 Agent Loop 模式(还没有工作区可用), 就只暂存, 等真正发送时再补写 ——
+  //     见 sendMessage 里对 pendingFiles 的兜底同步。
+  //   附件区在工作/交互模式里**只作为暂存**, 不再送到模型: 那两个模式的模型入口是工作区。
+  //
+  // 同一份来源(会话 + uri)只落盘一次: 分享到达时同步过、发送前又兜底同步一次, 不能变成两份副本。
+
+  // 把已经读进内存的来源文件写进当前会话的工作区, 返回每个文件在工作区里的文件名
+  // (此前已同步过的直接复用记录, 不重复落盘; 写入失败的文件名记为空串)
+  private syncPickedFilesToWorkspace(conv: Conversation, files: PickedFile[]): string[] {
+    let out: string[] = [];
+    if (this.context === null) {
+      return out;
+    }
+    for (let i: number = 0; i < files.length; i++) {
+      let file: PickedFile = files[i];
+      let source: string = file.uri !== '' ? file.uri : file.name;
+      let key: string = conv.id + '\n' + source;
+      let known: string | undefined = this.workspaceSyncedSources.get(key);
+      if (known !== undefined && known !== '') {
+        out.push(known);
+        continue;
+      }
+      let name: string = WorkFileService.savePickedFile(this.context, conv.id, file);
+      if (name === '') {
+        out.push('');
+        continue;
+      }
+      this.workspaceSyncedSources.set(key, name);
+      this.workspaceJustAdded.push(name);
+      out.push(name);
+    }
+    return out;
+  }
+
+  // 把"等待发送区"里尚未落盘的文件补写进工作区(发送前的兜底同步)。
+  // 场景: 分享到达时还在聊天模式(只暂存), 用户随后切到交互/工作模式并直接发送 ——
+  // 不补这一次, 文件就只当附件飞给模型, 工作区里什么都没有(用户看到的"同步过但工作区丢了")。
+  private syncStagedFilesToWorkspace(conv: Conversation, items: FileItem[]): WorkspaceSyncOutcome {
+    let outcome: WorkspaceSyncOutcome = new WorkspaceSyncOutcome();
+    if (this.context === null) {
+      return outcome;
+    }
+    for (let i: number = 0; i < items.length; i++) {
+      let item: FileItem = items[i];
+      let buf: ArrayBuffer | undefined = this.fileBuffers.get(item.id);
+      if (buf === undefined) {
+        outcome.failedIds.push(item.id);
+        continue;
+      }
+      let picked: PickedFile = {
+        name: item.name,
+        uri: item.uri,
+        fileType: item.type,
+        size: buf.byteLength,
+        buffer: buf
+      };
+      let names: string[] = this.syncPickedFilesToWorkspace(conv, [picked]);
+      let name: string = names.length > 0 ? names[0] : '';
+      if (name === '') {
+        outcome.failedIds.push(item.id);
+      } else {
+        outcome.savedNames.push(name);
+      }
+    }
+    return outcome;
+  }
+
+  // 只保留指定文件的内存缓冲(其余释放): 发送后 pendingFiles 里可能还留着写盘失败的文件,
+  // 它们的 buffer 必须跟着留下, 否则下次发送既补不了工作区、也发不出去。
+  private keepBuffersFor(items: FileItem[]): Map<string, ArrayBuffer> {
+    let kept: Map<string, ArrayBuffer> = new Map();
+    for (let i: number = 0; i < items.length; i++) {
+      let buf: ArrayBuffer | undefined = this.fileBuffers.get(items[i].id);
+      if (buf !== undefined) {
+        kept.set(items[i].id, buf);
+      }
+    }
+    return kept;
+  }
+
+  // 会话工作区里是否已有文件(用于保护"空对话": 空对话也可能带着用户刚分享进来的文件)
+  private conversationWorkspaceHasFiles(conv: Conversation): boolean {
+    if (this.context === null) {
+      return false;
+    }
+    if (conv.mode !== Constants.MODE_WORK && conv.mode !== Constants.MODE_INTERACTIVE) {
+      return false;
+    }
+    return WorkFileService.listWorkspace(this.context, conv.id).length > 0;
+  }
+
+  // 文件名是否图片(工作区里新到的图片要在消息里点一句"用 view_image 看", 否则模型只看文件树容易忽略)
+  private isImageFileName(name: string): boolean {
+    let lower: string = name.toLowerCase();
+    return lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png') ||
+      lower.endsWith('.webp') || lower.endsWith('.gif') || lower.endsWith('.bmp');
+  }
+
+  private hasImageFileName(names: string[]): boolean {
+    for (let i: number = 0; i < names.length; i++) {
+      if (this.isImageFileName(names[i])) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // 把整个工作区打包为 zip 并通过系统保存面板导出, 返回文件名
@@ -1163,10 +1293,13 @@ export class ChatViewModel {
     }
     promptAction.showToast({ message: '正在读取照片...', duration: 2000 });
     let stamp: string = new Date().getTime().toString();
-    // 工作模式: 照片直接存入工作区, 不作为聊天附件
-    if (this.workMode && this.context !== null) {
+    // Agent Loop 模式(工作/交互): 照片直接存入工作区, 不作为聊天附件。
+    // 门禁必须是 agentLoopMode —— 之前写的是 workMode, 交互模式下拍的照片会掉进附件区,
+    // 再以附件形式发给模型(用户看到的是"照片没进工作区")。
+    if (this.agentLoopMode && this.context !== null) {
       let conv: Conversation | null = this.currentConversation;
       if (conv === null) {
+        promptAction.showToast({ message: '当前没有工作会话, 照片未保存', duration: 2000 });
         return;
       }
       try {
@@ -1179,6 +1312,7 @@ export class ChatViewModel {
       }
       return;
     }
+    // 聊天模式: 没有沙箱工作区, 照片仍走聊天附件(与图片选择器一致)
     let picked: PickedFile | null = await FileService.readUri(uri, 'IMG_' + stamp + '.jpg');
     if (picked === null) {
       promptAction.showToast({ message: '照片读取失败', duration: 2000 });
@@ -1189,6 +1323,7 @@ export class ChatViewModel {
     promptAction.showToast({ message: '照片已加入附件', duration: 2000 });
   }
 
+  // 系统分享入口(URIs 来自 EntryAbility 解析的 Share Kit / ability.params.stream / want.uri)
   async acceptSharedFiles(uris: string[]): Promise<void> {
     if (uris.length === 0) {
       return;
@@ -1198,19 +1333,27 @@ export class ChatViewModel {
       promptAction.showToast({ message: '无法读取分享的文件', duration: 2000 });
       return;
     }
-    // 工作模式/交互模式: 分享文件在进入预览区的同时写入沙箱工作区。
-    // 门禁用 agentLoopMode —— 之前用 workMode, 交互模式下分享的图片只停在预览区, 从不落到工作区。
-    // 发送时 Agent Loop 会把等待发送区的附件一并带给模型(见 sendMessage), 预览区随发送清空。
+    // 两条去向, 顺序有讲究: 先落工作区, 再进附件区解析(解析要调多模态接口, 可能几秒,
+    // 工作区那份不该跟着一起等)。
+    //   1) 附件区暂存(所有模式都做): 用户切回聊天模式后仍能把它作为附件发出去;
+    //   2) Agent Loop 模式(工作/交互)额外写一份进沙箱工作区 —— 这两个模式的模型入口是工作区,
+    //      分享的文件必须在那里就位; 门禁用 agentLoopMode(交互模式与工作模式共用同一个工作区)。
+    // 同步失败(写盘失败)不谎报成功: 直接告诉用户, 文件仍留在附件区, 发送时会再补一次。
     let workspaceSynced: number = -1;
     if (this.agentLoopMode && this.context !== null) {
       let conv: Conversation | null = this.currentConversation;
-      if (conv !== null) {
-        let saved: string[] = WorkFileService.savePickedFiles(this.context, conv.id, files);
-        workspaceSynced = saved.length;
-        for (let i: number = 0; i < saved.length; i++) {
-          this.workspaceJustAdded.push(saved[i]);
+      if (conv === null) {
+        // 理论上 init 完成后不会再出现; 真出现就明确报"未同步", 不要静默留在附件区
+        workspaceSynced = 0;
+      } else {
+        let names: string[] = this.syncPickedFilesToWorkspace(conv, files);
+        workspaceSynced = 0;
+        for (let i: number = 0; i < names.length; i++) {
+          if (names[i] !== '') {
+            workspaceSynced++;
+          }
         }
-        if (saved.length > 0) {
+        if (workspaceSynced > 0) {
           await this.refreshWorkspace();
         }
       }
@@ -1229,7 +1372,7 @@ export class ChatViewModel {
     } else if (workspaceSynced === 0) {
       promptAction.showToast({
         message: files.length.toString() + ' 个分享文件已加入附件, 但同步到工作区失败',
-        duration: 2000
+        duration: 2500
       });
     } else {
       promptAction.showToast({
@@ -1612,32 +1755,52 @@ export class ChatViewModel {
 
     // ===== Agent Loop 模式(工作模式 / 交互模式): 走同一个循环, 系统提示词按会话模式选择 =====
     if (conv.mode === Constants.MODE_WORK || conv.mode === Constants.MODE_INTERACTIVE) {
+      // 工作/交互模式的模型入口是工作区, 不是附件。
+      // 附件区(等待发送区)在这两个模式里只是"系统分享的暂存位" —— 它存在的意义是让用户
+      // 切回聊天模式后还能把这份文件作为附件发出去, **不能**在被清掉之前顺手发给模型。
+      // 这条分支以前把 pendingFiles 全部转成 attachments 送给模型, 于是同一份分享文件
+      // 既进了工作区又当附件飞了一趟(用户看到的是"同步过, 但工作区里好像没有")。
+      // 现在的口径: 未落盘的文件先补写进工作区, 只把"文件已就位"告诉模型, 一个附件都不带。
+      let staged: FileItem[] = this.pendingFiles.filter((f: FileItem): boolean => !f.isParsing);
+      let leftover: FileItem[] = [];
+      let syncedNames: string[] = [];
+      if (staged.length > 0) {
+        let outcome: WorkspaceSyncOutcome = this.syncStagedFilesToWorkspace(conv, staged);
+        syncedNames = outcome.savedNames;
+        for (let i: number = 0; i < staged.length; i++) {
+          if (outcome.failedIds.indexOf(staged[i].id) !== -1) {
+            leftover.push(staged[i]);
+          }
+        }
+        if (syncedNames.length > 0) {
+          await this.refreshWorkspace();
+        }
+        if (leftover.length > 0) {
+          // 写盘失败的文件不静默丢弃: 留在附件区, 让用户看得见、可以重试
+          promptAction.showToast({
+            message: leftover.length.toString() + ' 个文件写入工作区失败, 已留在附件区',
+            duration: 2500
+          });
+        }
+      }
       let notes: string[] = [];
       if (this.workspaceJustAdded.length > 0) {
-        notes.push('【已上传到工作区的文件】' + this.workspaceJustAdded.join(', '));
+        let added: string[] = this.workspaceJustAdded;
         this.workspaceJustAdded = [];
-      }
-      // 等待发送区的附件必须一并送达模型: 这条分支以前完全没有消费 pendingFiles,
-      // 系统分享/拍照进来的图片会一直挂在预览条上 —— 既没同步工作区, 也没进请求,
-      // 交互模式下就表现为"分享了图片但模型看不到"。文本附件把解析结果拼进正文,
-      // 图片附件随本条消息走多模态(在循环历史里展开为带图的 user 消息)。
-      let ready: FileItem[] = this.pendingFiles.filter((f: FileItem): boolean =>
-        !f.isParsing && !f.error && (f.parsedText !== '' || f.dataUrl !== ''));
-      let attachments: Attachment[] = [];
-      for (let i: number = 0; i < ready.length; i++) {
-        let f: FileItem = ready[i];
-        if (f.parsedText !== '') {
-          notes.push('【文件解析：' + f.name + '】\n' + f.parsedText);
+        notes.push('【已上传到工作区的文件】' + added.join(', '));
+        // 图片要么用 view_image 看, 要么就是一堆文件名: 点一句, 省掉模型"要不要读"的犹豫
+        if (this.hasImageFileName(added)) {
+          notes.push('【图片素材】上面的图片就在工作区根目录, 需要看图内容时用 view_image 读取(一次一张, 不必重复读)。');
         }
-        let type: string = f.type.startsWith('image/') ? 'image' : 'file';
-        attachments.push(Attachment.of(f.name, f.parsedText, type, f.thumbnail, f.dataUrl, ''));
       }
       let workFullText: string = notes.length > 0 ? notes.join('\n\n') + '\n\n' + userText : userText;
-      let workUserMsg: Message = Message.ofUser(generateMessageId(), workFullText, userText, attachments);
+      // attachments 传空数组: 这两个模式的附件通道已关闭(见本分支开头的口径说明)
+      let noAttachments: Attachment[] = [];
+      let workUserMsg: Message = Message.ofUser(generateMessageId(), workFullText, userText, noAttachments);
       conv.messages.push(workUserMsg);
-      // 附件已随本条消息送出, 预览区同步清空(与聊天模式发送后一致), 避免后续每一轮重复携带
-      this.pendingFiles = [];
-      this.fileBuffers.clear();
+      // 已落工作区/未落盘的都从预览区收走: leftover 留在 pendingFiles 里(下次发送再补)
+      this.pendingFiles = leftover;
+      this.fileBuffers = this.keepBuffersFor(leftover);
       if (conv.title === '') {
         conv.title = userText.length > 24 ? userText.substring(0, 24) + '...' : userText;
       }

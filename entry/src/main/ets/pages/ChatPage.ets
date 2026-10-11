@@ -268,6 +268,13 @@ struct ChatPage {
     if (this.sharedFileUris === '') {
       return;
     }
+    // VM 还没恢复完状态时不能消费: 此刻 currentConversation 为 null, 分享文件会"既落不进
+    // 工作区、也没有任何提示", 只剩附件区里一个缩略图 —— 报障里的"概率性不同步到工作区"
+    // 就是这条时序(AppStorage 的分享载荷可能早于 init 完成到达)。
+    // 不消费也不清空载荷: init().then() 里会再走一次 consumeSharedFiles。
+    if (!this.vm.ready) {
+      return;
+    }
     let payload: string = this.sharedFileUris;
     this.sharedFileUris = '';
     try {

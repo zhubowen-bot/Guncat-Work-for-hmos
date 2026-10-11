@@ -20,6 +20,7 @@
 - **进入/退出**：侧边栏点击「工作模式」= `selectAgent('work')`；点击任意真实智能体即退出（`lastChatAgentId` 记录最近使用的真实智能体，供工具行的工作模式胶囊退出时回切）。
 - **会话绑定**：`Conversation.mode = 'chat' | 'work'`；工作会话 `agentId` 固定为 `'work'`，启动时对旧数据自动迁移。删除工作会话会同步清理沙箱工作区目录。
 - **开关差异**：进入工作模式强制开启深度思考（工具行不显示该开关）；联网搜索保留（服务端搜索工具与客户端函数工具并存下发）；上传/拍照直接进入工作区而非聊天附件。
+- **文件入口**（与交互模式同一条口径，门禁是 `agentLoopMode`）：上传 / 拍照 → 只落工作区；系统分享 → 附件区暂存一份（留给切回聊天模式后发送）+ 工作区一份，发送时只按工作区送达，不再当聊天附件重复送一遍。详见[交互模式架构 · 文件入口](interactive-mode.md#11-文件入口工作区是唯一去处与工作模式同一条口径)。
 - **持久化**：会话 JSON 新增 `mode` 与 `Message.toolCalls`（`ToolCallRecord[]`，含调用参数/结果/耗时，重启后据此还原时间线与 LLM 历史）。会话存档（`filesDir/guncat_conversations.json`）与工作区文件本体都存沙箱 `filesDir`，不进 Preferences。
 
 ## 2. Agent Loop（`ChatViewModel.executeWorkLoop`）
