@@ -7,11 +7,11 @@
         "material": {
           "certpath": "C:\\Users\\a1519\\.ohos\\config\\default_Guncat-Work-for-hmos_80z6WuF6FeKF_cT36SFINBTntF-8o4Jml1A8D_xDZ0U=.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "0000001B9488DC92FE90B33372DEB4D4C9509CB1D6389AE6EB69D42D787BAC957006E443CA0752E8913C1F",
+          "keyPassword": "0000001B421932214B6B5B12E977B5429FD0686C6366A131B0FB0CD72184745147689ECBD2591526B83BF9",
           "profile": "C:\\Users\\a1519\\.ohos\\config\\default_Guncat-Work-for-hmos_80z6WuF6FeKF_cT36SFINBTntF-8o4Jml1A8D_xDZ0U=.p7b",
           "signAlg": "SHA256withECDSA",
           "storeFile": "C:\\Users\\a1519\\.ohos\\config\\default_Guncat-Work-for-hmos_80z6WuF6FeKF_cT36SFINBTntF-8o4Jml1A8D_xDZ0U=.p12",
-          "storePassword": "0000001BABD21036F2D42C1BFFAA0E9883FB9A968AACDEDF149398A64161926EB1FB50A5FDDABFF219A620"
+          "storePassword": "0000001BD5F959902E24F9CD18FF5861775CF5AA1885BC9C3227F468A863B119FE1A4BCB12A77FC8E72D42"
         }
       }
     ],
