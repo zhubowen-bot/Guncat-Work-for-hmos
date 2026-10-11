@@ -892,7 +892,8 @@ export struct GuncatUiView {
   @Builder
   buildTextContent(el: UiElement) {
     Column() {
-      this.inlineRich(UiNode.str(this.live(el), 'text', ''), this.contentSize(el), $r('app.color.text_primary'), false)
+      this.inlineRich(UiNode.str(this.live(el), 'text', ''), this.contentSize(el),
+        $r('app.color.text_primary'), FontWeight.Normal, 0)
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
@@ -917,13 +918,21 @@ export struct GuncatUiView {
 
   // 行内富文本: **粗体** / `code` / [文字](https://…) —— 用 Flex 换行承载,
   // 不做完整 Markdown(那由 MarkDownRenderer 负责), 避免正文被包成代码块样式。
+  // baseWeight = 普通片段的字重(粗体片段永远 Bold): Callout 标题是 Medium、正文是 Normal,
+  // 一个 forceBold 布尔表达不了, 所以按调用点给基准字重。
+  // lineH = 行高, 传 0 表示不限制(跟随默认, 与不设该属性等价; 见官方 lineHeight 文档
+  // "设置值不大于0时, 不限制文本行高, 自适应字体大小")。
+  // ⚠️ 用 Flex 承载时"一行"是 Flex 的一行, 行高取该行里最高的子项 —— 所以**每个片段都要设上**
+  // 才真的生效, 只给第一个片段设没用。
   @Builder
-  inlineRich(text: string, textSize: number, textColor: ResourceColor, forceBold: boolean) {
+  inlineRich(text: string, textSize: number, textColor: ResourceColor, baseWeight: FontWeight,
+    lineH: number) {
     Flex({ wrap: FlexWrap.Wrap }) {
       ForEach(this.inlineSegments(text), (seg: InlineSeg, i: number) => {
         if (seg.kind === 'link') {
           Text(seg.text)
             .fontSize(textSize)
+            .lineHeight(lineH)
             .fontColor($r('app.color.brand'))
             .decoration({ type: TextDecorationType.Underline, color: $r('app.color.brand') })
             .onClick(() => {
@@ -933,7 +942,8 @@ export struct GuncatUiView {
         } else {
           Text(seg.text)
             .fontSize(textSize)
-            .fontWeight(seg.kind === 'bold' || forceBold ? FontWeight.Bold : FontWeight.Normal)
+            .lineHeight(lineH)
+            .fontWeight(seg.kind === 'bold' ? FontWeight.Bold : baseWeight)
             .fontColor(seg.kind === 'code' ? $r('app.color.brand') : textColor)
             .copyOption(CopyOptions.LocalDevice)
         }
@@ -1023,21 +1033,17 @@ export struct GuncatUiView {
         color: this.toneColor(UiNode.str(this.live(el), 'variant', 'info'))
       })
       Column({ space: 3 }) {
+        // 标题与正文都走**行内富文本**: 模型习惯在正文里写 `**强调**`, 而纯 Text 会把星号原样
+        // 显示出来(真机反馈: 灰字正文里出现 "你的描述**在行为层面基本准确**")。粗体 / `行内代码` /
+        // [链接](url) 三种都按界面里的内容渲染。标题原本是 Medium 字重, 用 baseWeight 传进去,
+        // 不能被统一的 Bold/Normal 覆盖掉。
         if (UiNode.has(this.live(el), 'title')) {
-          Text(UiNode.str(this.live(el), 'title', ''))
-            .fontSize(13)
-            .fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.text_primary'))
-            .width('100%')
-            .copyOption(CopyOptions.LocalDevice)
+          this.inlineRich(UiNode.str(this.live(el), 'title', ''), 13,
+            $r('app.color.text_primary'), FontWeight.Medium, 0)
         }
         if (UiNode.has(this.live(el), 'description')) {
-          Text(UiNode.str(this.live(el), 'description', ''))
-            .fontSize(13)
-            .lineHeight(20)
-            .fontColor($r('app.color.text_secondary'))
-            .width('100%')
-            .copyOption(CopyOptions.LocalDevice)
+          this.inlineRich(UiNode.str(this.live(el), 'description', ''), 13,
+            $r('app.color.text_secondary'), FontWeight.Normal, 20)
         }
       }
       .layoutWeight(1)

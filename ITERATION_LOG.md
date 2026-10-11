@@ -1,5 +1,65 @@
 # ITERATION_LOG
 
+## 2026-10-11 R78: Callout 灰字正文的行内 `**加粗**` 不生效（渲染端容忍模型的加粗习惯）
+
+### 需求
+"这种类型的卡片（左边图标 + 上方标题 + 下方灰字，灰底），下方灰字正文的 markdown 加粗无法正常加粗。"
+
+### 问题
+提示卡（`Callout` / `TextCallout`）的标题与正文在 `GuncatUiView.buildCallout()` 里是**裸 `Text`**：
+`Text(description).fontSize(13).lineHeight(20)...`。纯 `Text` 不解析任何行内标记，于是模型写的
+`**在行为层面基本准确**` 原样显示成带星号的文本。
+
+根因不只是"忘了接富文本"，还有一层**契约与现实的缝隙**：`GuncatUiPrompt` 的反例清单里写着
+"唯一例外是 `TextContent` 里的行内 `**粗体**`"，也就是说按契约模型**不该**在 Callout 里加粗。
+但"在正文里给关键结论加粗"是模型的习惯性动作 —— 一句话拦不住它，截图就是证据。渲染端正确的
+姿态是**容忍**（把标记当格式渲染），而不是把标记当字面量展示给用户。
+
+### 变更
+`entry/src/main/ets/views/GuncatUiView.ets`：
+
+- **`buildCallout()` 的 title / description 改走 `inlineRich(...)`** —— 与 `TextContent` 同一条
+  行内富文本路径（`**粗体**` / `` `行内代码` `` / `[文字](url)`）。`Callout` 与 `TextCallout` 在
+  `renderNode()` 里共用这一个 builder，所以一处修复覆盖两种提示条。
+- **`inlineRich()` 签名 `(text, textSize, textColor, forceBold)` → `(text, textSize, textColor, baseWeight, lineH)`**：
+  - `baseWeight` 是必需的新参数，不是"顺手加的功能"：Callout 标题原本是 `FontWeight.Medium`、
+    正文是 `Normal`，而旧实现里 `forceBold` 只有 Bold/Normal 两档（且**唯一调用点 `buildTextContent`
+    恒传 `false`**，等于该参数一直是死的）。照搬 `forceBold` 会把标题字重从 Medium 变成 Normal —— 为了
+    修一个 bug 改坏标题的字重不划算。现在：`seg.kind === 'bold' ? Bold : baseWeight`。
+  - `lineH` 用来把正文原本的 `lineHeight(20)` 原样带过去；`TextContent` 调用点传 `0`。官方
+    `lineHeight` 文档明确"设置值不大于0时，不限制文本行高，自适应字体大小"，即 0 与不设该属性等价，
+    所以这条主路径（正文 `TextContent`）的行为**没有变化**。
+  - `buildTextContent()` 调用点相应改为 `FontWeight.Normal, 0`。
+- **新增注释记下 `Flex` 承载行内富文本的行高坑**：用 `Flex` 换行时"一行"是 Flex 的一行，行高取该行里
+  **最高**的子项，因此行高必须**逐个片段**都设上才生效，只给第一个片段设没有意义。
+
+### 效果
+提示卡的标题与正文里的 `**强调**` 按粗体渲染，`` `代码` `` 按品牌色行内代码渲染，`[文字](url)`
+可点击跳转；星号不再外露。标题保持 Medium、正文保持 `lineHeight(20)`，其余观感不变。
+
+### 验证
+- `node test/guncat-harness/check-ui-copy.mjs`：**内容型 50 可复制 / 控件标签 19 豁免，通过**。
+  计数从上一轮的 52 变成 50，是因为这次把 Callout 的 title/description 两个裸 `Text` 换成了
+  `this.inlineRich(...)` 调用（`inlineRich` 内部的片段 `Text` 本来就带 `copyOption`，长按复制能力
+  不减反增 —— 现在整段是"按片段可选"，段落级选择见下方取舍）。
+- DevEco `tools/build-check.ps1`：**BUILD SUCCESSFUL**（`CompileArkTS` 17 s 254 ms，exit code 0，
+  0 条 ERROR）。`GuncatUiView.ets` 仅有的 4 条 warn 是改动前就存在的 `getContext` / `showToast`
+  弃用告警（315/318/327 行，在 `openUrl()` / `copyText()` 里）。
+- 范围选择：本轮按用户明确的"只修这张卡片（最小改动）"执行；`CardHeader` 副标题 / `InlineHeader`
+  说明 / `ListItem` 副标题 / 表格单元 / 指标说明等**仍是纯文本**，同样会出现字面星号。
+
+### 已知取舍
+- **契约没跟着改**：`GuncatUiPrompt` 里"唯一例外是 `TextContent` 里的行内 `**粗体**`"这句现在
+  与渲染端不完全一致（Callout 也支持了）。没有一起改，是因为那会改变模型行为（更主动地在提示卡里
+  加粗），属于产品口径而不是渲染 bug；渲染端先做到"容忍"已经能消除用户看到的星号。要改的话是
+  `GuncatUiPrompt.ts` 里的一行，`test-core.mjs` 没有断言钉这句（已确认）。
+- **行内富文本仍是 `Flex` + 多个 `Text` 分段**，没有改成 `Text` + `Span` 子组件。改造后
+  `maxLines` / 省略号 / `lineHeight` 都能保留，且长按选择可跨片段（现在的实现在段落里会被片段边界
+  切断），但会重写 `TextContent` 这条**已上真机验证过**的主路径，需要真机确认换行与链接点击 ——
+  不适合夹在本次最小修复里。
+- **没有加护栏**：本轮的修复是"某个 builder 该用哪条渲染路径"的渲染选择，不是可机械枚举的系统性
+  不变量，脚本只能钉住这一个 builder；已在此记录，若后续把其他卡片统一，再一并加护栏更划算。
+
 ## 2026-10-11 R77: 交互模式卡片文字支持长按自由复制（内容文字可选中 + 护栏）
 
 ### 需求
