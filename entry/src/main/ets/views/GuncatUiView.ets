@@ -7,7 +7,14 @@
 //   2. **绑定是活的**: 用户拖动/点选后重新物化整棵树(表达式里的 $变量用新值重算), 界面立即变化;
 //      需要模型重算时用 Action([@ToAssistant(...)]) 回传一条消息, 触发新一轮;
 //   3. **流式中禁用交互**: 程序没写完时控件置灰, 避免在残缺界面上提交;
-//   4. 绑定值随消息持久化(尾标记), 用户填过的参数在滚动/切换会话/重启后仍在。
+//   4. 绑定值随消息持久化(尾标记), 用户填过的参数在滚动/切换会话/重启后仍在;
+//   5. **文字一律可长按自由复制**: 界面里的字是模型写出来的内容, 用户常要摘出来用, 所以每个
+//      **内容型** Text 都带 `.copyOption(CopyOptions.LocalDevice)` —— 官方语义是"长按文本会弹出
+//      文本选择菜单, 可选中并复制、全选"。**交互控件标签除外**(按钮 / 选项卡 / 单选多选药丸 /
+//      下拉项 / 标签选项 / 选项卡条目 / 折叠触发器 / 追问胶囊 / 行内动作 / 序号圆点): 它们的整块
+//      区域就是点击热区, 挂上选择能力会跟自己的点击事件抢手势(真机与社区都出现过"点了没反应,
+//      只有长按出复制")。这些行一律以行尾 `// copy-off: 原因` 标注, 由
+//      `test/guncat-harness/check-ui-copy.mjs` 守住 —— 新加组件时漏挂 copyOption 会被它拦下。
 import { common } from '@kit.AbilityKit';
 import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
@@ -516,6 +523,7 @@ export struct GuncatUiView {
               .fontSize(11)
               .fontColor($r('app.color.text_tertiary'))
               .layoutWeight(1)
+              .copyOption(CopyOptions.LocalDevice)
           }
           .width('100%')
           .padding({ left: this.edge(), right: this.edge() })
@@ -524,7 +532,7 @@ export struct GuncatUiView {
   
         if (this.program.errors.length > 0) {
           Row({ space: 6 }) {
-            Text(this.showErrors ? '收起诊断' : ('诊断 · ' + this.program.errors.length.toString() + ' 条'))
+            Text(this.showErrors ? '收起诊断' : ('诊断 · ' + this.program.errors.length.toString() + ' 条')) // copy-off: 折叠开关标签(整行是点击热区)
               .fontSize(10)
               .fontColor($r('app.color.text_quaternary'))
           }
@@ -541,6 +549,7 @@ export struct GuncatUiView {
                   .fontSize(10)
                   .fontColor($r('app.color.text_quaternary'))
                   .width('100%')
+                  .copyOption(CopyOptions.LocalDevice)
               }, (msg: string, i: number) => 'err' + i.toString())
             }
             .width('100%')
@@ -553,7 +562,7 @@ export struct GuncatUiView {
   
         if (this.programText.trim() !== '') {
           Row({ space: 6 }) {
-            Text(this.showRaw ? '收起原始输出' : '查看原始输出')
+            Text(this.showRaw ? '收起原始输出' : '查看原始输出') // copy-off: 折叠开关标签(整行是点击热区)
               .fontSize(10)
               .fontColor($r('app.color.text_quaternary'))
           }
@@ -571,6 +580,7 @@ export struct GuncatUiView {
                 .fontColor($r('app.color.text_tertiary'))
                 .width('100%')
                 .wordBreak(WordBreak.BREAK_ALL)
+                .copyOption(CopyOptions.LocalDevice)
             }
             .scrollable(ScrollDirection.Vertical)
             .scrollBar(BarState.Auto)
@@ -601,13 +611,14 @@ export struct GuncatUiView {
           .fontSize(12)
           .fontColor($r('app.color.text_secondary'))
           .width('100%')
+          .copyOption(CopyOptions.LocalDevice)
       } else {
         Row({ space: 8 }) {
           LoadingProgress()
             .width(14)
             .height(14)
             .color($r('app.color.brand'))
-          Text('正在生成界面…')
+          Text('正在生成界面…') // copy-off: 加载状态文案
             .fontSize(12)
             .fontColor($r('app.color.text_tertiary'))
         }
@@ -632,6 +643,7 @@ export struct GuncatUiView {
             .margin({ right: 6, bottom: 6 })
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .copyOption(CopyOptions.LocalDevice)
         }, (row: string, i: number) => 'src' + i.toString())
       }
       .width('100%')
@@ -812,12 +824,14 @@ export struct GuncatUiView {
         .fontSize(13)
         .fontColor($r('app.color.text_primary'))
         .width('100%')
+        .copyOption(CopyOptions.LocalDevice)
     } else {
       // 未知/未实现组件: 不静默吞掉, 给一行浅色提示便于排查
       Text('未支持的组件 ' + el.type)
         .fontSize(11)
         .fontColor($r('app.color.text_quaternary'))
         .width('100%')
+        .copyOption(CopyOptions.LocalDevice)
     }
   }
 
@@ -841,11 +855,13 @@ export struct GuncatUiView {
         .fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.text_primary'))
         .width('100%')
+        .copyOption(CopyOptions.LocalDevice)
       if (UiNode.has(this.live(el), 'subtitle')) {
         Text(UiNode.str(this.live(el), 'subtitle', ''))
           .fontSize(12)
           .fontColor($r('app.color.text_tertiary'))
           .width('100%')
+          .copyOption(CopyOptions.LocalDevice)
       }
     }
     .width('100%')
@@ -860,11 +876,13 @@ export struct GuncatUiView {
         .fontWeight(FontWeight.Medium)
         .fontColor($r('app.color.text_primary'))
         .width('100%')
+        .copyOption(CopyOptions.LocalDevice)
       if (UiNode.has(this.live(el), 'description')) {
         Text(UiNode.str(this.live(el), 'description', ''))
           .fontSize(12)
           .fontColor($r('app.color.text_secondary'))
           .width('100%')
+          .copyOption(CopyOptions.LocalDevice)
       }
     }
     .width('100%')
@@ -911,11 +929,13 @@ export struct GuncatUiView {
             .onClick(() => {
               this.openUrl(seg.url);
             })
+            .copyOption(CopyOptions.LocalDevice)
         } else {
           Text(seg.text)
             .fontSize(textSize)
             .fontWeight(seg.kind === 'bold' || forceBold ? FontWeight.Bold : FontWeight.Normal)
             .fontColor(seg.kind === 'code' ? $r('app.color.brand') : textColor)
+            .copyOption(CopyOptions.LocalDevice)
         }
       }, (seg: InlineSeg, i: number) => 'is' + i.toString() + seg.kind)
     }
@@ -1009,6 +1029,7 @@ export struct GuncatUiView {
             .fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.text_primary'))
             .width('100%')
+            .copyOption(CopyOptions.LocalDevice)
         }
         if (UiNode.has(this.live(el), 'description')) {
           Text(UiNode.str(this.live(el), 'description', ''))
@@ -1016,6 +1037,7 @@ export struct GuncatUiView {
             .lineHeight(20)
             .fontColor($r('app.color.text_secondary'))
             .width('100%')
+            .copyOption(CopyOptions.LocalDevice)
         }
       }
       .layoutWeight(1)
@@ -1104,6 +1126,7 @@ export struct GuncatUiView {
           .fontColor($r('app.color.text_tertiary'))
           .width('100%')
           .margin({ top: 6 })
+          .copyOption(CopyOptions.LocalDevice)
       }
     }
     .width('100%')
@@ -1147,6 +1170,7 @@ export struct GuncatUiView {
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .width('100%')
               .margin({ top: 4 })
+              .copyOption(CopyOptions.LocalDevice)
           }
         }
         .layoutWeight(1)
@@ -1165,7 +1189,8 @@ export struct GuncatUiView {
           .fontSize(10)
           .fontColor($r('app.color.text_tertiary'))
           .layoutWeight(1)
-        Text('复制')
+          .copyOption(CopyOptions.LocalDevice)
+        Text('复制') // copy-off: 复制按钮自身
           .fontSize(10)
           .fontColor($r('app.color.brand'))
           .onClick(() => {
@@ -1180,6 +1205,7 @@ export struct GuncatUiView {
           .fontColor($r('app.color.code_text'))
           .width('100%')
           .textAlign(TextAlign.Start)
+          .copyOption(CopyOptions.LocalDevice)
       }
       .scrollable(ScrollDirection.Horizontal)
       .scrollBar(BarState.Auto)
@@ -1217,6 +1243,7 @@ export struct GuncatUiView {
       .borderRadius(999)
       .backgroundColor(this.tagBgColor(variant))
       .margin({ right: 6, bottom: 6 })
+      .copyOption(CopyOptions.LocalDevice)
   }
 
   private tagBgColor(variant: string): ResourceColor {
@@ -1279,11 +1306,13 @@ export struct GuncatUiView {
         .fontWeight(emphasize ? FontWeight.Medium : FontWeight.Normal)
         .fontColor($r('app.color.text_primary'))
         .layoutWeight(1)
+        .copyOption(CopyOptions.LocalDevice)
       Text(UiNode.objStr(this.liveRow(el, prop, index), 'right', ''))
         .fontSize(emphasize ? 12 : 13)
         .fontWeight(FontWeight.Medium)
         .fontColor($r('app.color.text_primary'))
         .flexShrink(0)
+        .copyOption(CopyOptions.LocalDevice)
     }
     .width('100%')
     .padding({ left: 12, right: 12, top: 9, bottom: 9 })
@@ -1433,6 +1462,7 @@ export struct GuncatUiView {
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
                 .textAlign(this.colAlign(col))
+                .copyOption(CopyOptions.LocalDevice)
             }, (col: UiElement, ci: number) => 'th' + ci.toString())
           }
           .width(this.tableWidth(el))
@@ -1449,6 +1479,7 @@ export struct GuncatUiView {
                   .maxLines(3)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
                   .textAlign(this.colAlignAt(el, ci))
+                  .copyOption(CopyOptions.LocalDevice)
               }, (cell: string, ci: number) => 'tc' + ri.toString() + '_' + ci.toString())
             }
             .width(this.tableWidth(el))
@@ -1538,7 +1569,7 @@ export struct GuncatUiView {
       ForEach(UiNode.elementList(this.live(el), 'sections'), (sec: UiElement, i: number) => {
         Column({ space: 8 }) {
           Row({ space: 6 }) {
-            Text(UiNode.str(this.live(sec), 'trigger', ''))
+            Text(UiNode.str(this.live(sec), 'trigger', '')) // copy-off: 折叠分节标题(整行是点击热区)
               .fontSize(14)
               .fontWeight(FontWeight.Medium)
               .fontColor($r('app.color.text_primary'))
@@ -1594,7 +1625,7 @@ export struct GuncatUiView {
       Scroll() {
         Row({ space: 8 }) {
           ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
-            Text(UiNode.str(this.live(item), 'trigger', ''))
+            Text(UiNode.str(this.live(item), 'trigger', '')) // copy-off: 选项卡标签(点击切换)
               .fontSize(13)
               .fontWeight(this.selectedIndexOf(el) === i ? FontWeight.Medium : FontWeight.Normal)
               .fontColor(this.selectedIndexOf(el) === i ? Color.White : $r('app.color.text_secondary'))
@@ -1647,7 +1678,7 @@ export struct GuncatUiView {
       ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
         Column({ space: 8 }) {
           Row({ space: 6 }) {
-            Text(UiNode.str(this.live(item), 'trigger', ''))
+            Text(UiNode.str(this.live(item), 'trigger', '')) // copy-off: 折叠项标题(整行是点击热区)
               .fontSize(14)
               .fontWeight(FontWeight.Medium)
               .fontColor($r('app.color.text_primary'))
@@ -1711,7 +1742,7 @@ export struct GuncatUiView {
       ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
         Row({ space: 10 }) {
           Column() {
-            Text((i + 1).toString())
+            Text((i + 1).toString()) // copy-off: 步骤序号圆点(装饰)
               .fontSize(11)
               .fontWeight(FontWeight.Medium)
               .fontColor(Color.White)
@@ -1728,11 +1759,13 @@ export struct GuncatUiView {
               .fontWeight(FontWeight.Medium)
               .fontColor($r('app.color.text_primary'))
               .width('100%')
+              .copyOption(CopyOptions.LocalDevice)
             Text(UiNode.str(this.live(item), 'details', ''))
               .fontSize(12)
               .lineHeight(19)
               .fontColor($r('app.color.text_secondary'))
               .width('100%')
+              .copyOption(CopyOptions.LocalDevice)
           }
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start)
@@ -1756,11 +1789,13 @@ export struct GuncatUiView {
           ? FontWeight.Bold : FontWeight.Normal)
         .fontColor($r('app.color.text_primary'))
         .width('100%')
+        .copyOption(CopyOptions.LocalDevice)
       if (UiNode.has(this.live(el), 'subtext')) {
         Text(UiNode.str(this.live(el), 'subtext', ''))
           .fontSize(11)
           .fontColor($r('app.color.text_secondary'))
           .width('100%')
+          .copyOption(CopyOptions.LocalDevice)
       }
     }
     .width('100%')
@@ -1801,6 +1836,7 @@ export struct GuncatUiView {
           .width('100%')
           .maxLines(2)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .copyOption(CopyOptions.LocalDevice)
         if (UiNode.has(this.live(el), 'subtitle')) {
           Text(UiNode.str(this.live(el), 'subtitle', ''))
             .fontSize(11)
@@ -1808,6 +1844,7 @@ export struct GuncatUiView {
             .width('100%')
             .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .copyOption(CopyOptions.LocalDevice)
         }
       }
       .layoutWeight(1)
@@ -1850,6 +1887,7 @@ export struct GuncatUiView {
           .width('100%')
           .maxLines(2)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .copyOption(CopyOptions.LocalDevice)
         if (UiNode.has(this.live(el), 'subtitle')) {
           Text(UiNode.str(this.live(el), 'subtitle', ''))
             .fontSize(11)
@@ -1857,6 +1895,7 @@ export struct GuncatUiView {
             .width('100%')
             .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .copyOption(CopyOptions.LocalDevice)
         }
       }
       .layoutWeight(1)
@@ -1874,11 +1913,13 @@ export struct GuncatUiView {
         .fontSize(17)
         .fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.text_primary'))
+        .copyOption(CopyOptions.LocalDevice)
       if (UiNode.has(this.live(el), 'previousValue')) {
         Text(UiNode.str(this.live(el), 'previousValue', ''))
           .fontSize(12)
           .fontColor($r('app.color.text_tertiary'))
           .decoration({ type: TextDecorationType.LineThrough, color: $r('app.color.text_tertiary') })
+          .copyOption(CopyOptions.LocalDevice)
       }
       if (this.trendText(el) !== '') {
         Text(this.trendText(el))
@@ -1888,6 +1929,7 @@ export struct GuncatUiView {
           .padding({ left: 6, right: 6, top: 2, bottom: 2 })
           .borderRadius(6)
           .backgroundColor(this.trendUp(el) ? '#E3F7EC' : '#FDE8E6')
+          .copyOption(CopyOptions.LocalDevice)
       }
       if (UiNode.has(this.live(el), 'subtext')) {
         Text(UiNode.str(this.live(el), 'subtext', ''))
@@ -1896,6 +1938,7 @@ export struct GuncatUiView {
           .layoutWeight(1)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .copyOption(CopyOptions.LocalDevice)
       }
     }
     .width('100%')
@@ -1950,12 +1993,14 @@ export struct GuncatUiView {
         .fontWeight(FontWeight.Medium)
         .fontColor($r('app.color.text_primary'))
         .width('100%')
+        .copyOption(CopyOptions.LocalDevice)
       if (UiNode.has(this.live(item), 'body')) {
         Text(UiNode.str(this.live(item), 'body', ''))
           .fontSize(12)
           .lineHeight(19)
           .fontColor($r('app.color.text_secondary'))
           .width('100%')
+          .copyOption(CopyOptions.LocalDevice)
       }
     }
     .width('100%')
@@ -2067,6 +2112,7 @@ export struct GuncatUiView {
               .fontWeight(FontWeight.Bold)
               .fontColor($r('app.color.text_primary'))
               .layoutWeight(1)
+              .copyOption(CopyOptions.LocalDevice)
           } else {
             Blank()
           }
@@ -2139,11 +2185,13 @@ export struct GuncatUiView {
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('app.color.text_primary'))
                 .width('100%')
+                .copyOption(CopyOptions.LocalDevice)
               if (UiNode.has(this.live(item), 'subtitle')) {
                 Text(UiNode.str(this.live(item), 'subtitle', ''))
                   .fontSize(12)
                   .fontColor($r('app.color.text_secondary'))
                   .width('100%')
+                  .copyOption(CopyOptions.LocalDevice)
               }
             }
             .layoutWeight(1)
@@ -2156,7 +2204,7 @@ export struct GuncatUiView {
         } else {
           Row({ space: 9 }) {
             Column() {
-              Text((i + 1).toString())
+              Text((i + 1).toString()) // copy-off: 列表序号圆点(装饰)
                 .fontSize(11)
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('app.color.brand'))
@@ -2174,19 +2222,21 @@ export struct GuncatUiView {
                 .fontSize(13)
                 .fontColor($r('app.color.text_primary'))
                 .width('100%')
+                .copyOption(CopyOptions.LocalDevice)
               if (UiNode.has(this.live(item), 'subtitle')) {
                 Text(UiNode.str(this.live(item), 'subtitle', ''))
                   .fontSize(12)
                   .lineHeight(19)
                   .fontColor($r('app.color.text_secondary'))
                   .width('100%')
+                  .copyOption(CopyOptions.LocalDevice)
               }
             }
             .layoutWeight(1)
             .alignItems(HorizontalAlign.Start)
 
             if (UiNode.has(this.live(item), 'actionLabel')) {
-              Text(UiNode.str(this.live(item), 'actionLabel', ''))
+              Text(UiNode.str(this.live(item), 'actionLabel', '')) // copy-off: 行内动作按钮
                 .fontSize(12)
                 .fontColor($r('app.color.brand'))
                 .padding({ left: 10, right: 10, top: 5, bottom: 5 })
@@ -2215,11 +2265,13 @@ export struct GuncatUiView {
         .fontSize(13)
         .fontColor($r('app.color.text_primary'))
         .width('100%')
+        .copyOption(CopyOptions.LocalDevice)
       if (UiNode.has(this.live(el), 'subtitle')) {
         Text(UiNode.str(this.live(el), 'subtitle', ''))
           .fontSize(12)
           .fontColor($r('app.color.text_secondary'))
           .width('100%')
+          .copyOption(CopyOptions.LocalDevice)
       }
     }
     .width('100%')
@@ -2231,7 +2283,7 @@ export struct GuncatUiView {
   buildFollowUps(el: UiElement) {
     Flex({ wrap: FlexWrap.Wrap }) {
       ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
-        Text(UiNode.str(this.live(item), 'text', ''))
+        Text(UiNode.str(this.live(item), 'text', '')) // copy-off: 追问胶囊(点击即发送)
           .fontSize(12)
           .fontColor($r('app.color.brand'))
           .padding({ left: 12, right: 12, top: 7, bottom: 7 })
@@ -2281,6 +2333,7 @@ export struct GuncatUiView {
         .fontWeight(FontWeight.Medium)
         .fontColor($r('app.color.text_primary'))
         .width('100%')
+        .copyOption(CopyOptions.LocalDevice)
       if (UiNode.element(this.live(el), 'input') !== null) {
         this.renderNode(UiNode.element(this.live(el), 'input') as UiElement, false)
       }
@@ -2289,6 +2342,7 @@ export struct GuncatUiView {
           .fontSize(11)
           .fontColor($r('app.color.text_tertiary'))
           .width('100%')
+          .copyOption(CopyOptions.LocalDevice)
       }
     }
     .width('100%')
@@ -2371,6 +2425,7 @@ export struct GuncatUiView {
           .fontSize(10)
           .fontColor($r('app.color.text_quaternary'))
           .width('100%')
+          .copyOption(CopyOptions.LocalDevice)
       }
     }
     .width('100%')
@@ -2444,6 +2499,7 @@ export struct GuncatUiView {
             .layoutWeight(1)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .copyOption(CopyOptions.LocalDevice)
         } else {
           Blank()
         }
@@ -2452,6 +2508,7 @@ export struct GuncatUiView {
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.brand'))
           .flexShrink(0)
+          .copyOption(CopyOptions.LocalDevice)
       }
       .width('100%')
 
@@ -2527,11 +2584,13 @@ export struct GuncatUiView {
               .fontSize(13)
               .fontColor($r('app.color.text_primary'))
               .width('100%')
+              .copyOption(CopyOptions.LocalDevice)
             if (UiNode.has(this.live(item), 'description')) {
               Text(UiNode.str(this.live(item), 'description', ''))
                 .fontSize(11)
                 .fontColor($r('app.color.text_secondary'))
                 .width('100%')
+                .copyOption(CopyOptions.LocalDevice)
             }
           }
           .layoutWeight(1)
@@ -2562,13 +2621,13 @@ export struct GuncatUiView {
       ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
         if (UiNode.has(this.live(item), 'description')) {
           Column({ space: 3 }) {
-            Text(UiNode.str(this.live(item), 'label', ''))
+            Text(UiNode.str(this.live(item), 'label', '')) // copy-off: 单选/多选项(整块是点击热区)
               .fontSize(13)
               .fontWeight(FontWeight.Medium)
               .fontColor(this.isSelected(el, this.itemValue(el, item)) && !multi
                 ? $r('app.color.brand') : $r('app.color.text_primary'))
               .width('100%')
-            Text(UiNode.str(this.live(item), 'description', ''))
+            Text(UiNode.str(this.live(item), 'description', '')) // copy-off: 单选/多选项(整块是点击热区)
               .fontSize(11)
               .fontColor($r('app.color.text_secondary'))
               .width('100%')
@@ -2592,7 +2651,7 @@ export struct GuncatUiView {
             this.toggleChoice(el, this.itemValue(el, item), multi);
           })
         } else {
-          Text(UiNode.str(this.live(item), 'label', ''))
+          Text(UiNode.str(this.live(item), 'label', '')) // copy-off: 单选/多选项(整块是点击热区)
             .fontSize(13)
             .fontColor(this.isSelected(el, this.itemValue(el, item))
               ? Color.White : $r('app.color.text_primary'))
@@ -2625,7 +2684,7 @@ export struct GuncatUiView {
     Column({ space: 6 }) {
       Flex({ wrap: FlexWrap.Wrap }) {
         ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
-          Text(UiNode.str(this.live(item), 'label', ''))
+          Text(UiNode.str(this.live(item), 'label', '')) // copy-off: 下拉选项(点击即选中)
             .fontSize(13)
             .fontColor(this.isSelected(el, UiNode.str(this.live(item), 'value', ''))
               ? Color.White : $r('app.color.text_primary'))
@@ -2651,7 +2710,7 @@ export struct GuncatUiView {
   buildChips(el: UiElement) {
     Flex({ wrap: FlexWrap.Wrap }) {
       ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
-        Text(UiNode.str(this.live(item), 'label', ''))
+        Text(UiNode.str(this.live(item), 'label', '')) // copy-off: 标签选项(点击即选中)
           .fontSize(12)
           .fontColor(this.isSelected(el, UiNode.str(this.live(item), 'value', ''))
             ? Color.White : $r('app.color.text_primary'))
@@ -2678,13 +2737,13 @@ export struct GuncatUiView {
       ForEach(UiNode.elementList(this.live(el), 'items'), (item: UiElement, i: number) => {
         Row({ space: 10 }) {
           Column({ space: 3 }) {
-            Text(UiNode.str(this.live(item), 'title', ''))
+            Text(UiNode.str(this.live(item), 'title', '')) // copy-off: 选项卡(整行是点击热区)
               .fontSize(14)
               .fontWeight(FontWeight.Medium)
               .fontColor($r('app.color.text_primary'))
               .width('100%')
             if (UiNode.has(this.live(item), 'subtitle')) {
-              Text(UiNode.str(this.live(item), 'subtitle', ''))
+              Text(UiNode.str(this.live(item), 'subtitle', '')) // copy-off: 选项卡(整行是点击热区)
                 .fontSize(12)
                 .fontColor($r('app.color.text_secondary'))
                 .width('100%')
@@ -2751,7 +2810,7 @@ export struct GuncatUiView {
 
   @Builder
   buildButton(el: UiElement, form: UiElement | null) {
-    Text(UiNode.str(this.live(el), 'label', '按钮'))
+    Text(UiNode.str(this.live(el), 'label', '按钮')) // copy-off: 按钮标签
       .fontSize(this.buttonFontSize(el))
       .fontWeight(FontWeight.Medium)
       .fontColor(this.buttonTextColor(el))

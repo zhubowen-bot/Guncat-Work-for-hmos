@@ -3,6 +3,7 @@ name: CI
 # 覆盖范围（边界是有意划定的，不是遗漏）
 #
 #   ✅ guncat-harness 纯逻辑单测 + 服务层 tsc 类型检查
+#   ✅ 交互界面文字可复制护栏（源码级扫描，见 check-ui-copy.mjs）
 #   ✅ docx / pptx / xlsx 三个 Office 生成器离线验证（Node 构建 + Python 结构校验）
 #
 #   ❌ 真实 ArkTS 编译 / HAP 构建：第三层验证需要 DevEco Studio + HarmonyOS SDK +
@@ -50,6 +51,13 @@ jobs:
         run: |
           node check-setup.mjs
           npx -y -p typescript@5.5.4 tsc -p check/tsconfig.json
+
+      # 不需要 setup.mjs：这个脚本直接扫 entry/ 下的 .ets 源码，不移植也不编译。
+      # 它守的是"交互界面里的内容文字都挂了 copyOption（长按自由复制）"，
+      # 漏挂只表现为"那块字长按没反应"，编译和单测都拦不住。
+      - name: 交互界面文字可复制护栏
+        working-directory: test/guncat-harness
+        run: node check-ui-copy.mjs
 
   office:
     name: Office 生成器离线验证

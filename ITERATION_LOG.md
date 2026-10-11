@@ -1,5 +1,41 @@
 # ITERATION_LOG
 
+## 2026-10-11 R77: 交互模式卡片文字支持长按自由复制（内容文字可选中 + 护栏）
+
+### 需求
+交互模式下，卡片中的文字内容无法长按自由复制，请添加"卡片文字自由复制"功能。
+
+### 问题
+交互模式的卡片是**能读的界面**：用户看到指标卡、表格或一段结论，常要把某一句摘出来用。但长按卡片文字**毫无反应**。根因是 ArkUI 的 `Text` 默认 `copyOption = CopyOptions.None`（不可复制粘贴），而 `GuncatUiView.ets` 里 70 多个 `Text` 一个都没挂这个属性 —— 同一条消息里的正文（`RichTextView`，三方库文本选择常开）能长按拖选，卡片里的字不能，两者体验割裂。
+
+### 变更
+`entry/src/main/ets/views/GuncatUiView.ets`：
+
+- **52 处内容型 `Text` 补 `.copyOption(CopyOptions.LocalDevice)`**：官方语义是"设置 copyOptions 为 CopyOptions.InApp 或者 CopyOptions.LocalDevice，长按文本，会弹出文本选择菜单，可选中文本并进行复制、全选操作"。覆盖 `CardHeader` / `InlineHeader` / `TextContent`(行内富文本) / `Callout` / 图片与图片墙 alt / `CodeBlock`(语言名 + 正文) / 标签胶囊 / `EntityList` / 表格表头与单元 / 步骤标题与详情 / `Text` / `IconText` / `ImageText` / 指标四值 / 卡片块(`contextCard` / 组合卡价格 / 列表项) / `ListItem` / 表单字段标签与提示 / 输入校验说明 / 滑块标签与数值 / 开关标签与说明 / 来源列表，以及底部空态说明、诊断条目、原始输出。短按照旧触发既有 `onClick`（如行内链接），**长按才进入选择**。
+- **19 处交互控件标签刻意豁免**：按钮 / 选项卡标签 / 单选多选药丸 / 下拉项 / 标签选项 / 选项卡条目 / `SectionBlock` 与 `Accordion` 的折叠触发器 / 追问胶囊 / 列表项 `actionLabel` / 步骤与列表的序号圆点（外加"正在生成界面…"加载文案）。理由：这些的**整块区域就是点击热区**，挂上选择能力会与自己的点击事件抢手势（社区与真机都出现过"点 Text 区域没反应，只有长按弹复制"）。豁免写法是**行尾 `// copy-off: 原因`**，让"刻意不加"和"忘了加"在源码里可区分。
+- 文件头补第 5 条设计要点，把这条纪律和豁免边界写进注释。
+
+`test/guncat-harness/check-ui-copy.mjs`（新）+ `.github/workflows/ci.yml`：
+
+- **源码级护栏**：扫描 `GuncatUiView.ets`，逐个 `Text(` 链要求"挂 `copyOption` 或带**非空原因**的 `copy-off`"，另加"可复制数量下限"兜底（防整段删除后零命中通过）。链的边界用括号深度 + `.` 续行判定（`.onClick(() => { … })` 这种多行回调整体能正确收进同一条链）。接入 CI 的 `logic` 作业。
+- 为什么必须新开一层：编译器只说"语法合法"，单测只覆盖 `common/**` 纯逻辑，而漏挂只表现为"真机上某块字长按没反应"——正是三层验证都拦不住的静默回归。
+- 图表（`GuncatUiCharts.ets`）的文字是坐标轴刻度与图例微标签（9~11fp、被自绘布局紧约束），**有意排除**并在脚本头写明理由。
+
+文档：`CHANGELOG.md`、`docs/architecture/interactive-mode.md`（渲染一节新增该条）、`docs/features.md`（「局部文本复制」补卡片文字，并顺手修正"操作区有「复制局部」按钮"这句已过时的描述 —— 该按钮早已被"文本选择常开"取代）、`CONTRIBUTING.md`（新增「第 2 层补充 · 源码级护栏」与一条红线）。
+
+### 效果
+- 卡片里**任何一句内容文字**都能长按选中、局部或全选复制，与正文 Markdown 的手感统一；交互控件不受影响（短按照旧）。
+
+### 验证
+- `node test/guncat-harness/check-ui-copy.mjs`：**内容型 52 可复制 / 控件标签 19 豁免，通过**。
+- 护栏**负向验证**（脚本自己造的坏文件，三种缺陷分别注入）：抽掉一处 `copyOption` → 点名 `Text(UiNode.str(this.live(col), 'label', ''))`；豁免原因清空 → 点名"没有写原因"；豁免又挂 `copyOption` → 点名"二者只能留一个"，`exit=1`。
+- 改动面确认：`GuncatUiView.ets` 里 `Text(` 起始行共 **71** 处，`52 + 19 = 71`，无漏网。
+
+### 已知取舍
+- **不豁免而行内链接**：行内 `[文字](url)` 既要点击跳转、也要能复制，判定为"内容文字"，两者共存（短按跳转 / 长按选择）。若真机上出现链接点不动，回退方案是把这一处也标 `copy-off`，护栏会接受。
+- **`CopyOptions.LocalDevice` 而非 `CopyOptions.InApp`**：与仓库既有用法一致（`TableOcrPage` 的 HTML / 调试文本），且用户复制出来就是要发到别处去的。
+- **控件标签的取舍偏保守**：理论上"单选/多选的选项文字"也值得复制，但它们同时也是点击热区，优先保证点击可靠。
+
 ## 2026-10-10 R76: 「快」前置为整段提示词的第 0 段一级标题（纪律前置）
 
 ### 需求
