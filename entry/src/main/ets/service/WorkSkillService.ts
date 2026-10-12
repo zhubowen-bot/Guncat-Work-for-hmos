@@ -210,7 +210,7 @@ export class WorkSkillService {
     llmEval.files.push(le1);
     llmEval.files.push(le2);
     list.push(llmEval);
-    // ===== 2026-09-17 四平台参考移植新增（见 SKILL_PORTING_REPORT.md） =====
+    // ===== 2026-09-17 四平台参考移植新增（见 docs/SKILL_PORTING_REPORT.md） =====
     let humanizer: SkillInfo = new SkillInfo();
     humanizer.id = 'humanizer';
     humanizer.name = '去 AI 味与拟人化改写';

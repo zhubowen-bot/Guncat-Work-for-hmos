@@ -9,7 +9,7 @@ body:
         欢迎提想法。为了让讨论更有效率，请说明**你遇到的是什么问题**，
         而不只是"我想要一个 X 功能"——同一个问题往往有更好的解法。
 
-        也可以先看 [`BACKLOG.md`](https://github.com/zhubowen-bot/Guncat-Work-for-hmos/blob/main/BACKLOG.md)，
+        也可以先看 [`docs/BACKLOG.md`](https://github.com/zhubowen-bot/Guncat-Work-for-hmos/blob/main/docs/BACKLOG.md)，
         里面已列了不少待办，也许你想提的正在其中。
 
   - type: textarea

@@ -8,9 +8,9 @@
 > **维护文档地图**（改哪块看哪份）：
 > 
 > - 本文档——架构、工具/技能/PPT 三套系统的设计与扩展步骤；
-> - `ITERATION_LOG.md`——Agent Loop 核心层逐轮改动与验证记录（R1–R64）；
-> - `BACKLOG.md`——当前待办与已完成的审计维度；
-> - `PORT_NOTES.md`——dsh 移植对照与后续核心层迭代说明；
+> - `docs/ITERATION_LOG.md`——Agent Loop 核心层逐轮改动与验证记录（R1–R64）；
+> - `docs/BACKLOG.md`——当前待办与已完成的审计维度；
+> - `docs/PORT_NOTES.md`——dsh 移植对照与后续核心层迭代说明；
 > - `test/pptx-harness/README.md`——PPT 生成器与 CSV 写入器的离线验证环境（Node 构建 + python-pptx 校验 + PNG 目检），改 `export/` 下任何文件后必跑；
 > - `entry/src/main/resources/rawfile/skills/`——**模型看到的**操作指南（5 个主 Skill：`research-intelligence`/`academic-publishing`/`content-writing`/`legal-ip`/`ai-tooling`，各含 `SKILL.md` + `ROUTING.md` + 分支子目录；7 个格式分支顶层直连：`ppt`/`docx`/`xlsx`/`svg`/`data`/`html`/`pdf`；`list_skills` 只暴露这 12 个可见技能，25 个分支由主 Skill 路由后按原 id 加载），是随工具演进同步维护的文档，也是可移植到其他 Agent 框架的复用资产。
 
@@ -58,7 +58,7 @@ for step in 1..WORK_MAX_STEPS(200, 防失控保险):
 - **可观测**：`LoopMetrics`（重试/压缩/max_tokens 计数）、`SessionLogAggregator`（协议维度 + 工具延迟 p50/p90/p99 + 跨会话聚合）、`PromptBudget`（token 预算估算）。
 - **测试**：`test/guncat-harness` 纯逻辑用例 **521 项全绿**；改 `common/` 后跑 `node setup.mjs && node test-core.mjs`，再 `node check-setup.mjs && tsc -p check/tsconfig.json`，最后 `assembleHap` 真机构建。
 
-每轮改动与验证记录在 `ITERATION_LOG.md`；当前待办见 `BACKLOG.md`；dsh 移植对照见 `PORT_NOTES.md`。
+每轮改动与验证记录在 `docs/ITERATION_LOG.md`；当前待办见 `docs/BACKLOG.md`；dsh 移植对照见 `docs/PORT_NOTES.md`。
 
 ## 3. 工具系统（45 个）
 

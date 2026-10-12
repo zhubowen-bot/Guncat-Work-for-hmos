@@ -15,5 +15,5 @@ contact_links:
     about: 环境要求、编码规范（ArkTS 硬约束）、怎么跑测试、PR 流程
 
   - name: 待办清单
-    url: https://github.com/zhubowen-bot/Guncat-Work-for-hmos/blob/main/BACKLOG.md
+    url: https://github.com/zhubowen-bot/Guncat-Work-for-hmos/blob/main/docs/BACKLOG.md
     about: 已规划的迭代方向与当前待办

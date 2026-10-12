@@ -83,7 +83,7 @@ node check-setup.mjs && npx -y -p typescript@5.5.4 tsc -p check/tsconfig.json
 
 ## 四、后续核心层迭代（R13–R42）
 
-6.1.0 移植完成后的核心层迭代记录在 `ITERATION_LOG.md`（R1–R42，逐轮验证）；`BACKLOG.md` 维护当前待办。主要技术方向：
+6.1.0 移植完成后的核心层迭代记录在 `docs/ITERATION_LOG.md`（R1–R42，逐轮验证）；`docs/BACKLOG.md` 维护当前待办。主要技术方向：
 
 - **决策层纯逻辑化**：`ToolScheduler` / `RepeatDetector` / `LoopDecisions` / `WorkLoopPlanner` / `WorkLoopSimulator` / `WorkLoopDriver` / `WorkLoopStateMachine` 全部抽到 `common/`，ChatViewModel 只做 IO 注入。
 - **三协议统一**：`LLMProtocol`（协议/端点）、`ToolDefAdapter`（工具形态）、`SSEProtocolAdapter` + `SSEAdapterFactory`（SSE 流水线）成为单一事实源，工作/聊天模式共用。

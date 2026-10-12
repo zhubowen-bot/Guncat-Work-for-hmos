@@ -193,7 +193,7 @@
 
 ## 6.1.0 更新（DeepSeek Harness 移植）
 
-把 DeepSeek Harness（dsh）的核心 Agent Loop 能力移植进工作模式：新增一批纯本地实现的工具、循环调度升级，并为宽屏设备引入三栏桌面界面。版本升至 6.1.0（`Constants.APP_VERSION` 与 `AppScope/app.json5` versionName 6.1.0 / versionCode 610 同步）。完整移植对照见 `PORT_NOTES.md`。
+把 DeepSeek Harness（dsh）的核心 Agent Loop 能力移植进工作模式：新增一批纯本地实现的工具、循环调度升级，并为宽屏设备引入三栏桌面界面。版本升至 6.1.0（`Constants.APP_VERSION` 与 `AppScope/app.json5` versionName 6.1.0 / versionCode 610 同步）。完整移植对照见 `docs/PORT_NOTES.md`。
 
 - **新工具（11 个）**：`glob`（`**`/`{a,b}`/`[...]` 模式按路径找文件）、`grep`（正则搜索文本内容）、`edit`（逐字符唯一匹配替换，返回行级 diff）、`str_replace_editor`（view/create/str_replace/insert 四命令编辑器）、`web_fetch`（抓取网页/接口原文，HTML 自动剥离为可读文本）、`ask_user_question`（暂停执行等待用户作答；UI 问题卡片支持单选/多选与文字补充，统一由"提交"发送）、`schedule_create/list/delete`（会话内定时提醒，到期自动唤醒执行，循环提醒最小间隔 300 秒）、`goal_create/get/update`（会话自主目标，随运行时快照注入防漂移）、`subagent`（进程内子代理：与主任务共享工作区、独立上下文、最多 40 步，最终报告作为工具结果交还）、`session_search`（在会话事件日志中检索历史）。
 - **Agent Loop 升级**：追加式会话事件日志（JSONL，`<filesDir>/sessions/<convId>.jsonl`，turn/assistant/工具结果留痕）；用户插话（steering）——任务执行中发送的消息不打断任务，在本轮结束后作为「用户补充」注入下一步请求；有界并行工具池（连续只读调用并发执行、上限 4、按模型顺序提交，改动类调用串行屏障）；粘性 max-tokens（输出顶到上限自动收尾并提示"发送继续"）；工具结果溢出暂存（超过约 1.2 万字符的全文落盘工作区 `.spill/`，模型收到头尾节选与定位提示，可 read_file 读回）；LLM 会话标题（首个任务收尾后后台生成，每会话一次）。

@@ -127,7 +127,7 @@ ArkTS 不是 TypeScript 的超集，它砍掉了大量动态特性。**最容易
 - **所有 `import` 必须写在文件最前面**，不能夹在其它语句之间。
 - **展开运算符**只允许把数组（或派生自数组的类）展开到 rest 参数或数组字面量中，其余场景手动解包。
 
-> 完整清单（约 70 条，含每条的理由与替代写法）见仓库根目录的 [`harmonyos-default.md`](harmonyos-default.md)。
+> 完整清单（约 70 条，含每条的理由与替代写法）见 [`docs/harmonyos-default.md`](docs/harmonyos-default.md)。
 
 ### 二、HarmonyOS API 与资源
 
@@ -165,8 +165,8 @@ ArkTS 不是 TypeScript 的超集，它砍掉了大量动态特性。**最容易
 | 目录布局、数据流、核心组件 | [项目结构](docs/architecture/project-structure.md) |
 | 客户端功能全貌 | [主要功能](docs/features.md) |
 | 版本变更史 | [更新记录](CHANGELOG.md) |
-| 待办与规划 | [`BACKLOG.md`](BACKLOG.md) |
-| Agent Loop 逐轮改动记录 | [`ITERATION_LOG.md`](ITERATION_LOG.md) |
+| 待办与规划 | [`docs/BACKLOG.md`](docs/BACKLOG.md) |
+| Agent Loop 逐轮改动记录 | [`docs/ITERATION_LOG.md`](docs/ITERATION_LOG.md) |
 
 ---
 

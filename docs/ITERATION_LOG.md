@@ -560,7 +560,7 @@ R69 把纪律写进了提示词（"默认一次回答直接给界面、不调用
 **给用户的结论**：这是**模型输出上限**问题，不是渲染/解析问题。可操作项：① 关掉深度思考（把预算全留给界面 JSON）；② 让界面更短（提示词已限制 2~4 个元素）；③ 截断时应用会自动用 JSON 模式重做一次界面。
 
 ### 下一项
-见 `BACKLOG.md`「交互模式后续待办」：交互状态归档、数据集绑定（界面元素直连工作区文件本地重算）、元素扩充（timeline/kanban/区间滑块/日期）、解析失败回退入口、`render_ui` 工具化渲染。
+见 `docs/BACKLOG.md`「交互模式后续待办」：交互状态归档、数据集绑定（界面元素直连工作区文件本地重算）、元素扩充（timeline/kanban/区间滑块/日期）、解析失败回退入口、`render_ui` 工具化渲染。
 
 ## 2026-09-16 R1: 工具执行超时/取消护栏
 
@@ -1786,7 +1786,7 @@ R69 把纪律写进了提示词（"默认一次回答直接给界面、不调用
   - 工作模式循环说明标注默认由 `WorkLoopDriver` 驱动（`WORK_USE_DRIVER_LOOP=true`，可回退）。
   - 2.1 节标题更新为 R13–R64，补充 `WorkLoopDriverBridge`/`LoopTurnInfoMapper`/`WorkLoopStepInfoBuilder`/`SchedulerSummary`/`describe`，测试数更新为 277。
   - 6.2.0 / Version 6.2.0 通俗语言新增「驱动引擎默认启用、可一键回退」一条。
-- `BACKLOG.md`：第八轮改为「产品功能（工具执行体验 + 会话质量/上下文）」，原纯兜底小工具移入「低优先级工程待办（暂缓）」。
+- `docs/BACKLOG.md`：第八轮改为「产品功能（工具执行体验 + 会话质量/上下文）」，原纯兜底小工具移入「低优先级工程待办（暂缓）」。
 
 ### 状态
 - 第八轮暂停，等待用户下一步指示。
@@ -2621,7 +2621,7 @@ R69 把纪律写进了提示词（"默认一次回答直接给界面、不调用
 - 扫描 `doubao-workbuddy-qwenwork-skills-skill` 参考目录，筛选高频、通用、可复用且与现有 10 个技能不重复的能力，按本项目规范移植到 `rawfile/skills/` 并登记进 `WorkSkillService.registry()`。
 
 ### 筛选结果
-- 产出 `SKILL_PORTING_REPORT.md`：记录四平台扫描范围、现有技能覆盖、筛选维度、落选候选、移植清单与 Source Map。
+- 产出 `docs/SKILL_PORTING_REPORT.md`：记录四平台扫描范围、现有技能覆盖、筛选维度、落选候选、移植清单与 Source Map。
 - 本轮新增 4 个技能：
   - `humanizer`：去 AI 味/拟人化/可读性改写（来源 workbuddy humanizer + social-content-team de-ai-writing/output-readability）；
   - `prompt-engineering`：提示词工程（来源 workbuddy prompt-engineering-expert）；
@@ -2635,7 +2635,7 @@ R69 把纪律写进了提示词（"默认一次回答直接给界面、不调用
 - 新增 `rawfile/skills/translation/SKILL.md` + `reference/translation-playbook.md`、`legal-full.md`（法律翻译完整原文）、`medical-1..5.md`（医学翻译完整原文拆段）；
 - `entry/src/main/ets/service/WorkSkillService.ts`：`registry()` 新增上述 4 个 SkillInfo（id/name/description/files 全量登记）；
 - `test/pptx-harness/check-docs.py`：新增全部新技能文档到体量/围栏检查；
-- `SKILL_PORTING_REPORT.md`：新增分析报告并记录“不简化原则”。
+- `docs/SKILL_PORTING_REPORT.md`：新增分析报告并记录“不简化原则”。
 
 ### 验证
 - `python test/pptx-harness/check-docs.py`：新技能文档全部 OK（仅既有 `ppt/SKILL.md` 13026 字符超限为历史遗留，未在本轮改动）；
@@ -2660,7 +2660,7 @@ R69 把纪律写进了提示词（"默认一次回答直接给界面、不调用
 - **删除自编速查文件（R2 纠正）**：`prompt-engineering/reference/best-practices.md`、`translation/reference/translation-playbook.md` 已删除，并从 registry/check-docs 移除。
 - **删除与 SKILL.md 重复的引用（R2 去重）**：`humanizer/reference/general-patterns.md`、`prompt-engineering/reference/original-skill.md`、`pdf/reference/original-prompt-1.md`、`translation/reference/legal-full.md` 已删除（内容已由对应 SKILL.md 承载）。
 - **新增适配层**：`pdf/reference/tool-notes.md`（本项目工具映射/工作流/能力边界），登记进 registry。
-- `SKILL_PORTING_REPORT.md`：新增「双数轮复查（R2）」章节记录以上修正。
+- `docs/SKILL_PORTING_REPORT.md`：新增「双数轮复查（R2）」章节记录以上修正。
 
 ### 验证
 - frontmatter：14 个技能目录名与 `name` 全部一致；
@@ -2678,7 +2678,7 @@ R69 把纪律写进了提示词（"默认一次回答直接给界面、不调用
 - 仅将 frontmatter `name` 改为 `questionnaire`，并在 SKILL.md 末尾加本项目适配说明（飞书交付改 `write_docx`/`write_xlsx`，M4 用 `transform_file` 清洗）；
 - `WorkSkillService.registry()` 登记 questionnaire（files 全量登记）；
 - `test/pptx-harness/check-docs.py` 加入 questionnaire 全部文档；
-- `SKILL_PORTING_REPORT.md` 更新为 5 个新技能并记录 R3。
+- `docs/SKILL_PORTING_REPORT.md` 更新为 5 个新技能并记录 R3。
 
 ### 验证
 - frontmatter：15 个技能目录名与 `name` 全部一致；
@@ -2718,7 +2718,7 @@ R69 把纪律写进了提示词（"默认一次回答直接给界面、不调用
 - 仅将 frontmatter `name` 改为 `content-rewrite`，并在 SKILL.md 末尾加本项目适配说明（飞书交付改 `write_file`/`write_docx`；配图用 `svg` 或用户供图；`internet-search` 对应 `search_web`）；
 - `WorkSkillService.registry()` 登记 content-rewrite（11 个 reference 文件全量登记）；
 - `test/pptx-harness/check-docs.py` 加入 content-rewrite 全部文档；
-- `SKILL_PORTING_REPORT.md` 更新为 6 个新技能并记录 R5。
+- `docs/SKILL_PORTING_REPORT.md` 更新为 6 个新技能并记录 R5。
 
 ### 验证
 - frontmatter：16 个技能目录名与 `name` 全部一致；
@@ -2758,7 +2758,7 @@ R69 把纪律写进了提示词（"默认一次回答直接给界面、不调用
 - frontmatter 原已是 `html`，未改名；仅在 SKILL.md 末尾加本项目适配说明（脚本不可执行、present_files/妙搭发布不可用、交付用 `write_file`、素材用 `download_file`、配图用 `write_svg`）；
 - `WorkSkillService.registry()` 登记 html（6 个 references + 2 个 scripts 全量登记）；
 - `test/pptx-harness/check-docs.py` 加入 html 的 SKILL.md + 6 个 reference 文档；
-- `SKILL_PORTING_REPORT.md` 更新为 7 个新技能并记录 R7。
+- `docs/SKILL_PORTING_REPORT.md` 更新为 7 个新技能并记录 R7。
 
 ### 验证
 - references 与 scripts MD5 哈希与参考源完全一致（IDENTICAL）；
@@ -2797,7 +2797,7 @@ R69 把纪律写进了提示词（"默认一次回答直接给界面、不调用
 - **review-agent**（ChatGPT 代码评审）：完整复制 `SKILL.md` + `agents/openai.yaml`；仅在 SKILL.md 末尾加适配说明（无 git/终端，依赖用户提供 diff，用 read_file/search_files 读取）；
 - `WorkSkillService.registry()` 登记 2 个技能（全部文件登记）；
 - `test/pptx-harness/check-docs.py` 加入 paper-reviewer 3 个 md + review-agent SKILL.md；
-- `SKILL_PORTING_REPORT.md` 更新为 9 个新技能并记录 R9。
+- `docs/SKILL_PORTING_REPORT.md` 更新为 9 个新技能并记录 R9。
 
 ### 验证
 - references/yaml 哈希与参考源完全一致（IDENTICAL）；
@@ -2835,7 +2835,7 @@ R69 把纪律写进了提示词（"默认一次回答直接给界面、不调用
 - `WorkSkillService.registry()` 登记 5 个技能（全部文件登记），技能总数 19 → 24；
 - `test/pptx-harness/check-docs.py` 加入 5 个技能全部 md；
 - README.md / README_EN.md 技能系统、项目树、工具表、维护地图与 6.2.0 底部条目同步为 24 个技能（10 核心 + 14 移植）；
-- SKILL_PORTING_REPORT.md 更新为 14 个新技能并记录本轮的 10h 段。
+- docs/SKILL_PORTING_REPORT.md 更新为 14 个新技能并记录本轮的 10h 段。
 
 ### 验证
 - 新增文件全部为原提示词全文复制（仅删不可用脚本、改交付/检索工具描述，无简化）；各文件字符数 <1.2 万，无需拆段；
@@ -2862,7 +2862,7 @@ R69 把纪律写进了提示词（"默认一次回答直接给界面、不调用
 - `WorkSkillService.registry()` 登记 5 个技能（khazix 2 + newmedia 23 + marketing 0 + patent 5 + sentiment 4 个 reference 文件），技能总数 24 → 29。
 - `test/pptx-harness/check-docs.py` 加入 5 个技能全部 md。
 - README.md / README_EN.md 技能系统、目录树、工具表、维护地图与 6.2.0 底部条目同步为 29 个技能（10 核心 + 19 移植）。
-- SKILL_PORTING_REPORT.md 更新为 19 个新技能并记录本轮的 10i 段。
+- docs/SKILL_PORTING_REPORT.md 更新为 19 个新技能并记录本轮的 10i 段。
 
 ### 验证
 - 新增文件保持原文提示词全文复制（仅删不可用脚本/平台、改交付/检索工具描述，无简化）；
@@ -2889,7 +2889,7 @@ R69 把纪律写进了提示词（"默认一次回答直接给界面、不调用
 - `WorkSkillService.registry()` 登记 3 个技能（journal-format 21 + research-proposal 7 + industry-analysis 9 个 reference 文件），技能总数 29 → 32。
 - `test/pptx-harness/check-docs.py` 加入 3 个技能全部 md（含拆分片段）。
 - README.md / README_EN.md 技能系统、目录树、工具表、维护地图与 6.2.0 底部条目同步为 32 个技能（10 核心 + 22 移植）。
-- SKILL_PORTING_REPORT.md 更新为 22 个新技能并记录本轮的 10j 段。
+- docs/SKILL_PORTING_REPORT.md 更新为 22 个新技能并记录本轮的 10j 段。
 - 清理：`test/pptx-harness/_split_jf.py`、`_cleanup_jf.py` 为临时工具，后续删除。
 
 ### 验证
@@ -2933,7 +2933,7 @@ R69 把纪律写进了提示词（"默认一次回答直接给界面、不调用
   - `marketing-material-review`：审核报告 docx/Markdown；逐条审核表用 `load_skill("xlsx")` + `write_xlsx`。
   - `research-lineage-map`：节点明细表用 `load_skill("xlsx")` + `write_xlsx`；可选 SVG 版演进图用 `write_svg`。
   - `html`/`pdf`/`journal-format`：移植期已深度接入，无需大改。
-- 新增 `ADAPTATION_PLAN.md` 记录 22 个技能的定制适配计划与状态（含已完成标记）。
+- 新增 `docs/ADAPTATION_PLAN.md` 记录 22 个技能的定制适配计划与状态（含已完成标记）。
 
 ### 验证
 - 全文保持原文提示词体量不简化；适配均以「适配说明/定制段落」追加，未删原文规则；

@@ -249,7 +249,7 @@
 ## 10k. R14（双数轮）22 个移植技能结合本应用工具的定制化适配
 
 - 对全部 22 个移植技能逐技能核对交付格式/工具与本应用真实工具（`docx`/`xlsx`/`ppt`/`svg`/`data` 核心技能 + read/write/edit 系列 + pdf/search_pdf/pdf_to_images + search_web/web_fetch + write_file + subagent）的一致性，把「泛泛的写文件/上传文档」改写为可执行的「`load_skill(核心技能)` + 具体工具调用」。
-- 新增 `ADAPTATION_PLAN.md`：22 个技能的定制适配计划与完成状态（批次 A/B/C）。
+- 新增 `docs/ADAPTATION_PLAN.md`：22 个技能的定制适配计划与完成状态（批次 A/B/C）。
 - 代表性改动：research-proposal / industry-analysis / patent-drafting / marketing-plan / newmedia-writing（Word→docx 技能，表/台账→xlsx 技能，配图→write_svg，汇报→write_pptx）；questionnaire / sentiment-tracker / reference-audit / paper-rebuttal / paper-reviewer / paper-close-reading（报告→docx，清单/台账→xlsx）；translation / humanizer / prompt-engineering / content-rewrite / marketing-material-review / research-lineage-map（术语表/清单/明细表→xlsx，演进图→write_svg）；html / pdf / journal-format 移植期已深度接入，无需大改。
 - 验证：全部保持原文提示词体量不简化（仅追加适配说明）；frontmatter 32/32；check-docs 通过（唯一超长仍为历史遗留 `ppt/SKILL.md`）；`tsc` 通过；registry vs disk 无缺失/无未登记；README/README_EN 计数不变（32 个 / 22 移植）。
 
@@ -259,6 +259,6 @@
 - [x] 新建 22 个技能目录（SKILL.md + reference/references + assets + agents）
 - [x] `WorkSkillService.registry()` 登记新技能（当前 32 个）
 - [x] 更新 `test/pptx-harness/check-docs.py` 文档体量检查
-- [x] 更新 `ITERATION_LOG.md` 记录本次移植
-- [x] 结合本应用工具完成 22 个移植技能的定制化适配（见 `ADAPTATION_PLAN.md` 与 10k 段）
+- [x] 更新 `docs/ITERATION_LOG.md` 记录本次移植
+- [x] 结合本应用工具完成 22 个移植技能的定制化适配（见 `docs/ADAPTATION_PLAN.md` 与 10k 段）
 - [ ] 目标剩余轮次：偶数轮继续复查/迭代已适配技能与文档同步（含 journal-format/research-proposal/industry-analysis 及此前各轮技能），并持续维护 README/README_EN 双语文档一致性。
