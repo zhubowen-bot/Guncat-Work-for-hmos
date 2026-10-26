@@ -1,3 +1,4 @@
+# 改编自 HiSH (MIT License, Copyright (c) 2025 hackeris) 的 deps/ 构建配方; 见 THIRD_PARTY_NOTICES.md
 include ../utils/Makefrag
 
 # 注: 原配方 `git clone gitlab.gnome.org/GNOME/glib`; 这里改用官方 release tarball,

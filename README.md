@@ -197,3 +197,7 @@ cp $HOME/hish-tci-build/deps/output/libqemu-system-aarch64-tci.so \
 本次版本不包含曾经评估或试验过、但最终撤回的本地 TTS 模型方案；README 仅描述当前代码中实际保留的功能。
 
 本项目基于 [Apache License 2.0](LICENSE) 开源。
+
+**第三方组件声明**：`shell` 工具内含 QEMU（GPL-2.0，以独立 `.so` 分发）、Linux 内核与 Alpine 用户态（GPL-2.0 / 各自许可），
+构建配方与底座镜像改编自 [HiSH](https://github.com/harmoninux/HiSH)（MIT, Copyright (c) 2025 hackeris）。
+逐项清单、源码获取方式与完整许可原文见 **[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)** 与 [`LICENSES/`](LICENSES/)（同一份声明也打进 HAP 的 `rawfile/licenses/`）。

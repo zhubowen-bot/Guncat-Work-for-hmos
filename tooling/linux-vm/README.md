@@ -132,5 +132,12 @@ sudo mount -o loop,ro /tmp/r.raw /mnt && ls /mnt/etc/guncat-setup /mnt/usr/local
 
 ## 授权
 
-`deps/` 下的构建配方与 guest 侧的挂载/终端约定改编自 [HiSH](https://github.com/harmoninux/HiSH)
-（MIT License, Copyright (c) 2025 hackeris）；QEMU 本体为 GPLv2，作为独立 `.so` 动态加载。
+| 组件 | 许可 | 说明 |
+| --- | --- | --- |
+| HiSH（`deps/` 配方、Alpine 底座、内核发布物） | MIT，© 2025 hackeris | 原文 [`LICENSES/HiSH-MIT.txt`](../../LICENSES/HiSH-MIT.txt) |
+| QEMU（`libqemu-system-aarch64-tci.so`，来自 `harmoninux/qemu` 的 `hish-libqemu` 分支） | GPL-2.0 | 独立 `.so` 分发；源码与提交号见 [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md) |
+| Linux kernel（`kernel_aarch64`） | GPL-2.0 | 源码 = torvalds/linux `v6.12` + linux-config 的 `arm64_virt` 配置 |
+| Alpine 3.22 及镜像内 apk 包 | 各自许可 | `apk info -v` 可查清单 |
+
+完整清单、源码获取方式与许可全文见仓库根的 [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md)
+与 [`LICENSES/`](../../LICENSES/)（同一份声明也随 HAP 分发到 `rawfile/licenses/`）。

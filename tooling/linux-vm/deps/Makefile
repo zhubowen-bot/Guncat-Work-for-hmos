@@ -1,3 +1,4 @@
+# 改编自 HiSH (MIT License, Copyright (c) 2025 hackeris) 的 deps/ 构建配方; 见 THIRD_PARTY_NOTICES.md
 # TOOL_HOME must be set externally (HarmonyOS Commandline Tools)
 ifndef TOOL_HOME
 $(error TOOL_HOME is not set. Please download HarmonyOS Commandline Tools from https://developer.huawei.com/consumer/cn/download/ and set TOOL_HOME)

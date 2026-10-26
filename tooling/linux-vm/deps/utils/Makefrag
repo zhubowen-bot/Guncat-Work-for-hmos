@@ -1,3 +1,4 @@
+# 改编自 HiSH (MIT License, Copyright (c) 2025 hackeris) 的 deps/ 构建配方; 见 THIRD_PARTY_NOTICES.md
 # use tic etc from homebrew
 export PATH := /opt/homebrew/opt/ncurses/bin/:/opt/homebrew/opt/coreutils/libexec/gnubin:/opt/homebrew/opt/gnu-sed/libexec/gnubin:/opt/homebrew/opt/make/libexec/gnubin:$(PATH)
 # avoid sed error

@@ -1,0 +1,117 @@
+# 第三方组件与许可声明
+
+> 本文档是本仓库（Guncat Work，Apache-2.0）随附的第三方组件声明。
+> `shell` 工具（设备内真 Linux）涉及的组件最多，集中列在 [1. Shell 工具（Linux VM）](#1-shell-工具linux-vm)。
+> 完整许可原文见 [`LICENSES/`](LICENSES/)，同一份声明与原文也打包进 HAP 的 `resources/rawfile/licenses/`。
+
+---
+
+## 1. Shell 工具（Linux VM）
+
+### 1.1 HiSH — MIT
+
+**用途**：本项目的 Linux VM 方案整体建立在 [HiSH](https://github.com/harmoninux/HiSH) 的实践之上，
+具体包括三处衍生：
+
+| 位置 | 与 HiSH 的关系 |
+| --- | --- |
+| [`tooling/linux-vm/deps/`](tooling/linux-vm/deps/) | 构建配方（`Makefile` / `utils/Makefrag` / zlib / zstd / pcre2 / glib / pixman / libqemu）**改编自 HiSH 的 `deps/` 目录**；改动点：改用 `codeload.github.com` 下载、glib 的 `proxy-libintl` 改为直接解包、zlib/pcre2 改静态链接、编完 strip、统一 `QEMU_TCI=1` |
+| `entry/src/main/resources/rawfile/vm/rootfs_guncat.qcow2` | 以 HiSH 发布的 Alpine 底座镜像（`harmoninux/linux-config` 的 `alpine-20251205/rootfs_aarch64.qcow2`）为底座，注入我们自己的 `/etc/guncat-setup`、`/usr/local/bin/guncat-agent`、`inittab`，并预装 Python 3 / pip / jq |
+| [`entry/src/main/cpp/vm/guncat_vm.cpp`](entry/src/main/cpp/vm/guncat_vm.cpp)、`fetch-assets.sh`、`build-rootfs.sh` | 代码为本项目新写；但「QEMU 以 `.so` 形式 dlopen、串口走 unix socket、9p 共享目录、内核与镜像的取用方式」沿用 HiSH 的做法与发布物 |
+
+**许可**：MIT，Copyright (c) 2025 hackeris。全文见 [`LICENSES/HiSH-MIT.txt`](LICENSES/HiSH-MIT.txt)。
+
+```
+MIT License
+
+Copyright (c) 2025 hackeris
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, ... （全文见 LICENSES/HiSH-MIT.txt）
+```
+
+### 1.2 QEMU — GPL-2.0
+
+**用途**：`entry/libs/arm64-v8a/libqemu-system-aarch64-tci.so`（打包进 HAP）由 QEMU 编译而来，
+以动态库形式在应用进程内 dlopen 运行。
+
+| 项 | 值 |
+| --- | --- |
+| 上游 | <https://github.com/harmoninux/qemu>（QEMU 的 fork，提供 `libqemu-system-aarch64.so` 目标与 `qemu_system_entry` 入口） |
+| 分支 / 提交 | `hish-libqemu` @ `50ce7096eb6b338bee88a0960c543f93f1b16959`（2025-12-13） |
+| QEMU 版本 | 10.2.0（见源码 `VERSION`） |
+| 我们的改动 | **只改构建开关，未改 QEMU 源码**：`--enable-tcg-interpreter`（TCI 解释执行，不生成机器码）、zlib/pcre2 静态链接、`llvm-strip`。全部开关与步骤见 [`tooling/linux-vm/deps/libqemu/Makefile`](tooling/linux-vm/deps/libqemu/Makefile) 与 [`build-libqemu-tci.sh`](tooling/linux-vm/build-libqemu-tci.sh) |
+| 源码获取 | 按上文 URL 取 `hish-libqemu` 分支（或 `git clone -b hish-libqemu`），用本仓库脚本即可复现同一 `.so`；GPL-2.0 全文见 [`LICENSES/GPL-2.0.txt`](LICENSES/GPL-2.0.txt) |
+
+QEMU 内部静态链接的第三方库（同一 GPL-2.0 二进制内，不再单独分发 `.so`）：
+
+| 库 | 版本 | 许可 | 上游 |
+| --- | --- | --- | --- |
+| zlib | 1.3.1 | zlib License（© 1995-2022 Jean-loup Gailly, Mark Adler） | <https://zlib.net> |
+| PCRE2 | 10.45 | BSD-3-Clause（PCRE2 LICENCE） | <https://github.com/PCRE2Project/pcre2> |
+| GLib | 2.82.0 | LGPL-2.1-or-later（全文见 [`LICENSES/LGPL-2.1.txt`](LICENSES/LGPL-2.1.txt)） | <https://gitlab.gnome.org/GNOME/glib> |
+| pixman | 0.42.2 | MIT | <https://cairographics.org> |
+| zstd | 1.5.7 | BSD-3-Clause / GPL-2.0（双许可） | <https://github.com/facebook/zstd> |
+| libffi | （glib 子项目） | MIT（© 1996-2014 Anthony Green, Red Hat, Inc and others） | <https://github.com/libffi/libffi> |
+| proxy-libintl | 0.4 | LGPL-2.0（glib 的 intl 回落子项目，© Frida） | <https://github.com/frida/proxy-libintl> |
+
+GLib 为 LGPL：本项目以静态方式把它链入 GPL-2.0 的 `libqemu-system-aarch64-tci.so`，该 `.so` 以独立文件分发、
+源码与完整可重建脚本（含链接参数）均在公开仓库，满足 LGPL 的「可重新链接」要求。
+
+### 1.3 libslirp — BSD 风格（Danny Gasparovski）
+
+**用途**：`entry/libs/arm64-v8a/libslirp.so.0`，QEMU 的用户态网络（`-netdev user`）。
+Copyright (c) 1995,1996 Danny Gasparovski。原文见 [`LICENSES/libslirp-COPYRIGHT.txt`](LICENSES/libslirp-COPYRIGHT.txt)。
+
+### 1.4 Linux kernel — GPL-2.0
+
+**用途**：`entry/src/main/resources/rawfile/vm/kernel_aarch64`（约 12MB，aarch64 `Image`），
+打包进 HAP 并在设备上引导。
+
+| 项 | 值 |
+| --- | --- |
+| 版本 | Linux 6.12（`uname` 报 `6.12.60`） |
+| 源码 | <https://github.com/torvalds/linux>（`v6.12` 分支） |
+| 构建配置 | <https://github.com/harmoninux/linux-config> 的 `arm64_virt`（构建步骤见 HiSH README「构建Linux内核」一节） |
+| 我们的改动 | 无（直接使用 HiSH 发布的预编译内核） |
+| 分发来源 | <https://github.com/harmoninux/linux-config/releases/tag/kernel-20260228> |
+| 许可全文 | [`LICENSES/GPL-2.0.txt`](LICENSES/GPL-2.0.txt) |
+
+> GPL-2.0 要求分发二进制时提供对应源码。上面给出了源码仓库、精确配置文件名与构建步骤；
+> 如需逐字节一致的二进制，用同一配置 + 同一工具链重建即可（本仓库 `tooling/linux-vm/fetch-assets.sh` 也会取该发布物）。
+
+### 1.5 Alpine Linux 与镜像内的 apk 包 — 各自许可
+
+**用途**：`rootfs_guncat.qcow2` 内的用户态（Alpine 3.22 + 我们预装的 `python3`/`py3-pip`/`jq`/`ca-certificates` 等 49 个包）。
+
+- Alpine 基础系统与各包分别适用 **MIT / BSD / GPL-2.0 / LGPL / MPL-2.0** 等许可（逐包不同）。
+- 镜像内的**逐包清单与版本**可查：`apk info -v`，或解包后看 `/lib/apk/db/installed`。
+- 各包源码与 `APKBUILD` 见 Alpine 的 [aports](https://gitlab.alpinelinux.org/alpine/aports)。
+- 其中 Python 为 **PSF-2.0**，`jq` 为 **MIT**，`ca-certificates` 为 **MPL-2.0**。
+- 预装过程与包清单见 [`tooling/linux-vm/provision-packages.sh`](tooling/linux-vm/provision-packages.sh)。
+
+### 1.6 QEMU 固件与键盘映射
+
+`rawfile/vm/efi-virtio.rom`、`rawfile/vm/keymaps/en-us` 取自 QEMU 源码树（`pc-bios/`），随 QEMU 同许可（GPL-2.0）。
+
+---
+
+## 2. 其它既有第三方组件
+
+| 组件 | 许可 | 说明 |
+| --- | --- | --- |
+| `@luvi/lv-markdown-in` | 见 `oh_modules` 内 LICENSE | Markdown 渲染 |
+| `@cangjie-tpc/formula_hybrid` / `prism_hybrid` | 见 `oh_modules` 内 LICENSE | LaTeX / 代码高亮 |
+| HarmonyOS SDK / JSVM-API | 华为 HarmonyOS SDK 许可 | `run_js` 依赖 `libjsvm.so` |
+
+> 本项目自身代码为 Apache-2.0，见 [`LICENSE`](LICENSE)。
+
+---
+
+## 3. 维护约定
+
+- **新增第三方代码或二进制**时，同步更新本文件与 `LICENSES/`，并把许可原文复制进
+  `entry/src/main/resources/rawfile/licenses/`（随 HAP 分发）。
+- 更新 QEMU 分支 / 内核镜像时，更新本文档里的**提交号、版本与来源 URL**。
+- 自检：`ls LICENSES/` 应至少包含 `HiSH-MIT.txt`、`GPL-2.0.txt`、`LGPL-2.1.txt`、`libslirp-COPYRIGHT.txt`。

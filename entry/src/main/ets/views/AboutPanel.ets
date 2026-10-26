@@ -88,6 +88,27 @@ export struct AboutPanel {
               context.openLink(REPO_URL);
             })
 
+            // 第三方组件与许可: shell 工具内含 QEMU(GPL-2.0)、Linux 内核(GPL-2.0)、Alpine 等,
+            // 声明原文随包放在 rawfile/licenses/, 同时给出仓库里的可读链接。
+            Row() {
+              Text('§')
+                .fontSize(15)
+                .fontColor($r('app.color.text_primary'))
+              Text('第三方组件与许可')
+                .fontSize(14)
+                .fontColor($r('app.color.text_primary'))
+                .margin({ left: 8 })
+            }
+            .padding({ left: 18, right: 18, top: 10, bottom: 10 })
+            .borderRadius(16)
+            .backgroundColor($r('app.color.raised_surface'))
+            .shadow({ radius: 10, color: '#12000000', offsetX: 0, offsetY: 2 })
+            .margin({ bottom: 24 })
+            .onClick(() => {
+              let context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+              context.openLink(REPO_URL + '/blob/main/THIRD_PARTY_NOTICES.md');
+            })
+
             Text('© 2026 Guncat Work (formerly Guncat AI)')
               .fontSize(12)
               .fontColor($r('app.color.text_secondary'))
