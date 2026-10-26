@@ -126,6 +126,12 @@ CPython 内静态链接/随包分发的第三方代码（均由 CPython 自身�
 
 本版本**没有**打包这三个库（因此 `sqlite3`、`ssl`、`ctypes` 不可用），无需声明。
 
+### 2.11 PyCryptodome（C 扩展，交叉编译）
+
+- **PyCryptodome 3.21.0** — Public Domain（部分 BSD-2-Clause / MIT，见包内 LICENSE.rst）；
+  构建脚本 `tooling/python/build-pycryptodome-ohos.sh`，产物 `entry/libs/arm64-v8a/Crypto/`
+  （40 个 `.abi3.so`）+ `.py` 进 `extras.zip`。
+
 ### 2.10 文档 / 数学类纯 Python 包
 
 | 包 | 许可 |

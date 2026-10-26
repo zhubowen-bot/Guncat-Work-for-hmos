@@ -193,6 +193,19 @@ certifi 也用文件路径拿 CA 包 —— zipimport 下这些路径是虚拟�
 3. 若将来非要上：先交叉编译 gfortran（或 flang）→ 编 OpenBLAS with LAPACK → 再编 scipy，
    预计 2–4 天且包体 +40~60MB。当前性价比不成立，暂缓。
 
+### PyCryptodome：已打通（2026-10，3.21.0）
+
+脚本 [`build-pycryptodome-ohos.sh`](../../tooling/python/build-pycryptodome-ohos.sh)。
+不需要 BLAS/Fortran，setuptools 直接编；AES-GCM、RSA 2048 签名/验签、SHA3 均已验证。
+
+**它的加载方式与众不同**：`Crypto/Util/_raw_api.py` 用 `ctypes.CDLL` 按**路径**加载自己的
+`.so`（不走 import 机制），路径由 `_file_system.py` 拼出来。设备上 `.so` 只能在 `libs/`，
+所以给 `_file_system.py` 打了补丁：包内找不到时回落到 `GUNCAT_PY_LIBDIR`（由 `sitecustomize`
+注入，值为应用 lib 目录）。
+
+顺带一条经验：**`sitecustomize.py` 必须放在 extras（真实目录），不能进 zip**。
+放在 zip 里它会比 extras 那份更早被 import，补丁就不生效了 —— 这次就是这么踩的。
+
 ## 3. 已验证可用（2026-10）
 
 纯 Python 21 个：requests / urllib3 / certifi / idna / charset-normalizer / python-dateutil /

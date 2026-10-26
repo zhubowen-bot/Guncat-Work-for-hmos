@@ -40,6 +40,9 @@ def _find_libdir() -> str:
 
 
 _LIBDIR = _find_libdir()
+if _LIBDIR:
+    # 供 pycryptodome 之类的库找到 libs 里的 C 扩展(它们用 ctypes 按路径加载)
+    os.environ.setdefault("GUNCAT_PY_LIBDIR", _LIBDIR)
 if _LIBDIR and _LIBDIR not in sys.path:
     sys.path.append(_LIBDIR)
 

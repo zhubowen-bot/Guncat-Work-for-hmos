@@ -143,7 +143,14 @@ done
 # 自带的小工具(网络自检等), 与三方包一起进 zip
 mkdir -p "$HERE/local-pkgs"
 if [ -d "$HERE/local-pkgs" ]; then
-  cp -f "$HERE"/local-pkgs/*.py "$STAGE/" 2>/dev/null || true
+  # 注意: sitecustomize 必须放在 extras(解压后的真实目录)里, 不能进 zip ——
+  # 反过来的话它会比 extras 里那份更早被 import, 补丁(如 GUNCAT_PY_LIBDIR)就不生效了
+  for f in "$HERE"/local-pkgs/*.py; do
+    case "$(basename "$f")" in
+      sitecustomize.py) continue ;;
+    esac
+    cp -f "$f" "$STAGE/" 2>/dev/null || true
+  done
 fi
 
 # 带"真实数据文件"的包不能留在 zip 里: 它们用 os.path 定位模板/证书, zipimport 下拿不到路径。
