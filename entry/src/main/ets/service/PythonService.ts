@@ -23,6 +23,7 @@ const DOMAIN: number = 0x0000;
 const TAG: string = 'PythonService';
 
 const RAW_ZIP: string = 'python/python312.zip';
+const RAW_CERT: string = 'python/cacert.pem';
 const PY_RUNTIME_DIR: string = 'python';
 const PY_STDLIB_SUBDIR: string = 'lib/python3.12';
 
@@ -89,6 +90,12 @@ export class PythonService {
         fileIo.mkdirSync(stdlib, true);
       }
       RawAsset.extract(context, RAW_ZIP, stdlib + '/python312.zip');
+      // https 用的 CA 证书(应用沙箱里没有系统 CA)
+      try {
+        RawAsset.extract(context, RAW_CERT, root + '/cacert.pem');
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, 'extract cacert failed: %{public}s', (e as Error).message);
+      }
       // C 扩展不打进 rawfile: 它们作为应用原生库随安装释放到 lib 目录, 这里不再解压
       PythonService.writeText(marker, want);
       return '';
@@ -141,6 +148,7 @@ export class PythonService {
       pythonPath: PythonService.pythonPath(context),
       argvJson: argvText,
       stdinPath: stdinPath,
+      certFile: PythonService.runtimeDir(context) + '/cacert.pem',
       timeoutMs: timeoutMs
     };
     // 串行化: 前一个调用结束后才开始(无论成功失败)
@@ -304,5 +312,6 @@ interface PyRunOptionsLike {
   pythonPath: string;
   argvJson: string;
   stdinPath: string;
+  certFile: string;
   timeoutMs: number;
 }

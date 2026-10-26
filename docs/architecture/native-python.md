@@ -134,10 +134,22 @@ PYTHONUTF8=1  PYTHONDONTWRITEBYTECODE=1  PYTHONNOUSERSITE=1
 
 | 不可用 | 原因 |
 | --- | --- |
-| `ssl`（连带 `urllib` 的 https） | 未编 OpenSSL |
-| `sqlite3` | 未编 SQLite |
 | `ctypes` | 未编 libffi |
-| `bz2` / `lzma` / `curses` / `readline` / `tkinter` / `multiprocessing` / `_locale` | 依赖库或 fork，沙箱里用不上 |
+| `curses` / `readline` / `tkinter` / `multiprocessing` / `_locale` / `dbm.gnu` | 依赖库或 fork，沙箱里用不上 |
+
+> 2026-10 补充：`sqlite3`（SQLite 3.45.3）、`ssl`/`_hashlib`（OpenSSL 3.0.15）、`bz2`（bzip2 1.0.8）、
+> `lzma`（xz 5.4.6）已通过 [`build-native-deps.sh`](../../tooling/python/build-native-deps.sh) 交叉编译进来，
+> 依赖库随包放在 `entry/libs/arm64-v8a/`（`libssl.so.3` / `libcrypto.so.3` / `libsqlite3.so` / `libbz2.so` / `liblzma.so.5`），
+> 扩展通过 `DT_NEEDED` 找它们。`hashlib.pbkdf2_hmac` / `scrypt` 也随之可用。
+
+### 6.2 超时是怎么做到"真的能打断"的
+
+- 执行固定在一个**专属线程**上：第一次调用时起线程、由它 `Py_Initialize`，之后所有执行都投递给它
+  （CPython 只把"调用过 `Py_Initialize` 的线程"当 main thread）。
+- 看门狗线程到点后 `pthread_kill(运行线程, SIGINT)` → 下一个字节码边界抛 `KeyboardInterrupt`。
+- 逐项实测否掉的方案：`PyErr_SetInterrupt()`（跨线程被丢："Signal 2 ignored due to race condition"）、
+  `PyThreadState_SetAsyncExc()`（恒返回 0，找不到 id）。
+- 阻塞在 C 调用里（如巨大的 `zlib.compress`）仍无法中断，只能等它返回。
 
 ## 7. 排障信号
 

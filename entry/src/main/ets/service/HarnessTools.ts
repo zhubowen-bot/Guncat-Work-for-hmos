@@ -674,10 +674,10 @@ export class HarnessTools {
     defs.push(HarnessTools.makeTool(PythonService.TOOL_NAME,
       '在设备上的**原生 CPython 3.12** 解释器里执行一段 Python(应用进程内, 不经虚拟机、无仿真), 速度接近手机原生 —— 算数/统计/正则/JSON/CSV 处理首选它。' +
       '**目录与其它工具完全一致**: 工作目录就是本会话工作区, 脚本里直接 `open("data/a.csv")` 与 read_file("data/a.csv") 读的是同一份文件; 用相对路径即可, 产物写到当前目录也立刻能被 read_file/transform_file 看到。' +
-      '与 shell 的分工: 这里只能跑 Python(**没有 subprocess/os.system/multiprocessing**, 不能调用 sed/awk/tar/git 等外部程序, 也没有 pip 装的第三方包); 需要调用 Unix 工具、装包或跑编译产物时用 shell。' +
-      '已内置标准库(纯 Python 模块 + json/csv/decimal/zlib/hashlib 等 C 扩展都可用; sqlite3 与 ssl 未编入, 也没有网络的第三方包)。' +
+      '与 shell 的分工: 这是原生解释器, 标准库完整(含 sqlite3 / ssl / zlib / bz2 / lzma); 但设备上**没有可用的 shell**(/bin/sh 被权限拒绝), `subprocess` 只能直接 exec 单个程序(设备自带 toybox: echo/ls/cat/grep/sed/sort/head/tail/wc/find/xargs/tar/gzip 等约 40 个, 没有 sh/awk/tr/jq/curl/unzip), 管道要在 Python 里用 Popen 自己接。需要管道语法、重定向、apk 生态或 GNU 工具时用 shell 工具(VM)。' +
+      '并发: **CPU 密集别用线程/线程池** —— 实测 8 个 CPU 任务串行 247ms, 线程池(2~8 线程)要 1.1~1.6s(慢 5~6 倍); 只有 I/O 等待型(网络/文件等待)用线程池才划算(实测 10 次 sleep(0.05): 502ms → 67ms)。multiprocessing / ProcessPoolExecutor 不可用(缺 _multiprocessing)。' +
       '返回值: 打印到 stdout 的内容随结果返回; 脚本用 `raise SystemExit(2)` 可指定退出码(非 0 不算工具失败); 异常会附 traceback。' +
-      '限制: 代码 ≤128KB, 默认 30 秒超时(timeout_ms 可放宽到 180 秒); 死循环会被 KeyboardInterrupt 打断, 但阻塞在 C 调用里的场景无法中断; 输出超过 20000 字符会截断并把全文存到工作区 .spill/ 供 read_file 读回。',
+      '限制: 代码 ≤128KB, 默认 30 秒超时(timeout_ms 可放宽到 180 秒), **超时会真正打断纯 Python 循环**(KeyboardInterrupt), 但阻塞在 C 调用里的场景仍可能拖到返回; 输出超过 20000 字符会截断并把全文存到工作区 .spill/ 供 read_file 读回; int→str 上限已放宽到 10 万位。',
       HarnessTools.props3(
         'code', HarnessTools.strProp('要执行的 Python 源码(可多行; 相对路径以工作区为基准)'),
         'cwd', HarnessTools.strProp('可选: 工作区内的子目录(相对路径, 如 "data"), 默认工作区根'),

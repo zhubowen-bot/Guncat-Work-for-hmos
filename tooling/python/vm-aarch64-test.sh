@@ -32,6 +32,20 @@ cp "$RAW/rootfs_guncat.qcow2" "$WORK/rootfs.qcow2"
 
 S="$WORK/workspaces/$CONV"
 cp "$LIBS/libpython3.12.so" "$LIBS/libz.so" "$S/"
+# 新依赖库(ssl/sqlite/bz2/lzma)也要放进 LD_LIBRARY_PATH 能搜到的目录
+for extra in "$LIBS"/libssl.so.3 "$LIBS"/libcrypto.so.3 "$LIBS"/libsqlite3.so "$LIBS"/libbz2.so "$LIBS"/liblzma.so.5; do
+  [ -f "$extra" ] && cp -f "$extra" "$S/"
+done
+cp "$PYRAW/cacert.pem" "$S/" 2>/dev/null || true
+
+# OpenSSL 在 OHOS 头文件下会引用 libc 的 __fd_chk(FD_SET 硬化); 设备侧由 OHOS libc 提供,
+# 但 Alpine musl 没有。为了让 VM 里能验证 ssl, 这里编一个 no-op 存根并用 LD_PRELOAD 挂上。
+cat > "$WORK/fdchk.c" <<'EOF'
+void __fd_chk(int fd) { (void) fd; }
+EOF
+TC_PATH="${TOOL_HOME:-/opt/ohos-cmdline/command-line-tools}/sdk/default/openharmony/native"
+"$TC_PATH/llvm/bin/aarch64-unknown-linux-ohos-clang" --sysroot="$TC_PATH/sysroot" \
+  -shared -fPIC -o "$S/libfdchk.so" "$WORK/fdchk.c"
 mkdir -p "$S/libs"
 cp "$LIBS"/*.cpython-312-*.so "$S/libs/" 2>/dev/null || true
 cp "$PYRAW/python312.zip" "$S/"
@@ -84,8 +98,34 @@ print("hello", 1 + 1)
 print(json.dumps({"a": 1}))
 print("crc32", hex(zlib.crc32(b"abc")))
 print("sqrt", math.sqrt(9))
+import sqlite3
+con = sqlite3.connect(":memory:")
+con.execute("create table t(x int)")
+con.executemany("insert into t values (?)", [(1,), (2,), (3,)])
+print("sqlite3", con.execute("select sum(x) from t").fetchone()[0])
+_pb = getattr(hashlib, "pbkdf2_hmac", None)
+print("pbkdf2", _pb("sha256", b"pw", b"salt", 1000).hex()[:16] if _pb else "MISSING")
+_sc = getattr(hashlib, "scrypt", None)
+print("scrypt", _sc(b"pw", salt=b"salt", n=1024, r=8, p=1, dklen=8).hex() if _sc else "MISSING")
+import bz2, lzma
+print("bz2", bz2.decompress(bz2.compress(b"abc")))
+print("lzma", lzma.decompress(lzma.compress(b"xyz")))
+for _m in ("_hashlib", "_ssl"):
+    try:
+        __import__(_m)
+        print(_m, "ok")
+    except BaseException as _e:
+        print(_m, "FAIL", repr(_e))
+try:
+    import ssl
+    ctx = ssl.create_default_context()
+    print("ssl", ctx.protocol, "certs", len(ctx.get_ca_certs()))
+except BaseException as _e:
+    print("ssl FAIL", repr(_e))
 PY
-export LD_LIBRARY_PATH=/workspace'
+export LD_LIBRARY_PATH=/workspace
+export SSL_CERT_FILE=/workspace/cacert.pem
+export LD_PRELOAD=/workspace/libfdchk.so'
 
 echo "== A) 完整布局(zip + libs + libz)"
 run_job a "$PREP

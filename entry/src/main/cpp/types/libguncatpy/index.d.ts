@@ -17,6 +17,8 @@ export interface PyRunOptions {
   pythonPath?: string;
   /** sys.argv 的 JSON 数组字符串, 默认 "[]" */
   argvJson?: string;
+  /** CA 证书包路径(ssl 用), 缺省用系统默认 */
+  certFile?: string;
   /** 超时毫秒数, 默认 60000 */
   timeoutMs?: number;
 }

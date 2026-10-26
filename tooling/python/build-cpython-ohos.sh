@@ -1,4 +1,4 @@
-!/usr/bin/env bash
+#!/usr/bin/env bash
 # Guncat Work: 交叉编译原生 CPython(3.12) 为 HarmonyOS aarch64 动态库 + 可打包的标准库。
 #
 # 产物:
@@ -23,6 +23,8 @@ TOOL_HOME="${TOOL_HOME:-/opt/ohos-cmdline/command-line-tools}"
 PY_VERSION="${PY_VERSION:-3.12.15}"
 WORK="${WORK:-$HOME/cpython-ohos}"
 BUILD_PYTHON="${BUILD_PYTHON:-/opt/py312/bin/python3.12}"
+# OpenSSL / SQLite / bzip2 / xz 的交叉编译产物(见 build-native-deps.sh)
+PY_DEPS_PREFIX="${PY_DEPS_PREFIX:-$HOME/ohos-py-deps/prefix}"
 
 NATIVE="$TOOL_HOME/sdk/default/openharmony/native"
 SYSROOT="$NATIVE/sysroot"
@@ -67,7 +69,8 @@ export RANLIB="$LLVM_BIN/llvm-ranlib"
 export STRIP="$LLVM_BIN/llvm-strip"
 export CFLAGS="--sysroot=$SYSROOT -O2 -fPIC -Wno-error=implicit-function-declaration -Wno-error=int-conversion"
 export CXXFLAGS="--sysroot=$SYSROOT -O2 -fPIC"
-export LDFLAGS="--sysroot=$SYSROOT -fuse-ld=lld"
+export CPPFLAGS="-I$PY_DEPS_PREFIX/include"
+export LDFLAGS="--sysroot=$SYSROOT -fuse-ld=lld -L$PY_DEPS_PREFIX/lib"
 
 echo "== configure (host=aarch64-linux-gnu, CC=OHOS clang)"
 # 交叉编译时 configure 不能探测设备文件/运行时行为, 这些答案按 Linux 默认值给死
@@ -88,12 +91,9 @@ _curses
 _curses_panel
 readline
 _tkinter
-_sqlite3
 _dbm
 _gdbm
 _ndbm
-_bz2
-_lzma
 _uuid
 nis
 ossaudiodev
@@ -189,6 +189,16 @@ ZL="$WORK/zlib-$ZLIB_VERSION"
   "$ZL/gzlib.c" "$ZL/gzread.c" "$ZL/gzwrite.c" "$ZL/inflate.c" "$ZL/infback.c" \
   "$ZL/inftrees.c" "$ZL/inffast.c" "$ZL/trees.c" "$ZL/uncompr.c" "$ZL/zutil.c" 2>/dev/null
 "$STRIP" --strip-unneeded "$LIBS/libz.so" 2>/dev/null || true
+
+# 5) 依赖库: 扩展通过 DT_NEEDED 找它们(SONAME 就是文件名, 与 libz.so 同一条路径)
+for lib in libssl.so.3 libcrypto.so.3 libsqlite3.so libbz2.so liblzma.so.5; do
+  if [ -f "$PY_DEPS_PREFIX/lib/$lib" ]; then
+    cp -Lf "$PY_DEPS_PREFIX/lib/$lib" "$LIBS/$lib"   # -L: liblzma.so.5 是软链, 要拷真身
+    "$STRIP" --strip-unneeded "$LIBS/$lib" 2>/dev/null || true
+  else
+    echo "WARN: 缺少 $PY_DEPS_PREFIX/lib/$lib" >&2
+  fi
+done
 
 echo "== 产物"
 

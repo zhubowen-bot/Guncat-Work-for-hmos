@@ -2,12 +2,15 @@
 // guncat_py.cpp 里的启动器脚本, 用来在没有真机的情况下验证:
 //   * 嵌入式与 CLI 的差异;
 //   * 路径注入方式(把 __GUNCAT_*__ 占位符渲染成真实路径, 不依赖环境变量);
-//   * 标准库/扩展缺失时的失败形态与诊断信息。
+//   * 标准库/扩展缺失时的失败形态与诊断;
+//   * 超时中断(PyThreadState_SetAsyncExc)是否真的能打断纯 Python 循环。
 //
-// 用法: embed-test <libpython.so> <launcher.py> <code.py> <outdir> <pythonhome> <pythonpath>
+// 用法: embed-test <libpython.so> <launcher.py> <code.py> <outdir> <pythonhome> <pythonpath> [timeout_ms]
 #include <dlfcn.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -16,6 +19,39 @@ typedef void (*fn_void)(void);
 typedef int (*fn_run)(const char*);
 typedef int (*fn_gil)(void);
 typedef void (*fn_gil_release)(int);
+typedef void* (*fn_ts_get)(void);
+typedef unsigned long (*fn_ts_id)(void*);
+typedef int (*fn_ts_async_exc)(unsigned long, void*);
+
+struct Watchdog {
+    volatile int* finished;
+    volatile int* fired;
+    int timeout_ms;
+    unsigned long tstate_id;
+    fn_gil gil;
+    fn_gil_release rel;
+    fn_ts_async_exc ts_exc;
+    void** keyboard_interrupt;
+    pthread_t runner;
+};
+
+static void* watchdog_fn(void* arg) {
+    struct Watchdog* w = (struct Watchdog*) arg;
+    int waited = 0;
+    while (!*w->finished && waited < w->timeout_ms) {
+        usleep(20000);
+        waited += 20;
+    }
+    if (*w->finished) {
+        return NULL;
+    }
+    fprintf(stderr, "[watchdog] timeout after %d ms (tstate %lu)\n", w->timeout_ms, w->tstate_id);
+    /* 与 native 实现一致: 给运行线程发 SIGINT(实测这是唯一能打断纯 Python 循环的办法) */
+    int rc = pthread_kill(w->runner, SIGINT);
+    fprintf(stderr, "[watchdog] pthread_kill(SIGINT) -> %d\n", rc);
+    *w->fired = 1;
+    return NULL;
+}
 
 static char* slurp(const char* path) {
     FILE* f = fopen(path, "rb");
@@ -32,13 +68,12 @@ static char* slurp(const char* path) {
 }
 
 static void replace_all(char* text, size_t cap, const char* token, const char* value) {
-    char out[65536];
+    static char out[262144];
     size_t tok = strlen(token);
     size_t vlen = strlen(value);
     size_t oi = 0;
     for (size_t i = 0; text[i] != '\0' && oi + vlen + 1 < sizeof(out); ) {
         if (strncmp(text + i, token, tok) == 0) {
-            if (oi + vlen >= cap) break;
             memcpy(out + oi, value, vlen);
             oi += vlen;
             i += tok;
@@ -53,35 +88,38 @@ static void replace_all(char* text, size_t cap, const char* token, const char* v
 
 int main(int argc, char** argv) {
     if (argc < 7) {
-        fprintf(stderr, "usage: %s libpython launcher code outdir pythonhome pythonpath\n", argv[0]);
+        fprintf(stderr,
+                "usage: %s libpython launcher code outdir pythonhome pythonpath [timeout_ms]\n",
+                argv[0]);
         return 2;
     }
     const char* lib = argv[1];
     char* raw = slurp(argv[2]);
     if (!raw) { fprintf(stderr, "no launcher\n"); return 2; }
-    // 渲染会变长(占位符比路径短), 用固定大缓冲, 避免 strncpy 越界
+    // 渲染会把占位符换成更长的真实路径, 用固定大缓冲避免越界
     static char launcher[262144];
     memset(launcher, 0, sizeof(launcher));
     strncpy(launcher, raw, sizeof(launcher) - 1);
     free(raw);
 
     const char* outdir = argv[4];
-    char code_path[4096], out_path[4096], err_path[4096], meta_path[4096], diag_path[4096], argv_path[4096];
+    char code_path[4096], out_path[4096], err_path[4096], meta_path[4096], diag_path[4096];
+    char argv_path[4096];
     snprintf(code_path, sizeof(code_path), "%s/code.py", outdir);
     snprintf(out_path, sizeof(out_path), "%s/stdout.txt", outdir);
     snprintf(err_path, sizeof(err_path), "%s/stderr.txt", outdir);
     snprintf(meta_path, sizeof(meta_path), "%s/meta.txt", outdir);
     snprintf(diag_path, sizeof(diag_path), "%s/diag.txt", outdir);
     snprintf(argv_path, sizeof(argv_path), "%s/argv.txt", outdir);
-    unlink(out_path); unlink(err_path); unlink(meta_path); unlink(diag_path);
-
-    // argv 文件(一行一个) —— 由测试自己准备; 没有就写个 "-c"
+    unlink(out_path);
+    unlink(err_path);
+    unlink(meta_path);
+    unlink(diag_path);
     if (access(argv_path, F_OK) != 0) {
         FILE* f = fopen(argv_path, "w");
         if (f) { fputs("-c\n", f); fclose(f); }
     }
 
-    // 与 native 侧一致: 把占位符渲染成真实路径(不依赖环境变量)
     replace_all(launcher, sizeof(launcher), "__GUNCAT_CODE__", code_path);
     replace_all(launcher, sizeof(launcher), "__GUNCAT_OUT__", out_path);
     replace_all(launcher, sizeof(launcher), "__GUNCAT_ERR__", err_path);
@@ -93,6 +131,7 @@ int main(int argc, char** argv) {
     setenv("PYTHONHOME", argv[5], 1);
     setenv("PYTHONPATH", argv[6], 1);
     setenv("PYTHONUTF8", "1", 1);
+    setenv("PYTHONIOENCODING", "utf-8", 1);
     setenv("PYTHONDONTWRITEBYTECODE", "1", 1);
     setenv("PYTHONNOUSERSITE", "1", 1);
 
@@ -103,15 +142,45 @@ int main(int argc, char** argv) {
     fn_run run = (fn_run) dlsym(h, "PyRun_SimpleString");
     fn_gil gil = (fn_gil) dlsym(h, "PyGILState_Ensure");
     fn_gil_release rel = (fn_gil_release) dlsym(h, "PyGILState_Release");
-    if (!is_init || !init || !run || !gil || !rel) { fprintf(stderr, "missing symbols\n"); return 1; }
+    fn_ts_get ts_get = (fn_ts_get) dlsym(h, "PyThreadState_Get");
+    fn_ts_id ts_id = (fn_ts_id) dlsym(h, "PyThreadState_GetID");
+    fn_ts_async_exc ts_exc = (fn_ts_async_exc) dlsym(h, "PyThreadState_SetAsyncExc");
+    void** keyboard_interrupt = (void**) dlsym(h, "PyExc_KeyboardInterrupt");
+    if (!is_init || !init || !run || !gil || !rel) {
+        fprintf(stderr, "missing symbols\n");
+        return 1;
+    }
 
     init();
     if (!is_init()) { fprintf(stderr, "Py_Initialize failed\n"); return 1; }
+
+    int timeout_ms = (argc >= 8) ? atoi(argv[7]) : 0;
     int state = gil();
+    unsigned long tstate_id = 0;
+    if (ts_get != NULL && ts_id != NULL) {
+        void* ts = ts_get();
+        if (ts != NULL) {
+            tstate_id = ts_id(ts);
+        }
+    }
+    volatile int finished = 0;
+    volatile int fired = 0;
+    struct Watchdog wd = {&finished, &fired, timeout_ms, tstate_id, gil, rel, ts_exc,
+                         keyboard_interrupt, pthread_self()};
+    pthread_t thread;
+    int has_thread = 0;
+    if (timeout_ms > 0) {
+        has_thread = pthread_create(&thread, NULL, watchdog_fn, &wd) == 0;
+    }
+
     int rc = run(launcher);
+    finished = 1;
+    if (has_thread) {
+        pthread_join(thread, NULL);
+    }
+    printf("rc=%d timeout_fired=%d\n", rc, fired);
     rel(state);
 
-    printf("rc=%d\n", rc);
     const char* files[4] = {meta_path, out_path, err_path, diag_path};
     const char* names[4] = {"meta", "stdout", "stderr", "diag"};
     for (int i = 0; i < 4; i++) {

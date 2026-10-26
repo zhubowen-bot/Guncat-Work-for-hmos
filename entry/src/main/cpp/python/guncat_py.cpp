@@ -20,6 +20,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <pthread.h>
+#include <signal.h>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -45,6 +48,10 @@ using FnPyRun_SimpleString = int (*)(const char*);
 using FnPyGILState_Ensure = int (*)();
 using FnPyGILState_Release = void (*)(int);
 using FnPyErr_SetInterrupt = void (*)();
+using FnPyThreadState_Get = void* (*)();
+using FnPyThreadState_GetID = unsigned long (*)(void*);
+// 3.10 起签名为 (unsigned long id, PyObject *exc); 用 void* 兜住更早的写法
+using FnPyThreadState_SetAsyncExc = int (*)(unsigned long, void*);
 
 struct PyApi {
     void* handle = nullptr;
@@ -55,6 +62,11 @@ struct PyApi {
     FnPyGILState_Ensure gilEnsure = nullptr;
     FnPyGILState_Release gilRelease = nullptr;
     FnPyErr_SetInterrupt setInterrupt = nullptr;
+    FnPyThreadState_Get threadStateGet = nullptr;
+    FnPyThreadState_GetID threadStateGetID = nullptr;
+    FnPyThreadState_SetAsyncExc setAsyncExc = nullptr;
+    // PyExc_KeyboardInterrupt 是导出的**数据符号**(PyObject*), dlsym 拿到的是它的地址
+    void** keyboardInterrupt = nullptr;
     // libpython 实际被加载的目录(就是应用的 lib 目录)。C 扩展模块也放在这里 ——
     // 设备上只有 lib 目录里的 .so 能 dlopen, 数据目录里的 ELF 会被拒。
     std::string libDir;
@@ -88,6 +100,11 @@ PyApi& LoadPyApi() {
     g_api.gilEnsure = reinterpret_cast<FnPyGILState_Ensure>(::dlsym(h, "PyGILState_Ensure"));
     g_api.gilRelease = reinterpret_cast<FnPyGILState_Release>(::dlsym(h, "PyGILState_Release"));
     g_api.setInterrupt = reinterpret_cast<FnPyErr_SetInterrupt>(::dlsym(h, "PyErr_SetInterrupt"));
+    g_api.threadStateGet = reinterpret_cast<FnPyThreadState_Get>(::dlsym(h, "PyThreadState_Get"));
+    g_api.threadStateGetID = reinterpret_cast<FnPyThreadState_GetID>(::dlsym(h, "PyThreadState_GetID"));
+    g_api.setAsyncExc = reinterpret_cast<FnPyThreadState_SetAsyncExc>(
+        ::dlsym(h, "PyThreadState_SetAsyncExc"));
+    g_api.keyboardInterrupt = reinterpret_cast<void**>(::dlsym(h, "PyExc_KeyboardInterrupt"));
     if (g_api.isInitialized == nullptr || g_api.initialize == nullptr ||
         g_api.runSimpleString == nullptr || g_api.gilEnsure == nullptr || g_api.gilRelease == nullptr) {
         g_api.error = "libpython 缺少必要符号(版本不匹配?)";
@@ -298,6 +315,14 @@ try:
             _argv = ['-c']
     sys.argv = list(_argv)
 
+    # PEP 670: 默认把 int→str 的转换限制在 4300 位, 实机上 2**100000 能算但 str(n) 会
+    # ValueError。数据分析场景里大整数转字符串很常见(哈希/阶乘/大数校验), 放宽到 10 万位。
+    try:
+        if hasattr(sys, 'set_int_max_str_digits'):
+            sys.set_int_max_str_digits(100000)
+    except BaseException:
+        pass
+
     _stage = 'stdin'
     if _stdin_path:
         sys.stdin = open(_stdin_path, 'r', encoding='utf-8', errors='replace')
@@ -412,6 +437,8 @@ struct PyRunOptions {
     std::string argvText = "-c";
     // 可选: 标准输入文件(内容会被挂成 sys.stdin); 空串表示让 sys.stdin 保持默认
     std::string stdinPath;
+    // 可选: CA 证书包路径(ssl 用); 空串则沿用系统默认
+    std::string certFile;
     int32_t timeoutMs = 60000;
 };
 
@@ -447,8 +474,14 @@ bool EnsureInterpreter(const PyRunOptions& opt, std::string& err) {
         ::setenv("PYTHONPATH", pyPath.c_str(), 1);
     }
     ::setenv("PYTHONUTF8", "1", 1);
+    // 无 TTY 时 stdout 的 encoding 会是 None, 显式钉住 UTF-8 更可控
+    ::setenv("PYTHONIOENCODING", "utf-8", 1);
     ::setenv("PYTHONDONTWRITEBYTECODE", "1", 1);
     ::setenv("PYTHONNOUSERSITE", "1", 1);
+    // https 要证书: 应用沙箱里没有系统 CA, 用随包带的 cacert.pem
+    if (!opt.certFile.empty()) {
+        ::setenv("SSL_CERT_FILE", opt.certFile.c_str(), 1);
+    }
     api.initialize();
     if (api.isInitialized() == 0) {
         err = "Py_Initialize 失败(检查 PYTHONHOME/PYTHONPATH 是否正确)";
@@ -515,24 +548,37 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
         return out;
     }
 
-    std::atomic<bool> finished{false};
     const int32_t timeoutMs = opt.timeoutMs > 0 ? opt.timeoutMs : 60000;
-    std::thread watchdog([&finished, timeoutMs, &api]() {
-        const int stepMs = 50;
+    std::atomic<bool> finished{false};
+    std::atomic<bool> interruptFired{false};
+
+    int state = api.gilEnsure();
+    // 超时打断机制的选择(都在宿主逐项实测过):
+    //   * PyErr_SetInterrupt: CPython 只在它认定的 main thread 上处理中断, 从别的线程调用
+    //     会被丢("Signal 2 ignored due to race condition"), 实机表现为 timeout_ms 完全失效;
+    //   * PyThreadState_SetAsyncExc: 恒返回 0(id 找不到), 不可用;
+    //   * **pthread_kill(运行线程, SIGINT)**: 立刻在下一个字节码边界抛 KeyboardInterrupt ✔
+    // 所以这里记下运行线程的 pthread 句柄, 看门狗到点直接给它发 SIGINT。
+    const pthread_t runnerThread = ::pthread_self();
+
+    std::thread watchdog([&finished, &interruptFired, timeoutMs, &api, runnerThread]() {
+        const int stepMs = 20;
         int waited = 0;
         while (!finished.load() && waited < timeoutMs) {
             std::this_thread::sleep_for(std::chrono::milliseconds(stepMs));
             waited += stepMs;
         }
-        if (!finished.load()) {
-            OH_LOG_WARN(LOG_APP, "python timeout after %{public}d ms, raising KeyboardInterrupt", timeoutMs);
-            if (api.setInterrupt != nullptr) {
-                api.setInterrupt();  // 让纯 Python 循环在下一个字节码边界抛 KeyboardInterrupt
-            }
+        if (finished.load()) {
+            return;
         }
+        OH_LOG_WARN(LOG_APP, "python timeout after %{public}d ms, sending SIGINT to runner", timeoutMs);
+        int rcSig = ::pthread_kill(runnerThread, SIGINT);
+        if (rcSig != 0 && api.setInterrupt != nullptr) {
+            api.setInterrupt();  // 兜底
+        }
+        interruptFired.store(true);
     });
 
-    int state = api.gilEnsure();
     std::string script = RenderScript(kLauncher, codePath, outPath, errPath, metaPath,
                                       diagPath, argvPath, opt.stdinPath);
     int rc = api.runSimpleString(script.c_str());
@@ -601,7 +647,8 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
     out.ok = (okFlag == "1");
     out.stdoutText = ReadFile(outPath);
     out.stderrText = ReadFile(errPath);
-    out.timedOut = out.durationMs >= timeoutMs && !out.ok && out.error.find("KeyboardInterrupt") != std::string::npos;
+    out.timedOut = !out.ok && (interruptFired.load() ||
+        (out.durationMs >= timeoutMs && out.error.find("KeyboardInterrupt") != std::string::npos));
     if (!out.ok) {
         if (out.error.empty()) {
             out.error = "执行失败(退出码 " + std::to_string(out.exitCode) + ")";
@@ -618,8 +665,92 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
     return out;
 }
 
-// ===== N-API =====
+// ===== 单线程执行器 =====
+// 为什么要有它: CPython 只认"调用 Py_Initialize 的那个线程"为 main thread, 中断信号
+// (PyErr_SetInterrupt) 也只在该线程上被处理。NAPI 回调可能落在不同线程上, 一旦运行线程
+// 不是初始化线程, timeout_ms 就会彻底失效(实机: 6 秒的忙循环照跑 6 秒, stderr 只留
+// "OSError: Signal 2 ignored due to race condition")。
+// 做法: 第一次调用时起一个专属线程, 由它初始化解释器并长期复用; 之后所有执行都投递给它。
+struct PyJob {
+    PyRunOptions opt;
+    PyRunOutcome out;
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool done = false;
+};
 
+std::mutex g_runnerMutex;          // 保护下面的 runner 生命周期
+std::thread* g_runner = nullptr;
+std::mutex g_queueMutex;           // 保护 g_pending
+std::condition_variable g_queueCv;
+PyJob* g_pending = nullptr;
+std::atomic<bool> g_runnerStarted{false};
+
+void RunnerLoop() {
+    for (;;) {
+        PyJob* job = nullptr;
+        {
+            std::unique_lock<std::mutex> lock(g_queueMutex);
+            g_queueCv.wait(lock, []() { return g_pending != nullptr; });
+            job = g_pending;
+            g_pending = nullptr;
+        }
+        if (job == nullptr) {
+            return;
+        }
+        PyRunOutcome out;
+        try {
+            out = RunPythonInner(job->opt);  // 在这个线程上执行, 信号可被处理
+        } catch (const std::exception& e) {
+            out.ok = false;
+            out.error = std::string("native 异常: ") + e.what();
+        }
+        {
+            std::lock_guard<std::mutex> lock(job->mutex);
+            job->out = out;
+            job->done = true;
+        }
+        job->cv.notify_all();
+    }
+}
+
+bool EnsureRunner(std::string& err) {
+    std::lock_guard<std::mutex> lock(g_runnerMutex);
+    if (g_runner != nullptr) {
+        return true;
+    }
+    PyApi& api = LoadPyApi();
+    if (!api.ok) {
+        err = api.error;
+        return false;
+    }
+    g_runner = new std::thread(RunnerLoop);
+    g_runnerStarted.store(true);
+    OH_LOG_INFO(LOG_APP, "python runner thread started");
+    return true;
+}
+
+PyRunOutcome DispatchToRunner(const PyRunOptions& opt) {
+    PyRunOutcome out;
+    std::string err;
+    if (!EnsureRunner(err)) {
+        out.ok = false;
+        out.error = err;
+        return out;
+    }
+    PyJob job;
+    job.opt = opt;
+    {
+        std::lock_guard<std::mutex> lock(g_queueMutex);
+        g_pending = &job;
+    }
+    g_queueCv.notify_one();
+    std::unique_lock<std::mutex> lock(job.mutex);
+    job.cv.wait(lock, [&job]() { return job.done; });
+    return job.out;
+}
+
+// ===== N-API =====
 napi_value MakeString(napi_env env, const std::string& s) {
     napi_value out = nullptr;
     napi_create_string_utf8(env, s.c_str(), s.size(), &out);
@@ -663,6 +794,7 @@ napi_value JsRunPython(napi_env env, napi_callback_info info) {
         opt.pythonPath = PropToString(env, args[0], "pythonPath");
         opt.argvJson = PropToString(env, args[0], "argvJson");
         opt.stdinPath = PropToString(env, args[0], "stdinPath");
+        opt.certFile = PropToString(env, args[0], "certFile");
         if (!opt.argvJson.empty()) {
             opt.argvText = opt.argvJson;  // 字段名沿用 argvJson, 内容是"一行一个参数"的纯文本
         }
@@ -693,7 +825,10 @@ napi_value JsRunPython(napi_env env, napi_callback_info info) {
     g_running.store(true);
     PyRunOutcome outcome;
     try {
-        outcome = RunPythonInner(opt);
+        // 关键: 必须交给"调用过 Py_Initialize 的那个线程"执行。CPython 只有在它认定的
+        // main thread 上才会处理中断信号 —— 实机现象是 PyErr_SetInterrupt 被丢掉
+        // ("Signal 2 ignored due to race condition"), timeout_ms 完全失效。
+        outcome = DispatchToRunner(opt);
     } catch (const std::exception& e) {
         outcome.ok = false;
         outcome.error = std::string("native 异常: ") + e.what();

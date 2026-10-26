@@ -2,6 +2,22 @@
 
 > [← 返回 README](README.md)
 
+## 未发布（原生 Python 增强：超时 / 依赖库 / 纪律纠偏）
+
+> 依据一次完整的实机自检（117 个模块矩阵 + 并发/超时/边界逐项实测），修掉最危险的一条并补齐四个缺失库。
+
+- **超时真正能打断了**：执行改为固定在"调用过 `Py_Initialize` 的专属线程"上，看门狗到点
+  `pthread_kill(运行线程, SIGINT)`。实测 `while True` 在 `timeout_ms` 到点时立刻抛
+  `KeyboardInterrupt`（此前 `PyErr_SetInterrupt` 跨线程被丢、`PyThreadState_SetAsyncExc`
+  恒返回 0，两条路都验证过不可用）。
+- **补齐 OpenSSL / SQLite / bzip2 / xz**：`ssl`（含 118 张 CA 证书，随包 `cacert.pem`）、
+  `hashlib.pbkdf2_hmac`、`scrypt`、`sqlite3`、`bz2`、`lzma` 全部可用；依赖库随包放
+  `entry/libs/arm64-v8a/`（`libssl.so.3` / `libcrypto.so.3` / `libsqlite3.so` / `libbz2.so` / `liblzma.so.5`）。
+  新增 `tooling/python/build-native-deps.sh`（OpenSSL 3.0.15 / SQLite 3.45.3 / bzip2 1.0.8 / xz 5.4.6）。
+- **纪律纠偏（根据实测）**：`subprocess` 其实可用（直接 exec 单个 toybox 程序，无 shell 语法）；
+  CPU 密集不要用线程/线程池（实测慢 5~6 倍）；`multiprocessing` 仍不可用；int→str 上限放宽到 10 万位。
+- 扩展总数 51 → **56**。
+
 ## 未发布（原生 Python）
 
 > 一句话：VM 里的 Python 慢是因为 **CPU 指令被逐条仿真**（实测比原生慢 2~3 个数量级），
