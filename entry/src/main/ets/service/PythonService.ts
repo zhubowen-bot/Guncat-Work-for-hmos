@@ -27,6 +27,9 @@ const RAW_ZIP: string = 'python/python312.zip';
 const RAW_SITE: string = 'python/site-packages.zip';
 const RAW_EXTRAS: string = 'python/extras.zip';
 const RAW_CERT: string = 'python/cacert.pem';
+// 中文字体: 思源黑体 SC(GB2312 子集, OFL-1.1), 让 matplotlib/Pillow 能直接画中文
+const RAW_FONT: string = 'python/fonts/SourceHanSansSC-Regular.otf';
+const FONT_FILE: string = 'SourceHanSansSC-Regular.otf';
 const PY_RUNTIME_DIR: string = 'python';
 const PY_STDLIB_SUBDIR: string = 'lib/python3.12';
 
@@ -112,6 +115,13 @@ export class PythonService {
         RawAsset.extract(context, RAW_CERT, root + '/cacert.pem');
       } catch (e) {
         hilog.warn(DOMAIN, TAG, 'extract cacert failed: %{public}s', (e as Error).message);
+      }
+      // 中文字体(思源黑体 GB2312 子集, OFL-1.1): 放在 stdlib 同级 fonts/,
+      // guncat_fonts 会在这个位置找它, matplotlib 一 import 就自动注册(画中文不再是方块)
+      try {
+        RawAsset.extract(context, RAW_FONT, stdlib + '/fonts/' + FONT_FILE);
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, 'extract cjk font failed: %{public}s', (e as Error).message);
       }
       // C 扩展不打进 rawfile: 它们作为应用原生库随安装释放到 lib 目录, 这里不再解压
       PythonService.writeText(marker, want);

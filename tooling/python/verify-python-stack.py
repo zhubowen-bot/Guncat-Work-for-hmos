@@ -106,6 +106,33 @@ def _matplotlib():
     return "%s png=%d bytes" % (matplotlib.__version__, len(buf.getvalue()))
 
 
+def _cjk_font():
+    """中文渲染: 拿不到字体时 matplotlib 会退回 DejaVu 并警告"Glyph missing", 这里必须为 0。"""
+    import warnings
+    import guncat_fonts
+    font = guncat_fonts.path()
+    assert font and os.path.isfile(font), "找不到随包中文字体 fonts/SourceHanSansSC-Regular.otf"
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        fig, ax = plt.subplots(figsize=(2, 1))
+        ax.text(0.5, 0.5, "中文测试", ha="center", va="center", fontsize=16)
+        ax.axis("off")
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png")
+        plt.close(fig)
+    missing = [w for w in caught if "missing from font" in str(w.message)]
+    assert not missing, "matplotlib 缺字: %s" % missing[0].message
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", (120, 40), "white")
+    ImageDraw.Draw(im).text((4, 8), "中文测试", font=guncat_fonts.pillow_font(20), fill="black")
+    ink = sum(1 for v in im.convert("L").getdata() if v < 128)
+    assert ink > 50, "Pillow 中文渲染没有墨迹(ink=%d)" % ink
+    return "%s ink=%d" % (os.path.basename(font), ink)
+
+
 def _qrcode():
     import qrcode
     img = qrcode.make("https://example.com")
@@ -245,6 +272,7 @@ CHECKS = [
     ("pandas", _pandas),
     ("pillow", _pillow),
     ("matplotlib", _matplotlib),
+    ("cjk-font", _cjk_font),
     ("qrcode", _qrcode),
     ("lxml", _lxml),
     ("regex", _regex),

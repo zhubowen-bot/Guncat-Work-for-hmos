@@ -677,7 +677,7 @@ export class HarnessTools {
       '与 shell 的分工: 这是原生解释器, 标准库完整(sqlite3/ssl/zlib/bz2/lzma/zipfile/csv/json/re/asyncio/threading)。' +
       '**随包三方库(全部离线可用, 直接用 import)**: ' +
       '数值数据 numpy(矩阵/FFT/linalg)、pandas(DataFrame/groupby/read_csv/时间序列); ' +
-      '图像绘图 matplotlib(**必须先 `matplotlib.use("Agg")`**, fig.savefig 出 PNG)、Pillow(Image.open/save/resize); ' +
+      '图像绘图 matplotlib(**必须先 `matplotlib.use("Agg")`**, fig.savefig 出 PNG; **中文开箱可用**, 随包思源黑体已自动注册)、Pillow(Image.open/save/resize; 中文用 `guncat_fonts.pillow_font(size)`); ' +
       '解析 lxml(etree.fromstring + `.xpath()`, lxml.html + `.cssselect()`)、regex(支持 `\\p{Han}`/`\\p{Emoji}` 等 Unicode 属性, 标准库 re 不支持)、bs4; ' +
       '文档 python-docx、python-pptx、XlsxWriter(带格式/公式/图表)、reportlab(PDF)、pypdf; ' +
       '加密 PyCryptodome(Crypto.Cipher.AES / Crypto.PublicKey.RSA / ECC / SHA3); 数学 sympy; ' +

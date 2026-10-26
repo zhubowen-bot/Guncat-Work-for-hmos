@@ -20,9 +20,9 @@ bash tooling/python/build-python-stack.sh verify      # 只跑自检
 `crypto` → `misc` → `extras` → `verify`。每步幂等，产物存在就跳过。
 
 自检由 [`verify-python-stack.py`](../../tooling/python/verify-python-stack.py) 完成，
-20 项覆盖：标准库（sqlite3/ssl/压缩/hash）、ctypes、numpy（含 fft/det）、pandas（groupby/tz）、
+21 项覆盖：标准库（sqlite3/ssl/压缩/hash）、ctypes、numpy（含 fft/det）、pandas（groupby/tz）、
 Pillow、matplotlib、qrcode、lxml（xpath/cssselect）、regex（`\p{Han}`）、bs4、PyCryptodome、
-docx/pptx/xlsxwriter、sympy、psutil、requests（+ certifi）、openpyxl/yaml/jinja2、reportlab、watchdog。
+docx/pptx/xlsxwriter、sympy、psutil、requests（+ certifi）、openpyxl/yaml/jinja2、reportlab、watchdog、中文字体。
 
 [`run-verify-stack.sh`](../../tooling/python/run-verify-stack.sh) 会**按真机布局**组装环境：
 extras.zip 解到临时目录、libs 只提供 `.so`、`PYTHONPATH=stdlib:site-packages:extras:libs`，
@@ -30,7 +30,7 @@ extras.zip 解到临时目录、libs 只提供 `.so`、`PYTHONPATH=stdlib:site-p
 
 ```
 python 3.12.15 | linux
-20/20 passed
+21/21 passed
 ```
 
 ## 1. 纯 Python 包：`tooling/python/vendor-pure.sh`
@@ -268,6 +268,22 @@ reportlab 的 `setup.py` 会尝试下载 Type1 字体曲线，离线环境会打
 
 2026-10-28 在 qemu（走宿主网络）实测：`DNS OK → TCP OK(93ms/31ms) → TLSv1.2 证书 89 天 →
 HTTPS 200`，结论"出网正常"；`get()` 与流式 `download()` 均正常。
+
+### 中文字体：思源黑体（2026-10）
+
+matplotlib/Pillow 默认字体不含中文，画出来是方块。现在随包带一份
+**Source Han Sans SC Regular**（OFL-1.1），按 **GB2312（6763 汉字）子集化到 3.4MB**：
+
+- 文件：`entry/src/main/resources/rawfile/python/fonts/SourceHanSansSC-Regular.otf`
+  运行时解到 `<stdlib>/fonts/`（`PythonService.ensureRuntime`）；
+- 注册：`guncat_fonts.py` 在 `sitecustomize` 里被 import，装一个 `sys.addaudithook`，
+  监听 `import matplotlib.font_manager` —— 一旦有人 import matplotlib 就自动
+  `addfont()` + 设 `font.sans-serif`，**用户什么都不用做**；
+- Pillow：`guncat_fonts.pillow_font(size)`；
+- 自检：`cjk-font` 一项要求「matplotlib 缺字警告 == 0」且「Pillow 渲染墨迹 > 50 像素」。
+
+顺带补上了 Pillow 的 `_imagingft`（FreeType 绑定）—— 之前编 Pillow 时 freetype 还不存在，
+`ImageFont.truetype` 直接 ImportError；现在 `FREETYPE_ROOT` 指到同一 prefix 重编即可。
 
 ## 3. 已验证可用（2026-10）
 

@@ -126,6 +126,14 @@ CPython 内静态链接/随包分发的第三方代码（均由 CPython 自身�
 
 本版本**没有**打包这三个库（因此 `sqlite3`、`ssl`、`ctypes` 不可用），无需声明。
 
+### 2.14 中文字体：Source Han Sans SC
+
+- **Source Han Sans SC Regular**（思源黑体）— SIL Open Font License 1.1 (OFL-1.1)，
+  Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
+- 位置：`entry/src/main/resources/rawfile/python/fonts/SourceHanSansSC-Regular.otf`，
+  按 GB2312 字符集子集化（保留字形轮廓，未修改字形设计）。
+- OFL 允许随软件分发与子集化；保留原版权声明与许可文本即可（见 `docs/legal/`）。
+
 ### 2.13 reportlab / watchdog（纯 Python 运行）
 
 - **reportlab 4.2.5** — BSD-3-Clause（ReportLab Inc.）；字体数据各有许可（见包内 `fonts/`）；

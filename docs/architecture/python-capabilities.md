@@ -58,13 +58,23 @@ im.resize((800, 600)).filter(ImageFilter.SHARPEN).save("out.jpg", quality=85)
 ImageDraw.Draw(im).text((10, 10), "Guncat", fill=(255, 255, 255))
 ```
 
-**中文字体**：matplotlib 默认字体不含中文，需要指定系统/自带字体：
+**中文（开箱即用）**：随包带了一份思源黑体 SC（GB2312 子集，3.4MB，OFL-1.1）。
+`sitecustomize` 在启动时装了钩子，**只要 import matplotlib，中文字体就自动注册**：
+
 ```python
-from matplotlib import font_manager
-# 把 ttf 放到工作区后：
-font_manager.fontManager.addfont("NotoSansSC.ttf")
-plt.rcParams["font.family"] = "Noto Sans SC"
+import matplotlib; matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+plt.title("中文标题")        # 直接可用，不会变方块
 ```
+
+Pillow 想要同款字体：
+```python
+import guncat_fonts
+font = guncat_fonts.pillow_font(24)      # ImageFont 对象
+ImageDraw.Draw(im).text((10, 10), "中文", font=font, fill="black")
+```
+想换字体：`guncat_fonts.use_cjk("/path/your.ttf")`。
+边界：子集只含 GB2312（6763 汉字），生僻字会显示成方块。
 
 ## 4. 解析与文本
 

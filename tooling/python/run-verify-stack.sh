@@ -24,10 +24,12 @@ TMP="${TMPDIR:-/tmp}/guncat-stack-$$"
 cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
 
-mkdir -p "$TMP/data"
+mkdir -p "$TMP/data" "$TMP/fonts"
+cp -f "$RAW"/fonts/*.otf "$TMP/fonts/" 2>/dev/null || true
 cd "$TMP"
 ( cd "$TMP/data" && unzip -q "$RAW/extras.zip" )
 
+GUNCAT_FONT_DIR="$TMP/fonts" \
 PYTHONPATH="$RAW/python312.zip:$RAW/site-packages.zip:$TMP/data:$LIBS" \
 PYTHONHOME="$ROOTFS/usr/local" \
 LD_LIBRARY_PATH="$ROOTFS/usr/local/lib:$LIBS" \
