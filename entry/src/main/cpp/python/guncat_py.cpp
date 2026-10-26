@@ -137,8 +137,45 @@ std::string Trim(const std::string& s) {
     return s.substr(b, e - b + 1);
 }
 
-bool ReadBoolFile(const std::string& path, bool defVal) {
-    std::string t = Trim(ReadFile(path));
+// 把路径安全地嵌进 Python 单引号字符串(路径由应用生成, 这里只做最小转义)
+std::string PyLiteral(const std::string& raw) {
+    std::string out;
+    out.reserve(raw.size() + 8);
+    for (std::size_t i = 0; i < raw.size(); ++i) {
+        char c = raw[i];
+        if (c == '\\' || c == '\'') {
+            out.push_back('\\');
+        }
+        out.push_back(c);
+    }
+    return out;
+}
+
+void ReplaceAll(std::string& text, const std::string& token, const std::string& value) {
+    std::size_t pos = 0;
+    while ((pos = text.find(token, pos)) != std::string::npos) {
+        text.replace(pos, token.size(), value);
+        pos += value.size();
+    }
+}
+
+// 用真实路径渲染启动器/诊断脚本
+std::string RenderScript(const char* tpl, const std::string& codePath, const std::string& outPath,
+                         const std::string& errPath, const std::string& metaPath,
+                         const std::string& diagPath, const std::string& argvPath,
+                         const std::string& stdinPath) {
+    std::string script(tpl);
+    ReplaceAll(script, "__GUNCAT_CODE__", PyLiteral(codePath));
+    ReplaceAll(script, "__GUNCAT_OUT__", PyLiteral(outPath));
+    ReplaceAll(script, "__GUNCAT_ERR__", PyLiteral(errPath));
+    ReplaceAll(script, "__GUNCAT_META__", PyLiteral(metaPath));
+    ReplaceAll(script, "__GUNCAT_DIAG__", PyLiteral(diagPath));
+    ReplaceAll(script, "__GUNCAT_ARGV__", PyLiteral(argvPath));
+    ReplaceAll(script, "__GUNCAT_STDIN__", PyLiteral(stdinPath));
+    return script;
+}
+
+bool ReadBoolFile(const std::string& path, bool defVal) {    std::string t = Trim(ReadFile(path));
     if (t == "1" || t == "true") {
         return true;
     }
@@ -197,14 +234,17 @@ int32_t PropToInt(napi_env env, napi_value obj, const char* name, int32_t defVal
 const char* kLauncher = R"PYSRC(
 import sys, os, io
 
-_env = os.environ
-_code_path = _env.get('GUNCAT_PY_CODE', '')
-_out_path = _env.get('GUNCAT_PY_OUT', '')
-_err_path = _env.get('GUNCAT_PY_ERR', '')
-_meta_path = _env.get('GUNCAT_PY_META', '')
-_diag_path = _env.get('GUNCAT_PY_DIAG', '')
-_argv_path = _env.get('GUNCAT_PY_ARGV', '')
-_stdin_path = _env.get('GUNCAT_PY_STDIN', '')
+# 注意: 这些路径是 native 侧在每次调用时**直接拼进源码**的, 不走环境变量。
+# 踩过的坑: CPython 在 Py_Initialize 里就把 os.environ 快照下来了, native 之后再用
+# libc setenv() 设的变量 Python 侧完全看不到 —— 于是 code/meta 路径全是空串,
+# 启动器"成功"执行了一段空脚本(rc=0)、什么文件都没写, 宿主只能看到"没有产出结果文件"。
+_code_path = '__GUNCAT_CODE__'
+_out_path = '__GUNCAT_OUT__'
+_err_path = '__GUNCAT_ERR__'
+_meta_path = '__GUNCAT_META__'
+_diag_path = '__GUNCAT_DIAG__'
+_argv_path = '__GUNCAT_ARGV__'
+_stdin_path = '__GUNCAT_STDIN__'
 
 
 def _write(path, text):
@@ -332,7 +372,7 @@ finally:
 // 再用"只用 builtins + sys/os"的最小脚本探一次, 至少把 sys.path / sys.prefix 落盘。
 const char* kMiniDiag = R"PYMINI(
 import sys, os
-_p = os.environ.get('GUNCAT_PY_DIAG', '')
+_p = '__GUNCAT_DIAG__'
 if _p:
     _lines = []
     try:
@@ -449,6 +489,8 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
         out.error = "无法写入 argv 文件: " + argvPath;
         return out;
     }
+    // 注意: 这些 GUNCAT_PY_* 环境变量只是留给排障用的副本 —— CPython 在 Py_Initialize 时
+    // 已快照 os.environ, 之后再 setenv 是看不见的, 所以路径一律走上面的源码内联。
     ::setenv("GUNCAT_PY_CODE", codePath.c_str(), 1);
     ::setenv("GUNCAT_PY_OUT", outPath.c_str(), 1);
     ::setenv("GUNCAT_PY_ERR", errPath.c_str(), 1);
@@ -491,7 +533,9 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
     });
 
     int state = api.gilEnsure();
-    int rc = api.runSimpleString(kLauncher);
+    std::string script = RenderScript(kLauncher, codePath, outPath, errPath, metaPath,
+                                      diagPath, argvPath, opt.stdinPath);
+    int rc = api.runSimpleString(script.c_str());
     api.gilRelease(state);
 
     finished.store(true);
@@ -512,8 +556,10 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
         // 启动器没写出结果: 再用最小脚本探一次(只用 sys/os), 保证至少拿到 sys.path 级信息
         OH_LOG_WARN(LOG_APP, "launcher produced no meta (rc=%{public}d), running mini diag", rc);
         ::unlink(diagPath.c_str());
+        std::string mini = RenderScript(kMiniDiag, codePath, outPath, errPath, metaPath,
+                                        diagPath, argvPath, opt.stdinPath);
         int state2 = api.gilEnsure();
-        int rc2 = api.runSimpleString(kMiniDiag);
+        int rc2 = api.runSimpleString(mini.c_str());
         api.gilRelease(state2);
         std::string diag = Trim(ReadFile(diagPath));
         out.error = "Python 启动器没有产出结果(rc=" + std::to_string(rc) +

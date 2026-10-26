@@ -133,6 +133,9 @@ mini import _json=FAIL ModuleNotFoundError("No module named '_json'")
 
 - `import _json=FAIL ... cannot open shared object file` → 扩展模块没随包/没加载（见 §5 的 libs 目录）；
 - `import zlib=FAIL ... libz.so` → 少了 `libz.so`；
+- 若看到 `rc=0` 且 meta/stdout/diag **全是空的** → 启动器没拿到路径（历史 bug：CPython 在
+  `Py_Initialize` 时快照 `os.environ`，native 之后 `setenv` 传路径 Python 侧读不到；现已改成把
+  路径直接渲染进启动器源码）；
 - 连 `mini` 都没有 → 解释器初始化后就不可用，优先查 `PYTHONHOME` 里的 zip 是否存在。
 
 ## 8. 验证

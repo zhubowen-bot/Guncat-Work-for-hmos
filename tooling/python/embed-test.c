@@ -1,10 +1,10 @@
 // 宿主侧 POC: 用与 guncat_py.cpp 相同的方式(dlopen + PyRun_SimpleString)执行
 // guncat_py.cpp 里的启动器脚本, 用来在没有真机的情况下验证:
-//   * 嵌入式和 CLI 的差异(这里是嵌入式);
-//   * 标准库只给 zip、扩展模块缺失时的失败形态(应当"没有产出结果文件");
-//   * 诊断信息是否足够定位问题。
+//   * 嵌入式与 CLI 的差异;
+//   * 路径注入方式(把 __GUNCAT_*__ 占位符渲染成真实路径, 不依赖环境变量);
+//   * 标准库/扩展缺失时的失败形态与诊断信息。
 //
-// 用法: embed-test <libpython.so> <launcher.py> <code.py> <outdir> <pythonhome> <pythonpath> [timeout_ms]
+// 用法: embed-test <libpython.so> <launcher.py> <code.py> <outdir> <pythonhome> <pythonpath>
 #include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,34 +31,70 @@ static char* slurp(const char* path) {
     return buf;
 }
 
+static void replace_all(char* text, size_t cap, const char* token, const char* value) {
+    char out[65536];
+    size_t tok = strlen(token);
+    size_t vlen = strlen(value);
+    size_t oi = 0;
+    for (size_t i = 0; text[i] != '\0' && oi + vlen + 1 < sizeof(out); ) {
+        if (strncmp(text + i, token, tok) == 0) {
+            if (oi + vlen >= cap) break;
+            memcpy(out + oi, value, vlen);
+            oi += vlen;
+            i += tok;
+        } else {
+            out[oi++] = text[i++];
+        }
+    }
+    out[oi] = '\0';
+    strncpy(text, out, cap - 1);
+    text[cap - 1] = '\0';
+}
+
 int main(int argc, char** argv) {
     if (argc < 7) {
         fprintf(stderr, "usage: %s libpython launcher code outdir pythonhome pythonpath\n", argv[0]);
         return 2;
     }
     const char* lib = argv[1];
-    char* launcher = slurp(argv[2]);
-    if (!launcher) { fprintf(stderr, "no launcher\n"); return 2; }
+    char* raw = slurp(argv[2]);
+    if (!raw) { fprintf(stderr, "no launcher\n"); return 2; }
+    // 渲染会变长(占位符比路径短), 用固定大缓冲, 避免 strncpy 越界
+    static char launcher[262144];
+    memset(launcher, 0, sizeof(launcher));
+    strncpy(launcher, raw, sizeof(launcher) - 1);
+    free(raw);
 
     const char* outdir = argv[4];
-    char code_path[4096], out_path[4096], err_path[4096], meta_path[4096], diag_path[4096];
+    char code_path[4096], out_path[4096], err_path[4096], meta_path[4096], diag_path[4096], argv_path[4096];
     snprintf(code_path, sizeof(code_path), "%s/code.py", outdir);
     snprintf(out_path, sizeof(out_path), "%s/stdout.txt", outdir);
     snprintf(err_path, sizeof(err_path), "%s/stderr.txt", outdir);
     snprintf(meta_path, sizeof(meta_path), "%s/meta.txt", outdir);
     snprintf(diag_path, sizeof(diag_path), "%s/diag.txt", outdir);
+    snprintf(argv_path, sizeof(argv_path), "%s/argv.txt", outdir);
     unlink(out_path); unlink(err_path); unlink(meta_path); unlink(diag_path);
+
+    // argv 文件(一行一个) —— 由测试自己准备; 没有就写个 "-c"
+    if (access(argv_path, F_OK) != 0) {
+        FILE* f = fopen(argv_path, "w");
+        if (f) { fputs("-c\n", f); fclose(f); }
+    }
+
+    // 与 native 侧一致: 把占位符渲染成真实路径(不依赖环境变量)
+    replace_all(launcher, sizeof(launcher), "__GUNCAT_CODE__", code_path);
+    replace_all(launcher, sizeof(launcher), "__GUNCAT_OUT__", out_path);
+    replace_all(launcher, sizeof(launcher), "__GUNCAT_ERR__", err_path);
+    replace_all(launcher, sizeof(launcher), "__GUNCAT_META__", meta_path);
+    replace_all(launcher, sizeof(launcher), "__GUNCAT_DIAG__", diag_path);
+    replace_all(launcher, sizeof(launcher), "__GUNCAT_ARGV__", argv_path);
+    replace_all(launcher, sizeof(launcher), "__GUNCAT_STDIN__", "");
 
     setenv("PYTHONHOME", argv[5], 1);
     setenv("PYTHONPATH", argv[6], 1);
     setenv("PYTHONUTF8", "1", 1);
     setenv("PYTHONDONTWRITEBYTECODE", "1", 1);
     setenv("PYTHONNOUSERSITE", "1", 1);
-    setenv("GUNCAT_PY_CODE", code_path, 1);
-    setenv("GUNCAT_PY_OUT", out_path, 1);
-    setenv("GUNCAT_PY_ERR", err_path, 1);
-    setenv("GUNCAT_PY_META", meta_path, 1);
-    setenv("GUNCAT_PY_DIAG", diag_path, 1);
 
     void* h = dlopen(lib, RTLD_NOW | RTLD_GLOBAL);
     if (!h) { fprintf(stderr, "dlopen: %s\n", dlerror()); return 1; }
