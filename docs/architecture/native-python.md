@@ -76,6 +76,12 @@ bash tooling/python/build-cpython-ohos.sh
 2. 标准库 zip 必须 **`zip -0` 存储**：zipimport 解压依赖 zlib 扩展模块，而它是应用 lib 目录里的 `.so`，
    启动早期加载失败会让解释器起不来。存储模式还省掉每个模块的 inflate，HAP 自身是 zip 会再压一次。
 
+**必须让扩展显式 `DT_NEEDED` libpython**：设备上扩展是 dlopen 加载的，若只 `NEEDED libc.so`，
+`PyModuleDef_Init` 这类符号只能去全局作用域找，而鸿蒙上找不到（实机报
+`Error relocating … math…so: PyModuleDef_Init: symbol not found`）。构建脚本因此改写
+`BLDSHARED` 追加 `-lpython3.12`，并把 libpython 的 SONAME 规范成 `libpython3.12.so`；
+加载器会先装 libpython 再直接绑定符号 —— 和 `libqemu` 找 `libslirp.so.0` 是同一条路径。
+
 关掉的扩展：`_ssl`/`_hashlib`（无 OpenSSL）、`_sqlite3`、`_ctypes`（无 libffi）、`_locale`、
 `curses`/`readline`/`_tkinter`、`_bz2`/`_lzma`、`_uuid`、`_multiprocessing` 等。
 `json`/`csv`/`decimal`/`zlib`/`hashlib`（无 OpenSSL 部分）/`math`/`statistics` 等都可用。
@@ -116,6 +122,22 @@ PYTHONUTF8=1  PYTHONDONTWRITEBYTECODE=1  PYTHONNOUSERSITE=1
 * **没有 fork/exec**：`subprocess`、`os.system`、`multiprocessing` 不可用；要调 Unix 工具请用 `shell`。
 * **没有网络**：未编 `_ssl`，`urllib` 的 https 不可用；HTTP 需求走 ArkTS 侧工具。
 * **第三方包**：镜像里 `pip` 装的包在 VM 里；原生解释器只有标准库（要 numpy/pandas 需另外交叉编译）。
+
+## 6.1 标准库可用性（实机口径）
+
+| 可用 | 说明 |
+| --- | --- |
+| 全部**纯 Python** 模块 | `json`/`csv`/`re`/`statistics`/`fractions`/`pathlib`/`argparse`/`logging`/`difflib`/`shutil`/`typing`/`dataclasses`/`textwrap`/`glob`/`traceback`… |
+| C 扩展 | `_json` `_csv` `zlib` `binascii` `math` `cmath` `_struct` `array` `_datetime` `_random` `_statistics` `_socket` `select` `mmap` `_decimal` `_elementtree` `pyexpat` `unicodedata` `_md5` `_sha1` `_sha2` `_sha3` `_blake2` `_posixsubprocess` `_queue` `_pickle` `_heapq` `_bisect` `_asyncio` `_contextvars` `fcntl` `termios` `resource` `grp` `syslog` |
+
+`hashlib` 没有 OpenSSL 后端，但会走 `_md5`/`_sha*`/`_blake2` 这些内置实现，`md5`/`sha256` 等**可用**。
+
+| 不可用 | 原因 |
+| --- | --- |
+| `ssl`（连带 `urllib` 的 https） | 未编 OpenSSL |
+| `sqlite3` | 未编 SQLite |
+| `ctypes` | 未编 libffi |
+| `bz2` / `lzma` / `curses` / `readline` / `tkinter` / `multiprocessing` / `_locale` | 依赖库或 fork，沙箱里用不上 |
 
 ## 7. 排障信号
 
