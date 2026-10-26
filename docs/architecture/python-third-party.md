@@ -254,6 +254,21 @@ certifi 也用文件路径拿 CA 包 —— zipimport 下这些路径是虚拟�
 reportlab 的 `setup.py` 会尝试下载 Type1 字体曲线，离线环境会打印 `Failed to download`，
 不影响使用（`.afm` 已随 sdist 提供）。
 
+### guncat_net：网络分层自检（2026-10 增强）
+
+`tooling/python/local-pkgs/guncat_net.py`，随包进 `site-packages.zip`。五个探测面：
+
+| 面 | 内容 | 失败时说明什么 |
+| --- | --- | --- |
+| loopback | 本机 127.0.0.1 建连 | 沙箱/解释器本身有问题（与外部网络无关） |
+| dns | `getaddrinfo` + A/AAAA 记录条数 | 没联网，或拿不到解析服务 |
+| tcp | 443 建连耗时 | 目标被策略拦截 / 无外网 |
+| tls | 握手版本、cipher、证书到期天数 | 证书过期(系统时间) 或中间设备拦截 |
+| https | 真正发 HEAD 拿状态码 | 应用层被拦（代理/鉴权） |
+
+2026-10-28 在 qemu（走宿主网络）实测：`DNS OK → TCP OK(93ms/31ms) → TLSv1.2 证书 89 天 →
+HTTPS 200`，结论"出网正常"；`get()` 与流式 `download()` 均正常。
+
 ## 3. 已验证可用（2026-10）
 
 纯 Python 21 个：requests / urllib3 / certifi / idna / charset-normalizer / python-dateutil /

@@ -126,11 +126,20 @@ import requests
 r = requests.get("https://api.example.com/items", timeout=15)
 r.raise_for_status(); data = r.json()
 ```
-自检工具（判断设备到底能不能出网）：
+
+自检工具（判断设备到底能不能出网、断在哪一层）：
+
 ```python
 import guncat_net
-print(guncat_net.check())      # 逐层报告 DNS / TCP / TLS 结果
+guncat_net.check()        # 打印 回环 / DNS / TCP / TLS / HTTPS 五段 + 结论
+guncat_net.diagnose()     # 同上但不打印，返回 dict，适合 if 判断
+guncat_net.get("https://example.com")                 # 取文本（自动处理编码）
+guncat_net.download("https://x/a.png", "a.png")        # 下载到文件（流式，不占内存）
 ```
+
+`check()` 会报告：本机回环是否正常（区分"沙箱坏了"还是"没网"）、每个域名的 IPv4/IPv6 记录、
+TCP 连接耗时、TLS 版本与证书到期天数、代理环境变量。证书校验失败时会明确提示
+"检查设备系统时间"——这是设备上最常见的证书问题来源。
 
 ## 8. 系统信息
 
