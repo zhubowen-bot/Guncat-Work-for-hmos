@@ -655,7 +655,7 @@ export class HarnessTools {
     defs.push(HarnessTools.makeTool(LinuxShellService.TOOL_NAME,
       '在设备上真实运行的 Linux(Alpine, QEMU 解释执行、无 JIT)里执行一条 shell 命令, 返回退出码与 stdout/stderr。' +
       '**目录与其它工具完全一致**: 命令的工作目录就是本会话工作区 —— 与 read_file/write_file/edit/glob 看到的是同一个目录(经 virtio-9p 直接共享, 不是副本), 所以 `cat data/a.csv` 与 read_file("data/a.csv") 读的是同一份内容, 用 shell 改过的文件立刻能被 read_file 读到。' +
-      '适用: 批量重命名/批量转换、sed/awk/grep/find/xargs 流水线、tar/gzip 打包、跨文件统计与比对、需要真程序的活(busybox; 需要 python/jq 等可先 `apk add`)。' +
+      '适用: 批量重命名/批量转换、sed/awk/grep/find/xargs 流水线、tar/gzip 打包、跨文件统计与比对、需要真程序的活(busybox; **已预装 Python 3 + pip + jq**, 其它包可 `apk add` 联网安装)。' +
       '**不要**用它做 read_file/write_file/search_files/glob/grep/transform_file 已经能做好的事(每次调用都有开销); 也不要逐条 `ls`/`cat` 摸索目录 —— 用 list_files/glob 更快。' +
       '语法: 标准 sh(管道、重定向、通配符、变量、&&/||、for/while、函数)。相对路径以工作区根为基准, cwd 可切到子目录。' +
       '开销: 首次调用需要引导虚拟机(冷启动数十秒, TCI 逐条解释执行, 比 JIT 慢但不需要受限权限), 之后同一进程内复用, 调用很快; 空闲 10 分钟后自动关机, 下次再冷启动。' +

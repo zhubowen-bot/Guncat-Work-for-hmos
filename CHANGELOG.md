@@ -20,8 +20,15 @@
 - **命令通道也是 9p**：任务写在 `filesDir/linux/ipc/<会话>/in/<id>/`，客人守护进程执行后把
   `stdout`/`stderr`/`code`/`done` 写回 `out/<id>/`。**不用串口做 RPC** —— 没有终端回显、ANSI 转义与
   二进制分界这类脆弱解析；串口只留作内核日志排障（native 侧存 64KB 环形缓冲，失败时附在错误里）。
-- **生命周期**：首次调用释放镜像（约 48MB，按 `versionCode` 缓存）并冷启动 VM（TCI 解释执行，数十秒）；
-  之后同进程复用；空闲 10 分钟下发 `poweroff` 释放 512MB 内存；进程退出即随进程销毁。
+- **生命周期**：首次调用释放镜像（压缩 qcow2 约 37MB，已含 Python 3 / pip / jq；按 `versionCode` +
+  `WORK_LINUX_IMAGE_REV` 缓存）并冷启动 VM（TCI 解释执行，数十秒）；
+  之后同进程复用；空闲 10 分钟下发 `poweroff` 释放 2GB 内存；进程退出即随进程销毁。
+- **预装 Python 3 / pip / jq**：镜像自带 `python3`(3.12)、`py3-pip`、`jq`、`ca-certificates`，
+  模型可以直接 `python3 -c "..."`、`pip install requests`、`cat data.json | jq '.items[]'`，
+  不必先联网装包；要加更多包改 `tooling/linux-vm/provision-packages.sh` 的 `PACKAGES` 重跑
+  （镜像自己 `apk add` 后回写 qcow2，依赖解析与 post-install 都由 apk 完成）。
+- **内存 512MB → 2GB**：手机普遍 12GB+，`apk add` / `pip install` / 解大压缩包不再容易 OOM；
+  空闲 10 分钟仍会自动关机释放。
 - **失败语义**：命令退出码非 0 **不算工具失败**（`grep` 无匹配返回 1 是正常语义），由模型按退出码与
   stderr 判断；只有 VM 不可用/引导失败才是 `ok=false`，且错误里带串口日志尾部。输出超 60KB 截断，
   全文落到工作区 `.spill/shell-*.log` 供 `read_file` 读回。
@@ -45,7 +52,8 @@
   打包、跨文件统计这类"需要真程序"的活；并明确"目录与其它工具一致"这条口径，避免模型把 shell 里的文件
   当成另一个世界。
 - 工具面：工作模式 **45 → 46** 个工具；交互模式仍是 **27 个**（`shell` 属于重工具，故意不进白名单）。
-- 版本号：`6.3.0` / 630 → **`6.4.0` / 640**（versionCode 变化会触发镜像重新释放）。
+- 版本号：`6.3.0` / 630 → **`6.4.0`**（versionCode 见 `AppScope/app.json5`；versionCode 或
+  `WORK_LINUX_IMAGE_REV` 变化都会触发镜像重新释放）。
 
 ## 6.3.0 更新（交互模式 · Intelligent UI）
 

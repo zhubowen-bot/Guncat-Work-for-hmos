@@ -8,7 +8,7 @@
 | 产物 | 落地位置 | 大小 |
 | --- | --- | --- |
 | `libqemu-system-aarch64-tci.so` / `libslirp.so.0` | `entry/libs/arm64-v8a/` | ≈43MB |
-| `rootfs_guncat.qcow2`（定制过的 Alpine 根文件系统） | `entry/src/main/resources/rawfile/vm/` | ≈36MB |
+| `rootfs_guncat.qcow2`（定制 Alpine + Python 3/pip/jq，压缩 qcow2） | `entry/src/main/resources/rawfile/vm/` | ≈37MB |
 | `kernel_aarch64` | `entry/src/main/resources/rawfile/vm/` | ≈12MB |
 
 > `libqemu-img.so`（快照/镜像管理用）本工程不需要，不打包。
@@ -89,6 +89,19 @@ bash tooling/linux-vm/build-rootfs.sh
 - 注入 `/usr/local/bin/guncat-agent`（轮询任务通道并执行命令，把结果写回）
 - 重写 `/etc/inittab`：**不启动 OpenRC**（TCI 下每个服务脚本都是纯开销），只留 sysinit + agent + 串口控制台
 - 输出 `entry/src/main/resources/rawfile/vm/rootfs_guncat.qcow2`
+
+## 3.1 预装软件包（Python 等，可选但强烈建议）
+
+镜像默认**已预装** `python3`、`py3-pip`、`jq`、`ca-certificates`。要加/换包：
+
+```bash
+PACKAGES="python3 py3-pip py3-numpy jq git" bash tooling/linux-vm/provision-packages.sh
+```
+
+做法是**让镜像自己装自己**：脚本用宿主 `qemu-system-aarch64` 引导待发布镜像，走与 app 完全相同的
+文件式命令协议，在客人内部执行 `apk add`，成功后关机并把 qcow2 覆盖回 `rawfile/vm/`。
+依赖解析、post-install 触发器、字节码编译全部由 apk 完成（不是在宿主手工解 apk 包）。
+脚本同时会验证 `python3 -V`、`pip --version`、`import json,sqlite3,ssl`、`pip install six`。
 
 ## 4. 验证产物（不需要真机）
 

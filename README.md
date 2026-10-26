@@ -9,7 +9,7 @@
 ![HarmonyOS](https://img.shields.io/badge/HarmonyOS-API%2024%20(6.1.1)-blue)
 ![version](https://img.shields.io/badge/version-6.4.0-blue)
 ![forms](https://img.shields.io/badge/Agent%20Forms-Intelligent%20UI%20%2B%20Harness-blueviolet)
-![tools](https://img.shields.io/badge/%E5%86%85%E7%BD%AE%E5%B7%A5%E5%85%B7-45-informational)
+![tools](https://img.shields.io/badge/%E5%86%85%E7%BD%AE%E5%B7%A5%E5%85%B7-46-informational)
 ![skills](https://img.shields.io/badge/%E6%8A%80%E8%83%BD-32-informational)
 [![license](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 [![CI](https://github.com/zhubowen-bot/Guncat-Work-for-hmos/actions/workflows/ci.yml/badge.svg)](https://github.com/zhubowen-bot/Guncat-Work-for-hmos/actions/workflows/ci.yml)
@@ -53,7 +53,7 @@ Guncat Work 支持完整丰富的客户端功能：聊天模式内置通用、�
 - **内置本地联网搜索**：软件内置、无需手动开关，工作模式与聊天模式都能调用，不受制于服务端联网开关。
 - **端侧直出 Office**：PPT / Word / Excel / SVG 由本地生成器产出，基于 JSON 中间层，文档可无损读回、算子式编辑；PDF 与 Office 全部本地解析，不消耗多模态配额。
 - **46 个内置工具**：文件增删改查与模式匹配搜索、任务清单、图片查看、网络下载、PDF 解析、Office 读写、数据管道清洗转换与格式互转、基于 JSVM-API 的 `run_js` 代码沙箱（不联网、不读写文件系统，后台线程执行并带超时保护），以及**设备内真 Linux 的 `shell`**（QEMU TCG 解释执行、不需要 JIT 权限；Alpine + busybox，可用 `apk add`，工作目录经 virtio-9p 与本会话工作区直连）。
-- **真 Linux，不是模拟器 API**：`shell` 里跑的是完整 Linux 用户态（内核 6.12 + Alpine 3.22），管道/重定向/通配符/`sed`/`awk`/`find`/`tar` 都是真的；首启引导数十秒，之后同进程复用，空闲 10 分钟自动关机释放内存。
+- **真 Linux，不是模拟器 API**：`shell` 里跑的是完整 Linux 用户态（内核 6.12 + Alpine 3.22，**预装 Python 3 / pip / jq**），管道/重定向/通配符/`sed`/`awk`/`find`/`tar` 都是真的；首启引导数十秒，之后同进程复用，空闲 10 分钟自动关机释放内存（2GB）。
 - **32 个技能**：5 个主 Skill 路由 + 7 个格式分支，命中即按需加载；PPT / Word / Excel 三个技能采用「门」式约束，交付前生成可核对的自检报告。
 - **原生 Markdown**：CommonMark 与 GFM 常用语法、代码高亮、表格、任务列表、LaTeX 行内与块级公式、Mermaid 图表，深浅色主题自动适配。
 - **附件与分享**：图片 / 文档直传或预解析、256px 缩略图、快捷拍照、导出 Markdown 回答为 Word（含 LaTeX → OMML 原生公式）、接收 HarmonyOS 系统分享。
@@ -93,7 +93,7 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 
 - `entry/libs/arm64-v8a/libqemu-system-aarch64-tci.so`（TCG **解释执行**版 QEMU，不需要 JIT 权限，约 42MB）
 - `entry/libs/arm64-v8a/libslirp.so.0`（QEMU 用户态网络，约 2MB）
-- `entry/src/main/resources/rawfile/vm/rootfs_guncat.qcow2`（Alpine 根文件系统，约 36MB）
+- `entry/src/main/resources/rawfile/vm/rootfs_guncat.qcow2`（Alpine 根文件系统，压缩 qcow2 约 37MB，已预装 Python 3 / pip / jq）
 - `entry/src/main/resources/rawfile/vm/kernel_aarch64`（Linux 6.12 内核，约 12MB）
 
 在 WSL2 + HarmonyOS Command Line Tools 下依次执行（细节见 [Linux VM 构建链](tooling/linux-vm/README.md)）：
@@ -107,7 +107,7 @@ cp $HOME/hish-tci-build/deps/output/libqemu-system-aarch64-tci.so \
    $HOME/hish-tci-build/deps/output/libslirp.so.0 entry/libs/arm64-v8a/
 ```
 
-打好包的 HAP 约 160MB（含 QEMU 与两套镜像）。缺这些产物时应用照常构建与运行，只是调用 `shell`
+打好包的 HAP 约 166MB（含 QEMU 与两套镜像）。缺这些产物时应用照常构建与运行，只是调用 `shell`
 会返回明确的"运行库不可用"说明。
 
 ### 首次配置

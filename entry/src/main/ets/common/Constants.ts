@@ -238,7 +238,11 @@ export class Constants {
   static readonly WORK_SHELL_TOOL_NAME: string = 'shell';
   // 沙箱内目录布局: filesDir/linux/vm(内核与 rootfs 镜像) 与 filesDir/linux/ipc(命令通道)
   static readonly WORK_LINUX_DIR: string = 'linux';
-  static readonly WORK_LINUX_MEMORY_MB: number = 512;
+  // 客人镜像内容版本: **每次重建 rootfs_guncat.qcow2 都要改这里**, 否则已装过的设备不会重新释放镜像
+  // (比 versionCode 更精确: 同一版本内换镜像也能生效)。
+  static readonly WORK_LINUX_IMAGE_REV: string = '2026-10-26-python3';
+  // 客人内存: 手机普遍 12GB+, 2GB 足够 `apk add` / pip / 解大压缩包; 空闲 10 分钟会自动关机释放
+  static readonly WORK_LINUX_MEMORY_MB: number = 2048;
   // 首次引导(冷启动)上限: TCI 解释执行下 boots 明显慢于 JIT, 给足余量
   static readonly WORK_LINUX_BOOT_TIMEOUT_MS: number = 180000;
   // 结果轮询间隔: 客人把 done 文件写进 9p 共享目录, 宿主轮询它

@@ -119,14 +119,34 @@ cd "/workspace/$cwd" && sh "$cmd"
 
 | 阶段 | 行为 |
 | --- | --- |
-| 首次调用 | 释放镜像（约 48MB，按 `versionCode` 缓存到 `filesDir/linux/vm/`）→ 启动 QEMU → 轮询 `ipc/.ready`（上限 180s） |
+| 首次调用 | 释放镜像（压缩 qcow2 约 37MB，按 `versionCode` + `WORK_LINUX_IMAGE_REV` 缓存到 `filesDir/linux/vm/`）→ 启动 QEMU → 轮询 `ipc/.ready`（上限 180s） |
 | 引导完成 | 客人 `guncat-setup` 挂完 9p，`guncat-agent` 写 `.ready` 后开始轮询任务 |
 | 后续调用 | 直接下发任务，只有 9p 往返 + 命令本身的开销 |
-| 空闲 10 分钟 | 宿主下发 `sync; poweroff -f`，QEMU（带 `-no-reboot`）退出，释放 512MB 内存 |
+| 空闲 10 分钟 | 宿主下发 `sync; poweroff -f`，QEMU（带 `-no-reboot`）退出，释放 2GB 内存 |
 | 进程退出 | QEMU 线程随进程结束；下次启动清掉旧 `.ready` 重新引导 |
 
-资源：`-m 512`、`-smp 1`、`-accel tcg,thread=single`（TCI 不支持多线程 TCG）、无显示设备
+资源：`-m 2048`、`-smp 1`、`-accel tcg,thread=single`（TCI 不支持多线程 TCG）、无显示设备
 （`-display none`）、无 QMP/monitor、网络走 slirp 用户态（出站可用，不监听宿主端口）。
+
+**为什么是 1 核**：TCI 没有多线程 TCG，`-smp N` 的多个 vCPU 只会轮流跑在同一个宿主线程上，
+对"一条命令跑完"的模型没有收益，只多出 TCG 上下文切换开销；要真并行得上 JIT，而 JIT 需要受限权限。
+**为什么是 2GB**：手机普遍 12GB+，`apk add`、`pip install`、解大压缩包都吃内存；空闲 10 分钟自动关机，
+不长期占着。
+
+## 5.1 预装软件
+
+镜像里**已预装**常用工具（见 `tooling/linux-vm/provision-packages.sh`）：
+
+| 包 | 用途 |
+| --- | --- |
+| `python3`（3.12） | 数据处理、脚本、算法试算 —— 模型最常用的"真程序" |
+| `py3-pip` | `pip install` 第三方库（如 `requests`、`openpyxl`） |
+| `jq` | JSON 切分/筛选（配合 `cat data.json \| jq ...`） |
+| `ca-certificates` | HTTPS 证书链（pip / curl / apk 都依赖） |
+
+装包是**用镜像自己装自己**：`provision-packages.sh` 用宿主 qemu 引导待发布镜像，走同一套命令协议
+在客人内部 `apk add`，再关机回写 qcow2 —— 依赖解析与 post-install 触发器都由 apk 完成，不是在宿主
+手工解包。要加包就改 `PACKAGES` 重跑一次（例如 `PACKAGES="python3 py3-pip py3-numpy pandas"`）。
 
 ## 6. 安全边界（明确写清楚）
 
@@ -153,7 +173,11 @@ cd "/workspace/$cwd" && sh "$cmd"
 ## 8. 维护
 
 - **换内核 / 换根文件系统**：`bash tooling/linux-vm/fetch-assets.sh` 取新素材 → `build-rootfs.sh` 重新注入 →
-  重新打包。app 侧靠 `filesDir/linux/vm/.version`（写入 `versionCode-versionName`）判断是否需要重新释放。
+  `provision-packages.sh` 装包并压缩 → 重新打包。**改完镜像必须把 `Constants.WORK_LINUX_IMAGE_REV` 换个值**，
+  否则已装设备（同 versionCode）不会重新释放镜像。
+- **镜像为什么是压缩 qcow2**：同一份内容未压缩 117MB、压缩后 37MB。压缩版让 HAP 少 80MB、设备侧占用也少 80MB；
+  代价是 `qemu-img` 里 `-c` 的簇在读时要解压，而我们的 QEMU 静态链了 zlib（已确认 `.so` 内有 inflate 且
+  qcow2 驱动正常），这部分开销相对 TCI 的解释执行可以忽略。
 - **改命令协议**：`guncat-agent` 与 `LinuxShellService` 必须同步改（协议是"文件即接口"，没有版本协商；
   两者在同一个 HAP 里发布，不需要向后兼容）。
 - **改 QEMU 参数**：集中在 `LinuxShellService.buildQemuArgs()`；`thread=multi` 在 TCI 下会启动失败。

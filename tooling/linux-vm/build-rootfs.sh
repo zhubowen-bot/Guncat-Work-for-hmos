@@ -105,3 +105,5 @@ qemu-img convert -f raw -O qcow2 -o compat=1.1,lazy_refcounts=on rootfs.raw "$OU
 qemu-img info "$OUT" | awk 'NR<=6'
 ls -l "$OUT"
 echo "== done: $OUT"
+echo "提醒: 镜像内容变了 —— 请把 entry/src/main/ets/common/Constants.ts 里的 WORK_LINUX_IMAGE_REV"
+echo "      改成新值, 否则已装设备不会重新释放镜像。"

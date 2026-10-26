@@ -547,7 +547,9 @@ export class LinuxShellService {
     try {
       let info: bundleManager.BundleInfo = bundleManager.getBundleInfoForSelfSync(
         bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
-      return info.versionCode.toString() + '-' + info.versionName;
+      // 镜像版本单独进 marker: 同一 app 版本内换了镜像(见 WORK_LINUX_IMAGE_REV)也要重新释放
+      return info.versionCode.toString() + '-' + info.versionName + '-' +
+        Constants.WORK_LINUX_IMAGE_REV;
     } catch (e) {
       return 'unknown';
     }

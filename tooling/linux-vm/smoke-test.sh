@@ -46,7 +46,7 @@ echo "hello-from-host" > "$WORK/workspaces/$CONV/data/a.txt"
 echo "== 引导镜像(宿主 $($QEMU --version | awk 'NR==1{print $4}'))"
 "$QEMU" \
   -machine virt,acpi=on,gic-version=max,iommu=none,its=off,usb=off,virtualization=off \
-  -cpu max,pauth-impdef=on,sve=off,pmu=off -accel tcg,thread=single -smp 1 -m 512 \
+  -cpu max,pauth-impdef=on,sve=off,pmu=off -accel tcg,thread=single -smp 1 -m 2048 \
   -kernel "$WORK/vm/kernel_aarch64" \
   -append "root=/dev/sda rw rootfstype=ext4 rootwait console=ttyAMA0 consoleblank=0 loglevel=4 init=/init mitigations=off audit=0 random.trust_cpu=on elevator=noop skew_tick=1 nmi_watchdog=0 panic=1" \
   -rtc base=utc,clock=host -L "$WORK/vm" \
@@ -87,6 +87,10 @@ expect() {  # 描述, 期望, 实际
   if [ "$2" = "$3" ]; then pass "$1"; else bad "$1 (期望 [$2] 实际 [$3])"; fi
 }
 
+expect_grep() {  # 描述, 正则, 文件
+  if grep -qE "$2" "$3" 2>/dev/null; then pass "$1"; else bad "$1 (在 $3 里没找到 /$2/)"; fi
+}
+
 echo "== 命令协议"
 run_job j1 'pwd; uname -srm; cat data/a.txt'
 expect "pwd 是工作区" "/workspace" "$(head -1 "$WORK/ipc/$CONV/out/j1/stdout")"
@@ -114,6 +118,12 @@ run_job j5 'cat a.txt' 'data'
 expect "cwd 参数生效" "hello-from-host" "$(cat "$WORK/ipc/$CONV/out/j5/stdout")"
 run_job j6 'echo hi | tr a-z A-Z; for f in *.txt; do echo "f=$f"; done'
 expect "管道与 for 循环可用" "HI" "$(head -1 "$WORK/ipc/$CONV/out/j6/stdout")"
+
+echo "== 预装工具"
+run_job j7 'python3 -c "import sys,json,sqlite3,ssl; print(\"py\", sys.version.split()[0])"; python3 -m pip --version; jq -nc "{a:1}"'
+expect_grep "Python 3 可用(含 ssl/sqlite3/json)" '^py 3\.12' "$WORK/ipc/$CONV/out/j7/stdout"
+expect_grep "pip 可用" '^pip 25\.' "$WORK/ipc/$CONV/out/j7/stdout"
+expect_grep "jq 可用" '^\{"a":1\}$' "$WORK/ipc/$CONV/out/j7/stdout"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "== 全部通过"; else echo "== 有失败项(串口日志: $WORK/serial.log)"; fi
