@@ -161,6 +161,38 @@ zlib/libpng（Pillow 那套）→ **freetype 2.13.3** → **qhull 8.0.2** → **
 验证（qemu + 模拟真机布局）：`etree.fromstring` + `xpath('//a/@x')` 正确；
 `lxml.html` + `cssselect('p.c')` 正确（cssselect 是纯 Python，已 vendor）。
 
+### 文档 / 办公 / 数学库（2026-10）
+
+| 包 | 作用 | 备注 |
+| --- | --- | --- |
+| python-docx 1.2.0 | 生成/读取 Word | 依赖 lxml ✔；**模板是真实文件**，必须放 extras |
+| python-pptx 1.0.2 | 生成/读取 PPT | 依赖 lxml + Pillow；同样要放 extras |
+| XlsxWriter 3.x | 写带格式的 Excel | 与原生 `write_xlsx` 互补（公式/图表/条件格式更全） |
+| qrcode | 生成二维码 | 依赖 Pillow 输出 PNG |
+| sympy + mpmath | 符号数学（积分/解方程/化简） | 纯 Python，体积较大（约 9MB） |
+
+**重要经验：带数据文件的包不能留在 zip 里。** python-docx 用
+`os.path.join(os.path.dirname(docx.__file__), 'templates', 'default.docx')` 定位模板，
+certifi 也用文件路径拿 CA 包 —— zipimport 下这些路径是虚拟的，会报
+`PackageNotFoundError: ... /site-packages.zip/docx/templates/default.docx`。
+所以 `vendor-pure.sh` 现在把它们单独放进 `$WORK/extras-pkgs/`，需要合并进 `extras.zip`
+（运行时解成真实文件）。已在 `DATA_PKGS` 里登记：docx、pptx、certifi。
+
+### scipy：暂不集成（2026-10 评估结论）
+
+阻塞点不是 Python 层，而是**工具链缺 Fortran**：
+
+- scipy 的 `linalg` / `sparse` / `optimize` 都依赖 LAPACK，而 LAPACK 是 Fortran 实现；
+- OHOS SDK 里没有 gfortran/flang；OpenBLAS 可以 `NOFORTRAN=1` 编，但那只给 BLAS+CBLAS，**没有 LAPACK**；
+- 交叉编 gfortran 运行库（libgfortran）再对齐 OHOS libc，是另一个量级的工程。
+
+替代方案与代价：
+
+1. numpy 已覆盖 `linalg`（含 `solve`/`svd`/`eig`，走自带的 lapack_lite）、`fft`、`stats` 的一部分；
+2. 需要 scipy 特有功能（稀疏矩阵、优化、信号处理）时，用 numpy 手写或用纯 Python 实现；
+3. 若将来非要上：先交叉编译 gfortran（或 flang）→ 编 OpenBLAS with LAPACK → 再编 scipy，
+   预计 2–4 天且包体 +40~60MB。当前性价比不成立，暂缓。
+
 ## 3. 已验证可用（2026-10）
 
 纯 Python 21 个：requests / urllib3 / certifi / idna / charset-normalizer / python-dateutil /

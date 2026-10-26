@@ -126,6 +126,17 @@ CPython 内静态链接/随包分发的第三方代码（均由 CPython 自身�
 
 本版本**没有**打包这三个库（因此 `sqlite3`、`ssl`、`ctypes` 不可用），无需声明。
 
+### 2.10 文档 / 数学类纯 Python 包
+
+| 包 | 许可 |
+| --- | --- |
+| python-docx 1.2.0 | MIT |
+| python-pptx 1.0.2 | MIT |
+| XlsxWriter | BSD-2-Clause |
+| qrcode | BSD-3-Clause |
+| sympy | BSD-3-Clause |
+| mpmath | BSD-3-Clause |
+
 ### 2.9 lxml / libxml2 / libxslt（C 扩展，交叉编译）
 
 - **lxml 5.3.0** — BSD-3-Clause（Copyright (c) 2004 Infrae）；

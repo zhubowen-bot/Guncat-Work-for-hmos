@@ -46,10 +46,18 @@ pyparsing
 cycler
 fonttools
 cssselect
+python-docx
+python-pptx
+XlsxWriter
+qrcode
+sympy
+mpmath
 "
 # 这些包在 PyPI 上同时有"平台轮子"和"纯 Python 轮子", 直接 --only-binary 会挑到 cpXXX 平台轮;
 # 显式指定 py3/any 平台把它们拉成纯 Python 版本。
 PURE_FORCED="${PURE_FORCED:-charset-normalizer}"
+# 需要真实文件的包(模板/证书), 运行时必须在解压后的目录里
+DATA_PKGS="${DATA_PKGS:-docx pptx certifi}"
 PKGS="${PKGS:-$DEFAULT_PKGS}"
 SOURCE_PKGS="${SOURCE_PKGS:-pyyaml markupsafe}"
 mkdir -p "$WORK/src"
@@ -138,6 +146,26 @@ if [ -d "$HERE/local-pkgs" ]; then
   cp -f "$HERE"/local-pkgs/*.py "$STAGE/" 2>/dev/null || true
 fi
 
+# 带"真实数据文件"的包不能留在 zip 里: 它们用 os.path 定位模板/证书, zipimport 下拿不到路径。
+# 这些包会被挪到 extras 目录(运行时解成真实文件), 见脚本末尾的输出提示。
+for pkg in $DATA_PKGS; do
+  if [ -d "$STAGE/$pkg" ]; then
+    mkdir -p "$WORK/extras-pkgs"
+    rm -rf "$WORK/extras-pkgs/$pkg"
+    cp -r "$STAGE/$pkg" "$WORK/extras-pkgs/$pkg"
+    rm -rf "$STAGE/$pkg"
+    echo "   data-pkg -> extras: $pkg"
+  fi
+done
+for d in "$STAGE"/*.dist-info; do
+  case "$(basename "$d")" in
+    docx-*|python_docx-*|pptx-*|python_pptx-*|certifi-*) ;;
+    *) continue ;;
+  esac
+  mkdir -p "$WORK/extras-pkgs"
+  mv "$d" "$WORK/extras-pkgs/" 2>/dev/null || true
+done
+
 # 去掉 __pycache__ 与测试目录, 减小体积
 find "$STAGE" -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
 find "$STAGE" -maxdepth 1 -type d -name 'tests' -prune -exec rm -rf {} + 2>/dev/null || true
@@ -147,4 +175,8 @@ rm -f "$PYRAW/site-packages.zip"
 echo "== 产物"
 ls -lh "$PYRAW/site-packages.zip" | awk '{print $5, $9}'
 echo "包数: $(find "$STAGE" -maxdepth 1 -mindepth 1 -type d | wc -l) 个目录"
+if [ -d "$WORK/extras-pkgs" ]; then
+  echo "带数据的包已放到 $WORK/extras-pkgs —— 需要合并进 rawfile/python/extras.zip:"
+  ls "$WORK/extras-pkgs" | tr '\n' ' '; echo
+fi
 [ -n "$SKIPPED" ] && echo "跳过(需交叉编译):$SKIPPED" || true
