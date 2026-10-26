@@ -23,7 +23,6 @@ const DOMAIN: number = 0x0000;
 const TAG: string = 'PythonService';
 
 const RAW_ZIP: string = 'python/python312.zip';
-const RAW_DYNLOAD_DIR: string = 'python/lib-dynload';
 const PY_RUNTIME_DIR: string = 'python';
 const PY_STDLIB_SUBDIR: string = 'lib/python3.12';
 
@@ -54,8 +53,10 @@ export class PythonService {
   }
 
   private static pythonPath(context: common.UIAbilityContext): string {
+    // 只给标准库 zip; C 扩展模块在应用的 lib 目录里(native 侧用 dladdr 自动并进 PYTHONPATH),
+    // 因为设备上只有 lib 目录下的 .so 允许 dlopen。
     let stdlib: string = PythonService.runtimeDir(context) + '/' + PY_STDLIB_SUBDIR;
-    return stdlib + '/python312.zip:' + stdlib + '/lib-dynload';
+    return stdlib + '/python312.zip';
   }
 
   /** 首次调用时把 libpython 依赖的标准库/扩展模块释放到沙箱 */
@@ -74,7 +75,6 @@ export class PythonService {
     }
     let root: string = PythonService.runtimeDir(context);
     let stdlib: string = root + '/' + PY_STDLIB_SUBDIR;
-    let dynload: string = stdlib + '/lib-dynload';
     let marker: string = root + '/.version';
     let want: string = PythonService.runtimeVersion();
     try {
@@ -84,28 +84,12 @@ export class PythonService {
           return '';
         }
       }
-      hilog.info(DOMAIN, TAG, 'releasing python runtime (%{public}s)', want);
+      hilog.info(DOMAIN, TAG, 'releasing python stdlib (%{public}s)', want);
       if (!fileIo.accessSync(stdlib)) {
         fileIo.mkdirSync(stdlib, true);
       }
-      if (!fileIo.accessSync(dynload)) {
-        fileIo.mkdirSync(dynload, true);
-      }
       RawAsset.extract(context, RAW_ZIP, stdlib + '/python312.zip');
-      let files: string[] = PythonService.readDynloadManifest(context);
-      if (files.length === 0) {
-        return '运行库清单 rawfile/python/dynload-list.json 缺失或为空';
-      }
-      let count: number = 0;
-      for (let i: number = 0; i < files.length; i++) {
-        let name: string = files[i];
-        if (!name.endsWith('.so')) {
-          continue;
-        }
-        RawAsset.extract(context, RAW_DYNLOAD_DIR + '/' + name, dynload + '/' + name);
-        count++;
-      }
-      hilog.info(DOMAIN, TAG, 'released %{public}d extension modules', count);
+      // C 扩展不打进 rawfile: 它们作为应用原生库随安装释放到 lib 目录, 这里不再解压
       PythonService.writeText(marker, want);
       return '';
     } catch (e) {
@@ -142,12 +126,8 @@ export class PythonService {
     if (!fileIo.accessSync(scratch)) {
       fileIo.mkdirSync(scratch, true);
     }
-    let argvJson: string = '[]';
-    try {
-      argvJson = JSON.stringify(argv);
-    } catch (e) {
-      argvJson = '[]';
-    }
+    // argv 走"一行一个参数"的纯文本: 启动器不需要 import json 就能拿到参数
+    let argvText: string = argv.length > 0 ? argv.join('\n') : '-c';
     let stdinPath: string = '';
     if (stdinText !== '') {
       stdinPath = scratch + '/stdin.txt';
@@ -159,7 +139,7 @@ export class PythonService {
       scratchDir: scratch,
       pythonHome: PythonService.pythonHome(context),
       pythonPath: PythonService.pythonPath(context),
-      argvJson: argvJson,
+      argvJson: argvText,
       stdinPath: stdinPath,
       timeoutMs: timeoutMs
     };
@@ -173,27 +153,6 @@ export class PythonService {
       return pyRunNative(options);
     } finally {
       release();
-    }
-  }
-
-  /** 读打包时生成的扩展模块清单(避免依赖 resourceManager 的目录列举 API) */
-  private static readDynloadManifest(context: common.UIAbilityContext): string[] {
-    try {
-      let bytes: Uint8Array = context.resourceManager.getRawFileContentSync(
-        'python/dynload-list.json');
-      let text: string = util.TextDecoder.create('utf-8').decodeToString(bytes);
-      let parsed: Object = JSON.parse(text) as Object;
-      if (!Array.isArray(parsed)) {
-        return [];
-      }
-      let arr: string[] = parsed as string[];
-      let out: string[] = [];
-      for (let i: number = 0; i < arr.length; i++) {
-        out.push(String(arr[i]));
-      }
-      return out;
-    } catch (e) {
-      return [];
     }
   }
 

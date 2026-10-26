@@ -131,20 +131,19 @@ rm -f "$PROJ/entry/src/main/resources/rawfile/python/python312.zip"
     -x 'test/*' -x 'idlelib/*' -x 'turtledemo/*' -x 'tkinter/*' -x 'lib2to3/*' \
     -x 'ensurepip/*' -x 'lib-dynload/*' -x '__pycache__/*' -x '*.pyc' -x 'config-*/*' )
 
-# 3) C 扩展模块(必须解压, zipimport 不能加载 .so)
-rm -rf "$PROJ/entry/src/main/resources/rawfile/python/lib-dynload"
-mkdir -p "$PROJ/entry/src/main/resources/rawfile/python/lib-dynload"
-cp -f "$STDLIB"/lib-dynload/*.so "$PROJ/entry/src/main/resources/rawfile/python/lib-dynload/" 2>/dev/null || true
-for f in "$PROJ/entry/src/main/resources/rawfile/python/lib-dynload"/*.so; do
+# 3) C 扩展模块: 必须放进 entry/libs/<abi>/ —— 只有应用 lib 目录下的 .so 才能在设备上被
+#    dlopen(数据目录里的 ELF 会被 linker/沙箱拒绝)。它们同时是 CPython 的 import 目标,
+#    运行期由 PythonService 把该目录并进 PYTHONPATH(见 guncat_py.cpp 的 dladdr 逻辑)。
+rm -f "$PROJ/entry/libs/arm64-v8a"/*.cpython-312-*.so
+cp -f "$STDLIB"/lib-dynload/*.so "$PROJ/entry/libs/arm64-v8a/" 2>/dev/null || true
+for f in "$PROJ/entry/libs/arm64-v8a"/*.cpython-312-*.so; do
   [ -f "$f" ] && "$STRIP" --strip-unneeded "$f" || true
 done
-# 4) 清单: ArkTS 侧不依赖 resourceManager 的目录列举 API, 直接读这份 JSON 就知道要释放哪些 .so
-( cd "$PROJ/entry/src/main/resources/rawfile/python/lib-dynload" && \
-  ls -1 *.so | sed 's/^/"/; s/$/"/' | paste -sd, - | sed 's/^/[/; s/$/]/' \
-  > "$PROJ/entry/src/main/resources/rawfile/python/dynload-list.json" )
+# 旧布局(rawfile 里解压)留下的目录清掉, 避免两份
+rm -rf "$PROJ/entry/src/main/resources/rawfile/python/lib-dynload"
+rm -f "$PROJ/entry/src/main/resources/rawfile/python/dynload-list.json"
 
 echo "== 产物"
 ls -lh "$PROJ/entry/libs/arm64-v8a/libpython3.12.so" \
        "$PROJ/entry/src/main/resources/rawfile/python/python312.zip" | awk '{print $5, $9}'
-du -sh "$PROJ/entry/src/main/resources/rawfile/python/lib-dynload"
-echo "扩展模块: $(ls "$PROJ/entry/src/main/resources/rawfile/python/lib-dynload" | wc -l) 个"
+echo "扩展模块: $(ls "$PROJ/entry/libs/arm64-v8a"/*.cpython-312-*.so 2>/dev/null | wc -l) 个 (在 libs/arm64-v8a/)"

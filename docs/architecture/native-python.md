@@ -66,14 +66,14 @@ bash tooling/python/build-cpython-ohos.sh
 | --- | --- | --- |
 | `libpython3.12.so` | `entry/libs/arm64-v8a/` | 5.8 MB |
 | `python312.zip`（纯 Python 标准库，**不压缩存储**） | `entry/src/main/resources/rawfile/python/` | 9.6 MB |
-| `lib-dynload/*.so`（51 个 C 扩展） | 同上 | 3.7 MB |
-| `dynload-list.json`（扩展模块清单） | 同上 | <1 KB |
+| 51 个 C 扩展（`_json.cpython-312-aarch64-linux-gnu.so` 等） | `entry/libs/arm64-v8a/` | 3.5 MB |
+| `libz.so`（zlib 1.3.1，供 `zlib`/`binascii` 扩展链接） | 同上 | 90 KB |
 
 两个踩过的坑，脚本里已经处理：
 
 1. CPython 的 `config.sub` 不认 `aarch64-linux-ohos` → 用 `--host=aarch64-linux-gnu` +
    编译器包装器把 `--print-multiarch` 对齐成 `aarch64-linux-gnu`（编译目标仍是 OHOS）。
-2. 标准库 zip 必须 **`zip -0` 存储**：zipimport 解压依赖 zlib 扩展模块，而它在 `lib-dynload` 里，
+2. 标准库 zip 必须 **`zip -0` 存储**：zipimport 解压依赖 zlib 扩展模块，而它是应用 lib 目录里的 `.so`，
    启动早期加载失败会让解释器起不来。存储模式还省掉每个模块的 inflate，HAP 自身是 zip 会再压一次。
 
 关掉的扩展：`_ssl`/`_hashlib`（无 OpenSSL）、`_sqlite3`、`_ctypes`（无 libffi）、`_locale`、
@@ -85,16 +85,22 @@ bash tooling/python/build-cpython-ohos.sh
 首次调用 `run_python`（或 VM 里首次 `npy`）时，把 rawfile 释放到 `filesDir/python/`：
 
 ```
-filesDir/python/lib/python3.12/
-├── python312.zip        ← 标准库（zipimport 直接读）
-└── lib-dynload/*.so     ← C 扩展
+filesDir/python/lib/python3.12/python312.zip   ← 标准库（zipimport 直接读）
+<应用 lib 目录>/libpython3.12.so                ← 解释器
+<应用 lib 目录>/libz.so                         ← zlib
+<应用 lib 目录>/*.cpython-312-*.so              ← C 扩展（运行期并进 PYTHONPATH）
 ```
+
+为什么扩展不放 rawfile 而要放进 `libs/`：**设备上只有应用 lib 目录里的 `.so` 允许 `dlopen`**，
+数据目录里的 ELF 会被 linker/沙箱拒绝（QEMU 的 `.so` 一直放在这里也是同一个原因）。
+应用 lib 目录的绝对路径不需要写死 —— native 侧用 `dladdr(Py_Initialize)` 反查 libpython 落在哪，
+再把它追加进 `PYTHONPATH`。
 
 解释器启动参数（native 侧 `setenv` 后 `Py_Initialize()`）：
 
 ```
 PYTHONHOME   = filesDir/python
-PYTHONPATH   = filesDir/python/lib/python3.12/python312.zip:…/lib-dynload
+PYTHONPATH   = filesDir/python/lib/python3.12/python312.zip:<应用 lib 目录>
 PYTHONUTF8=1  PYTHONDONTWRITEBYTECODE=1  PYTHONNOUSERSITE=1
 ```
 
@@ -111,7 +117,25 @@ PYTHONUTF8=1  PYTHONDONTWRITEBYTECODE=1  PYTHONNOUSERSITE=1
 * **没有网络**：未编 `_ssl`，`urllib` 的 https 不可用；HTTP 需求走 ArkTS 侧工具。
 * **第三方包**：镜像里 `pip` 装的包在 VM 里；原生解释器只有标准库（要 numpy/pandas 需另外交叉编译）。
 
-## 7. 验证
+## 7. 排障信号
+
+`run_python`/`npy` 失败时，返回值里会带**运行库诊断**（native 侧在启动器没写出结果时用最小脚本再探一次）：
+
+```
+Python 启动器没有产出结果(rc=-1, 兜底诊断 rc=0)
+—— 运行库诊断 ——
+mini version=3.12.15 ...
+mini prefix=/data/storage/el2/base/files/python
+mini path=/data/storage/el2/base/files/python/lib/python3.12/python312.zip
+mini path=/data/app/el1/bundle/.../libs/arm64
+mini import _json=FAIL ModuleNotFoundError("No module named '_json'")
+```
+
+- `import _json=FAIL ... cannot open shared object file` → 扩展模块没随包/没加载（见 §5 的 libs 目录）；
+- `import zlib=FAIL ... libz.so` → 少了 `libz.so`；
+- 连 `mini` 都没有 → 解释器初始化后就不可用，优先查 `PYTHONHOME` 里的 zip 是否存在。
+
+## 8. 验证
 
 | 测试 | 覆盖 | 结果 |
 | --- | --- | --- |

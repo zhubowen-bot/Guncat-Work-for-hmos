@@ -55,6 +55,9 @@ struct PyApi {
     FnPyGILState_Ensure gilEnsure = nullptr;
     FnPyGILState_Release gilRelease = nullptr;
     FnPyErr_SetInterrupt setInterrupt = nullptr;
+    // libpython 实际被加载的目录(就是应用的 lib 目录)。C 扩展模块也放在这里 ——
+    // 设备上只有 lib 目录里的 .so 能 dlopen, 数据目录里的 ELF 会被拒。
+    std::string libDir;
     std::string error;
     bool ok = false;
 };
@@ -89,6 +92,16 @@ PyApi& LoadPyApi() {
         g_api.runSimpleString == nullptr || g_api.gilEnsure == nullptr || g_api.gilRelease == nullptr) {
         g_api.error = "libpython 缺少必要符号(版本不匹配?)";
         return g_api;
+    }
+    // 用 dladdr 找出 libpython 落在哪个目录: C 扩展也在同一目录, 运行期要把它并进 PYTHONPATH
+    Dl_info info;
+    if (::dladdr(reinterpret_cast<void*>(g_api.initialize), &info) != 0 &&
+        info.dli_fname != nullptr) {
+        std::string path(info.dli_fname);
+        std::size_t slash = path.find_last_of('/');
+        if (slash != std::string::npos && slash > 0) {
+            g_api.libDir = path.substr(0, slash);
+        }
     }
     g_api.ok = true;
     return g_api;
@@ -174,54 +187,179 @@ int32_t PropToInt(napi_env env, napi_value obj, const char* name, int32_t defVal
 
 // 启动器: 用户代码在子命名空间里执行, 输出被 io.StringIO 捕获后落盘。
 // 全部状态走环境变量里的文件路径, 避免把用户代码拼进 Python 源码字符串。
+//
+// 两条硬要求(踩过坑):
+//   1. 顶层只 import sys/os/io —— 它们全是内置/冻结模块, 不依赖 lib-dynload 里的 C 扩展。
+//      早先版本顶层 `import json, traceback`, 一旦某个 C 扩展加载失败(例如 _json),
+//      启动器会在写结果文件之前就抛异常, 宿主只能看到"没有产出结果文件"这种瞎猜的报错。
+//   2. 无论如何都要写 meta(含 stage + traceback), 失败时再写一份 diag(sys.path/import 探测),
+//      让"解释器起没起来、stdlib 在哪、哪个扩展加载不了"在工具返回值里一眼可见。
 const char* kLauncher = R"PYSRC(
-import json, os, sys, io, traceback
+import sys, os, io
 
-_code_path = os.environ['GUNCAT_PY_CODE']
-_out_path = os.environ['GUNCAT_PY_OUT']
-_err_path = os.environ['GUNCAT_PY_ERR']
-_meta_path = os.environ['GUNCAT_PY_META']
-_argv = json.loads(os.environ.get('GUNCAT_PY_ARGV', '[]'))
+_env = os.environ
+_code_path = _env.get('GUNCAT_PY_CODE', '')
+_out_path = _env.get('GUNCAT_PY_OUT', '')
+_err_path = _env.get('GUNCAT_PY_ERR', '')
+_meta_path = _env.get('GUNCAT_PY_META', '')
+_diag_path = _env.get('GUNCAT_PY_DIAG', '')
+_argv_path = _env.get('GUNCAT_PY_ARGV', '')
+_stdin_path = _env.get('GUNCAT_PY_STDIN', '')
 
-sys.argv = list(_argv)
-sys.dont_write_bytecode = True
 
-_stdin_path = os.environ.get('GUNCAT_PY_STDIN', '')
-if _stdin_path:
-    sys.stdin = open(_stdin_path, 'r', encoding='utf-8', errors='replace')
+def _write(path, text):
+    if not path:
+        return
+    try:
+        _f = open(path, 'w', encoding='utf-8', errors='replace')
+        try:
+            _f.write(text)
+        finally:
+            _f.close()
+    except BaseException:
+        pass
 
-with open(_code_path, 'r', encoding='utf-8') as _f:
-    _src = _f.read()
 
-_out, _err = io.StringIO(), io.StringIO()
-_saved_out, _saved_err = sys.stdout, sys.stderr
-sys.stdout, sys.stderr = _out, _err
+def _fmt_exc():
+    try:
+        import traceback
+        return traceback.format_exc()
+    except BaseException:
+        try:
+            _t, _v, _ = sys.exc_info()
+            return '%s: %r' % (_t, _v)
+        except BaseException:
+            return 'unknown error'
 
-_globals = {'__name__': '__main__', '__file__': _code_path, '__builtins__': __builtins__}
-_ok = True
+
+_stage = 'boot'
+_ok = 0
+_code = 0
 _error = ''
-_exit_code = 0
-try:
-    exec(compile(_src, '<run_python>', 'exec'), _globals, _globals)
-except SystemExit as _e:
-    _exit_code = _e.code if isinstance(_e.code, int) else (0 if _e.code is None else 1)
-    _ok = _exit_code == 0
-    if not _ok:
-        _error = 'SystemExit(%r)' % (_e.code,)
-except BaseException:
-    _ok = False
-    _error = traceback.format_exc()
-finally:
-    sys.stdout, sys.stderr = _saved_out, _saved_err
+_out = None
+_errbuf = None
 
-with open(_out_path, 'w', encoding='utf-8') as _f:
-    _f.write(_out.getvalue())
-with open(_err_path, 'w', encoding='utf-8') as _f:
-    _f.write(_err.getvalue())
-with open(_meta_path, 'w', encoding='utf-8') as _f:
-    _f.write('%d\n%d\n' % (1 if _ok else 0, _exit_code))
-    _f.write(_error)
+try:
+    _stage = 'argv'
+    _argv = ['-c']
+    if _argv_path:
+        try:
+            _af = open(_argv_path, 'r', encoding='utf-8', errors='replace')
+            try:
+                _raw = _af.read()
+            finally:
+                _af.close()
+            _argv = _raw.split('\n')
+            if _argv and _argv[-1] == '':
+                _argv.pop()
+            if not _argv:
+                _argv = ['-c']
+        except BaseException:
+            _argv = ['-c']
+    sys.argv = list(_argv)
+
+    _stage = 'stdin'
+    if _stdin_path:
+        sys.stdin = open(_stdin_path, 'r', encoding='utf-8', errors='replace')
+
+    _stage = 'read_code'
+    _src = ''
+    if _code_path:
+        _cf = open(_code_path, 'r', encoding='utf-8')
+        try:
+            _src = _cf.read()
+        finally:
+            _cf.close()
+
+    _stage = 'capture'
+    _out = io.StringIO()
+    _errbuf = io.StringIO()
+    _saved_out, _saved_err = sys.stdout, sys.stderr
+    sys.stdout, sys.stderr = _out, _errbuf
+
+    _stage = 'exec'
+    _globals = {'__name__': '__main__', '__file__': _code_path}
+    _ok = 1
+    try:
+        exec(compile(_src, '<run_python>', 'exec'), _globals, _globals)
+    except SystemExit as _se:
+        _code = _se.code if isinstance(_se.code, int) else (0 if _se.code is None else 1)
+        if _code == 0:
+            _ok = 1
+        else:
+            _ok = 0
+            _error = 'SystemExit(%r)' % (_se.code,)
+    except BaseException:
+        _ok = 0
+        _error = _fmt_exc()
+    finally:
+        sys.stdout, sys.stderr = _saved_out, _saved_err
+        _stage = 'write_result'
+        _write(_out_path, _out.getvalue())
+        _write(_err_path, _errbuf.getvalue())
+    _stage = 'done'
+except BaseException:
+    _ok = 0
+    _error = _fmt_exc()
+finally:
+    if _ok == 0 and _diag_path:
+        try:
+            _lines = [
+                'version=' + sys.version.replace('\n', ' '),
+                'prefix=' + sys.prefix,
+                'base_prefix=' + sys.base_prefix,
+                'executable=' + sys.executable,
+                'cwd=' + os.getcwd(),
+                'argv=' + repr(sys.argv),
+                'stage=' + _stage,
+            ]
+            for _p in sys.path:
+                _lines.append('path=' + str(_p))
+            for _m in ('posix', 'io', 'os', 'encodings', 'codecs', '_codecs',
+                       'json', '_json', 'csv', '_csv', 'zlib', 'math', 'binascii'):
+                try:
+                    __import__(_m)
+                    _lines.append('import %s=ok' % _m)
+                except BaseException as _ie:
+                    _lines.append('import %s=FAIL %r' % (_m, _ie))
+            _write(_diag_path, '\n'.join(_lines) + '\n')
+        except BaseException:
+            pass
+    _write(_meta_path, '%d\n%d\n%s\nstage=%s\n' % (1 if _ok else 0, _code, _error, _stage))
 )PYSRC";
+
+// 兜底诊断: 万一启动器连结果文件都没写出来(例如某个 import 就把解释器搞死了),
+// 再用"只用 builtins + sys/os"的最小脚本探一次, 至少把 sys.path / sys.prefix 落盘。
+const char* kMiniDiag = R"PYMINI(
+import sys, os
+_p = os.environ.get('GUNCAT_PY_DIAG', '')
+if _p:
+    _lines = []
+    try:
+        _lines.append('mini version=' + sys.version.replace('\n', ' '))
+        _lines.append('mini prefix=' + sys.prefix)
+        _lines.append('mini executable=' + sys.executable)
+        _lines.append('mini cwd=' + os.getcwd())
+        for _x in sys.path:
+            _lines.append('mini path=' + str(_x))
+        _built = ('posix', 'io', 'os', 'encodings', '_codecs', '_json', 'zlib', 'math')
+        for _m in _built:
+            try:
+                __import__(_m)
+                _lines.append('mini import %s=ok' % _m)
+            except BaseException as _e:
+                _lines.append('mini import %s=FAIL %r' % (_m, _e))
+    except BaseException as _e:
+        _lines.append('mini failed %r' % (_e,))
+    try:
+        _f = open(_p, 'w')
+        try:
+            _f.write('\n'.join(_lines) + '\n')
+        finally:
+            _f.close()
+    except BaseException:
+        pass
+)PYMINI";
 
 struct PyRunOptions {
     std::string code;
@@ -230,6 +368,8 @@ struct PyRunOptions {
     std::string pythonHome;
     std::string pythonPath;
     std::string argvJson = "[]";
+    // argv: 一行一个参数(启动器按行切分, 不走 JSON)
+    std::string argvText = "-c";
     // 可选: 标准输入文件(内容会被挂成 sys.stdin); 空串表示让 sys.stdin 保持默认
     std::string stdinPath;
     int32_t timeoutMs = 60000;
@@ -258,8 +398,13 @@ bool EnsureInterpreter(const PyRunOptions& opt, std::string& err) {
     if (!opt.pythonHome.empty()) {
         ::setenv("PYTHONHOME", opt.pythonHome.c_str(), 1);
     }
-    if (!opt.pythonPath.empty()) {
-        ::setenv("PYTHONPATH", opt.pythonPath.c_str(), 1);
+    // PYTHONPATH = 调用方给的标准库 zip + 应用 lib 目录(C 扩展在这里)
+    std::string pyPath = opt.pythonPath;
+    if (!api.libDir.empty() && pyPath.find(api.libDir) == std::string::npos) {
+        pyPath = pyPath.empty() ? api.libDir : (pyPath + ":" + api.libDir);
+    }
+    if (!pyPath.empty()) {
+        ::setenv("PYTHONPATH", pyPath.c_str(), 1);
     }
     ::setenv("PYTHONUTF8", "1", 1);
     ::setenv("PYTHONDONTWRITEBYTECODE", "1", 1);
@@ -289,18 +434,27 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
     const std::string outPath = opt.scratchDir + "/stdout.txt";
     const std::string errPath = opt.scratchDir + "/stderr.txt";
     const std::string metaPath = opt.scratchDir + "/meta.txt";
+    const std::string diagPath = opt.scratchDir + "/diag.txt";
+    const std::string argvPath = opt.scratchDir + "/argv.txt";
     ::unlink(outPath.c_str());
     ::unlink(errPath.c_str());
     ::unlink(metaPath.c_str());
+    ::unlink(diagPath.c_str());
     if (!WriteFile(codePath, opt.code)) {
         out.error = "无法写入临时脚本目录: " + opt.scratchDir;
+        return out;
+    }
+    // argv 走纯文本(一行一个), 启动器不需要 import json 就能拿到参数
+    if (!WriteFile(argvPath, opt.argvText)) {
+        out.error = "无法写入 argv 文件: " + argvPath;
         return out;
     }
     ::setenv("GUNCAT_PY_CODE", codePath.c_str(), 1);
     ::setenv("GUNCAT_PY_OUT", outPath.c_str(), 1);
     ::setenv("GUNCAT_PY_ERR", errPath.c_str(), 1);
     ::setenv("GUNCAT_PY_META", metaPath.c_str(), 1);
-    ::setenv("GUNCAT_PY_ARGV", opt.argvJson.c_str(), 1);
+    ::setenv("GUNCAT_PY_DIAG", diagPath.c_str(), 1);
+    ::setenv("GUNCAT_PY_ARGV", argvPath.c_str(), 1);
     if (opt.stdinPath.empty()) {
         ::unsetenv("GUNCAT_PY_STDIN");
     } else {
@@ -355,8 +509,21 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
 
     const bool hasMeta = ::access(metaPath.c_str(), F_OK) == 0;
     if (!hasMeta) {
-        out.error = (rc != 0) ? "Python 执行失败(没有产出结果文件, 可能是解释器初始化不完整)"
-                              : "Python 执行没有产出结果文件";
+        // 启动器没写出结果: 再用最小脚本探一次(只用 sys/os), 保证至少拿到 sys.path 级信息
+        OH_LOG_WARN(LOG_APP, "launcher produced no meta (rc=%{public}d), running mini diag", rc);
+        ::unlink(diagPath.c_str());
+        int state2 = api.gilEnsure();
+        int rc2 = api.runSimpleString(kMiniDiag);
+        api.gilRelease(state2);
+        std::string diag = Trim(ReadFile(diagPath));
+        out.error = "Python 启动器没有产出结果(rc=" + std::to_string(rc) +
+            ", 兜底诊断 rc=" + std::to_string(rc2) + ")";
+        if (!diag.empty()) {
+            out.error += "\n—— 运行库诊断 ——\n" + diag;
+        } else {
+            out.error += "\n(连最小诊断脚本也没跑出结果: 解释器初始化后基本不可用, "
+                         "优先怀疑 PYTHONHOME 指向的目录里没有标准库, 或 libpython 与扩展模块不匹配)";
+        }
         return out;
     }
     std::string meta = ReadFile(metaPath);
@@ -375,12 +542,32 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
         out.exitCode = std::atoi(codeStr.c_str());
         out.error = meta.substr(second + 1);
     }
+    // meta 末尾带一行 stage=<阶段>, 单独摘出来(失败时拼进报错, 便于判断卡在哪一步)
+    std::string stage;
+    std::size_t stagePos = out.error.rfind("\nstage=");
+    if (stagePos != std::string::npos) {
+        stage = Trim(out.error.substr(stagePos + 7));
+        out.error = out.error.substr(0, stagePos);
+    } else if (out.error.compare(0, 6, "stage=") == 0) {
+        stage = Trim(out.error.substr(6));
+        out.error.clear();
+    }
     out.ok = (okFlag == "1");
     out.stdoutText = ReadFile(outPath);
     out.stderrText = ReadFile(errPath);
     out.timedOut = out.durationMs >= timeoutMs && !out.ok && out.error.find("KeyboardInterrupt") != std::string::npos;
-    if (!out.ok && out.error.empty()) {
-        out.error = "执行失败(退出码 " + std::to_string(out.exitCode) + ")";
+    if (!out.ok) {
+        if (out.error.empty()) {
+            out.error = "执行失败(退出码 " + std::to_string(out.exitCode) + ")";
+        }
+        if (!stage.empty() && stage != "done") {
+            out.error += "\n(启动器停在阶段: " + stage + ")";
+        }
+        // 启动器判失败时也把诊断带上: 用户/模型能直接看到 sys.path 与哪些扩展加载不了
+        std::string diag = Trim(ReadFile(diagPath));
+        if (!diag.empty() && out.error.find("import ") == std::string::npos) {
+            out.error += "\n—— 运行库诊断 ——\n" + diag;
+        }
     }
     return out;
 }
@@ -430,8 +617,8 @@ napi_value JsRunPython(napi_env env, napi_callback_info info) {
         opt.pythonPath = PropToString(env, args[0], "pythonPath");
         opt.argvJson = PropToString(env, args[0], "argvJson");
         opt.stdinPath = PropToString(env, args[0], "stdinPath");
-        if (opt.argvJson.empty()) {
-            opt.argvJson = "[]";
+        if (!opt.argvJson.empty()) {
+            opt.argvText = opt.argvJson;  // 字段名沿用 argvJson, 内容是"一行一个参数"的纯文本
         }
         opt.timeoutMs = PropToInt(env, args[0], "timeoutMs", 60000);
     }
@@ -470,6 +657,10 @@ napi_value JsRunPython(napi_env env, napi_callback_info info) {
     if (outcome.timedOut) {
         g_abandoned.fetch_add(1);
     }
+    std::string errHead = outcome.error.size() > 160 ? outcome.error.substr(0, 160) : outcome.error;
+    OH_LOG_INFO(LOG_APP, "run_python ok=%{public}d timeout=%{public}d rc=%{public}d %{public}lldms err=%{public}s",
+        outcome.ok ? 1 : 0, outcome.timedOut ? 1 : 0, outcome.exitCode,
+        static_cast<long long>(outcome.durationMs), errHead.c_str());
     napi_set_named_property(env, result, "ok", MakeBool(env, outcome.ok));
     napi_set_named_property(env, result, "timedOut", MakeBool(env, outcome.timedOut));
     napi_set_named_property(env, result, "exitCode", MakeInt(env, outcome.exitCode));
