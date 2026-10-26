@@ -142,14 +142,31 @@ PYTHONUTF8=1  PYTHONDONTWRITEBYTECODE=1  PYTHONNOUSERSITE=1
 > 依赖库随包放在 `entry/libs/arm64-v8a/`（`libssl.so.3` / `libcrypto.so.3` / `libsqlite3.so` / `libbz2.so` / `liblzma.so.5`），
 > 扩展通过 `DT_NEEDED` 找它们。`hashlib.pbkdf2_hmac` / `scrypt` 也随之可用。
 
-### 6.2 超时是怎么做到"真的能打断"的
+### 6.2 超时: 为什么不是"发信号打断"
 
-- 执行固定在一个**专属线程**上：第一次调用时起线程、由它 `Py_Initialize`，之后所有执行都投递给它
-  （CPython 只把"调用过 `Py_Initialize` 的线程"当 main thread）。
-- 看门狗线程到点后 `pthread_kill(运行线程, SIGINT)` → 下一个字节码边界抛 `KeyboardInterrupt`。
-- 逐项实测否掉的方案：`PyErr_SetInterrupt()`（跨线程被丢："Signal 2 ignored due to race condition"）、
-  `PyThreadState_SetAsyncExc()`（恒返回 0，找不到 id）。
-- 阻塞在 C 调用里（如巨大的 `zlib.compress`）仍无法中断，只能等它返回。
+先说结论: **绝不能用信号去打断解释器**。实机做过 7 次对照实验(timeout_ms=1000~1500 对 3~10 秒的任务):
+
+| 现象 | 次数 | 机制 |
+| --- | --- | --- |
+| 超时被完全忽略, 任务跑满设计时长 | 5 | 应用进程里 SIGINT 的处置是 `SIG_IGN`, 信号直接丢弃 |
+| 到点**直接闪退** | 2 | 同一时刻 SIGINT 是 `SIG_DFL`, 信号一到进程就被杀 |
+
+上一版用 `pthread_kill(运行线程, SIGINT)`, 在桌面 Linux 上 100% 成功(POC 验证过), 但在鸿蒙应用进程里
+信号处置不由我们掌控 —— 等于把进程生死交给了一个不可控的信号。另外两条路也实测不通:
+`PyErr_SetInterrupt()` 只在 CPython 认定的 main thread 上生效(跨线程会被丢弃, 日志里那句
+`Signal 2 ignored due to race condition` 就是它), `PyThreadState_SetAsyncExc()` 恒返回 0。
+
+现在的方案是**两层, 全在可控范围内**:
+
+1. **硬截止(AST 注入)**: 执行前用 `ast` 给 `while True` / `while 1` 这类常量真循环的循环体首行插入
+   `if __guncat_deadline and __guncat_now() > __guncat_deadline: raise TimeoutError('run_python 超时(ast-deadline)')`。
+   纯 Python 层, 不可能伤到进程; 普通循环不注入, 零开销。实测 `while True` 在 1.5 秒时准点抛出。
+2. **软超时(宿主侧)**: 宿主等 `timeout_ms + 1.5s` 仍没结束, 就放弃等待并返回"超时(未中断, 任务仍在后台运行)",
+   同时把运行时**熔断** —— 之后本会话所有 `run_python` 直接拒绝, 避免排队把 12 个核烧满。
+   这条覆盖 AST 管不到的情况(超长 `for`、阻塞在 C 调用里)。
+
+执行本身固定在一个**专属线程**上(第一次调用时创建, 由它 `Py_Initialize`, 之后所有调用都投递给它) ——
+解释器的线程态、GIL 记录都绑在初始化它的线程上, NAPI 回调落在别的线程会出各种怪问题。
 
 ## 7. 排障信号
 

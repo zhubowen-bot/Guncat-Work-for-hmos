@@ -29,6 +29,8 @@ export interface PyRunResult {
   ok: boolean;
   /** 是否因超时被中断 */
   timedOut: boolean;
+  /** true 表示宿主放弃等待(任务仍在后台跑), 而不是被正常打断 */
+  softTimeout: boolean;
   /** SystemExit 的退出码(普通异常为 0) */
   exitCode: number;
   /** 被捕获的 stdout */
@@ -45,4 +47,6 @@ export interface PyRunResult {
 export const isAvailable: () => string;
 
 /** 在常驻解释器里执行一段 Python(同步调用, 调用方应放到异步任务里) */
+export const isBusy: () => boolean;
+
 export const runPython: (options: PyRunOptions) => PyRunResult;

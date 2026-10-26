@@ -19,39 +19,6 @@ typedef void (*fn_void)(void);
 typedef int (*fn_run)(const char*);
 typedef int (*fn_gil)(void);
 typedef void (*fn_gil_release)(int);
-typedef void* (*fn_ts_get)(void);
-typedef unsigned long (*fn_ts_id)(void*);
-typedef int (*fn_ts_async_exc)(unsigned long, void*);
-
-struct Watchdog {
-    volatile int* finished;
-    volatile int* fired;
-    int timeout_ms;
-    unsigned long tstate_id;
-    fn_gil gil;
-    fn_gil_release rel;
-    fn_ts_async_exc ts_exc;
-    void** keyboard_interrupt;
-    pthread_t runner;
-};
-
-static void* watchdog_fn(void* arg) {
-    struct Watchdog* w = (struct Watchdog*) arg;
-    int waited = 0;
-    while (!*w->finished && waited < w->timeout_ms) {
-        usleep(20000);
-        waited += 20;
-    }
-    if (*w->finished) {
-        return NULL;
-    }
-    fprintf(stderr, "[watchdog] timeout after %d ms (tstate %lu)\n", w->timeout_ms, w->tstate_id);
-    /* 与 native 实现一致: 给运行线程发 SIGINT(实测这是唯一能打断纯 Python 循环的办法) */
-    int rc = pthread_kill(w->runner, SIGINT);
-    fprintf(stderr, "[watchdog] pthread_kill(SIGINT) -> %d\n", rc);
-    *w->fired = 1;
-    return NULL;
-}
 
 static char* slurp(const char* path) {
     FILE* f = fopen(path, "rb");
@@ -127,6 +94,12 @@ int main(int argc, char** argv) {
     replace_all(launcher, sizeof(launcher), "__GUNCAT_DIAG__", diag_path);
     replace_all(launcher, sizeof(launcher), "__GUNCAT_ARGV__", argv_path);
     replace_all(launcher, sizeof(launcher), "__GUNCAT_STDIN__", "");
+    {
+        char deadline[32];
+        int tmo = (argc >= 8) ? atoi(argv[7]) : 0;
+        snprintf(deadline, sizeof(deadline), "%.3f", tmo > 0 ? tmo / 1000.0 : 0.0);
+        replace_all(launcher, sizeof(launcher), "__GUNCAT_DEADLINE__", deadline);
+    }
 
     setenv("PYTHONHOME", argv[5], 1);
     setenv("PYTHONPATH", argv[6], 1);
@@ -142,10 +115,6 @@ int main(int argc, char** argv) {
     fn_run run = (fn_run) dlsym(h, "PyRun_SimpleString");
     fn_gil gil = (fn_gil) dlsym(h, "PyGILState_Ensure");
     fn_gil_release rel = (fn_gil_release) dlsym(h, "PyGILState_Release");
-    fn_ts_get ts_get = (fn_ts_get) dlsym(h, "PyThreadState_Get");
-    fn_ts_id ts_id = (fn_ts_id) dlsym(h, "PyThreadState_GetID");
-    fn_ts_async_exc ts_exc = (fn_ts_async_exc) dlsym(h, "PyThreadState_SetAsyncExc");
-    void** keyboard_interrupt = (void**) dlsym(h, "PyExc_KeyboardInterrupt");
     if (!is_init || !init || !run || !gil || !rel) {
         fprintf(stderr, "missing symbols\n");
         return 1;
@@ -155,30 +124,10 @@ int main(int argc, char** argv) {
     if (!is_init()) { fprintf(stderr, "Py_Initialize failed\n"); return 1; }
 
     int timeout_ms = (argc >= 8) ? atoi(argv[7]) : 0;
+    (void) timeout_ms;
     int state = gil();
-    unsigned long tstate_id = 0;
-    if (ts_get != NULL && ts_id != NULL) {
-        void* ts = ts_get();
-        if (ts != NULL) {
-            tstate_id = ts_id(ts);
-        }
-    }
-    volatile int finished = 0;
-    volatile int fired = 0;
-    struct Watchdog wd = {&finished, &fired, timeout_ms, tstate_id, gil, rel, ts_exc,
-                         keyboard_interrupt, pthread_self()};
-    pthread_t thread;
-    int has_thread = 0;
-    if (timeout_ms > 0) {
-        has_thread = pthread_create(&thread, NULL, watchdog_fn, &wd) == 0;
-    }
-
     int rc = run(launcher);
-    finished = 1;
-    if (has_thread) {
-        pthread_join(thread, NULL);
-    }
-    printf("rc=%d timeout_fired=%d\n", rc, fired);
+    printf("rc=%d\n", rc);
     rel(state);
 
     const char* files[4] = {meta_path, out_path, err_path, diag_path};

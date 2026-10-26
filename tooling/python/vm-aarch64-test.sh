@@ -133,6 +133,13 @@ cp /workspace/../a64test/run/code.py /workspace/run/code.py 2>/dev/null || true
 /workspace/embed-a64 /workspace/libpython3.12.so /workspace/launcher.py /workspace/run/code.py /workspace/run \
   /workspace/pyhome \"/workspace/pyhome/lib/python3.12/python312.zip:/workspace/libs\" 2>&1" 600
 
+echo "== C) 硬超时(AST 截止检查: while True 应在 1.5s 抛 TimeoutError)"
+run_job c "$PREP
+mkdir -p /workspace/run/c2
+printf 'i = 0\\nwhile True:\\n    i += 1\\n' > /workspace/run/c2/code.py
+/workspace/embed-a64 /workspace/libpython3.12.so /workspace/launcher.py /workspace/run/c2/code.py /workspace/run/c2 \
+  /workspace/pyhome \"/workspace/pyhome/lib/python3.12/python312.zip:/workspace/libs\" 1500 2>&1 | grep -E 'rc=|超时' | head -3" 600
+
 echo "== B) 只给 zip(模拟扩展目录没并进 PYTHONPATH)"
 run_job b "$PREP
 /workspace/embed-a64 /workspace/libpython3.12.so /workspace/launcher.py /workspace/run/code.py /workspace/run \

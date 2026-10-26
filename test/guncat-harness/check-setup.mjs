@@ -197,13 +197,14 @@ writeFileSync(join(allDir, 'vm-shim.ts'),
 writeFileSync(join(allDir, 'py-shim.ts'),
   `export interface PyRunOptions {\n` +
   `  code: string;\n  workDir?: string;\n  scratchDir?: string;\n  pythonHome?: string;\n` +
-  `  pythonPath?: string;\n  argvJson?: string;\n  stdinPath?: string;\n  timeoutMs?: number;\n}\n` +
+  `  pythonPath?: string;\n  argvJson?: string;\n  stdinPath?: string;\n  certFile?: string;\n  timeoutMs?: number;\n}\n` +
   `export interface PyRunResult {\n` +
-  `  ok: boolean;\n  timedOut: boolean;\n  exitCode: number;\n  stdout: string;\n  stderr: string;\n` +
+  `  ok: boolean;\n  timedOut: boolean;\n  softTimeout: boolean;\n  exitCode: number;\n  stdout: string;\n  stderr: string;\n` +
   `  error: string;\n  durationMs: number;\n}\n` +
   `export function isAvailable(): string { return 'py-shim: 原生模块仅在设备侧可用'; }\n` +
+  `export function isBusy(): boolean { return false; }\n` +
   `export function runPython(options: PyRunOptions): PyRunResult {\n` +
-  `  return { ok: false, timedOut: false, exitCode: 1, stdout: '', stderr: '',\n` +
+  `  return { ok: false, timedOut: false, softTimeout: false, exitCode: 1, stdout: '', stderr: '',\n` +
   `    error: 'py-shim: 原生模块仅在设备侧可用', durationMs: 0 };\n}\n`);
 
 // ===== @kit 桩 =====

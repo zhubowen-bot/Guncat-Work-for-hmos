@@ -48,10 +48,6 @@ using FnPyRun_SimpleString = int (*)(const char*);
 using FnPyGILState_Ensure = int (*)();
 using FnPyGILState_Release = void (*)(int);
 using FnPyErr_SetInterrupt = void (*)();
-using FnPyThreadState_Get = void* (*)();
-using FnPyThreadState_GetID = unsigned long (*)(void*);
-// 3.10 起签名为 (unsigned long id, PyObject *exc); 用 void* 兜住更早的写法
-using FnPyThreadState_SetAsyncExc = int (*)(unsigned long, void*);
 
 struct PyApi {
     void* handle = nullptr;
@@ -61,12 +57,6 @@ struct PyApi {
     FnPyRun_SimpleString runSimpleString = nullptr;
     FnPyGILState_Ensure gilEnsure = nullptr;
     FnPyGILState_Release gilRelease = nullptr;
-    FnPyErr_SetInterrupt setInterrupt = nullptr;
-    FnPyThreadState_Get threadStateGet = nullptr;
-    FnPyThreadState_GetID threadStateGetID = nullptr;
-    FnPyThreadState_SetAsyncExc setAsyncExc = nullptr;
-    // PyExc_KeyboardInterrupt 是导出的**数据符号**(PyObject*), dlsym 拿到的是它的地址
-    void** keyboardInterrupt = nullptr;
     // libpython 实际被加载的目录(就是应用的 lib 目录)。C 扩展模块也放在这里 ——
     // 设备上只有 lib 目录里的 .so 能 dlopen, 数据目录里的 ELF 会被拒。
     std::string libDir;
@@ -99,12 +89,6 @@ PyApi& LoadPyApi() {
     g_api.runSimpleString = reinterpret_cast<FnPyRun_SimpleString>(::dlsym(h, "PyRun_SimpleString"));
     g_api.gilEnsure = reinterpret_cast<FnPyGILState_Ensure>(::dlsym(h, "PyGILState_Ensure"));
     g_api.gilRelease = reinterpret_cast<FnPyGILState_Release>(::dlsym(h, "PyGILState_Release"));
-    g_api.setInterrupt = reinterpret_cast<FnPyErr_SetInterrupt>(::dlsym(h, "PyErr_SetInterrupt"));
-    g_api.threadStateGet = reinterpret_cast<FnPyThreadState_Get>(::dlsym(h, "PyThreadState_Get"));
-    g_api.threadStateGetID = reinterpret_cast<FnPyThreadState_GetID>(::dlsym(h, "PyThreadState_GetID"));
-    g_api.setAsyncExc = reinterpret_cast<FnPyThreadState_SetAsyncExc>(
-        ::dlsym(h, "PyThreadState_SetAsyncExc"));
-    g_api.keyboardInterrupt = reinterpret_cast<void**>(::dlsym(h, "PyExc_KeyboardInterrupt"));
     if (g_api.isInitialized == nullptr || g_api.initialize == nullptr ||
         g_api.runSimpleString == nullptr || g_api.gilEnsure == nullptr || g_api.gilRelease == nullptr) {
         g_api.error = "libpython 缺少必要符号(版本不匹配?)";
@@ -177,7 +161,8 @@ void ReplaceAll(std::string& text, const std::string& token, const std::string& 
 }
 
 // 用真实路径渲染启动器/诊断脚本
-std::string RenderScript(const char* tpl, const std::string& codePath, const std::string& outPath,
+std::string RenderScript(const char* tpl, const std::string& deadlineText,
+                         const std::string& codePath, const std::string& outPath,
                          const std::string& errPath, const std::string& metaPath,
                          const std::string& diagPath, const std::string& argvPath,
                          const std::string& stdinPath) {
@@ -189,6 +174,7 @@ std::string RenderScript(const char* tpl, const std::string& codePath, const std
     ReplaceAll(script, "__GUNCAT_DIAG__", PyLiteral(diagPath));
     ReplaceAll(script, "__GUNCAT_ARGV__", PyLiteral(argvPath));
     ReplaceAll(script, "__GUNCAT_STDIN__", PyLiteral(stdinPath));
+    ReplaceAll(script, "__GUNCAT_DEADLINE__", deadlineText);
     return script;
 }
 
@@ -249,7 +235,7 @@ int32_t PropToInt(napi_env env, napi_value obj, const char* name, int32_t defVal
 //   2. 无论如何都要写 meta(含 stage + traceback), 失败时再写一份 diag(sys.path/import 探测),
 //      让"解释器起没起来、stdlib 在哪、哪个扩展加载不了"在工具返回值里一眼可见。
 const char* kLauncher = R"PYSRC(
-import sys, os, io
+import sys, os, io, time
 
 # 注意: 这些路径是 native 侧在每次调用时**直接拼进源码**的, 不走环境变量。
 # 踩过的坑: CPython 在 Py_Initialize 里就把 os.environ 快照下来了, native 之后再用
@@ -342,11 +328,53 @@ try:
     _saved_out, _saved_err = sys.stdout, sys.stderr
     sys.stdout, sys.stderr = _out, _errbuf
 
+    _stage = 'compile'
+    _deadline_s = __GUNCAT_DEADLINE__
+
+    def _arm(_code_src):
+        # 只在"常量真循环"(while True / while 1)的循环体首行插入截止检查。
+        # 为什么是这里: 实机证明信号中断不可用(要么被丢弃, 要么直接杀进程),
+        # 而纯 Python 层的检查绝不会伤到进程; 普通循环不注入, 保持零开销。
+        try:
+            import ast as _ast
+            _tree = _ast.parse(_code_src, '<run_python>', 'exec')
+        except SyntaxError:
+            return _code_src
+
+        class _Deadline(_ast.NodeTransformer):
+            def _guard(self):
+                _now = _ast.Call(func=_ast.Name(id='__guncat_now', ctx=_ast.Load()),
+                                 args=[], keywords=[])
+                _test = _ast.BoolOp(op=_ast.And(), values=[
+                    _ast.Name(id='__guncat_deadline', ctx=_ast.Load()),
+                    _ast.Compare(left=_now, ops=[_ast.Gt()],
+                                 comparators=[_ast.Name(id='__guncat_deadline', ctx=_ast.Load())]),
+                ])
+                _raise = _ast.Raise(
+                    exc=_ast.Call(func=_ast.Name(id='__guncat_timeout', ctx=_ast.Load()),
+                                  args=[_ast.Constant('run_python 超时(ast-deadline)')],
+                                  keywords=[]),
+                    cause=None)
+                return _ast.If(test=_test, body=[_raise], orelse=[])
+
+            def visit_While(self, node):
+                self.generic_visit(node)
+                if isinstance(node.test, _ast.Constant) and node.test.value in (True, 1):
+                    node.body.insert(0, self._guard())
+                return node
+
+        return _ast.fix_missing_locations(_Deadline().visit(_tree))
+
     _stage = 'exec'
-    _globals = {'__name__': '__main__', '__file__': _code_path}
+    _globals = {
+        '__name__': '__main__', '__file__': _code_path,
+        '__guncat_deadline': (time.monotonic() + _deadline_s) if _deadline_s and _deadline_s > 0 else None,
+        '__guncat_now': time.monotonic,
+        '__guncat_timeout': TimeoutError,
+    }
     _ok = 1
     try:
-        exec(compile(_src, '<run_python>', 'exec'), _globals, _globals)
+        exec(compile(_arm(_src), '<run_python>', 'exec'), _globals, _globals)
     except SystemExit as _se:
         _code = _se.code if isinstance(_se.code, int) else (0 if _se.code is None else 1)
         if _code == 0:
@@ -444,7 +472,8 @@ struct PyRunOptions {
 
 struct PyRunOutcome {
     bool ok = false;
-    bool timedOut = false;
+    bool timedOut = false;      // 命中超时(硬/软都算)
+    bool softTimeout = false;   // 宿主放弃等待, 任务还在后台跑
     int32_t exitCode = 0;
     std::string stdoutText;
     std::string stderrText;
@@ -548,44 +577,22 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
         return out;
     }
 
-    const int32_t timeoutMs = opt.timeoutMs > 0 ? opt.timeoutMs : 60000;
-    std::atomic<bool> finished{false};
-    std::atomic<bool> interruptFired{false};
-
     int state = api.gilEnsure();
-    // 超时打断机制的选择(都在宿主逐项实测过):
-    //   * PyErr_SetInterrupt: CPython 只在它认定的 main thread 上处理中断, 从别的线程调用
-    //     会被丢("Signal 2 ignored due to race condition"), 实机表现为 timeout_ms 完全失效;
-    //   * PyThreadState_SetAsyncExc: 恒返回 0(id 找不到), 不可用;
-    //   * **pthread_kill(运行线程, SIGINT)**: 立刻在下一个字节码边界抛 KeyboardInterrupt ✔
-    // 所以这里记下运行线程的 pthread 句柄, 看门狗到点直接给它发 SIGINT。
-    const pthread_t runnerThread = ::pthread_self();
-
-    std::thread watchdog([&finished, &interruptFired, timeoutMs, &api, runnerThread]() {
-        const int stepMs = 20;
-        int waited = 0;
-        while (!finished.load() && waited < timeoutMs) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(stepMs));
-            waited += stepMs;
-        }
-        if (finished.load()) {
-            return;
-        }
-        OH_LOG_WARN(LOG_APP, "python timeout after %{public}d ms, sending SIGINT to runner", timeoutMs);
-        int rcSig = ::pthread_kill(runnerThread, SIGINT);
-        if (rcSig != 0 && api.setInterrupt != nullptr) {
-            api.setInterrupt();  // 兜底
-        }
-        interruptFired.store(true);
-    });
-
-    std::string script = RenderScript(kLauncher, codePath, outPath, errPath, metaPath,
+    // 这里**故意不再有任何信号/中断注入**。
+    // 实机回归(7 次实验)证明: 鸿蒙应用进程的 SIGINT 处置不受我们控制 ——
+    //   5/7 次 pthread_kill 发过去被直接丢弃(timeout_ms 完全失效),
+    //   2/7 次 SIGINT 是默认动作, 信号一到进程当场被杀(闪退)。
+    // 所以超时改由两层配合: 启动器里的 AST 截止检查(能在 while True 里抛 TimeoutError),
+    // 以及宿主侧的软超时(放弃等待 + 熔断后续调用)。见 DispatchToRunner。
+    // 传给启动器的超时(秒): AST 截止检查到点抛 TimeoutError
+    const double timeoutSeconds =
+        static_cast<double>(opt.timeoutMs > 0 ? opt.timeoutMs : 60000) / 1000.0;
+    char deadlineBuf[32];
+    snprintf(deadlineBuf, sizeof(deadlineBuf), "%.3f", timeoutSeconds);
+    std::string script = RenderScript(kLauncher, deadlineBuf, codePath, outPath, errPath, metaPath,
                                       diagPath, argvPath, opt.stdinPath);
     int rc = api.runSimpleString(script.c_str());
     api.gilRelease(state);
-
-    finished.store(true);
-    watchdog.join();
 
     {
         char buf[4096];
@@ -602,7 +609,7 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
         // 启动器没写出结果: 再用最小脚本探一次(只用 sys/os), 保证至少拿到 sys.path 级信息
         OH_LOG_WARN(LOG_APP, "launcher produced no meta (rc=%{public}d), running mini diag", rc);
         ::unlink(diagPath.c_str());
-        std::string mini = RenderScript(kMiniDiag, codePath, outPath, errPath, metaPath,
+        std::string mini = RenderScript(kMiniDiag, deadlineBuf, codePath, outPath, errPath, metaPath,
                                         diagPath, argvPath, opt.stdinPath);
         int state2 = api.gilEnsure();
         int rc2 = api.runSimpleString(mini.c_str());
@@ -647,8 +654,8 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
     out.ok = (okFlag == "1");
     out.stdoutText = ReadFile(outPath);
     out.stderrText = ReadFile(errPath);
-    out.timedOut = !out.ok && (interruptFired.load() ||
-        (out.durationMs >= timeoutMs && out.error.find("KeyboardInterrupt") != std::string::npos));
+    // 硬超时由启动器的 AST 截止检查抛出, 消息里带固定标记
+    out.timedOut = !out.ok && out.error.find("run_python 超时") != std::string::npos;
     if (!out.ok) {
         if (out.error.empty()) {
             out.error = "执行失败(退出码 " + std::to_string(out.exitCode) + ")";
@@ -666,51 +673,64 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
 }
 
 // ===== 单线程执行器 =====
-// 为什么要有它: CPython 只认"调用 Py_Initialize 的那个线程"为 main thread, 中断信号
-// (PyErr_SetInterrupt) 也只在该线程上被处理。NAPI 回调可能落在不同线程上, 一旦运行线程
-// 不是初始化线程, timeout_ms 就会彻底失效(实机: 6 秒的忙循环照跑 6 秒, stderr 只留
-// "OSError: Signal 2 ignored due to race condition")。
-// 做法: 第一次调用时起一个专属线程, 由它初始化解释器并长期复用; 之后所有执行都投递给它。
+// 为什么要有它: 解释器只在"初始化它的那个线程"上才行为稳定(线程态、信号、GIL 记录都绑在
+// 那个线程上), 而 NAPI 回调可能落在不同线程。做法: 第一次调用时起一个专属线程,
+// 由它初始化解释器并长期复用, 之后所有执行都投递给它。
+//
+// 超时策略(实机回归后定的):
+//   * 硬超时: 启动器在 `while True` 这类常量真循环里插入截止检查, 到点抛 TimeoutError;
+//   * 软超时: 宿主等 timeout_ms + 1.5s 仍没结束, 就放弃等待并返回"超时(未能中断)",
+//     同时把运行时标记为忙, 拒绝后续调用(熔断), 避免排队把 CPU 越烧越满。
+//   * 绝不发信号: 实机证明 SIGINT 在本进程里要么被丢弃, 要么直接杀进程(闪退)。
 struct PyJob {
     PyRunOptions opt;
     PyRunOutcome out;
     std::mutex mutex;
     std::condition_variable cv;
     bool done = false;
+    bool abandoned = false;
 };
 
 std::mutex g_runnerMutex;          // 保护下面的 runner 生命周期
 std::thread* g_runner = nullptr;
 std::mutex g_queueMutex;           // 保护 g_pending
 std::condition_variable g_queueCv;
-PyJob* g_pending = nullptr;
+std::shared_ptr<PyJob> g_pending;
 std::atomic<bool> g_runnerStarted{false};
+std::atomic<int> g_busy{0};        // 排队 + 执行中的调用数(>0 表示运行时忙)
+std::atomic<bool> g_poisoned{false};  // 出现过软超时: 之后的调用一律拒绝
 
 void RunnerLoop() {
     for (;;) {
-        PyJob* job = nullptr;
+        std::shared_ptr<PyJob> job;
         {
             std::unique_lock<std::mutex> lock(g_queueMutex);
             g_queueCv.wait(lock, []() { return g_pending != nullptr; });
             job = g_pending;
             g_pending = nullptr;
         }
-        if (job == nullptr) {
+        if (!job) {
             return;
         }
         PyRunOutcome out;
         try {
-            out = RunPythonInner(job->opt);  // 在这个线程上执行, 信号可被处理
+            out = RunPythonInner(job->opt);
         } catch (const std::exception& e) {
             out.ok = false;
             out.error = std::string("native 异常: ") + e.what();
         }
+        bool orphan = false;
         {
             std::lock_guard<std::mutex> lock(job->mutex);
             job->out = out;
             job->done = true;
+            orphan = job->abandoned;
         }
         job->cv.notify_all();
+        g_busy.fetch_sub(1);
+        if (orphan) {
+            OH_LOG_WARN(LOG_APP, "abandoned python call finished (rc=%{public}d)", out.exitCode);
+        }
     }
 }
 
@@ -738,16 +758,40 @@ PyRunOutcome DispatchToRunner(const PyRunOptions& opt) {
         out.error = err;
         return out;
     }
-    PyJob job;
-    job.opt = opt;
+    auto job = std::make_shared<PyJob>();
+    job->opt = opt;
+    g_busy.fetch_add(1);
     {
         std::lock_guard<std::mutex> lock(g_queueMutex);
-        g_pending = &job;
+        g_pending = job;
     }
     g_queueCv.notify_one();
-    std::unique_lock<std::mutex> lock(job.mutex);
-    job.cv.wait(lock, [&job]() { return job.done; });
-    return job.out;
+
+    const int32_t timeoutMs = opt.timeoutMs > 0 ? opt.timeoutMs : 60000;
+    // 多给 1.5 秒: 让启动器里的硬截止(TimeoutError)有机会把 meta/traceback 写完
+    const auto limit = std::chrono::steady_clock::now() +
+                       std::chrono::milliseconds(timeoutMs + 1500);
+    std::unique_lock<std::mutex> lock(job->mutex);
+    if (!job->cv.wait_until(lock, limit, [&job]() { return job->done; })) {
+        job->abandoned = true;
+        lock.unlock();
+        g_poisoned.store(true);
+        out.ok = false;
+        out.timedOut = true;
+        out.softTimeout = true;
+        out.exitCode = -1;
+        out.error = "执行超过 " + std::to_string(timeoutMs) +
+                    " ms 且未能中断(任务仍在后台运行)。"
+                    "为避免持续占 CPU, 本会话的后续 run_python 调用已被拒绝; "
+                    "请等待它自行结束, 或重启应用。";
+        OH_LOG_WARN(LOG_APP, "python soft timeout after %{public}d ms (job abandoned)", timeoutMs);
+        return out;
+    }
+    return job->out;
+}
+
+bool PyRuntimeBusy() {
+    return g_busy.load() > 0 || g_poisoned.load();
 }
 
 // ===== N-API =====
@@ -774,6 +818,13 @@ napi_value JsIsAvailable(napi_env env, napi_callback_info) {
     std::lock_guard<std::mutex> lock(g_mutex);
     PyApi& api = LoadPyApi();
     return MakeString(env, api.ok ? std::string() : api.error);
+}
+
+// isBusy(): true 表示运行时正忙(排队/执行中)或已因软超时熔断
+napi_value JsIsBusy(napi_env env, napi_callback_info) {
+    napi_value out = nullptr;
+    napi_get_boolean(env, PyRuntimeBusy(), &out);
+    return out;
 }
 
 // runPython({ code, workDir, scratchDir, pythonHome, pythonPath, argvJson, timeoutMs })
@@ -822,6 +873,22 @@ napi_value JsRunPython(napi_env env, napi_callback_info info) {
         return result;
     }
 
+    if (g_poisoned.load()) {
+        napi_value result = nullptr;
+        napi_create_object(env, &result);
+        napi_set_named_property(env, result, "ok", MakeBool(env, false));
+        napi_set_named_property(env, result, "timedOut", MakeBool(env, true));
+        napi_set_named_property(env, result, "softTimeout", MakeBool(env, true));
+        napi_set_named_property(env, result, "exitCode", MakeInt(env, -1));
+        napi_set_named_property(env, result, "stdout", MakeString(env, ""));
+        napi_set_named_property(env, result, "stderr", MakeString(env, ""));
+        napi_set_named_property(env, result, "durationMs", MakeInt(env, 0));
+        napi_set_named_property(env, result, "error", MakeString(env,
+            "上一次 Python 调用超时且未能中断, 仍在后台运行; 为免继续占 CPU, 本会话已停止执行 Python。"
+            "请等待它自行结束或重启应用。"));
+        return result;
+    }
+
     g_running.store(true);
     PyRunOutcome outcome;
     try {
@@ -844,6 +911,7 @@ napi_value JsRunPython(napi_env env, napi_callback_info info) {
         static_cast<long long>(outcome.durationMs), errHead.c_str());
     napi_set_named_property(env, result, "ok", MakeBool(env, outcome.ok));
     napi_set_named_property(env, result, "timedOut", MakeBool(env, outcome.timedOut));
+    napi_set_named_property(env, result, "softTimeout", MakeBool(env, outcome.softTimeout));
     napi_set_named_property(env, result, "exitCode", MakeInt(env, outcome.exitCode));
     napi_set_named_property(env, result, "stdout", MakeString(env, outcome.stdoutText));
     napi_set_named_property(env, result, "stderr", MakeString(env, outcome.stderrText));
@@ -859,6 +927,7 @@ static napi_value Init(napi_env env, napi_value exports) {
     napi_property_descriptor desc[] = {
         {"isAvailable", nullptr, JsIsAvailable, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"runPython", nullptr, JsRunPython, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"isBusy", nullptr, JsIsBusy, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;

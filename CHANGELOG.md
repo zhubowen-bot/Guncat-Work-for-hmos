@@ -6,10 +6,11 @@
 
 > 依据一次完整的实机自检（117 个模块矩阵 + 并发/超时/边界逐项实测），修掉最危险的一条并补齐四个缺失库。
 
-- **超时真正能打断了**：执行改为固定在"调用过 `Py_Initialize` 的专属线程"上，看门狗到点
-  `pthread_kill(运行线程, SIGINT)`。实测 `while True` 在 `timeout_ms` 到点时立刻抛
-  `KeyboardInterrupt`（此前 `PyErr_SetInterrupt` 跨线程被丢、`PyThreadState_SetAsyncExc`
-  恒返回 0，两条路都验证过不可用）。
+- **超时方案推倒重来（上一版的信号中断被实机证伪）**：7 次对照实验里，`pthread_kill(SIGINT)` 5 次被丢弃、
+  2 次直接把进程杀掉（闪退）——鸿蒙应用进程的 SIGINT 处置不受我们控制。现改为两层：
+  ① `ast` 给 `while True` 这类常量真循环注入截止检查，到点抛 `TimeoutError`（纯 Python 层，不可能伤进程）；
+  ② 宿主等 `timeout_ms + 1.5s` 仍未结束则"放弃等待"并**熔断**本会话后续调用。信号路径已彻底移除。
+- **随包 IANA 时区数据**：`zoneinfo` 从 0 个可用时区变为完整可用（tzdata 打进标准库 zip）。
 - **补齐 OpenSSL / SQLite / bzip2 / xz**：`ssl`（含 118 张 CA 证书，随包 `cacert.pem`）、
   `hashlib.pbkdf2_hmac`、`scrypt`、`sqlite3`、`bz2`、`lzma` 全部可用；依赖库随包放
   `entry/libs/arm64-v8a/`（`libssl.so.3` / `libcrypto.so.3` / `libsqlite3.so` / `libbz2.so` / `liblzma.so.5`）。
