@@ -118,7 +118,9 @@ export struct WorkTurnView {
   //   每 33ms 就把整块正文重建一次 —— 真机表现正是"不停闪烁"。纯文本走 buildTurnContent 里
   //   `uiSegs.length === 0` 的快车道(单个 RichTextView, 库自带流式增量渲染), 组件实例不换, 不闪。
   private commitParts(content: string, finalized: boolean): void {
-    let parts: GuncatUiParts = GuncatUiParts.build(content, finalized);
+    // 第三个参数 false = 工作模式**永不产出界面片段**。工作模式只交付文本与工具结果,
+    // 一旦解析界面程序就会冒出交互模式的卡片(真机事故: 没标语言的代码块被当成界面程序)。
+    let parts: GuncatUiParts = GuncatUiParts.build(content, finalized, false);
     let next: GuncatUiSeg[] = [];
     let hasUi: boolean = false;
     for (let i: number = 0; i < parts.segments.length; i++) {
@@ -185,48 +187,11 @@ export struct WorkTurnView {
   // 收尾自愈: 一旦正文不再变化(本轮产出结束)且界面块还是按"流式中"构建的,
   // 就地按 finalized 重建一次。不依赖 @Watch/父组件通知——真机上那些回调不可靠,
   // 曾表现为"卡片停在骨架态, 切走再切回会话才正常"。
-  // 每 250ms 检查一次: 内容还在变就继续等, 连续两次采样一致即视为稳定, 立刻重建并停止。
+  //
+  // 工作模式已经不再渲染任何交互界面(commitParts 永远传 allowUi=false), 这条自愈路径整体作废:
+  // 保留空实现, 免掉每 250ms 的采样与无谓重建。
   private startUiSettleTimer(): void {
-    if (this.uiSettleTimer !== -1) {
-      return;
-    }
-    let waited: number = 0;
-    let stableSamples: number = 0;
-    let lastSample: string = this.message.content;
-    this.uiSettleTimer = setInterval((): void => {
-      waited += 250;
-      let content: string = this.message.content;
-      if (!GuncatUiParts.hasProgram(content)) {
-        // 正文里没有界面程序: 无需自愈, 或等超时后收工
-        if (waited >= 8000) {
-          this.stopUiSettleTimer();
-        }
-        return;
-      }
-      if (content !== lastSample) {
-        // 内容仍在增长(仍在流式/工具轮仍在追加)
-        lastSample = content;
-        stableSamples = 0;
-      } else {
-        stableSamples++;
-      }
-      // 已经按"结束态"构建过且内容稳定 → 无需再动
-      if (this.uiBuildFinalized && stableSamples >= 2) {
-        this.stopUiSettleTimer();
-        return;
-      }
-      // 内容稳定且尚未按结束态构建 → 就地重建
-      if (stableSamples >= 2) {
-        this.refreshUiPartsFinal();
-        this.stopUiSettleTimer();
-        return;
-      }
-      if (waited >= 8000) {
-        // 超时保护: 无论如何按结束态构建一次, 避免永久骨架
-        this.refreshUiPartsFinal();
-        this.stopUiSettleTimer();
-      }
-    }, 250);
+    this.stopUiSettleTimer();
   }
 
   private stopUiSettleTimer(): void {

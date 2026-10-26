@@ -1540,6 +1540,22 @@ console.log('[GuncatUiParts 切分]');
   check('正文不含尾标记', wp.segments[0].raw.indexOf(']]>') < 0);
   check('界面片段带上状态', wp.segments[0].stateJson === '{"$k":7}');
 
+  // 回归: 没标语言的代码块曾被当成界面程序, 工作模式因此冒出卡片
+  check('isUiFence: 空 info 不是界面围栏', GuncatUiFences.isUiFence('') === false &&
+    GuncatUiFences.isUiFence('   ') === false);
+  check('isUiFence: 只有显式语言才是', GuncatUiFences.isUiFence('guncat-ui') === true &&
+    GuncatUiFences.isUiFence('openui-lang') === true && GuncatUiFences.isUiFence('python') === false);
+
+  const noHeader = GuncatUiParts.build('看代码:\n```\nroot = Card([a])\na = TextContent("x")\n```', true);
+  check('无头围栏不当界面', noHeader.hasUiSeg === false && noHeader.hasUi === false);
+  check('无头围栏保留原文', noHeader.segments[0].text.indexOf('root = Card') >= 0);
+
+  const workMode = GuncatUiParts.build('随便写点\n```python\nprint(1)\n```\nroot = Card([a])\na = TextContent("x")', true, false);
+  check('工作模式永不产出界面片段', workMode.hasUi === false && workMode.hasUiSeg === false &&
+    workMode.segments.length === 1 && workMode.segments[0].type === GuncatUiSegType.TEXT);
+  check('工作模式保留全部原文', workMode.segments[0].text.indexOf('print(1)') >= 0 &&
+    workMode.segments[0].text.indexOf('root = Card') >= 0);
+
   check('hasProgram 判定', GuncatUiParts.hasProgram('root = Card([') === true &&
     GuncatUiParts.hasProgram('随便一段话') === false);
   check('needsRepair 判定', GuncatUiParts.needsRepair('root = Card([') === false &&

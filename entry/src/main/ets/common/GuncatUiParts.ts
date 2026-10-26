@@ -64,9 +64,20 @@ export class GuncatUiParts {
   // 去除界面程序后的纯文本(用于复制/导出/标题生成)
   textOnly: string = '';
 
-  static build(content: string, finalized: boolean = false): GuncatUiParts {
+  // allowUi=false 用于**工作模式**: 那里永远不渲染交互卡片, 整条内容都按 Markdown 文本走。
+  // (工作模式出现过事故: 一段没标语言的代码块被当成界面程序, 渲染成了交互模式的卡片。)
+  static build(content: string, finalized: boolean = false, allowUi: boolean = true): GuncatUiParts {
     let parts: GuncatUiParts = new GuncatUiParts();
     if (content === null || content === undefined || content === '') {
+      return parts;
+    }
+    if (!allowUi) {
+      // 工作模式: 不解析界面程序, 原样一个文本片段(交给 Markdown 渲染)
+      let only: GuncatUiSeg = new GuncatUiSeg();
+      only.type = GuncatUiSegType.TEXT;
+      only.text = content;
+      parts.segments.push(only);
+      parts.textOnly = content;
       return parts;
     }
     GuncatUiLibrary.init();

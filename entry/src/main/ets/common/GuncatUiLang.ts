@@ -3102,13 +3102,14 @@ export class GuncatUiFences {
     return out;
   }
 
-  // 是否为界面围栏(语言标记为 guncat-ui / openui-lang, 或空 info)
+  // 是否为界面围栏: **必须带语言标记**(guncat-ui / openui-lang)。
+  //
+  // 曾经把「空 info」(``` 后什么都没有)也当作界面围栏, 结果是: 模型写一段普通的、没标语言的
+  // 代码块(工作模式里尤其常见 —— 输出代码示例、把文件内容贴出来), 就被当成界面程序塞进卡片,
+  // 工作模式因此冒出不该有的卡片。没有语言标记的围栏现在一律按普通代码块渲染。
   static isUiFence(info: string): boolean {
-    let lower: string = info.toLowerCase();
-    if (lower === '' || lower === GuncatUiLang.FENCE_LANG || lower === GuncatUiLang.FENCE_LANG_ALT) {
-      return true;
-    }
-    return false;
+    let lower: string = info.trim().toLowerCase();
+    return lower === GuncatUiLang.FENCE_LANG || lower === GuncatUiLang.FENCE_LANG_ALT;
   }
 
   // 已闭合的界面程序文本
