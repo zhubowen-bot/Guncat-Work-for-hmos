@@ -126,6 +126,12 @@ CPython 内静态链接/随包分发的第三方代码（均由 CPython 自身�
 
 本版本**没有**打包这三个库（因此 `sqlite3`、`ssl`、`ctypes` 不可用），无需声明。
 
+### 2.6 pandas / libffi（C 扩展，交叉编译）
+
+- **pandas 2.2.3** — BSD-3-Clause（Copyright (c) 2008-2011, AQR Capital Management, LLC, Lambda Foundry, Inc. and PyData Development Team）；
+  构建脚本 `tooling/python/build-pandas-ohos.sh`，产物 `entry/libs/arm64-v8a/pandas/`；
+- **libffi 3.4.6** — MIT（`libffi.so.8` 随包，供 `ctypes`/`_ctypes` 使用）。
+
 ### 2.5 numpy（C 扩展，交叉编译）
 
 - **numpy 2.1.3** — BSD-3-Clause（Copyright (c) 2005-2024, NumPy Developers）；

@@ -64,6 +64,45 @@ numpy 的 `_multiarray_umath.so` 等必须在包里跟随包目录，而包目�
 `np.arange(12).reshape(3,4)` 求和 66、`@` 矩阵乘、`np.fft.fft([0,1,2,3]) = [6,-2,-2,-2]`、
 `np.linalg.det([[1,2],[3,4]]) = -2`、`polyfit`、`histogram`、`default_rng` 全部正确。
 
+### pandas：已打通（2026-10，2.2.3）
+
+脚本 [`build-pandas-ohos.sh`](../../tooling/python/build-pandas-ohos.sh)。比 numpy 多两步：
+
+1. **pandas 的 `__init__` 链上会 `import ctypes`** —— 我们的 CPython 当初因为缺 libffi 把
+   `_ctypes` 关了。脚本先交叉编 libffi 3.4.6，再手工编出 `_ctypes` 扩展（六个 .c，链 `-lffi -lpython3.12`）。
+   顺带把 `ctypes` 本身补回来了：`ctypes.CDLL('libm.so').sqrt(9)` 可用。
+2. **Cython 的 `cimport numpy` 找不到 pxd** —— 把 numpy 的 `.pxd` 树复制到 pandas 源码根的
+   `numpy/` 下（Cython 会搜当前目录）；host 侧 cython 也能解析。
+
+产物：`entry/libs/arm64-v8a/pandas/`（34MB，已 strip、已删 tests）+ `_ctypes...so` + `libffi.so.8`。
+运行时依赖 numpy（已有）与 pytz/dateutil/tzdata（site-packages.zip / 标准库 zip 里都有）。
+
+验证（qemu + Alpine rootfs）：
+`pd.DataFrame({'city':['a','b','a','b'],'amt':[1.5,2.5,3,4]}).groupby('city')['amt'].sum()`
+→ `{'a': 4.5, 'b': 6.5}`；带时区的 `pd.date_range(..., tz='Asia/Shanghai')` 正常输出 `+08:00`。
+
+## 2.5 C 扩展包的双层布局（重要）
+
+**hvigor 打包时只保留 `libs/` 里的 `.so`**，同一目录下的 `.py` 会被丢掉。所以 numpy / pandas
+这种"C 扩展和 Python 代码混在同一个包里"的库必须拆两层：
+
+| 位置 | 内容 | 为什么 |
+| --- | --- | --- |
+| `rawfile/python/extras.zip` → 解到 `filesDir/python/lib/python3.12/extras/` | 包的**全部 .py/数据** | 设备上只有数据目录能放可写文件、能被 zipimport/普通 import 读到 |
+| `entry/libs/arm64-v8a/<pkg>/…so` | 扩展模块 | **只有应用 lib 目录里的 .so 能被 dlopen** |
+
+两层要能"合起来"成为一个包，靠 `extras.zip` 里的 `sitecustomize.py`：它把应用 lib 目录里的
+同名子树接进扩展模块搜索路径（`sys.meta_path` 末尾的兜底 finder），只在"父包已加载、但 .so
+不在父包目录"时生效。`PYTHONPATH` 顺序必须是 `stdlib.zip : site-packages.zip : extras : libs`
+—— extras 要在 libs 之前，否则 `import numpy` 会命中 libs 里那个只有 `.so` 的空壳目录。
+
+验证方式（模拟真机布局）：把 extras.zip 解到临时目录、libs 里只留 `.so`，用 qemu 跑目标 python：
+
+```
+numpy 2.1.3 | sum 66 | fft [6.0,-2.0,-2.0,-2.0]
+pandas 2.2.3 | groupby {1: 3.0, 2: 3.0}
+```
+
 ## 3. 已验证可用（2026-10）
 
 纯 Python 21 个：requests / urllib3 / certifi / idna / charset-normalizer / python-dateutil /
