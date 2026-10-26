@@ -124,6 +124,28 @@ zlib（已有）→ libpng 1.6.44 → libjpeg-turbo 3.0.4（cmake，`WITH_SIMD=O
 验证（qemu + 模拟真机布局）：新建 32×32 图 → 存 PNG（102 字节）→ 读回 → `np.array` 得到
 `(32,32,3) uint8`；JPEG 保存、resize、BLUR 滤镜均正常。
 
+### matplotlib：已打通（2026-10，3.9.2）
+
+脚本 [`build-matplotlib-ohos.sh`](../../tooling/python/build-matplotlib-ohos.sh)。整条依赖链：
+zlib/libpng（Pillow 那套）→ **freetype 2.13.3** → **qhull 8.0.2** → **kiwisolver 1.4.7** +
+**contourpy 1.3.1** → matplotlib。
+
+关键点：
+
+1. **freetype 必须用 savannah 的 release 包**：GitHub 的 tarball 会跑 `git submodule` 检查而失败；
+   并且要 `--without-brotli`（否则缺 `brotli/decode.h`）。
+2. **qhull 自己编**（cmake，CMake ≥4 需 `-DCMAKE_POLICY_VERSION_MINIMUM=3.5`），
+   再给个 `qhull.pc`；配置 matplotlib 时加 `-Dsystem-freetype=true -Dsystem-qhull=true`，
+   否则 meson 会去下载 subproject。
+3. matplotlib 的 `meson.build` 用 `run_command(python3 -m setuptools_scm)` 取版本，
+   构建机没有该包时把这一行换成字面版本号最省事。
+4. 构建期依赖要装进**目标** python：`cppy`（kiwisolver）、`meson-python`（contourpy）、
+   `pybind11`（matplotlib/contourpy 的头文件 + `.pc`）。
+5. `mpl_toolkits`（含 mplot3d）要一起打进 extras，否则 3D 投影不可用。
+
+验证（qemu + 模拟真机布局）：`plt.subplots` + `plot`/`bar`/`contour` 存 PNG 均成功
+（12KB / 5KB），`matplotlib 3.9.2` 正常报告版本。
+
 ## 3. 已验证可用（2026-10）
 
 纯 Python 21 个：requests / urllib3 / certifi / idna / charset-normalizer / python-dateutil /

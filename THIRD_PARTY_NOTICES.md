@@ -126,6 +126,15 @@ CPython 内静态链接/随包分发的第三方代码（均由 CPython 自身�
 
 本版本**没有**打包这三个库（因此 `sqlite3`、`ssl`、`ctypes` 不可用），无需声明。
 
+### 2.8 matplotlib 及其依赖（C/C++ 扩展，交叉编译）
+
+- **matplotlib 3.9.2** — PSF-2.0 AND MIT AND CC0-1.0 AND OFL-1.1 AND Bitstream-Vera AND Public-Domain
+  （字体与样例数据各有单独许可，见包内 `LICENSE/` 目录）；
+- **freetype 2.13.3** — FreeType License (FTL) 或 GPLv2（本项目按 FTL 使用）；
+- **qhull 8.0.2** — Qhull 许可（BSD 风格）；
+- **kiwisolver 1.4.7** — BSD-3-Clause；**contourpy 1.3.1** — BSD-3-Clause；
+- 纯 Python 依赖 pyparsing / cycler / fonttools 见 2.4 节的表格。
+
 ### 2.7 Pillow / libjpeg-turbo / libpng（C 扩展，交叉编译）
 
 - **Pillow 11.0.0** — HPND（Historical Permission Notice and Disclaimer，见 Pillow 仓库 LICENSE）；
