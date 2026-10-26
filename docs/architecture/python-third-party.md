@@ -19,8 +19,8 @@ bash tooling/python/build-python-stack.sh verify      # 只跑自检
 阶段：`deps` → `cpython` → `pure` → `numpy` → `pandas` → `pillow` → `mpl` → `lxml` →
 `crypto` → `misc` → `extras` → `verify`。每步幂等，产物存在就跳过。
 
-**自检已经是打包的硬门槛**：`tools/build-check.ps1` 在调 hvigor 之前会先跑这 21 项，
-失败直接 `exit 3`，不产出 HAP。本机没有 WSL/rootfs 时自动跳过并提示；
+**自检已经是打包的硬门槛**：`tools/build-check.ps1` 在调 hvigor 之前会先跑
+`docs-check.py --strict`（文档坏链）与这 21 项，任一失败即中止（`exit 4` / `exit 3`），不产出 HAP。本机没有 WSL/rootfs 时自动跳过并提示；
 临时想跳过用 `-SkipPythonStack`。
 
 自检由 [`verify-python-stack.py`](../../tooling/python/verify-python-stack.py) 完成，

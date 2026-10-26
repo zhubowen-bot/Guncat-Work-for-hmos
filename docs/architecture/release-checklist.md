@@ -9,6 +9,10 @@
 powershell -ExecutionPolicy Bypass -File tools/build-check.ps1
 ```
 
+它依次跑两件事（都失败即中止）：
+1. `python3 tooling/docs-check.py --strict` —— 文档相对链接/锚点检查（坏链 `exit 4`）；
+2. `tooling/python/run-verify-stack.sh` —— 21 项运行库自检（失败 `exit 3`）。
+
 它会在调 hvigor 之前跑 `tooling/python/run-verify-stack.sh`（**按真机布局**组装：
 extras 解压到临时目录、libs 只提供 `.so`、qemu 跑目标 python），21 项全过才继续打包。
 失败会以 `exit 3` 中止。

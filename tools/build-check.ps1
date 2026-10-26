@@ -86,6 +86,12 @@ if (-not $skipPython) {
     $here = (Get-Location).Path
     $drive = $here.Substring(0, 1).ToLower()
     $wslPath = '/mnt/' + $drive + ($here.Substring(2) -replace '\\', '/')
+    Write-Host '== 文档相对链接检查 =='
+    & wsl -d Ubuntu -u root -- bash -c "cd '$wslPath' && python3 tooling/docs-check.py --strict" 2>&1 | Select-Object -Last 4
+    if ($LASTEXITCODE -ne 0) {
+      Write-Error "文档里有坏链(exit $LASTEXITCODE) —— 修好再打包"
+      exit 4
+    }
     Write-Host '== 原生 Python 技术栈自检(21 项) =='
     & wsl -d Ubuntu -u root -- bash -c "cd '$wslPath' && SSL_CERT_FILE='$wslPath/entry/src/main/resources/rawfile/python/cacert.pem' bash tooling/python/run-verify-stack.sh" 2>&1 | Select-Object -Last 10
     if ($LASTEXITCODE -ne 0) {
@@ -93,7 +99,7 @@ if (-not $skipPython) {
       exit 3
     }
   } else {
-    Write-Host '== 跳过 Python 自检(未找到 WSL rootfs) =='
+    Write-Host '== 跳过文档/Python 自检(未找到 WSL rootfs) =='
   }
 }
 

@@ -112,6 +112,18 @@ PYTHONUTF8=1  PYTHONDONTWRITEBYTECODE=1  PYTHONNOUSERSITE=1
 
 释放由 `filesDir/python/.version`（`versionCode` + `WORK_PY_RUNTIME_REV`）判定，换运行库只需改常量。
 
+### 5.1 三层布局（2026-10 起）
+
+| 层 | 位置 | 内容 | 为什么要分层 |
+| --- | --- | --- | --- |
+| 应用 lib | `entry/libs/arm64-v8a/` | `libpython3.12.so` + 所有 C 扩展 `.so` + 依赖库(zlib/ssl/sqlite/numpy/pandas/PIL/matplotlib/lxml/Crypto…) | **设备上只有这里能被 dlopen** |
+| 数据目录 zip | `<base>/python/lib/python3.12/{python312,site-packages}.zip` | 标准库、纯 Python 三方库 | zipimport 读得到，省空间 |
+| 数据目录普通文件 | `<base>/python/lib/python3.12/{extras/,fonts/,cacert.pem}` | numpy/pandas/PIL/matplotlib/lxml/Crypto 的 `.py`、中文字体、CA 证书 | hvigor 打包时**会丢掉 libs 里的 `.py`**；字体/证书用 `os.path` 定位，zip 里拿不到 |
+
+`sitecustomize.py` 负责把两层缝起来：把应用 lib 目录接进扩展搜索路径(`sys.meta_path` 末尾的
+finders)、导出 `GUNCAT_PY_LIBDIR` 给 PyCryptodome 这类用 ctypes 按路径加载的库、
+并在启动时装上中文字体钩子(`import matplotlib` 即自动注册思源黑体)。
+
 ## 6. 执行模型与限制
 
 * **单实例、串行**：native 侧有 `g_running` 互斥，ArkTS 侧还有 promise 链；两个调用不会同时进解释器。
@@ -208,9 +220,15 @@ mini import _json=FAIL ModuleNotFoundError("No module named '_json'")
 
 | 测试 | 覆盖 | 结果 |
 | --- | --- | --- |
-| [`npy-test.sh`](../../tooling/linux-vm/npy-test.sh) | guest 脚本覆盖安装、数值、stdin、argv、管道进 jq、退出码、相对路径、子目录、异常、往返开销 | 12 项全过 |
+| [`verify-python-stack.py`](../../tooling/python/verify-python-stack.py) | **21 项**技术栈自检: 标准库(sqlite3/ssl/压缩/hash)、ctypes、numpy、pandas、Pillow、matplotlib、**中文渲染**、qrcode、lxml、regex、bs4、PyCryptodome、docx/pptx/xlsxwriter、sympy、psutil、requests+certifi、openpyxl/yaml/jinja2、reportlab、watchdog | 21/21 通过 |
+| [`run-verify-stack.sh`](../../tooling/python/run-verify-stack.sh) | **按真机布局**组装环境(qemu): extras 解压到临时目录、libs 只给 `.so`、`PYTHONPATH=stdlib:site-packages:extras:libs` | 同上 |
+| [`build-python-stack.sh`](../../tooling/python/build-python-stack.sh) | 12 个阶段全量重建(幂等) | 可一键重建 |
+| [`npy-test.sh`](../../tooling/linux-vm/npy-test.sh) | guest 脚本: 安装、数值、stdin、argv、管道进 jq、退出码、相对路径、子目录、异常、往返开销 | 12 项全过 |
 | [`smoke-test.sh`](../../tooling/linux-vm/smoke-test.sh) | VM 引导、9p 一致性、cwd、超时、Python/pip/jq、npy 存在 | 18 项全过 |
-| `test/guncat-harness` | 工具目录 47 个、交互模式 27 个、`run_python` 不在子代理工具面 | 521 项全过 |
+| `test/guncat-harness` | 工具目录、交互模式、超时/熔断、卡片路由、缺库提示等源码级守卫 | **543 项全过** |
 
-真机性能数字仍待补（本次只能在宿主用 JIT/TCI 做相对比较）；`run_python` 的绝对值应当接近原生
+**打包门槛**: `tools/build-check.ps1` 在调 hvigor 之前先跑 21 项自检，失败即中止(exit 3)，
+避免带着坏掉的运行库出包。本机无 WSL/rootfs 时自动跳过，`-SkipPythonStack` 可强制跳过。
+
+真机性能数字仍待补（原位对比表见 §6.2 的微基准）；`run_python` 的绝对值应接近原生
 （手机上 `sum(range(200000))` 预期 < 30 ms，对比 VM 的 1.65 s）。

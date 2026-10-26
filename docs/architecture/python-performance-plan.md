@@ -38,7 +38,7 @@
 
 ### 1.2 TCI vs JIT 对照（本次新增，同一台 x86 主机、同一镜像、同一套参数）
 
-用 [`tooling/linux-vm/bench.sh`](tooling/linux-vm/bench.sh) 跑：
+用 [`tooling/linux-vm/bench.sh`](../../tooling/linux-vm/bench.sh) 跑：
 `LABEL=jit`（宿主 Debian QEMU 10.2.1，TCG JIT）与 `NET=0 QEMU=…/build-tci/qemu-system-aarch64 LABEL=tci`
 （上游 QEMU 10.2.0 + `--enable-tcg-interpreter`）。计时在**客人内部**用 `/proc/uptime` 完成，
 不含宿主轮询开销。
