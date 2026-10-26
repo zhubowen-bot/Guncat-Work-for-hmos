@@ -3102,14 +3102,14 @@ export class GuncatUiFences {
     return out;
   }
 
-  // 是否为界面围栏: **必须带语言标记**(guncat-ui / openui-lang)。
+  // 是否为界面围栏: guncat-ui / openui-lang / **空 info**(没写语言标记)。
   //
-  // 曾经把「空 info」(``` 后什么都没有)也当作界面围栏, 结果是: 模型写一段普通的、没标语言的
-  // 代码块(工作模式里尤其常见 —— 输出代码示例、把文件内容贴出来), 就被当成界面程序塞进卡片,
-  // 工作模式因此冒出不该有的卡片。没有语言标记的围栏现在一律按普通代码块渲染。
+  // 空 info 也算界面的理由(勿改): 交互模式的原则是"宁可当卡片渲染, 也不要退化成别的东西" ——
+  // 模型经常把界面程序包在光秃秃的 ``` 里, 若按普通代码块渲染, 用户看到的是一段源码而不是界面。
+  // 工作模式不受影响: 那里 GuncatUiParts.build 传 allowUi=false, 压根不解析界面围栏。
   static isUiFence(info: string): boolean {
     let lower: string = info.trim().toLowerCase();
-    return lower === GuncatUiLang.FENCE_LANG || lower === GuncatUiLang.FENCE_LANG_ALT;
+    return lower === '' || lower === GuncatUiLang.FENCE_LANG || lower === GuncatUiLang.FENCE_LANG_ALT;
   }
 
   // 已闭合的界面程序文本

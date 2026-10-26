@@ -160,7 +160,7 @@ export class PythonService {
       state = 0;
     }
     if (state === 2) {
-      return PythonService.failResult('[python 已停用] 本会话连续 3 次超时且有任务未能中断; ' +
+      return PythonService.failResult('[python 已停用] 本会话连续 10 次超时且有任务未能中断; ' +
         '为免持续占 CPU, 已停止执行 Python, 请重启应用。');
     }
     if (state === 1) {

@@ -700,7 +700,7 @@ std::shared_ptr<PyJob> g_pending;
 std::atomic<bool> g_runnerStarted{false};
 std::atomic<int> g_busy{0};          // 排队 + 执行中的调用数(>0 表示运行时忙)
 std::atomic<int> g_softStreak{0};    // 连续软超时次数(正常完成一次就清零)
-std::atomic<bool> g_banned{false};   // 连续 3 次软超时: 本会话永久停用 Python
+std::atomic<bool> g_banned{false};   // 连续 10 次软超时: 本会话永久停用 Python
 
 void RunnerLoop() {
     for (;;) {
@@ -781,7 +781,7 @@ PyRunOutcome DispatchToRunner(const PyRunOptions& opt) {
         job->abandoned = true;
         lock.unlock();
         const int streak = g_softStreak.fetch_add(1) + 1;
-        if (streak >= 3) {
+        if (streak >= 10) {
             g_banned.store(true);
             OH_LOG_WARN(LOG_APP, "python soft timeout x%{public}d, banning python for this session", streak);
         }
@@ -792,7 +792,7 @@ PyRunOutcome DispatchToRunner(const PyRunOptions& opt) {
         out.error = "执行超过 " + std::to_string(timeoutMs) +
                     " ms 且未能中断(任务仍在后台运行)。"
                     "在它结束之前, run_python 会直接拒绝(不会排队); 等它跑完即自动恢复。"
-                    "连续 3 次超时则会停用本会话的 Python, 需要重启应用。";
+                    "连续 10 次超时才会停用本会话的 Python(需要重启应用)。";
         OH_LOG_WARN(LOG_APP, "python soft timeout after %{public}d ms (job abandoned)", timeoutMs);
         return out;
     }
