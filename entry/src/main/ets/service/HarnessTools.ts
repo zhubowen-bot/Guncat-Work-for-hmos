@@ -676,7 +676,7 @@ export class HarnessTools {
       '**目录与其它工具完全一致**: 工作目录就是本会话工作区, 脚本里直接 `open("data/a.csv")` 与 read_file("data/a.csv") 读的是同一份文件; 用相对路径即可, 产物写到当前目录也立刻能被 read_file/transform_file 看到。' +
       '与 shell 的分工: 这是原生解释器, 标准库完整(sqlite3/ssl/zlib/bz2/lzma/zipfile/csv/json/re/asyncio/threading)。' +
       '**随包三方库(全部离线可用, 直接用 import)**: ' +
-      '数值数据 numpy(矩阵/FFT/linalg)、pandas(DataFrame/groupby/read_csv/时间序列); ' +
+      '数值数据 numpy(矩阵/FFT/linalg)、pandas(DataFrame/groupby/read_csv/时间序列)、**scipy**(linalg/optimize/sparse/integrate/signal/interpolate/stats/special); ' +
       '图像绘图 matplotlib(**必须先 `matplotlib.use("Agg")`**, fig.savefig 出 PNG; **中文开箱可用**, 随包思源黑体已自动注册)、Pillow(Image.open/save/resize; 中文用 `guncat_fonts.pillow_font(size)`); ' +
       '解析 lxml(etree.fromstring + `.xpath()`, lxml.html + `.cssselect()`)、regex(支持 `\\p{Han}`/`\\p{Emoji}` 等 Unicode 属性, 标准库 re 不支持)、bs4; ' +
       '文档 python-docx、python-pptx、XlsxWriter(带格式/公式/图表)、reportlab(PDF)、pypdf; ' +
@@ -684,7 +684,7 @@ export class HarnessTools {
       '系统 psutil(CPU/内存/线程数)、ctypes(调系统库)、watchdog(文件监控); ' +
       '网络 requests(+certifi 根证书, 可直连外网)、guncat_net(分层网络自检 `check()` / `diagnose()` / `get()` / `download()`); ' +
       '其它 jinja2/PyYAML/openpyxl/xlrd/dateutil/pytz/markdown/tabulate/tqdm/qrcode。' +
-      '**没有** scipy(缺 Fortran/LAPACK, 用 numpy 代替)、GUI 后端、运行期 pip install。' +
+      '**没有** GUI 后端、运行期 pip install; 需要数值优化/积分/稀疏矩阵时用 scipy。' +
       '设备上**没有可用的 shell**(/bin/sh 被权限拒绝), `subprocess` 只能直接 exec 单个程序(设备自带 toybox: echo/ls/cat/grep/sed/sort/head/tail/wc/find/xargs/tar/gzip 等约 40 个, 没有 sh/awk/tr/jq/curl/unzip), 管道要在 Python 里用 Popen 自己接。需要管道语法、重定向、apk 生态或 GNU 工具时用 shell 工具(VM)。' +
       '并发: **纯 Python 计算别用线程/线程池** —— 实测 8 个 CPU 任务串行 162ms, 线程池(2~8 线程)要 1.2~1.4s(慢 7~8 倍, 全是 GIL 争用); 但**会释放 GIL 的 C 运算**(hashlib / zlib / bz2 / lzma / sqlite3 / 编解码)多线程是**真并行**: 实测 sha256 8 线程 2.7 倍、并行度到 8.6, 批量哈希/压缩就该这么干(分块 ≥64KB —— hashlib 单块 <2KB 不释放 GIL); I/O 等待型用线程池同样有效(10 次 sleep(0.05): 502ms → 67ms)。multiprocessing / ProcessPoolExecutor 不可用(缺 _multiprocessing)。' +
       '返回值: 打印到 stdout 的内容随结果返回; 脚本用 `raise SystemExit(2)` 可指定退出码(非 0 不算工具失败); 异常会附 traceback。' +

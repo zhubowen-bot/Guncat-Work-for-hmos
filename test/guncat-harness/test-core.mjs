@@ -1606,8 +1606,9 @@ console.log('[GuncatUiParts 切分]');
     check('run_python 描述写明 matplotlib 要 Agg', tools.indexOf('use("Agg")') >= 0);
     check('run_python 描述写明没有 scipy', tools.indexOf('scipy') >= 0);
     const prompt = readFileSync(root + '/entry/src/main/ets/common/PromptBuilder.ts', 'utf8');
-    check('系统提示词写明能力边界', prompt.indexOf('没有 scipy') >= 0 &&
-      prompt.indexOf('无 multiprocessing') >= 0);
+    // scipy 已在 2026-10 打通, 边界改成了"无 GUI 后端 / 无 multiprocessing / 不能 pip install"
+    check('系统提示词写明能力边界', prompt.indexOf('无 multiprocessing') >= 0 &&
+      prompt.indexOf('pip install') >= 0 && prompt.indexOf('无 GUI 后端') >= 0);
   }
 
   check('hasProgram 判定', GuncatUiParts.hasProgram('root = Card([') === true &&

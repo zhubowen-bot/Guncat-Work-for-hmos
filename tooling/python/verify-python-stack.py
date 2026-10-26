@@ -70,6 +70,24 @@ def _numpy():
     return np.__version__
 
 
+def _scipy():
+    """scipy 覆盖 linalg/optimize/special/stats/sparse/integrate 六个核心模块。"""
+    import numpy as np
+    from scipy import linalg, optimize, special, stats, sparse, integrate
+    a = np.array([[3.0, 2.0], [1.0, 4.0]])
+    x = linalg.solve(a, np.array([7.0, 9.0]))
+    assert np.allclose(x, [1.0, 2.0]), x
+    assert abs(float(linalg.det(a)) - 10.0) < 1e-9   # 3*4 - 2*1 = 10
+    r = optimize.minimize(lambda v: (v[0] - 1) ** 2 + (v[1] - 2) ** 2, [0.0, 0.0])
+    assert r.success and np.allclose(r.x, [1.0, 2.0], atol=1e-3), r.x
+    assert abs(float(integrate.quad(lambda v: v * v, 0, 1)[0]) - 1.0 / 3.0) < 1e-6
+    assert abs(float(special.erf(0.0))) < 1e-12
+    assert abs(float(stats.norm.cdf(0.0)) - 0.5) < 1e-12
+    assert sparse.csr_matrix(np.eye(3)).nnz == 3
+    import scipy
+    return scipy.__version__
+
+
 def _pandas():
     import pandas as pd
     df = pd.DataFrame({"city": ["a", "b", "a", "b"], "amt": [1.5, 2.5, 3.0, 4.0]})
@@ -270,6 +288,7 @@ CHECKS = [
     ("ctypes", _ctypes),
     ("numpy", _numpy),
     ("pandas", _pandas),
+    ("scipy", _scipy),
     ("pillow", _pillow),
     ("matplotlib", _matplotlib),
     ("cjk-font", _cjk_font),

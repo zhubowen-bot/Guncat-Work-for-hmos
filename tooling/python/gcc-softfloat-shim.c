@@ -76,3 +76,67 @@ float __powisf2(float a, int b)
 {
     return (float)__powidf2((double)a, b);
 }
+
+/* double → binary128(精确加宽)。用位运算拼装, 避免调用自身。 */
+long double __extenddftf2(double a)
+{
+    unsigned long long bits;
+    memcpy(&bits, &a, sizeof(bits));
+    unsigned long long sign = bits >> 63;
+    int exp = (int)((bits >> 52) & 0x7FF);
+    unsigned long long mant = bits & ((1ULL << 52) - 1);
+    unsigned __int128 out = (unsigned __int128)sign << 127;
+
+    if (exp == 0x7FF) {
+        out |= ((unsigned __int128)0x7FFF) << 112;
+        if (mant) {
+            out |= ((unsigned __int128)1) << 111; /* quiet NaN */
+        }
+    } else if (exp == 0) {
+        if (mant == 0) {
+            /* ±0 */
+        } else {
+            /* double 次正规数: 规格化到 quad(quad 的指数范围大得多) */
+            int shift = 0;
+            while (!(mant & (1ULL << 52))) {
+                mant <<= 1;
+                shift++;
+            }
+            mant &= (1ULL << 52) - 1;
+            out |= ((unsigned __int128)(16383 - 1023 - shift + 1)) << 112;
+            out |= ((unsigned __int128)mant) << 60;
+        }
+    } else {
+        out |= ((unsigned __int128)(exp - 1023 + 16383)) << 112;
+        out |= ((unsigned __int128)mant) << 60;
+    }
+
+    long double result;
+    memcpy(&result, &out, sizeof(result));
+    return result;
+}
+
+/* int → binary128。 */
+long double __floatsitf(int a)
+{
+    unsigned long long sign = a < 0 ? 1ULL : 0ULL;
+    unsigned long long mag = sign ? (unsigned long long)(-(long long)a) : (unsigned long long)a;
+    unsigned __int128 out = (unsigned __int128)sign << 127;
+    if (mag == 0) {
+        long double zero;
+        memcpy(&zero, &out, sizeof(zero));
+        return zero;
+    }
+    int bits = 64;
+    while (!(mag & (1ULL << 63))) {
+        mag <<= 1;
+        bits--;
+    }
+    /* mag 现在是 [1,2) 的 64 位规格化值; 指数 = bits-1 */
+    int unbiased = bits - 1;
+    out |= ((unsigned __int128)(unbiased + 16383)) << 112;
+    out |= ((unsigned __int128)(mag & ((1ULL << 63) - 1))) << 49;
+    long double result;
+    memcpy(&result, &out, sizeof(result));
+    return result;
+}

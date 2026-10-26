@@ -66,7 +66,7 @@ fi
 # ---------- 3. C / C++ 扩展 ----------
 for stage in numpy:build-numpy-ohos.sh pandas:build-pandas-ohos.sh \
              pillow:build-pillow-ohos.sh mpl:build-matplotlib-ohos.sh \
-             lxml:build-lxml-ohos.sh crypto:build-pycryptodome-ohos.sh \
+             lxml:build-lxml-ohos.sh scipy:build-scipy-ohos.sh crypto:build-pycryptodome-ohos.sh \
              misc:build-misc-ohos.sh; do
   name="${stage%%:*}"; script="${stage##*:}"
   if [ "$WANT" = "all" ] || [ "$WANT" = "$name" ]; then

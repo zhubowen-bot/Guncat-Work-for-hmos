@@ -24,9 +24,9 @@ bash tooling/python/build-python-stack.sh verify      # 只跑自检
 临时想跳过用 `-SkipPythonStack`。
 
 自检由 [`verify-python-stack.py`](../../tooling/python/verify-python-stack.py) 完成，
-21 项覆盖：标准库（sqlite3/ssl/压缩/hash）、ctypes、numpy（含 fft/det）、pandas（groupby/tz）、
+22 项覆盖：标准库（sqlite3/ssl/压缩/hash）、ctypes、numpy（含 fft/det）、pandas（groupby/tz）、
 Pillow、matplotlib、qrcode、lxml（xpath/cssselect）、regex（`\p{Han}`）、bs4、PyCryptodome、
-docx/pptx/xlsxwriter、sympy、psutil、requests（+ certifi）、openpyxl/yaml/jinja2、reportlab、watchdog、中文字体。
+docx/pptx/xlsxwriter、sympy、psutil、requests（+ certifi）、openpyxl/yaml/jinja2、reportlab、watchdog、中文字体、scipy。
 
 [`run-verify-stack.sh`](../../tooling/python/run-verify-stack.sh) 会**按真机布局**组装环境：
 extras.zip 解到临时目录、libs 只提供 `.so`、`PYTHONPATH=stdlib:site-packages:extras:libs`，
@@ -34,7 +34,7 @@ extras.zip 解到临时目录、libs 只提供 `.so`、`PYTHONPATH=stdlib:site-p
 
 ```
 python 3.12.15 | linux
-21/21 passed
+22/22 passed
 ```
 
 ## 1. 纯 Python 包：`tooling/python/vendor-pure.sh`
@@ -207,31 +207,41 @@ certifi 也用文件路径拿 CA 包 —— zipimport 下这些路径是虚拟�
 所以 `vendor-pure.sh` 现在把它们单独放进 `$WORK/extras-pkgs/`，需要合并进 `extras.zip`
 （运行时解成真实文件）。已在 `DATA_PKGS` 里登记：docx、pptx、certifi。
 
-### scipy：已完整交叉编译，运行期还差最后一步（2026-10）
+### scipy：已打通（2026-10，1.14.1 + OpenBLAS 0.3.28）
 
-**编译阶段已全部通过**：scipy 1.14.1 + OpenBLAS 0.3.28(含 LAPACK)，1413 个目标全部链接成功，
-产物 93MB / 113 个扩展。这证明了 "OHOS 上能编 scipy" —— 之前"缺 Fortran 做不了"的结论是错的。
+脚本 [`build-scipy-ohos.sh`](../../tooling/python/build-scipy-ohos.sh)。**早先"缺 Fortran 做不了"
+的结论是错的**，实际做通的路径：
 
-关键步骤（脚本见 [`gfortran-shim.c`](../../tooling/python/gfortran-shim.c)、
-[`gfortran-rt-stub.c`](../../tooling/python/gfortran-rt-stub.c)、
-[`gcc-softfloat-shim.c`](../../tooling/python/gcc-softfloat-shim.c)）：
-
-| 步骤 | 说明 |
+| 环节 | 做法 |
 | --- | --- |
-| 交叉 Fortran | `apt-get install gfortran-aarch64-linux-gnu`（GCC 15.2） |
-| OpenBLAS | `TARGET=ARMV8 CC=<ohos clang> FC=<cross gfortran>`，产出含 LAPACK 的 `libopenblas.a` |
+| Fortran 编译器 | `apt-get install gfortran-aarch64-linux-gnu`（GCC 15.2） |
+| BLAS/LAPACK | OpenBLAS 0.3.28，`TARGET=ARMV8` + OHOS clang + 交叉 gfortran，产出含 LAPACK 的 `libopenblas.so`（10MB） |
 | LAPACK 验证 | qemu 下 `ctypes` 调 `dgesv_`：`info=0`、解正确 |
-| scipy 构建 | meson 交叉文件里 `fc` 指向**包装器**：编译用 gfortran、链接用 OHOS clang（避免 DT_NEEDED libgfortran） |
-| 构建期工具 | `cython`/`f2py`/`pythran` 都在目标 python 里跑，包装器要加 `-P`（否则 meson 的 cwd 会让 `import signal` 命中 `scipy/signal`） |
+| scipy 构建 | meson 交叉文件里 `fc` 指向**包装器**：编译走 gfortran、链接走 OHOS clang（避免 DT_NEEDED glibc 版 libgfortran） |
+| 运行期替身 | `libgfortran.so.5`(16 个符号)、`libgcc_s.so.1`(libunwind + 自实现 soft-float 转换)、`libmvec.so.1`(标量向量数学) |
 
-**运行期剩余问题**：`_arpack`/`_odepack`/`_quadpack` 等少数模块仍然 `DT_NEEDED libgcc_s.so.1`，
-而它们用到了 libgcc 的 soft-float 符号（`__trunctfdf2`、`__extenddftf2`、`__powidf2` …）。
-glibc 版 `libgcc.a` 里这些符号是 **hidden visibility**，无法导出给动态链接器；
-OHOS 的 compiler-rt builtins 里也没有 aarch64 版本。
+验证（qemu，按真机布局）：
 
-已解决 `__trunctfdf2` / `__powidf2` / `__powisf2`（自己按 IEEE 754 位运算实现），
-剩下的推荐解法是给这些模块 **静态链 libgcc**（`-static-libgcc` 或直接把 `libgcc.a` 加进链接行），
-静态链接不受 hidden visibility 限制。**下一轮做这个**，预计包体 +30MB（openblas 11 + scipy 20）。
+```
+linalg.solve [1,2] | det 10 | eigvals | lu/cholesky
+sparse.spsolve / eigs        integrate.quad=2.0 (∫sin) | odeint e^-1
+optimize.minimize [2,-1]     optimize.curve_fit [2,1]
+special.erf 0.5205 | gamma 24   stats.norm.ppf 1.96 | ttest p=0.2302
+signal.find_peaks / filtfilt    interpolate.interp1d/CubicSpline
+spatial.distance 5.0            cluster.vq.kmeans2
+```
+
+**踩坑清单**（都固化进脚本注释）：
+
+1. 包装器要给 `cython`/`f2py`/`pythran` 加 `-P` —— meson 的 cwd 在 scipy 源码树里，
+   不加的话 `import signal` 会命中 `scipy/signal`；
+2. numpy 的 `.pxd` 要复制进 build 根，否则 `cimport numpy` 失败（和 pandas 同一个坑）；
+3. ARPACK 需要 `-fallow-argument-mismatch`，但 clang 不认，包装器里过滤；
+4. glibc `libgcc.a` 里 soft-float 符号是 **hidden visibility**，导出不了 →
+   自己实现 `__trunctfdf2`/`__extenddftf2`/`__floatsitf`/`__powidf2`（[`gcc-softfloat-shim.c`](../../tooling/python/gcc-softfloat-shim.c)）；
+5. scipy 少数模块 DT_NEEDED `libgfortran.so.5` 与 `libmvec.so.1` —— 用 15KB/50KB 的替身库满足加载。
+
+体积：scipy 30MB(.so) + 33MB(.py, 进 extras) + openblas 10MB ≈ **+73MB**。
 
 ## 3. 已验证可用（2026-10）
 
