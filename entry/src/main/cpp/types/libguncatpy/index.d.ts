@@ -47,6 +47,7 @@ export interface PyRunResult {
 export const isAvailable: () => string;
 
 /** 在常驻解释器里执行一段 Python(同步调用, 调用方应放到异步任务里) */
-export const isBusy: () => boolean;
+/** 0=可用 1=忙(超时任务仍在跑, 结束即恢复) 2=已封禁(连续 3 次超时) */
+export const pyState: () => number;
 
 export const runPython: (options: PyRunOptions) => PyRunResult;

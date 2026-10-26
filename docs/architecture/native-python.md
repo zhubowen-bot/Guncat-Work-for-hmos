@@ -161,9 +161,22 @@ PYTHONUTF8=1  PYTHONDONTWRITEBYTECODE=1  PYTHONNOUSERSITE=1
 1. **硬截止(AST 注入)**: 执行前用 `ast` 给 `while True` / `while 1` 这类常量真循环的循环体首行插入
    `if __guncat_deadline and __guncat_now() > __guncat_deadline: raise TimeoutError('run_python 超时(ast-deadline)')`。
    纯 Python 层, 不可能伤到进程; 普通循环不注入, 零开销。实测 `while True` 在 1.5 秒时准点抛出。
-2. **软超时(宿主侧)**: 宿主等 `timeout_ms + 1.5s` 仍没结束, 就放弃等待并返回"超时(未中断, 任务仍在后台运行)",
-   同时把运行时**熔断** —— 之后本会话所有 `run_python` 直接拒绝, 避免排队把 12 个核烧满。
-   这条覆盖 AST 管不到的情况(超长 `for`、阻塞在 C 调用里)。
+2. **软超时(宿主侧)**: 宿主等 `timeout_ms + 1.5s` 仍没结束, 就放弃等待并返回"超时(未中断, 任务仍在后台运行)"。
+   覆盖 AST 管不到的情况(超长 `for`、阻塞在 C 调用里)。
+
+**覆盖范围(实机验证过的边界)**:
+
+| 写法 | 硬截止 | 行为 |
+| --- | --- | --- |
+| `while True:` / `while 1:` | ✅ | 到点抛 `TimeoutError('run_python 超时(ast-deadline)')`, 可被用户 `try/except` 接住, 通道保持可用 |
+| `while <条件式>:`(如 `while time.time()-t0 < 2:`) | ✅ | 同上 |
+| `for i in range(N):` | ❌ | 只能软超时 |
+
+`for` 循环故意不注入逐次检查: 紧凑数值循环每轮只花 ~100ns, 每次都比一次时间会慢 2~3 倍, 不划算 —— 改用提示词/文档
+明确要求"`for` 必须自己写死边界", 让写法从一开始就安全。
+
+**熔断策略**: 软超时后, 只要那个任务还在跑, `run_python` 就**直接拒绝**(不排队); 任务一结束(`g_busy` 归零)
+自动恢复。连续 3 次软超时(中间没有一次正常完成)才永久停用本会话的 Python, 需要重启应用。
 
 执行本身固定在一个**专属线程**上(第一次调用时创建, 由它 `Py_Initialize`, 之后所有调用都投递给它) ——
 解释器的线程态、GIL 记录都绑在初始化它的线程上, NAPI 回调落在别的线程会出各种怪问题。

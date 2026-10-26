@@ -16,7 +16,7 @@
   `entry/libs/arm64-v8a/`（`libssl.so.3` / `libcrypto.so.3` / `libsqlite3.so` / `libbz2.so` / `liblzma.so.5`）。
   新增 `tooling/python/build-native-deps.sh`（OpenSSL 3.0.15 / SQLite 3.45.3 / bzip2 1.0.8 / xz 5.4.6）。
 - **纪律纠偏（根据实测）**：`subprocess` 其实可用（直接 exec 单个 toybox 程序，无 shell 语法）；
-  CPU 密集不要用线程/线程池（实测慢 5~6 倍）；`multiprocessing` 仍不可用；int→str 上限放宽到 10 万位。
+  纯 Python 计算不要用线程/线程池（实测慢 7~8 倍，GIL 争用）；但 `hashlib`/`zlib`/`bz2`/`lzma`/`sqlite3` 等释放 GIL 的 C 运算多线程是真并行（sha256 8 线程 2.7 倍，分块需 ≥64KB）；`multiprocessing` 仍不可用；int→str 上限放宽到 10 万位。
 - 扩展总数 51 → **56**。
 
 ## 未发布（原生 Python）

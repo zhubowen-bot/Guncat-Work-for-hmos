@@ -13,7 +13,8 @@ import { fileIo } from '@kit.CoreFileKit';
 import { resourceManager } from '@kit.LocalizationKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { isAvailable as pyIsAvailable, runPython as pyRunNative, PyRunResult } from 'libguncatpy.so';
+import { isAvailable as pyIsAvailable, runPython as pyRunNative, pyState as pyNativeState,
+  PyRunResult } from 'libguncatpy.so';
 import { Constants } from '../common/Constants';
 import { RawAsset } from './RawAsset';
 import { SpillStore } from './SpillStore';
@@ -151,6 +152,21 @@ export class PythonService {
       certFile: PythonService.runtimeDir(context) + '/cacert.pem',
       timeoutMs: timeoutMs
     };
+    // 熔断/忙判定放在入队之前: 上一次超时未结束的任务还在跑, 新调用绝不排队(会把 CPU 烧满)
+    let state: number = 0;
+    try {
+      state = pyNativeState();
+    } catch (e) {
+      state = 0;
+    }
+    if (state === 2) {
+      return PythonService.failResult('[python 已停用] 本会话连续 3 次超时且有任务未能中断; ' +
+        '为免持续占 CPU, 已停止执行 Python, 请重启应用。');
+    }
+    if (state === 1) {
+      return PythonService.failResult('[python 忙] 上一次 Python 调用超时且未能中断, 仍在后台运行; ' +
+        '它结束后会自动恢复(不会排队)。请稍后再试。');
+    }
     // 串行化: 前一个调用结束后才开始(无论成功失败)
     await PythonService.chain.catch((): void => {});
     let release: () => void = (): void => {};
@@ -205,7 +221,10 @@ export class PythonService {
     let systemExit: boolean = r.error.indexOf('SystemExit') === 0;
     let ok: boolean = r.ok || systemExit;
     let header: string;
-    if (r.timedOut) {
+    if (r.softTimeout === true) {
+      header = '[python 超时 · 未中断 · ' + (elapsedMs / 1000).toFixed(2) + 's · 上限 ' +
+        (timeoutMs / 1000).toFixed(0) + 's]';
+    } else if (r.timedOut) {
       header = '[python 超时 · ' + (elapsedMs / 1000).toFixed(2) + 's · 上限 ' +
         (timeoutMs / 1000).toFixed(0) + 's]';
     } else if (ok) {

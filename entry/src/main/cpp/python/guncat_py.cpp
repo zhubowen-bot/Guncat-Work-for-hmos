@@ -332,7 +332,9 @@ try:
     _deadline_s = __GUNCAT_DEADLINE__
 
     def _arm(_code_src):
-        # 只在"常量真循环"(while True / while 1)的循环体首行插入截止检查。
+        # 给**所有 while 循环**的循环体首行插入截止检查(含 while True 与 while <条件式>)。
+        # for 循环不注入: 逐次迭代的检查会让紧凑数值循环慢 2~3 倍, 代价不划算, 改为在
+        # 提示词/文档里明确警告"for 不受超时保护, 必须自己写边界"。
         # 为什么是这里: 实机证明信号中断不可用(要么被丢弃, 要么直接杀进程),
         # 而纯 Python 层的检查绝不会伤到进程; 普通循环不注入, 保持零开销。
         try:
@@ -359,8 +361,7 @@ try:
 
             def visit_While(self, node):
                 self.generic_visit(node)
-                if isinstance(node.test, _ast.Constant) and node.test.value in (True, 1):
-                    node.body.insert(0, self._guard())
+                node.body.insert(0, self._guard())
                 return node
 
         return _ast.fix_missing_locations(_Deadline().visit(_tree))
@@ -697,8 +698,9 @@ std::mutex g_queueMutex;           // 保护 g_pending
 std::condition_variable g_queueCv;
 std::shared_ptr<PyJob> g_pending;
 std::atomic<bool> g_runnerStarted{false};
-std::atomic<int> g_busy{0};        // 排队 + 执行中的调用数(>0 表示运行时忙)
-std::atomic<bool> g_poisoned{false};  // 出现过软超时: 之后的调用一律拒绝
+std::atomic<int> g_busy{0};          // 排队 + 执行中的调用数(>0 表示运行时忙)
+std::atomic<int> g_softStreak{0};    // 连续软超时次数(正常完成一次就清零)
+std::atomic<bool> g_banned{false};   // 连续 3 次软超时: 本会话永久停用 Python
 
 void RunnerLoop() {
     for (;;) {
@@ -728,6 +730,9 @@ void RunnerLoop() {
         }
         job->cv.notify_all();
         g_busy.fetch_sub(1);
+        if (!orphan) {
+            g_softStreak.store(0);  // 正常跑完一次, 连续超时计数清零
+        }
         if (orphan) {
             OH_LOG_WARN(LOG_APP, "abandoned python call finished (rc=%{public}d)", out.exitCode);
         }
@@ -775,23 +780,31 @@ PyRunOutcome DispatchToRunner(const PyRunOptions& opt) {
     if (!job->cv.wait_until(lock, limit, [&job]() { return job->done; })) {
         job->abandoned = true;
         lock.unlock();
-        g_poisoned.store(true);
+        const int streak = g_softStreak.fetch_add(1) + 1;
+        if (streak >= 3) {
+            g_banned.store(true);
+            OH_LOG_WARN(LOG_APP, "python soft timeout x%{public}d, banning python for this session", streak);
+        }
         out.ok = false;
         out.timedOut = true;
         out.softTimeout = true;
         out.exitCode = -1;
         out.error = "执行超过 " + std::to_string(timeoutMs) +
                     " ms 且未能中断(任务仍在后台运行)。"
-                    "为避免持续占 CPU, 本会话的后续 run_python 调用已被拒绝; "
-                    "请等待它自行结束, 或重启应用。";
+                    "在它结束之前, run_python 会直接拒绝(不会排队); 等它跑完即自动恢复。"
+                    "连续 3 次超时则会停用本会话的 Python, 需要重启应用。";
         OH_LOG_WARN(LOG_APP, "python soft timeout after %{public}d ms (job abandoned)", timeoutMs);
         return out;
     }
     return job->out;
 }
 
-bool PyRuntimeBusy() {
-    return g_busy.load() > 0 || g_poisoned.load();
+// 0=可用 1=忙(有超时任务仍在跑, 等它结束自动恢复) 2=已封禁(连续 3 次超时)
+int PyRuntimeState() {
+    if (g_banned.load()) {
+        return 2;
+    }
+    return g_busy.load() > 0 ? 1 : 0;
 }
 
 // ===== N-API =====
@@ -820,10 +833,10 @@ napi_value JsIsAvailable(napi_env env, napi_callback_info) {
     return MakeString(env, api.ok ? std::string() : api.error);
 }
 
-// isBusy(): true 表示运行时正忙(排队/执行中)或已因软超时熔断
-napi_value JsIsBusy(napi_env env, napi_callback_info) {
+// pyState(): 0=可用 1=忙(超时任务还在跑, 结束即恢复) 2=已封禁(连续 3 次超时)
+napi_value JsPyState(napi_env env, napi_callback_info) {
     napi_value out = nullptr;
-    napi_get_boolean(env, PyRuntimeBusy(), &out);
+    napi_create_int32(env, PyRuntimeState(), &out);
     return out;
 }
 
@@ -873,7 +886,7 @@ napi_value JsRunPython(napi_env env, napi_callback_info info) {
         return result;
     }
 
-    if (g_poisoned.load()) {
+    if (PyRuntimeState() == 2) {
         napi_value result = nullptr;
         napi_create_object(env, &result);
         napi_set_named_property(env, result, "ok", MakeBool(env, false));
@@ -927,7 +940,7 @@ static napi_value Init(napi_env env, napi_value exports) {
     napi_property_descriptor desc[] = {
         {"isAvailable", nullptr, JsIsAvailable, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"runPython", nullptr, JsRunPython, nullptr, nullptr, nullptr, napi_default, nullptr},
-    {"isBusy", nullptr, JsIsBusy, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"pyState", nullptr, JsPyState, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;

@@ -202,7 +202,7 @@ writeFileSync(join(allDir, 'py-shim.ts'),
   `  ok: boolean;\n  timedOut: boolean;\n  softTimeout: boolean;\n  exitCode: number;\n  stdout: string;\n  stderr: string;\n` +
   `  error: string;\n  durationMs: number;\n}\n` +
   `export function isAvailable(): string { return 'py-shim: 原生模块仅在设备侧可用'; }\n` +
-  `export function isBusy(): boolean { return false; }\n` +
+  `export function pyState(): number { return 0; }\n` +
   `export function runPython(options: PyRunOptions): PyRunResult {\n` +
   `  return { ok: false, timedOut: false, softTimeout: false, exitCode: 1, stdout: '', stderr: '',\n` +
   `    error: 'py-shim: 原生模块仅在设备侧可用', durationMs: 0 };\n}\n`);
