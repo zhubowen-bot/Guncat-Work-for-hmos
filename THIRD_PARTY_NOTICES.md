@@ -126,6 +126,15 @@ CPython 内静态链接/随包分发的第三方代码（均由 CPython 自身�
 
 本版本**没有**打包这三个库（因此 `sqlite3`、`ssl`、`ctypes` 不可用），无需声明。
 
+### 2.5 numpy（C 扩展，交叉编译）
+
+- **numpy 2.1.3** — BSD-3-Clause（Copyright (c) 2005-2024, NumPy Developers）；
+  构建脚本 `tooling/python/build-numpy-ohos.sh`，产物在 `entry/libs/arm64-v8a/numpy/`；
+- **libc++ 运行时**（`libc++_shared.so`，随 OHOS SDK / LLVM 提供，Apache-2.0 with LLVM exception）——
+  `numpy.fft` 的 pocketfft 是 C++ 实现；
+- numpy 自带 `LICENSES_bundled.txt` 列出的第三方片段（libdivide 等）按其各自许可分发，
+  原文见 numpy 源码仓库。
+
 ### 2.4 纯 Python 三方库（vendor 进 site-packages.zip）
 
 由 [`tooling/python/vendor-pure.sh`](tooling/python/vendor-pure.sh) 从 PyPI 拉取**纯 Python 轮子**并打包，

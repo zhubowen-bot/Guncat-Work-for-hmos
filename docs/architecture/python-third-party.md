@@ -39,30 +39,30 @@ SYSROOT=$TC/sysroot
 2. 每个 `.so` 必须带 `DT_NEEDED libpython3.12.so`（否则实机报 `PyModuleDef_Init: symbol not found`）；
 3. 依赖库（libz/libssl/libcrypto/libsqlite3/libbz2/liblzma…）也放同一目录，SONAME 即文件名。
 
-### numpy 的现状与下一步
+### numpy：已打通（2026-10，2.1.3）
 
-numpy 2.x 用 meson 构建，`meson.build` 需要**目标平台的 python 解释器**做内省
-（`import sysconfig` 取头文件/库路径）。交叉编译时 meson 不能在 x86 上执行 aarch64 的
-`python3`，因此卡在：
+完整脚本见 [`build-numpy-ohos.sh`](../../tooling/python/build-numpy-ohos.sh)。关键三步：
 
-```
-meson.build:41:12: ERROR: Python dependency not found
-```
+1. **让 meson 能内省目标解释器**：numpy 2.x 的 `meson.build` 要跑 `python -c "import sysconfig"`。
+   OHOS SDK 的 sysroot 不含运行时加载器，交叉编出的 aarch64 python 在 x86 上跑不起来 ——
+   所以准备一份 Alpine minirootfs（`alpine-aarch64`）当 `-L`，用 `qemu-user` 跑我们的目标 python，
+   再包成 wrapper 写进 cross file 的 `[binaries] python` / `cython`。
+2. **用 numpy 自带的 vendored meson（1.5.2）**：系统 meson 缺 numpy 的 `features` 模块
+   （`meson_cpu/meson.build` 里 `import('features')`），会报 `Module "features" does not exist`。
+3. **目标 python 的 pkg-config**：`python-3.12.pc`（含 `Libs/Cflags`）+ `PKG_CONFIG_LIBDIR`，
+   否则 meson 报 `Python dependency not found`。
 
-已排除：`pkg-config` 缺失、`.pc` 文件名不符（`python3` / `python-3.12` / `*-embed` 都已提供
-且 `pkg-config --modversion python-3.12` 正常返回 3.12）。真正缺的是"能在构建机上运行的
-目标解释器"。
+产物落 `entry/libs/arm64-v8a/numpy/`（14MB，已 strip、已删 tests/f2py），
+另外带 `libc++_shared.so`（`numpy.fft` 的 pocketfft 是 C++）。
+启动器会把 libDir 并进 `PYTHONPATH`，所以 `import numpy` 直接可用；`NEEDED` 是
+`libpython3.12.so` + `libc.so`，与其它扩展同一条加载路径。
 
-两条可行路线（按推荐顺序）：
+为什么放在 libs 而不是 site-packages：**设备上只有应用 lib 目录里的 `.so` 能被 dlopen**，
+numpy 的 `_multiarray_umath.so` 等必须在包里跟随包目录，而包目录又必须在可加载的树下。
 
-1. **qemu-user + OHOS sysroot**：装 `qemu-user-static`，用
-   `qemu-aarch64-static -L $SYSROOT <交叉编译出的 python3> -c "import sysconfig; ..."`
-   让 meson 完成内省；把该命令包成 wrapper 写进 cross file 的 `[binaries] python`。
-2. **改走 setuptools 路线**：numpy 1.26.x 仍支持 `setup.py`，用
-   `_PYTHON_HOST_PLATFORM=linux-aarch64` + `CC/AR/LDSHARED` 交叉，不走 meson 的 Python 依赖发现。
-
-numpy 打通后，pandas（依赖 numpy + Cython 生成的 C）、scipy、matplotlib 才有意义；
-Pillow/lxml 与 numpy 无关，可并行推进（依赖 libjpeg-turbo、libpng、freetype、libxml2/libxslt）。
+验证（qemu + Alpine rootfs，与设备同 ABI）：
+`np.arange(12).reshape(3,4)` 求和 66、`@` 矩阵乘、`np.fft.fft([0,1,2,3]) = [6,-2,-2,-2]`、
+`np.linalg.det([[1,2],[3,4]]) = -2`、`polyfit`、`histogram`、`default_rng` 全部正确。
 
 ## 3. 已验证可用（2026-10）
 
