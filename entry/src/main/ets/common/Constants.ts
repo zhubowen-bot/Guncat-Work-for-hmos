@@ -264,7 +264,7 @@ export class Constants {
   // run_python 工具(原生 CPython 3.12): 与 shell 共用工作区, 但跑在应用进程内的真解释器上
   static readonly WORK_PY_TOOL_NAME: string = 'run_python';
   // 运行库内容版本: 换 libpython / 标准库后要改这里, 触发重新释放
-  static readonly WORK_PY_RUNTIME_REV: string = '2026-10-26-cpython-3.12.15';
+  static readonly WORK_PY_RUNTIME_REV: string = '2026-10-26-cpython-3.12.15-libs';
   static readonly WORK_PY_MAX_CODE_BYTES: number = 128 * 1024;
   static readonly WORK_PY_DEFAULT_TIMEOUT_MS: number = 30000;
   static readonly WORK_PY_MAX_TIMEOUT_MS: number = 180000;
