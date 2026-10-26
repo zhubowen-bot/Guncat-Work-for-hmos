@@ -330,6 +330,19 @@ try:
 
     _stage = 'compile'
     _deadline_s = __GUNCAT_DEADLINE__
+    _tick_n = 0
+    _tick_dl = (time.monotonic() + _deadline_s) if _deadline_s and _deadline_s > 0 else None
+
+    def _guard_iter(_it):
+        # 非 range 的 for 循环: 用生成器包装, 每 4096 项看一次表。
+        # (range 循环走另一个更便宜的方案: 直接用循环变量取模, 不用函数调用。)
+        _n = 0
+        _dl = _tick_dl
+        for _v in _it:
+            _n += 1
+            if (_n & 4095) == 0 and _dl is not None and time.monotonic() > _dl:
+                raise TimeoutError('run_python 超时(ast-deadline)')
+            yield _v
 
     def _arm(_code_src):
         # 给**所有 while 循环**的循环体首行插入截止检查(含 while True 与 while <条件式>)。
@@ -364,6 +377,35 @@ try:
                 node.body.insert(0, self._guard())
                 return node
 
+            def visit_For(self, node):
+                self.generic_visit(node)
+                _dl_name = _ast.Name(id='__guncat_deadline', ctx=_ast.Load())
+                _check = _ast.If(test=_ast.BoolOp(op=_ast.And(), values=[
+                    _dl_name,
+                    _ast.Compare(left=_ast.Call(func=_ast.Name(id='__guncat_now', ctx=_ast.Load()),
+                                                args=[], keywords=[]),
+                                 ops=[_ast.Gt()], comparators=[_dl_name])]),
+                    body=[_ast.Raise(exc=_ast.Call(
+                        func=_ast.Name(id='__guncat_timeout', ctx=_ast.Load()),
+                        args=[_ast.Constant('run_python 超时(ast-deadline)')], keywords=[]), cause=None)],
+                    orelse=[])
+                _it = node.iter
+                _is_range = (isinstance(_it, _ast.Call) and
+                             isinstance(_it.func, _ast.Name) and _it.func.id == 'range' and
+                             isinstance(node.target, _ast.Name))
+                if _is_range:
+                    # range 循环: `if not (i & 8191): <看表>` —— 每轮只多两次算术, 约 30ns
+                    _mask = _ast.UnaryOp(op=_ast.Not(),
+                                         operand=_ast.BinOp(left=_ast.Name(id=node.target.id, ctx=_ast.Load()),
+                                                            op=_ast.BitAnd(),
+                                                            right=_ast.Constant(8191)))
+                    node.body.insert(0, _ast.If(test=_mask, body=[_check], orelse=[]))
+                else:
+                    # 其它可迭代对象: 包一层生成器(每 4096 项看表一次)
+                    node.iter = _ast.Call(func=_ast.Name(id='__guncat_iter', ctx=_ast.Load()),
+                                          args=[_it], keywords=[])
+                return node
+
         return _ast.fix_missing_locations(_Deadline().visit(_tree))
 
     _stage = 'exec'
@@ -372,6 +414,7 @@ try:
         '__guncat_deadline': (time.monotonic() + _deadline_s) if _deadline_s and _deadline_s > 0 else None,
         '__guncat_now': time.monotonic,
         '__guncat_timeout': TimeoutError,
+        '__guncat_iter': _guard_iter,
     }
     _ok = 1
     try:

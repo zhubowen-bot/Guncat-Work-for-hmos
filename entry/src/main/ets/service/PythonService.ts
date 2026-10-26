@@ -24,6 +24,7 @@ const DOMAIN: number = 0x0000;
 const TAG: string = 'PythonService';
 
 const RAW_ZIP: string = 'python/python312.zip';
+const RAW_SITE: string = 'python/site-packages.zip';
 const RAW_CERT: string = 'python/cacert.pem';
 const PY_RUNTIME_DIR: string = 'python';
 const PY_STDLIB_SUBDIR: string = 'lib/python3.12';
@@ -58,7 +59,8 @@ export class PythonService {
     // 只给标准库 zip; C 扩展模块在应用的 lib 目录里(native 侧用 dladdr 自动并进 PYTHONPATH),
     // 因为设备上只有 lib 目录下的 .so 允许 dlopen。
     let stdlib: string = PythonService.runtimeDir(context) + '/' + PY_STDLIB_SUBDIR;
-    return stdlib + '/python312.zip';
+    // 标准库 zip + 纯 Python 三方库 zip(requests/openpyxl/PyYAML/jinja2 …)
+    return stdlib + '/python312.zip' + ':' + stdlib + '/site-packages.zip';
   }
 
   /** 首次调用时把 libpython 依赖的标准库/扩展模块释放到沙箱 */
@@ -91,6 +93,12 @@ export class PythonService {
         fileIo.mkdirSync(stdlib, true);
       }
       RawAsset.extract(context, RAW_ZIP, stdlib + '/python312.zip');
+      // 纯 Python 三方库(独立 zip, 与标准库分开升级)
+      try {
+        RawAsset.extract(context, RAW_SITE, stdlib + '/site-packages.zip');
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, 'extract site-packages failed: %{public}s', (e as Error).message);
+      }
       // https 用的 CA 证书(应用沙箱里没有系统 CA)
       try {
         RawAsset.extract(context, RAW_CERT, root + '/cacert.pem');

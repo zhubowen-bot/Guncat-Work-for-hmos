@@ -122,9 +122,55 @@ CPython 内静态链接/随包分发的第三方代码（均由 CPython 自身�
 > 未编入的模块：`_ssl`/`_hashlib`（无 OpenSSL）、`_sqlite3`、`_ctypes`（无 libffi）、
 > `_locale`、curses/readline/tkinter、`_bz2`/`_lzma`、`_uuid`、`_multiprocessing`。
 
-### 2.2 SQLite / OpenSSL / libffi
+### 2.2 SQLite / OpenSSL / libffi（历史说明）
 
 本版本**没有**打包这三个库（因此 `sqlite3`、`ssl`、`ctypes` 不可用），无需声明。
+
+### 2.4 纯 Python 三方库（vendor 进 site-packages.zip）
+
+由 [`tooling/python/vendor-pure.sh`](tooling/python/vendor-pure.sh) 从 PyPI 拉取**纯 Python 轮子**并打包，
+运行时挂在 `PYTHONPATH` 上（`filesDir/python/lib/python3.12/site-packages.zip`）。各包版本与许可：
+
+# vendor 纯 Python 包许可摘要(自动生成, 勿手改)
+
+| 包 | 版本 | 许可 |
+| --- | --- | --- |
+| beautifulsoup4 | 4.15.0 | MIT License |
+| certifi | 2026.10.23 | MPL-2.0 |
+| et_xmlfile | 2.0.0 | MIT |
+| idna | 3.20 | BSD-3-Clause |
+| Jinja2 | 3.1.6 | BSD License |
+| Markdown | 3.11.2 | BSD-3-Clause |
+| openpyxl | 3.1.5 | MIT |
+| packaging | 26.3 | Apache-2.0 OR BSD-2-Clause |
+| pypdf | 6.21.2 | BSD-3-Clause |
+| python-dateutil | 3.0.0 | Dual License |
+| pytz | 2026.5 | MIT |
+| requests | 2.34.2 | Apache-2.0 |
+| six | 1.17.0 | MIT |
+| soupsieve | 3.0.4 | MIT |
+| tabulate | 0.10.0 | MIT |
+| tqdm | 4.70.1 | MPL-2.0 AND MIT |
+| typing_extensions | 4.16.0 | PSF-2.0 |
+| urllib3 | 2.8.0 | MIT |
+| xlrd | 2.0.2 | BSD |
+
+（完整许可原文随各包位于 `site-packages.zip` 内的 `*.dist-info/` 目录。）
+
+### 2.3 OpenSSL / SQLite / bzip2 / xz —— 原生 Python 的可选依赖
+
+这几项是随后补进来的（交叉编译见 [`tooling/python/build-native-deps.sh`](tooling/python/build-native-deps.sh)），
+只被 `run_python` 的解释器使用：
+
+| 组件 | 版本 | 许可 | 用途 |
+| --- | --- | --- | --- |
+| OpenSSL | 3.0.15 | **Apache-2.0** | `_ssl` / `_hashlib`（TLS、`pbkdf2_hmac`、`scrypt`） |
+| SQLite | 3.45.3 | **Public Domain** | `_sqlite3` |
+| bzip2 | 1.0.8 | BSD 风格（Julian Seward） | `_bz2` |
+| xz / liblzma | 5.4.6 | **Public Domain**（liblzma 部分 0BSD） | `_lzma` |
+
+OpenSSL 以 Apache-2.0 分发，与本项目 Apache-2.0 兼容；许可原文见
+[`LICENSES/Apache-2.0-OpenSSL.txt`](LICENSES/Apache-2.0-OpenSSL.txt)（构建后可从 OpenSSL 源码的 `LICENSE.txt` 取得）。
 
 ---
 
