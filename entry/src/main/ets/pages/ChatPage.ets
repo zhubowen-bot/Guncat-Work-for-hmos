@@ -1518,6 +1518,8 @@ struct ChatPage {
             // 交互模式选「关闭」思考时不再挂空的"思考中"条(历史消息有思考内容仍会显示)
             thinkingExpected: this.vm.loopThinkingEnabled,
             // 交互模式: 仅最新一轮界面可交互, 历史界面块与执行中的界面置灰防重复提交
+            // 只有交互模式渲染交互卡片; 工作模式一律纯文本(同一个 WorkTurnView)
+            allowUi: this.vm.interactiveMode,
             uiLocked: this.vm.interactiveMode &&
               (msg.id !== this.vm.pendingUiMessageId || this.vm.isStreaming),
             // 界面回传分两类:

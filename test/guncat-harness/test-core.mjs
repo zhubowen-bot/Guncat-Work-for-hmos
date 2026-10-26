@@ -47,6 +47,7 @@ import {
   GuncatUiTrailer
 } from './gen/GuncatUiRuntime.ts';
 import { GuncatUiParts, GuncatUiSegType } from './gen/GuncatUiParts.ts';
+import { readFileSync } from 'node:fs';
 import { UiChartGeom, UiBox, UiNum, UiPalette, UiPoint, UiScale } from './gen/GuncatUiPaint.ts';
 import { GuncatUiPrompt } from './gen/GuncatUiPrompt.ts';
 
@@ -1576,6 +1577,18 @@ console.log('[GuncatUiParts 切分]');
     GuncatUiParts.build('root = Card([a])\na = TextContent("x")', true).hasUi === true);
   check('allowUi 显式 false 才走纯文本',
     GuncatUiParts.build('root = Card([a])\na = TextContent("x")', true, false).hasUi === false);
+
+  // 组件级路由守卫(源码级): WorkTurnView 同时服务工作模式与交互模式,
+  // 一旦写死 allowUi=false, 交互模式就会整条退化成源码(真机事故)。这里用文本断言钉死。
+  {
+    const src = readFileSync(new URL('../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1') +
+      '/entry/src/main/ets/views/WorkTurnView.ets', 'utf8');
+    check('WorkTurnView 按 allowUi 分流', src.indexOf('this.allowUi') >= 0 &&
+      src.indexOf('buildInteractive') >= 0 && src.indexOf('GuncatUiParts.build(content, finalized, false)') >= 0);
+    const page = readFileSync(new URL('../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1') +
+      '/entry/src/main/ets/pages/ChatPage.ets', 'utf8');
+    check('ChatPage 把交互模式显式传给 WorkTurnView', page.indexOf('allowUi: this.vm.interactiveMode') >= 0);
+  }
 
   check('交互模式: 纯文本不强行出卡片',
     GuncatUiParts.buildInteractive('就是一段普通结论, 没有任何程序。', true).hasUiSeg === false);

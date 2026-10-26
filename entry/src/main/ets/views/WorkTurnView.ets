@@ -56,6 +56,9 @@ export struct WorkTurnView {
   @State private uiSegs: GuncatUiSeg[] = [];
   // 该轮界面是否已回传(仅最新一轮可交互)
   @Prop uiLocked: boolean = false;
+  // 本组件同时服务工作模式与交互模式(agentLoopMode 两者都为 true)。只有交互模式才渲染
+  // 交互卡片; 工作模式一律按 Markdown 文本渲染。默认 true = 宁可出卡片, 由 ChatPage 显式传入。
+  @Prop allowUi: boolean = true;
   private onUiInteract: (messageId: string, ev: GuncatUiEvent) => void =
     (_messageId: string, _ev: GuncatUiEvent): void => {};
   // 上一次工具行状态签名(数量/参数量/执行态): 变化才递增 stepsTick 触发行重建,
@@ -118,9 +121,11 @@ export struct WorkTurnView {
   //   每 33ms 就把整块正文重建一次 —— 真机表现正是"不停闪烁"。纯文本走 buildTurnContent 里
   //   `uiSegs.length === 0` 的快车道(单个 RichTextView, 库自带流式增量渲染), 组件实例不换, 不闪。
   private commitParts(content: string, finalized: boolean): void {
-    // 第三个参数 false = 工作模式**永不产出界面片段**。工作模式只交付文本与工具结果,
-    // 一旦解析界面程序就会冒出交互模式的卡片(真机事故: 没标语言的代码块被当成界面程序)。
-    let parts: GuncatUiParts = GuncatUiParts.build(content, finalized, false);
+    // 交互模式(allowUi=true): 走卡片优先的解析, 有程序就必须出卡片;
+    // 工作模式(allowUi=false): 结构上不产出界面片段, 只交付文本与工具结果。
+    let parts: GuncatUiParts = this.allowUi
+      ? GuncatUiParts.buildInteractive(content, finalized)
+      : GuncatUiParts.build(content, finalized, false);
     let next: GuncatUiSeg[] = [];
     let hasUi: boolean = false;
     for (let i: number = 0; i < parts.segments.length; i++) {
@@ -188,10 +193,48 @@ export struct WorkTurnView {
   // 就地按 finalized 重建一次。不依赖 @Watch/父组件通知——真机上那些回调不可靠,
   // 曾表现为"卡片停在骨架态, 切走再切回会话才正常"。
   //
-  // 工作模式已经不再渲染任何交互界面(commitParts 永远传 allowUi=false), 这条自愈路径整体作废:
-  // 保留空实现, 免掉每 250ms 的采样与无谓重建。
+  // 只在交互模式(allowUi)启用: 工作模式不渲染界面, 采样毫无意义。
+  // 每 250ms 检查一次: 内容还在变就继续等, 连续两次采样一致即视为稳定, 立刻重建并停止。
   private startUiSettleTimer(): void {
-    this.stopUiSettleTimer();
+    if (!this.allowUi) {
+      this.stopUiSettleTimer();
+      return;
+    }
+    if (this.uiSettleTimer !== -1) {
+      return;
+    }
+    let waited: number = 0;
+    let stableSamples: number = 0;
+    let lastSample: string = this.message.content;
+    this.uiSettleTimer = setInterval((): void => {
+      waited += 250;
+      let content: string = this.message.content;
+      if (!GuncatUiParts.hasProgram(content)) {
+        if (waited >= 8000) {
+          this.stopUiSettleTimer();
+        }
+        return;
+      }
+      if (content !== lastSample) {
+        lastSample = content;
+        stableSamples = 0;
+      } else {
+        stableSamples++;
+      }
+      if (this.uiBuildFinalized && stableSamples >= 2) {
+        this.stopUiSettleTimer();
+        return;
+      }
+      if (stableSamples >= 2) {
+        this.refreshUiPartsFinal();
+        this.stopUiSettleTimer();
+        return;
+      }
+      if (waited >= 8000) {
+        this.refreshUiPartsFinal();
+        this.stopUiSettleTimer();
+      }
+    }, 250);
   }
 
   private stopUiSettleTimer(): void {
