@@ -52,12 +52,14 @@ XlsxWriter
 qrcode
 sympy
 mpmath
+watchdog
+reportlab
 "
 # 这些包在 PyPI 上同时有"平台轮子"和"纯 Python 轮子", 直接 --only-binary 会挑到 cpXXX 平台轮;
 # 显式指定 py3/any 平台把它们拉成纯 Python 版本。
 PURE_FORCED="${PURE_FORCED:-charset-normalizer}"
 # 需要真实文件的包(模板/证书), 运行时必须在解压后的目录里
-DATA_PKGS="${DATA_PKGS:-docx pptx certifi}"
+DATA_PKGS="${DATA_PKGS:-docx pptx certifi reportlab}"
 PKGS="${PKGS:-$DEFAULT_PKGS}"
 SOURCE_PKGS="${SOURCE_PKGS:-pyyaml markupsafe}"
 mkdir -p "$WORK/src"

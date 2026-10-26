@@ -20,9 +20,9 @@ bash tooling/python/build-python-stack.sh verify      # 只跑自检
 `crypto` → `misc` → `extras` → `verify`。每步幂等，产物存在就跳过。
 
 自检由 [`verify-python-stack.py`](../../tooling/python/verify-python-stack.py) 完成，
-18 项覆盖：标准库（sqlite3/ssl/压缩/hash）、ctypes、numpy（含 fft/det）、pandas（groupby/tz）、
+20 项覆盖：标准库（sqlite3/ssl/压缩/hash）、ctypes、numpy（含 fft/det）、pandas（groupby/tz）、
 Pillow、matplotlib、qrcode、lxml（xpath/cssselect）、regex（`\p{Han}`）、bs4、PyCryptodome、
-docx/pptx/xlsxwriter、sympy、psutil、requests（+ certifi）、openpyxl/yaml/jinja2。
+docx/pptx/xlsxwriter、sympy、psutil、requests（+ certifi）、openpyxl/yaml/jinja2、reportlab、watchdog。
 
 [`run-verify-stack.sh`](../../tooling/python/run-verify-stack.sh) 会**按真机布局**组装环境：
 extras.zip 解到临时目录、libs 只提供 `.so`、`PYTHONPATH=stdlib:site-packages:extras:libs`，
@@ -30,7 +30,7 @@ extras.zip 解到临时目录、libs 只提供 `.so`、`PYTHONPATH=stdlib:site-p
 
 ```
 python 3.12.15 | linux
-18/18 passed
+20/20 passed
 ```
 
 ## 1. 纯 Python 包：`tooling/python/vendor-pure.sh`
@@ -243,6 +243,16 @@ certifi 也用文件路径拿 CA 包 —— zipimport 下这些路径是虚拟�
 `qemu-aarch64: Could not open '/lib/ld-musl-aarch64.so.1'`。
 
 同样走双层布局：`regex/_regex.so`、`psutil/*.abi3.so` 在 `libs/`，`.py` 在 `extras.zip`。
+
+### reportlab / watchdog（2026-10）
+
+| 包 | 作用 | 备注 |
+| --- | --- | --- |
+| **reportlab 4.2.5** | 生成 PDF（文字/表格/图形/分页） | 用**纯 Python 回退模式**（加速模块 `_rl_accel` 未编，功能不缺，速度略慢）；字体数据随包 → 进 extras |
+| **watchdog 6.0.0** | 文件变更监控 | Linux 下 inotify 走 ctypes，**无需 C 扩展**；纯 Python → 进 site-packages.zip |
+
+reportlab 的 `setup.py` 会尝试下载 Type1 字体曲线，离线环境会打印 `Failed to download`，
+不影响使用（`.afm` 已随 sdist 提供）。
 
 ## 3. 已验证可用（2026-10）
 

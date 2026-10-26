@@ -126,6 +126,11 @@ CPython 内静态链接/随包分发的第三方代码（均由 CPython 自身�
 
 本版本**没有**打包这三个库（因此 `sqlite3`、`ssl`、`ctypes` 不可用），无需声明。
 
+### 2.13 reportlab / watchdog（纯 Python 运行）
+
+- **reportlab 4.2.5** — BSD-3-Clause（ReportLab Inc.）；字体数据各有许可（见包内 `fonts/`）；
+- **watchdog 6.0.0** — Apache-2.0。
+
 ### 2.12 regex / psutil（C 扩展）
 
 - **regex 2024.11.6** — Apache-2.0；产物 `entry/libs/arm64-v8a/regex/`，`.py` 在 `extras.zip`；

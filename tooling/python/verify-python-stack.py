@@ -218,6 +218,26 @@ def _openpyxl_yaml_jinja():
     return "%s/%s/%s" % (openpyxl.__version__, yaml.__version__, jinja2.__version__)
 
 
+def _reportlab():
+    from reportlab.pdfgen import canvas
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf)
+    c.setFont("Helvetica", 12)
+    c.drawString(72, 720, "Guncat")
+    c.showPage()
+    c.save()
+    assert buf.getvalue().startswith(b"%PDF")
+    return "pdf=%d bytes" % len(buf.getvalue())
+
+
+def _watchdog():
+    from watchdog.observers import Observer
+    from watchdog.events import FileSystemEventHandler
+    obs = Observer()
+    assert type(obs).__name__ in ("InotifyObserver", "Observer"), type(obs).__name__
+    return "%s" % type(obs).__name__
+
+
 CHECKS = [
     ("stdlib", _stdlib),
     ("ctypes", _ctypes),
@@ -237,6 +257,8 @@ CHECKS = [
     ("psutil", _psutil),
     ("requests", _requests),
     ("openpyxl/yaml/jinja2", _openpyxl_yaml_jinja),
+    ("reportlab", _reportlab),
+    ("watchdog", _watchdog),
 ]
 
 
