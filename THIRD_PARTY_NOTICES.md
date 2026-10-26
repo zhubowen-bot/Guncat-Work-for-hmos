@@ -126,6 +126,12 @@ CPython 内静态链接/随包分发的第三方代码（均由 CPython 自身�
 
 本版本**没有**打包这三个库（因此 `sqlite3`、`ssl`、`ctypes` 不可用），无需声明。
 
+### 2.9 lxml / libxml2 / libxslt（C 扩展，交叉编译）
+
+- **lxml 5.3.0** — BSD-3-Clause（Copyright (c) 2004 Infrae）；
+- **libxml2 2.13.5** — MIT；**libxslt 1.1.42** — MIT（两者随包：`libxml2.so.2` / `libxslt.so.1` / `libexslt.so.0`）；
+- **cssselect 1.6.0** — BSD-3-Clause（纯 Python，见 2.4 节表格）。
+
 ### 2.8 matplotlib 及其依赖（C/C++ 扩展，交叉编译）
 
 - **matplotlib 3.9.2** — PSF-2.0 AND MIT AND CC0-1.0 AND OFL-1.1 AND Bitstream-Vera AND Public-Domain

@@ -146,6 +146,21 @@ zlib/libpng（Pillow 那套）→ **freetype 2.13.3** → **qhull 8.0.2** → **
 验证（qemu + 模拟真机布局）：`plt.subplots` + `plot`/`bar`/`contour` 存 PNG 均成功
 （12KB / 5KB），`matplotlib 3.9.2` 正常报告版本。
 
+### lxml：已打通（2026-10，5.3.0）
+
+脚本 [`build-lxml-ohos.sh`](../../tooling/python/build-lxml-ohos.sh)。依赖 libxml2 2.13.5 + libxslt 1.1.42。
+
+两个关键点：
+
+1. **必须用 PyPI 的 sdist，不能用 GitHub tag**。GitHub 树里只有 `.pyx`，会用构建机的 Cython 现场生成 C；
+   Cython 3.3 生成的代码与 lxml 5.3 不兼容，报 `use of undeclared identifier '__pyx_empty_tuple'`。
+   PyPI sdist 里带**已生成好的 C**，直接编即可。
+2. libxml2/libxslt 是 autotools：GitHub tag 没有 `configure`，先 `autoreconf -fi`；
+   `config.sub` 不认 `ohos`，用 `--host=aarch64-linux-gnu` 混过校验（编译器仍是 OHOS clang）。
+
+验证（qemu + 模拟真机布局）：`etree.fromstring` + `xpath('//a/@x')` 正确；
+`lxml.html` + `cssselect('p.c')` 正确（cssselect 是纯 Python，已 vendor）。
+
 ## 3. 已验证可用（2026-10）
 
 纯 Python 21 个：requests / urllib3 / certifi / idna / charset-normalizer / python-dateutil /

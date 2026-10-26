@@ -5,6 +5,7 @@
 | beautifulsoup4 | 4.15.0 | MIT License |
 | certifi | 2026.10.23 | MPL-2.0 |
 | charset-normalizer | 3.5.2 | MIT |
+| cssselect | 1.6.0 | BSD-3-Clause |
 | cycler | 0.12.1 | BSD License |
 | et_xmlfile | 2.0.0 | MIT |
 | idna | 3.20 | BSD-3-Clause |

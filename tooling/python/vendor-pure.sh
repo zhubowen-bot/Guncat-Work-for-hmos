@@ -45,6 +45,7 @@ tqdm
 pyparsing
 cycler
 fonttools
+cssselect
 "
 # 这些包在 PyPI 上同时有"平台轮子"和"纯 Python 轮子", 直接 --only-binary 会挑到 cpXXX 平台轮;
 # 显式指定 py3/any 平台把它们拉成纯 Python 版本。
