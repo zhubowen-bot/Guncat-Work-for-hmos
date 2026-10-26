@@ -1,0 +1,16 @@
+[binaries]
+c = '/opt/ohos-cmdline/command-line-tools/sdk/default/openharmony/native/llvm/bin/aarch64-unknown-linux-ohos-clang'
+cpp = '/opt/ohos-cmdline/command-line-tools/sdk/default/openharmony/native/llvm/bin/aarch64-unknown-linux-ohos-clang++'
+ar = '/opt/ohos-cmdline/command-line-tools/sdk/default/openharmony/native/llvm/bin/llvm-ar'
+strip = '/opt/ohos-cmdline/command-line-tools/sdk/default/openharmony/native/llvm/bin/llvm-strip'
+python = '/usr/bin/python3'
+
+[host_machine]
+system = 'linux'
+cpu_family = 'aarch64'
+cpu = 'aarch64'
+endian = 'little'
+
+[properties]
+needs_exe_wrapper = true
+longdouble_format = 'IEEE_QUAD_LE'

@@ -1,0 +1,10 @@
+prefix=/root/cpython-ohos/dest/usr/local
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include/python3.12
+
+Name: Python
+Description: Python library
+Version: 3.12
+Libs: -L${libdir} -lpython3.12
+Cflags: -I${includedir}
