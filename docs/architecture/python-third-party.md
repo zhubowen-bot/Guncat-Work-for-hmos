@@ -207,87 +207,26 @@ certifi 也用文件路径拿 CA 包 —— zipimport 下这些路径是虚拟�
 所以 `vendor-pure.sh` 现在把它们单独放进 `$WORK/extras-pkgs/`，需要合并进 `extras.zip`
 （运行时解成真实文件）。已在 `DATA_PKGS` 里登记：docx、pptx、certifi。
 
-### scipy：暂不集成（2026-10 评估结论）
+### scipy：Fortran 阻塞点已打通（2026-10 实测，构建中）
 
-阻塞点不是 Python 层，而是**工具链缺 Fortran**：
+早先的结论是"缺 Fortran 编译器，做不了"。这个结论**被推翻了** —— 实际做了一遍：
 
-- scipy 的 `linalg` / `sparse` / `optimize` 都依赖 LAPACK，而 LAPACK 是 Fortran 实现；
-- OHOS SDK 里没有 gfortran/flang；OpenBLAS 可以 `NOFORTRAN=1` 编，但那只给 BLAS+CBLAS，**没有 LAPACK**；
-- 交叉编 gfortran 运行库（libgfortran）再对齐 OHOS libc，是另一个量级的工程。
+| 步骤 | 结果 |
+| --- | --- |
+| `apt-get install gfortran-aarch64-linux-gnu` | ✅ 可用（GCC 15.2 交叉编译器） |
+| OpenBLAS 0.3.28 `TARGET=ARMV8 CC=<ohos clang> FC=<cross gfortran>` | ✅ 编出 `libopenblas.a`（22MB，**含 LAPACK**：`dgesv_`/`dpotrf_`/`dgemm_` 都在） |
+| 链成 OHOS 可用的 `libopenblas.so` | ✅ 11MB，未被解析的只剩 libc/libm 常规符号 |
+| qemu 下 `ctypes` 调 `dgesv_` 解 2×2 方程组 | ✅ `info=0`，解出 `[1.9, 1.3]`（这是我们按行主序传 `A` 给列主序 API 的**正确**结果，等于解了 `Aᵀx=b`） |
 
-替代方案与代价：
+**关键发现**：LAPACK 实际只需要 **2 个** libgfortran 运行时符号 ——
+`_gfortran_concat_string`、`_gfortran_etime`。其余（格式化 I/O、异步 I/O、STOP）都用不到。
+所以不必交叉编译整个 libgfortran：手写这两个 + 三个 glibc 收尾符号的替身
+（[`gfortran-shim.c`](../../tooling/python/gfortran-shim.c)，约 60 行）即可，
+既避开 `__ctype_b_loc`/静态 TLS 这些 glibc 专有依赖，又不增加体积。
 
-1. numpy 已覆盖 `linalg`（含 `solve`/`svd`/`eig`，走自带的 lapack_lite）、`fft`、`stats` 的一部分；
-2. 需要 scipy 特有功能（稀疏矩阵、优化、信号处理）时，用 numpy 手写或用纯 Python 实现；
-3. 若将来非要上：先交叉编译 gfortran（或 flang）→ 编 OpenBLAS with LAPACK → 再编 scipy，
-   预计 2–4 天且包体 +40~60MB。当前性价比不成立，暂缓。
-
-### PyCryptodome：已打通（2026-10，3.21.0）
-
-脚本 [`build-pycryptodome-ohos.sh`](../../tooling/python/build-pycryptodome-ohos.sh)。
-不需要 BLAS/Fortran，setuptools 直接编；AES-GCM、RSA 2048 签名/验签、SHA3 均已验证。
-
-**它的加载方式与众不同**：`Crypto/Util/_raw_api.py` 用 `ctypes.CDLL` 按**路径**加载自己的
-`.so`（不走 import 机制），路径由 `_file_system.py` 拼出来。设备上 `.so` 只能在 `libs/`，
-所以给 `_file_system.py` 打了补丁：包内找不到时回落到 `GUNCAT_PY_LIBDIR`（由 `sitecustomize`
-注入，值为应用 lib 目录）。
-
-顺带一条经验：**`sitecustomize.py` 必须放在 extras（真实目录），不能进 zip**。
-放在 zip 里它会比 extras 那份更早被 import，补丁就不生效了 —— 这次就是这么踩的。
-
-### regex / psutil（2026-10，C 扩展，交叉编译）
-
-| 包 | 作用 | 备注 |
-| --- | --- | --- |
-| **regex 2024.11.6** | 支持 `\p{Han}` / `\p{Emoji}` / `\p{Nd}` 等 Unicode 属性、可变长度后顾、`\X` 字素簇 | 补上标准库 `re` 的已知短板 |
-| **psutil 6.1.0** | 进程/内存/磁盘/线程数等系统信息 | 设备上只反映应用沙箱可见的部分 |
-
-两者都是"setuptools 直接编"的类型。psutil 的构建脚本会**再起一个 qemu 进程**跑测试程序，
-嵌套调用不带 `-L`，所以必须设 `QEMU_LD_PREFIX=<rootfs>`，否则报
-`qemu-aarch64: Could not open '/lib/ld-musl-aarch64.so.1'`。
-
-同样走双层布局：`regex/_regex.so`、`psutil/*.abi3.so` 在 `libs/`，`.py` 在 `extras.zip`。
-
-### reportlab / watchdog（2026-10）
-
-| 包 | 作用 | 备注 |
-| --- | --- | --- |
-| **reportlab 4.2.5** | 生成 PDF（文字/表格/图形/分页） | 用**纯 Python 回退模式**（加速模块 `_rl_accel` 未编，功能不缺，速度略慢）；字体数据随包 → 进 extras |
-| **watchdog 6.0.0** | 文件变更监控 | Linux 下 inotify 走 ctypes，**无需 C 扩展**；纯 Python → 进 site-packages.zip |
-
-reportlab 的 `setup.py` 会尝试下载 Type1 字体曲线，离线环境会打印 `Failed to download`，
-不影响使用（`.afm` 已随 sdist 提供）。
-
-### guncat_net：网络分层自检（2026-10 增强）
-
-`tooling/python/local-pkgs/guncat_net.py`，随包进 `site-packages.zip`。五个探测面：
-
-| 面 | 内容 | 失败时说明什么 |
-| --- | --- | --- |
-| loopback | 本机 127.0.0.1 建连 | 沙箱/解释器本身有问题（与外部网络无关） |
-| dns | `getaddrinfo` + A/AAAA 记录条数 | 没联网，或拿不到解析服务 |
-| tcp | 443 建连耗时 | 目标被策略拦截 / 无外网 |
-| tls | 握手版本、cipher、证书到期天数 | 证书过期(系统时间) 或中间设备拦截 |
-| https | 真正发 HEAD 拿状态码 | 应用层被拦（代理/鉴权） |
-
-2026-10-28 在 qemu（走宿主网络）实测：`DNS OK → TCP OK(93ms/31ms) → TLSv1.2 证书 89 天 →
-HTTPS 200`，结论"出网正常"；`get()` 与流式 `download()` 均正常。
-
-### 中文字体：思源黑体（2026-10）
-
-matplotlib/Pillow 默认字体不含中文，画出来是方块。现在随包带一份
-**Source Han Sans SC Regular**（OFL-1.1），按 **GB2312（6763 汉字）子集化到 3.4MB**：
-
-- 文件：`entry/src/main/resources/rawfile/python/fonts/SourceHanSansSC-Regular.otf`
-  运行时解到 `<stdlib>/fonts/`（`PythonService.ensureRuntime`）；
-- 注册：`guncat_fonts.py` 在 `sitecustomize` 里被 import，装一个 `sys.addaudithook`，
-  监听 `import matplotlib.font_manager` —— 一旦有人 import matplotlib 就自动
-  `addfont()` + 设 `font.sans-serif`，**用户什么都不用做**；
-- Pillow：`guncat_fonts.pillow_font(size)`；
-- 自检：`cjk-font` 一项要求「matplotlib 缺字警告 == 0」且「Pillow 渲染墨迹 > 50 像素」。
-
-顺带补上了 Pillow 的 `_imagingft`（FreeType 绑定）—— 之前编 Pillow 时 freetype 还不存在，
-`ImageFont.truetype` 直接 ImportError；现在 `FREETYPE_ROOT` 指到同一 prefix 重编即可。
+**剩余工作**（下一轮）：scipy 自身还有 Fortran 源码（`linalg`/`special`/`optimize`），
+需要在 meson 交叉文件里指定 `fc = aarch64-linux-gnu-gfortran`，并把 `.pc` 指到这份 OpenBLAS。
+预计包体 +25~35MB（openblas 11MB + scipy 扩展 15~20MB）。
 
 ## 3. 已验证可用（2026-10）
 
