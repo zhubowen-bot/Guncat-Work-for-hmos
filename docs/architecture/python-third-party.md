@@ -8,6 +8,31 @@
 | 纯 Python | requests、jinja2、openpyxl、PyYAML、bs4、pypdf、dateutil | 拉轮子解包成 `site-packages.zip`，运行时挂 `PYTHONPATH` | 分钟级 |
 | C 扩展 | numpy、pandas、Pillow、lxml、matplotlib、scipy | 交叉编译成 aarch64 的 `.so`，进 `entry/libs/arm64-v8a/` | 半天到数天 |
 
+## 0. 一条命令重建 + 自检
+
+```bash
+bash tooling/python/build-python-stack.sh            # 补齐所有缺失的层
+FORCE=1 bash tooling/python/build-python-stack.sh mpl # 只重编 matplotlib 相关
+bash tooling/python/build-python-stack.sh verify      # 只跑自检
+```
+
+阶段：`deps` → `cpython` → `pure` → `numpy` → `pandas` → `pillow` → `mpl` → `lxml` →
+`crypto` → `misc` → `extras` → `verify`。每步幂等，产物存在就跳过。
+
+自检由 [`verify-python-stack.py`](../../tooling/python/verify-python-stack.py) 完成，
+18 项覆盖：标准库（sqlite3/ssl/压缩/hash）、ctypes、numpy（含 fft/det）、pandas（groupby/tz）、
+Pillow、matplotlib、qrcode、lxml（xpath/cssselect）、regex（`\p{Han}`）、bs4、PyCryptodome、
+docx/pptx/xlsxwriter、sympy、psutil、requests（+ certifi）、openpyxl/yaml/jinja2。
+
+[`run-verify-stack.sh`](../../tooling/python/run-verify-stack.sh) 会**按真机布局**组装环境：
+extras.zip 解到临时目录、libs 只提供 `.so`、`PYTHONPATH=stdlib:site-packages:extras:libs`，
+然后用 `qemu-aarch64` 跑目标 python。2026-10-28 的结果：
+
+```
+python 3.12.15 | linux
+18/18 passed
+```
+
 ## 1. 纯 Python 包：`tooling/python/vendor-pure.sh`
 
 ```bash
