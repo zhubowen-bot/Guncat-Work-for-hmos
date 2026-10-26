@@ -308,6 +308,24 @@ export class GuncatUiParts {
     return GuncatUiLang.looksLikeProgram(split.body);
   }
 
+  // **交互模式专用**: 只要能看出正文里有界面程序, 就一定产出界面片段(宁可渲染成卡片,
+  // 也不退化成普通文本/代码块)。这是兜底: 万一围栏判定规则以后又被改动(历史上就出过
+  // "交互模式一张卡片都不显示"的事故), 这里仍然会把整段内容按程序解析出来。
+  static buildInteractive(content: string, finalized: boolean = false): GuncatUiParts {
+    let parts: GuncatUiParts = GuncatUiParts.build(content, finalized);
+    if (parts.hasUiSeg || !GuncatUiParts.hasProgram(content)) {
+      return parts;
+    }
+    // 有程序的样子, 却没切出界面片段 —— 去掉围栏标记行, 整段按程序解析
+    let stripped: string = content.replace(/```[^\n]*\n?/g, '');
+    parts.segments.length = 0;
+    parts.hasUi = false;
+    parts.hasUiSeg = false;
+    GuncatUiParts.appendProgram(parts, stripped, true, finalized, false);
+    parts.textOnly = '';
+    return parts;
+  }
+
   // 消息里所有界面程序拼起来的纯文本(用于复制/导出/标题生成)
   static textOnly(content: string): string {
     return GuncatUiParts.build(content, true).textOnly;

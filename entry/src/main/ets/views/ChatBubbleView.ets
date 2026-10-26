@@ -314,7 +314,8 @@ export struct ChatBubbleView {
   //   重建一次 —— 真机表现就是工作模式 / 聊天模式"不停闪烁"。纯文本走 buildAIContent 里
   //   `uiSegs.length === 0` 的快车道(单个 RichTextView, 库自带流式增量渲染), 组件实例不换, 不闪。
   private commitParts(content: string, finalized: boolean): void {
-    let parts: GuncatUiParts = GuncatUiParts.build(content, finalized);
+    // 交互模式用 buildInteractive: 只要有程序的样子就一定出卡片(宁可卡片, 不退化成文本)
+    let parts: GuncatUiParts = GuncatUiParts.buildInteractive(content, finalized);
     let next: GuncatUiSeg[] = [];
     let hasUi: boolean = false;
     for (let i: number = 0; i < parts.segments.length; i++) {

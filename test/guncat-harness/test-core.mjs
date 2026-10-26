@@ -1558,6 +1558,21 @@ console.log('[GuncatUiParts 切分]');
   check('工作模式保留全部原文', workMode.segments[0].text.indexOf('print(1)') >= 0 &&
     workMode.segments[0].text.indexOf('root = Card') >= 0);
 
+  // 交互模式兜底: 三种交付形态都必须出卡片; 程序被包在别的语言围栏里时也要出卡片
+  const shapes = [
+    '引导\n```guncat-ui\nroot = Card([a])\na = TextContent("x")\n```',
+    '引导\n```\nroot = Card([a])\na = TextContent("x")\n```',
+    '引导\nroot = Card([a])\na = TextContent("x")',
+    '引导\n```text\nroot = Card([a])\na = TextContent("x")\n```'
+  ];
+  for (let si = 0; si < shapes.length; si++) {
+    const p = GuncatUiParts.buildInteractive(shapes[si], true);
+    check('交互模式形态 ' + si + ' 出卡片', p.hasUiSeg === true && p.hasUi === true &&
+      p.segments.filter((s) => s.type === GuncatUiSegType.UI).length === 1);
+  }
+  check('交互模式: 纯文本不强行出卡片',
+    GuncatUiParts.buildInteractive('就是一段普通结论, 没有任何程序。', true).hasUiSeg === false);
+
   check('hasProgram 判定', GuncatUiParts.hasProgram('root = Card([') === true &&
     GuncatUiParts.hasProgram('随便一段话') === false);
   check('needsRepair 判定', GuncatUiParts.needsRepair('root = Card([') === false &&
