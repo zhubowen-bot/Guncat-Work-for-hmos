@@ -25,7 +25,10 @@ import {
   VmStartResult,
   VmStatus
 } from 'libguncatvm.so';
+import { PyRunResult } from 'libguncatpy.so';
 import { Constants } from '../common/Constants';
+import { PythonService } from './PythonService';
+import { RawAsset } from './RawAsset';
 import { ToolExecResult, WorkFileService } from './WorkFileService';
 
 const DOMAIN: number = 0x0000;
@@ -140,7 +143,7 @@ export class LinuxShellService {
       return LinuxShellService.fail('无法写入命令通道: ' + LinuxShellService.errText(e));
     }
 
-    let run: GuestRun = await LinuxShellService.waitGuest(context, conv, jobId, outDir, timeoutMs);
+    let run: GuestRun = await LinuxShellService.waitGuest(context, conv, convId, jobId, outDir, timeoutMs);
     run.jobId = jobId;
     run.bootMs = bootMs;
     run.cwdLabel = cwdRel === '' ? '/' : '/' + cwdRel;
@@ -207,6 +210,9 @@ export class LinuxShellService {
     // 新一次引导: 清掉上一次(可能因崩溃/超时)残留的任务目录, 避免客人开机后重放旧命令
     LinuxShellService.removeTree(LinuxShellService.ipcRoot(context));
     WorkFileService.ensureDir(LinuxShellService.ipcRoot(context));
+    // 把随 HAP 打包的 guest 脚本放进共享目录: 客人开机时 guncat-setup 会覆盖安装
+    // (这样改 npy/agent 不用重建镜像, 也不会多背一份镜像 blob)
+    LinuxShellService.stageGuestScripts(context);
 
     let serialSocket: string = context.tempDir + '/guncat-qemu-serial.sock';
     LinuxShellService.removeIfExists(serialSocket);
@@ -250,6 +256,22 @@ export class LinuxShellService {
   // ===== 镜像准备 =====
 
   // 首启把 rawfile 里的内核/根文件系统/ROM 释放到沙箱; 版本变化时重新释放
+  // 把 rawfile/vm/guest 下的脚本释放到 ipc 根目录的 guest/, 客人启动时覆盖安装到 /usr/local/bin
+  private static stageGuestScripts(context: common.UIAbilityContext): void {
+    let names: string[] = ['npy', 'guncat-agent'];
+    let dir: string = LinuxShellService.ipcRoot(context) + '/guest';
+    try {
+      WorkFileService.ensureDir(dir);
+      for (let i: number = 0; i < names.length; i++) {
+        RawAsset.extract(context, 'vm/guest/' + names[i], dir + '/' + names[i]);
+      }
+    } catch (e) {
+      // 释放失败不阻塞引导: 镜像里已有一份兜底实现
+      hilog.warn(DOMAIN, TAG, 'stage guest scripts failed: %{public}s',
+        LinuxShellService.errText(e));
+    }
+  }
+
   private static ensureImages(context: common.UIAbilityContext): string {
     let vmDir: string = LinuxShellService.vmDir(context);
     try {
@@ -376,24 +398,27 @@ export class LinuxShellService {
 
   // ===== 执行与结果 =====
 
-  private static async waitGuest(context: common.UIAbilityContext, conv: string, jobId: string,
-    outDir: string, timeoutMs: number): Promise<GuestRun> {
+  private static async waitGuest(context: common.UIAbilityContext, conv: string, convId: string,
+    jobId: string, outDir: string, timeoutMs: number): Promise<GuestRun> {
     let run: GuestRun = new GuestRun();
     let start: number = Date.now();
     // 客人侧自己用 busybox timeout 兜命令; 这里再留 20s 余量给 9p 往返与结果落盘
     let deadline: number = start + timeoutMs + 20000;
     let donePath: string = outDir + '/done';
+    let callDir: string = LinuxShellService.ipcRoot(context) + '/' + conv + '/call';
     while (Date.now() < deadline) {
       if (LinuxShellService.exists(donePath)) {
         break;
       }
+      // 跨域桥: 客人里的 `npy` 把 Python 转发到原生解释器执行(见 tooling/linux-vm/guest/npy)
+      await LinuxShellService.serveNpyCalls(context, convId, conv, callDir, outDir);
       let st: VmStatus = vmStatus();
       if (!st.running) {
         run.error = 'Linux VM 在命令执行期间退出(exit=' + st.exitCode.toString() + ')' +
           '\n\n—— 串口日志尾部 ——\n' + vmSerialTail(3000);
         return run;
       }
-      await LinuxShellService.sleep(Constants.WORK_LINUX_JOB_POLL_MS);
+      await LinuxShellService.sleep(Constants.WORK_LINUX_JOB_ACTIVE_POLL_MS);
     }
     run.durationMs = Date.now() - start;
     if (!LinuxShellService.exists(donePath)) {
@@ -412,9 +437,102 @@ export class LinuxShellService {
     return run;
   }
 
+  /**
+   * 服务客人侧 `npy` 的跨域调用:
+   * 客人把 {code, argv, cwd, timeout, stdin} 写进 ipc/<conv>/call/<id>/, 这里用**原生 CPython**
+   * 执行后把 {stdout, stderr, code, done} 写回 ipc/<conv>/out/<id>/, 客人的 shim 读走结果后
+   * 以相同退出码返回 —— 于是 `npy gen.py | jq ...` 这种管道里的 Python 段也是原生速度。
+   */
+  private static async serveNpyCalls(context: common.UIAbilityContext, convId: string,
+    conv: string, callDir: string, outerOutDir: string): Promise<void> {
+    let names: string[] = LinuxShellService.listNames(callDir);
+    for (let i: number = 0; i < names.length; i++) {
+      let id: string = names[i];
+      let reqDir: string = callDir + '/' + id;
+      if (!LinuxShellService.exists(reqDir + '/ready')) {
+        continue;
+      }
+      let outDir: string = LinuxShellService.ipcRoot(context) + '/' + conv + '/out/' + id;
+      if (outDir === outerOutDir) {
+        continue;
+      }
+      let code: string = LinuxShellService.readText(reqDir + '/code');
+      let argv: string[] = [];
+      try {
+        let parsed: Object = JSON.parse(LinuxShellService.readText(reqDir + '/argv')) as Object;
+        if (Array.isArray(parsed)) {
+          let arr: string[] = parsed as string[];
+          for (let k: number = 0; k < arr.length; k++) {
+            argv.push(String(arr[k]));
+          }
+        }
+      } catch (e) {
+        argv = [];
+      }
+      let cwdRel: string = LinuxShellService.readText(reqDir + '/cwd').trim();
+      let timeoutMs: number = Constants.WORK_PY_DEFAULT_TIMEOUT_MS;
+      let rawTimeout: number = LinuxShellService.parseInt(
+        LinuxShellService.readText(reqDir + '/timeout').trim(), 0);
+      if (rawTimeout > 0) {
+        timeoutMs = Math.min(rawTimeout * 1000, Constants.WORK_PY_MAX_TIMEOUT_MS);
+      }
+      let stdinText: string = LinuxShellService.readText(reqDir + '/stdin');
+      try {
+        WorkFileService.ensureDir(outDir);
+        // 第一次跨域调用时运行库可能还没释放(用户先用了 shell 里的 npy)
+        let prep: string = await PythonService.ensureRuntime(context);
+        if (prep !== '') {
+          LinuxShellService.writeText(outDir + '/stderr', 'npy: ' + prep);
+          LinuxShellService.writeText(outDir + '/code', '1');
+          LinuxShellService.writeText(outDir + '/done', '1');
+          LinuxShellService.removeDir(reqDir);
+          continue;
+        }
+        let res: PyRunResult = await PythonService.exec(context, convId, code, argv, cwdRel,
+          timeoutMs, stdinText);
+        LinuxShellService.writeText(outDir + '/stdout', res.stdout !== undefined ? res.stdout : '');
+        LinuxShellService.writeText(outDir + '/stderr', res.stderr !== undefined ? res.stderr : '');
+        if (!res.ok && res.error !== '') {
+          LinuxShellService.writeText(outDir + '/stderr',
+            (res.stderr !== undefined ? res.stderr : '') + res.error);
+        }
+        let exitCode: number = res.exitCode !== undefined ? res.exitCode : 0;
+        if (!res.ok && exitCode === 0) {
+          exitCode = res.timedOut ? 124 : 1;
+        }
+        LinuxShellService.writeText(outDir + '/code', exitCode.toString());
+      } catch (e) {
+        LinuxShellService.writeText(outDir + '/stderr', 'npy 桥执行失败: ' +
+          LinuxShellService.errText(e));
+        LinuxShellService.writeText(outDir + '/code', '1');
+      }
+      // done 最后写: 客人以它为准
+      LinuxShellService.writeText(outDir + '/done', '1');
+      LinuxShellService.removeDir(reqDir);
+    }
+  }
+
+  private static listNames(dir: string): string[] {
+    if (!LinuxShellService.exists(dir)) {
+      return [];
+    }
+    try {
+      return fileIo.listFileSync(dir);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  private static removeDir(dir: string): void {
+    try {
+      fileIo.rmdirSync(dir);
+    } catch (e) {
+      // 清不掉不影响结果, 下次引导会整体清空 ipc 目录
+    }
+  }
+
   // 输出超出"送回模型"的上限时, 把完整文件拷进工作区 .spill/, 模型可 read_file 读回
-  private static materializeOutputs(context: common.UIAbilityContext, convId: string,
-    outDir: string, jobId: string, run: GuestRun): void {
+  private static materializeOutputs(context: common.UIAbilityContext, convId: string,    outDir: string, jobId: string, run: GuestRun): void {
     if (run.stdoutBytes > Constants.WORK_SHELL_MAX_OUTPUT_BYTES) {
       run.stdoutSpill = LinuxShellService.spillCopy(context, convId, outDir + '/stdout',
         'shell-' + jobId + '.stdout.log');

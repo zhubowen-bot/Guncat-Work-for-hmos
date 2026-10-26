@@ -6,3 +6,5 @@
 
 # Linux VM 构建链 + 客人侧脚本(进 Alpine 镜像执行)
 tooling/linux-vm/**  text eol=lf
+# guest 侧脚本会装进 Linux 执行, CRLF 会让 shebang 失效
+entry/src/main/resources/rawfile/vm/guest/** text eol=lf

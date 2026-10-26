@@ -240,13 +240,15 @@ export class Constants {
   static readonly WORK_LINUX_DIR: string = 'linux';
   // 客人镜像内容版本: **每次重建 rootfs_guncat.qcow2 都要改这里**, 否则已装过的设备不会重新释放镜像
   // (比 versionCode 更精确: 同一版本内换镜像也能生效)。
-  static readonly WORK_LINUX_IMAGE_REV: string = '2026-10-26-python3';
+  static readonly WORK_LINUX_IMAGE_REV: string = '2026-10-26-npy';
   // 客人内存: 手机普遍 12GB+, 2GB 足够 `apk add` / pip / 解大压缩包; 空闲 10 分钟会自动关机释放
   static readonly WORK_LINUX_MEMORY_MB: number = 2048;
   // 首次引导(冷启动)上限: TCI 解释执行下 boots 明显慢于 JIT, 给足余量
   static readonly WORK_LINUX_BOOT_TIMEOUT_MS: number = 180000;
   // 结果轮询间隔: 客人把 done 文件写进 9p 共享目录, 宿主轮询它
   static readonly WORK_LINUX_JOB_POLL_MS: number = 120;
+  // 跑任务时的轮询间隔: 要同时服务 npy 跨域调用, 比空闲轮询快一点(单次往返 ≈ 轮询间隔 + 解释器启动)
+  static readonly WORK_LINUX_JOB_ACTIVE_POLL_MS: number = 40;
   static readonly WORK_SHELL_DEFAULT_TIMEOUT_MS: number = 60000;
   static readonly WORK_SHELL_MAX_TIMEOUT_MS: number = 240000;
   // 单条命令正文 / stdin / 送回模型的输出 上限(输出超出部分落盘到工作区 .spill/)
@@ -259,6 +261,17 @@ export class Constants {
   static readonly WORK_SHELL_IDLE_SHUTDOWN_MS: number = 10 * 60 * 1000;
   // shell 工具的执行护栏上限: 命令上限 + 冷启动 + 9p 往返余量
   static readonly WORK_SHELL_TOOL_TIMEOUT_MS: number = 360000;
+  // run_python 工具(原生 CPython 3.12): 与 shell 共用工作区, 但跑在应用进程内的真解释器上
+  static readonly WORK_PY_TOOL_NAME: string = 'run_python';
+  // 运行库内容版本: 换 libpython / 标准库后要改这里, 触发重新释放
+  static readonly WORK_PY_RUNTIME_REV: string = '2026-10-26-cpython-3.12.15';
+  static readonly WORK_PY_MAX_CODE_BYTES: number = 128 * 1024;
+  static readonly WORK_PY_DEFAULT_TIMEOUT_MS: number = 30000;
+  static readonly WORK_PY_MAX_TIMEOUT_MS: number = 180000;
+  // 送回模型的输出字符上限(超出部分落盘到工作区 .spill/)
+  static readonly WORK_PY_MAX_OUTPUT_CHARS: number = 20000;
+  // 执行护栏: 覆盖"解释器超时 + 结果整理"
+  static readonly WORK_PY_TOOL_TIMEOUT_MS: number = 200000;
 
   // 工具并发执行的滚动池大小(对齐 dsh 的 maxParallelToolCalls, 只作用于只读并行段)
   static readonly WORK_MAX_PARALLEL_TOOLS: number = 4;

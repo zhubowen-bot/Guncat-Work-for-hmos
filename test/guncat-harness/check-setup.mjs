@@ -135,7 +135,10 @@ for (const [relSrc, relDst, replaces] of [
   ['service/ToolCallStream.ts', 'ToolCallStream.ts', []],
   ['service/LocalWebSearch.ts', 'LocalWebSearch.ts', []],
   ['service/JsCodeService.ts', 'JsCodeService.ts', [["from 'libguncatjs.so'", "from './jsvm-shim'"]]],
-  ['service/LinuxShellService.ts', 'LinuxShellService.ts', [["from 'libguncatvm.so'", "from './vm-shim'"]]],
+  ['service/LinuxShellService.ts', 'LinuxShellService.ts',
+    [["from 'libguncatvm.so'", "from './vm-shim'"], ["from 'libguncatpy.so'", "from './py-shim'"]]],
+  ['service/RawAsset.ts', 'RawAsset.ts', []],
+  ['service/PythonService.ts', 'PythonService.ts', [["from 'libguncatpy.so'", "from './py-shim'"]]],
   ['service/WorkToolRunner.ets', 'WorkToolRunner.ts', []],
 ]) {
   port(relSrc, relDst, replaces);
@@ -190,6 +193,19 @@ writeFileSync(join(allDir, 'vm-shim.ts'),
   `export function sendInput(data: ArrayBuffer): boolean { return false; }\n` +
   `export function requestShutdown(): boolean { return false; }\n`);
 
+// 原生 Python(libguncatpy.so)同理: Node 侧只有类型, 调用一律拒绝
+writeFileSync(join(allDir, 'py-shim.ts'),
+  `export interface PyRunOptions {\n` +
+  `  code: string;\n  workDir?: string;\n  scratchDir?: string;\n  pythonHome?: string;\n` +
+  `  pythonPath?: string;\n  argvJson?: string;\n  stdinPath?: string;\n  timeoutMs?: number;\n}\n` +
+  `export interface PyRunResult {\n` +
+  `  ok: boolean;\n  timedOut: boolean;\n  exitCode: number;\n  stdout: string;\n  stderr: string;\n` +
+  `  error: string;\n  durationMs: number;\n}\n` +
+  `export function isAvailable(): string { return 'py-shim: 原生模块仅在设备侧可用'; }\n` +
+  `export function runPython(options: PyRunOptions): PyRunResult {\n` +
+  `  return { ok: false, timedOut: false, exitCode: 1, stdout: '', stderr: '',\n` +
+  `    error: 'py-shim: 原生模块仅在设备侧可用', durationMs: 0 };\n}\n`);
+
 // ===== @kit 桩 =====
 writeFileSync(join(stubsDir, '@kit.CoreFileKit.ts'),
   `export declare namespace fileIo {\n` +
@@ -199,7 +215,7 @@ writeFileSync(join(stubsDir, '@kit.CoreFileKit.ts'),
   `  function accessSync(path: string): boolean;\n  function statSync(path: string): Stat;\n` +
   `  function mkdirSync(path: string, recursion?: boolean): void;\n  function listFileSync(path: string): string[];\n` +
   `  function openSync(path: string, mode: number): File;\n` +
-  `  function readSync(fd: number, buffer: ArrayBuffer, opts: { offset: number; length?: number }): number;\n` +
+  `  function readSync(fd: number, buffer: ArrayBuffer, opts?: { offset?: number; length?: number }): number;\n` +
   `  function writeSync(fd: number, buffer: ArrayBuffer | string, opts?: { offset?: number; length?: number }): number;\n` +
   `  function closeSync(fileOrFd: File | number): void;\n` +
 `  function unlinkSync(path: string): void;  function rmdirSync(path: string): void;\n` +
@@ -214,6 +230,7 @@ writeFileSync(join(stubsDir, '@kit.AbilityKit.ts'),
   `  interface RawFileDescriptor { fd: number; offset: number; length: number; }\n` +
   `  interface ResourceManager {\n` +
   `    getRawFileContent(path: string): Promise<Uint8Array>;\n` +
+  `    getRawFileContentSync(path: string): Uint8Array;\n` +
   `    getRawFdSync(path: string): RawFileDescriptor;\n` +
   `    closeRawFdSync(path: string): void;\n  }\n` +
   `  class UIAbilityContext { filesDir: string; cacheDir: string; tempDir: string; resourceManager: ResourceManager; }\n}\n` +

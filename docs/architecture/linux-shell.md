@@ -102,6 +102,10 @@ cd "/workspace/$cwd" && sh "$cmd"
 | `stdin` |  | 命令的标准输入内容（缺省 `/dev/null`） |
 | `ready` | ✅ | **最后**创建；出现即表示请求完整，客人开始执行 |
 
+> **跨域桥 `npy`**：客人里的 `npy` 会往 `…/call/<id>/` 写同样形状的请求（`code`/`argv`/`cwd`/`timeout`/`stdin`/`ready`），
+> 宿主在执行 shell 任务的同时轮询这个目录，用**原生 CPython** 执行后把结果写回 `…/out/<id>/`。
+> 于是 `npy gen.py | jq ...` 这种管道里的 Python 段也是原生速度（详见 [native-python.md](native-python.md)）。
+
 客人 → 宿主（`…/out/<任务 id>/`）：
 
 | 文件 | 含义 |

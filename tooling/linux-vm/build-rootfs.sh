@@ -38,6 +38,8 @@ trap cleanup EXIT
 echo "== 3/6 注入 Guncat 系统文件"
 install -m 0755 "$GUEST/guncat-setup" "$MNT/etc/guncat-setup"
 install -m 0755 "$GUEST/guncat-agent" "$MNT/usr/local/bin/guncat-agent"
+# npy: 跨域桥 —— VM 里的 Python 调用转发给宿主原生解释器(见 guest/npy 头部注释)
+install -m 0755 "$GUEST/npy" "$MNT/usr/local/bin/npy"
 
 # inittab: 只保留 Guncat 需要的动作, 不启动 OpenRC
 cat > "$MNT/etc/inittab" <<'EOF'
@@ -93,6 +95,7 @@ mkdir -p "$MNT/etc/modprobe.d"
 echo "== 4/6 校验注入结果"
 test -x "$MNT/etc/guncat-setup"
 test -x "$MNT/usr/local/bin/guncat-agent"
+test -x "$MNT/usr/local/bin/npy"
 grep -q guncat-agent "$MNT/etc/inittab"
 echo "   inittab/fstab/agent 就绪; busybox 可用: $(chroot "$MNT" /bin/busybox 2>/dev/null | awk 'NR==1' || true)"
 

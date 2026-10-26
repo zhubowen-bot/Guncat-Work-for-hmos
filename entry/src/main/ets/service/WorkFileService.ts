@@ -66,12 +66,16 @@ export class WorkFileService {
     readOnly = readOnly.concat(['glob', 'grep', 'web_fetch', 'schedule_list', 'goal_get', 'session_search']);
     let mutating: string[] = WorkFileService.workMutatingNames();
     mutating = mutating.concat(['edit', 'str_replace_editor', 'goal_create', 'goal_update',
-      'schedule_create', 'schedule_delete', 'run_js', Constants.WORK_SHELL_TOOL_NAME]);
+      'schedule_create', 'schedule_delete', 'run_js', Constants.WORK_SHELL_TOOL_NAME,
+      Constants.WORK_PY_TOOL_NAME]);
     ToolRegistry.ensure(WorkFileService.toolDefs(false), readOnly, mutating);
     // shell 的执行护栏要覆盖「冷启动 + 命令本身」, 比全局默认(180s)宽; 命令失败不自动重试
     // (重跑一条 shell 命令可能重复改文件), 由模型按退出码自行决定。
     ToolRegistry.setRuntimeConfig(Constants.WORK_SHELL_TOOL_NAME,
       Constants.WORK_SHELL_TOOL_TIMEOUT_MS, 0);
+    // 原生 Python 同理: 解释器默认 30s 上限, 护栏要留出结果整理余量; 不自动重试(脚本可能有副作用)
+    ToolRegistry.setRuntimeConfig(Constants.WORK_PY_TOOL_NAME,
+      Constants.WORK_PY_TOOL_TIMEOUT_MS, 0);
     // 并行安全标注(核心工具, 独立于只读/变更分类): subagent 是独立上下文/独立 LLM 循环的
     // 嵌套代理, 可与其他 subagent 并发派发; 由 ToolScheduler 归入并行组。
     let parallelSafe: string[] = WorkFileService.workParallelSafeNames();
@@ -103,7 +107,7 @@ export class WorkFileService {
       'write_docx', 'edit_docx', 'write_xlsx', 'edit_xlsx', 'write_pptx',
       'edit_ppt', 'write_csv', 'download_file', 'write_svg', 'todo_write', 'record_search',
       LOCAL_SEARCH_TOOL_NAME, LOCAL_SEARCH_LEGACY_TOOL_NAME, 'transform_file',
-      Constants.WORK_SHELL_TOOL_NAME];
+      Constants.WORK_SHELL_TOOL_NAME, Constants.WORK_PY_TOOL_NAME];
   }
 
   // ===== 路径基础 =====

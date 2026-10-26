@@ -75,6 +75,16 @@ run_job() {  # id, cmd, timeout
   [ -s "$out/stderr" ] && { echo "--- stderr:"; tail -15 "$out/stderr"; }
 }
 
+echo "== 同步 guest 侧文件"
+# agent / setup / npy 都从共享目录装进去, 这样改脚本不用重建镜像也能生效
+cp "$HERE/guest/guncat-agent" "$WORK/workspaces/$CONV/guncat-agent"
+cp "$HERE/guest/guncat-setup" "$WORK/workspaces/$CONV/guncat-setup"
+cp "$HERE/guest/npy" "$WORK/workspaces/$CONV/npy"
+run_job guestfiles 'install -m 0755 /workspace/guncat-agent /usr/local/bin/guncat-agent
+install -m 0755 /workspace/guncat-setup /etc/guncat-setup
+install -m 0755 /workspace/npy /usr/local/bin/npy
+ls -l /usr/local/bin/npy /usr/local/bin/guncat-agent' 60
+
 echo "== 网络自检"
 run_job net 'ip -4 addr show eth0 | grep inet; cat /etc/resolv.conf | head -3' 60
 
@@ -91,7 +101,7 @@ EOF
 cat /etc/pip.conf' 60
 
 echo "== 验证"
-run_job verify 'python3 -V; python3 -m pip --version; python3 -c "import json,sqlite3,ssl,hashlib,decimal; print(\"stdlib ok\")"; jq --version' 120
+run_job verify 'python3 -V; python3 -m pip --version; python3 -c "import json,sqlite3,ssl,hashlib,decimal; print(\"stdlib ok\")"; jq --version; command -v npy' 120
 run_job pipinstall 'python3 -m pip install --no-cache-dir --quiet six && python3 -c "import six; print(\"pip install ok\", six.__version__)"' 300
 
 echo "== 收尾"

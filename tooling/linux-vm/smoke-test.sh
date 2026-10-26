@@ -124,6 +124,8 @@ run_job j7 'python3 -c "import sys,json,sqlite3,ssl; print(\"py\", sys.version.s
 expect_grep "Python 3 可用(含 ssl/sqlite3/json)" '^py 3\.12' "$WORK/ipc/$CONV/out/j7/stdout"
 expect_grep "pip 可用" '^pip 25\.' "$WORK/ipc/$CONV/out/j7/stdout"
 expect_grep "jq 可用" '^\{"a":1\}$' "$WORK/ipc/$CONV/out/j7/stdout"
+run_job j8 'command -v npy'
+expect "npy 跨域桥已装" "/usr/local/bin/npy" "$(head -1 "$WORK/ipc/$CONV/out/j8/stdout")"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "== 全部通过"; else echo "== 有失败项(串口日志: $WORK/serial.log)"; fi

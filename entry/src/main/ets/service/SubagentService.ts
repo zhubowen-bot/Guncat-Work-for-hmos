@@ -134,7 +134,8 @@ export class SubagentService {
     return ['subagent', 'ask_user_question',
       'schedule_create', 'schedule_delete', 'schedule_list',
       'goal_create', 'goal_update', 'todo_write',
-      Constants.WORK_SHELL_TOOL_NAME];
+      // shell / run_python 能读写整个会话工作区, 子代理的产出目录隔离约束不住它们
+      Constants.WORK_SHELL_TOOL_NAME, Constants.WORK_PY_TOOL_NAME];
   }
 
   private static filteredToolDefs(): Record<string, Object>[] {

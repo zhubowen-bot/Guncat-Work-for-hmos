@@ -1,0 +1,92 @@
+#!/bin/sh
+# npy: 在 VM 里调用**宿主原生 CPython** 执行 Python(跨域桥)。
+#
+# 为什么需要它: VM 里的 python3 是 Alpine 的 CPython, 但它跑在 QEMU 的指令解释器上,
+# CPU 密集脚本会慢 2~3 个数量级。宿主侧有一个原生 CPython(与 shell 共用同一份工作区),
+# npy 把 {代码, 参数, 工作目录, stdin} 写进 9p 命令通道, 宿主执行后把
+# {stdout, stderr, 退出码} 写回, 本脚本转发给调用者 —— 于是管道里的 Python 段也是原生速度:
+#
+#   npy -c 'print(sum(range(200000)))'
+#   npy gen.py --count 100 | jq .       # stdout 照常进管道
+#   cat data.json | npy -c 'import json,sys; print(len(json.load(sys.stdin)))'
+#
+# 语义与限制(与 run_python 工具一致):
+#   * 工作目录: 当前目录(相对 /workspace), 两边是同一份文件;
+#   * 没有 subprocess/os.system/multiprocessing, 没有 pip 第三方包, 无网络;
+#   * 超时: NPY_TIMEOUT=<秒>, 默认 30。
+set -u
+
+IPC=/mnt/guncat-ipc
+CUR=/run/guncat/workspace.current
+timeout_s="${NPY_TIMEOUT:-30}"
+
+die() { echo "npy: $*" >&2; exit 2; }
+
+conv=$(cat "$CUR" 2>/dev/null)
+[ -n "$conv" ] || die "找不到当前会话(VM 还没执行过任何任务?)"
+
+[ $# -ge 1 ] || die "用法: npy [-c 代码 | 脚本.py] [参数...]"
+
+if [ "$1" = "-c" ]; then
+  shift
+  [ $# -ge 1 ] || die "用法: npy -c '代码'"
+  code=$1
+  shift
+  [ $# -eq 0 ] || die "-c 模式不接受额外参数(要传参请写脚本文件)"
+  argv='["-c"]'
+else
+  script=$1
+  shift
+  [ -f "$script" ] || die "找不到脚本: $script"
+  code=$(cat "$script") || die "读不了脚本: $script"
+  esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+  argv="[\"$(esc "$script")\""
+  for a in "$@"; do
+    argv="$argv,\"$(esc "$a")\""
+  done
+  argv="$argv]"
+fi
+
+# cwd 用相对 /workspace 的路径(宿主会把它拼到同一份工作区上)
+here=$(pwd)
+case "$here" in
+  /workspace) rel="" ;;
+  /workspace/*) rel=${here#/workspace/} ;;
+  *) rel="" ;;
+esac
+
+id="npy-$$-$(date +%s 2>/dev/null)$(date +%N 2>/dev/null)"
+req="$IPC/$conv/call/$id"
+out="$IPC/$conv/out/$id"
+mkdir -p "$req" 2>/dev/null || die "无法写入命令通道 $req"
+
+printf '%s' "$code" > "$req/code" || die "写入 code 失败"
+printf '%s' "$argv" > "$req/argv"
+printf '%s' "$rel" > "$req/cwd"
+printf '%s' "$timeout_s" > "$req/timeout"
+if [ -t 0 ]; then
+  : > "$req/stdin"
+else
+  cat > "$req/stdin" 2>/dev/null || : > "$req/stdin"
+fi
+# ready 最后写: 宿主一看到就开始执行
+: > "$req/ready"
+
+waited=0
+limit=$(( timeout_s * 200 + 600 ))
+while [ ! -f "$out/done" ]; do
+  waited=$((waited + 1))
+  if [ "$waited" -ge "$limit" ]; then
+    echo "npy: 宿主 $((limit / 200)) 秒内没有返回(VM 是否已关闭?\$) " >&2
+    exit 124
+  fi
+  sleep 0.005 2>/dev/null || sleep 1
+done
+
+cat "$out/stdout" 2>/dev/null
+cat "$out/stderr" 2>/dev/null >&2
+code=$(cat "$out/code" 2>/dev/null)
+case "$code" in
+  ''|*[!0-9]*) code=1 ;;
+esac
+exit "$code"

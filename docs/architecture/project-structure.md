@@ -34,6 +34,8 @@ entry/src/main/ets/
 │   ├── WorkToolRunner.ets          # 工作模式工具统一分发入口（Office 生成/PPT 读写等 .ets 能力）
 │   ├── WorkFileService.ts          # 沙箱工作区 + 文件类/技能类工具实现 + 工具 Schema（toolDefs）
 │   ├── LinuxShellService.ts        # shell 工具：设备内真 Linux（QEMU TCI + virtio-9p 工作区直连）
+│   ├── PythonService.ts            # run_python 工具：原生 CPython（libpython3.12.so）+ 跨域桥服务端
+│   ├── RawAsset.ts                 # rawfile 大资源分块释放（镜像 / Python 运行库）
 │   ├── WorkSkillService.ts         # 技能注册表（registry）+ rawfile 技能文档加载（list/load）
 │   ├── OfficeReader.ts             # docx/xlsx/pptx 本地文本抽取（zlib 解包 + XML 扫描）
 │   ├── PdfTextExtractor.ts         # 本地 PDF 文本抽取（字节层对象表/页面树/ToUnicode/内容流）

@@ -1775,12 +1775,13 @@ console.log('[组件库与提示词]');
     'schedule_create', 'schedule_list', 'schedule_delete',
     'goal_create', 'goal_get', 'goal_update', 'subagent', 'session_search', 'run_js',
     // shell: 设备内真 Linux(QEMU TCI)。属于「长程/重」工具, 故意不进交互模式白名单
-    'shell'
+    // run_python: 原生 CPython 解释器, 同样是工作模式的重活工具; 交互模式的轻计算仍用 run_js
+    'shell', 'run_python'
   ];
   const allDefs = allToolNames.map((name) => ({ 'name': name }));
   const keptNames = ToolRegistry.filterInteractive(allDefs).map((d) => d['name']);
-  check('交互模式工具面裁剪: 工作模式 46 个工具只下发 27 个',
-    allToolNames.length === 46 && keptNames.length === 27);
+  check('交互模式工具面裁剪: 工作模式 47 个工具只下发 27 个',
+    allToolNames.length === 47 && keptNames.length === 27);
   check('交互模式工具面保留"读素材 / 算数字 / 查事实 / 出文件"四类',
     keptNames.indexOf('read_file') >= 0 && keptNames.indexOf('run_js') >= 0 &&
     keptNames.indexOf('web_fetch') >= 0 && keptNames.indexOf('write_docx') >= 0 &&

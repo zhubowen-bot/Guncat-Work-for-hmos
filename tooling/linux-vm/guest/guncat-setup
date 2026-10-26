@@ -49,5 +49,19 @@ mount9p workspaces /mnt/workspaces || echo "guncat: workspaces 9p mount failed" 
 mount9p guncatipc  /mnt/guncat-ipc || echo "guncat: guncatipc 9p mount failed"  > /dev/kmsg 2>/dev/null
 
 mkdir -p /run/guncat
+
+# ---- 宿主随 HAP 带来的 guest 辅助脚本 ----
+# 镜像里冻结的脚本改一次就要重建镜像(还多一份 37MB 的镜像 blob), 所以把 npy / agent 这类
+# **纯脚本**改成"开机从共享目录覆盖安装": 应用侧在启动 QEMU 前把 rawfile 里的版本放进
+# /mnt/guncat-ipc/guest/, 这里优先用它们, 镜像里的只当兜底。
+if [ -d /mnt/guncat-ipc/guest ]; then
+  for f in npy guncat-agent; do
+    if [ -f "/mnt/guncat-ipc/guest/$f" ]; then
+      install -m 0755 "/mnt/guncat-ipc/guest/$f" "/usr/local/bin/$f" 2>/dev/null || \
+        echo "guncat: install $f failed" > /dev/kmsg 2>/dev/null
+    fi
+  done
+fi
+
 export PATH
 exit 0

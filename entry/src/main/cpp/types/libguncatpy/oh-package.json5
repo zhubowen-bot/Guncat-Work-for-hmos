@@ -1,0 +1,6 @@
+{
+  "name": "libguncatpy.so",
+  "types": "./index.d.ts",
+  "version": "1.0.0",
+  "description": "Guncat Work 原生 Python 运行时(CPython 3.12 嵌入)类型声明"
+}

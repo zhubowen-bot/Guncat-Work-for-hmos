@@ -2,6 +2,25 @@
 
 > [← 返回 README](README.md)
 
+## 未发布（原生 Python）
+
+> 一句话：VM 里的 Python 慢是因为 **CPU 指令被逐条仿真**（实测比原生慢 2~3 个数量级），
+> 不是缺 CPython 的 JIT。既然 JIT 权限拿不到，就把解释器**编译成 HarmonyOS 原生 `.so`**，
+> 在应用进程内直接跑；VM 里再放一个 `npy` 桥，让 shell 管道也能用上这个原生解释器。
+
+- **新增 `run_python(code, cwd?, timeout_ms?)`** —— 第 47 个内置工具：原生 CPython 3.12
+  （`libpython3.12.so` 5.8MB + 标准库 9.6MB + 51 个 C 扩展），应用进程内执行、无仿真；
+  工作目录就是会话工作区（与 `read_file`/`shell` 同一份文件），默认 30s、上限 180s，
+  输出超 20000 字符落 `.spill/`；无 subprocess/pip/网络（要 Unix 工具或装包用 `shell`）。
+- **新增跨域桥 `npy`**（VM 内 `/usr/local/bin/npy`）：`npy -c '...'` / `npy script.py args`
+  把 Python 转发给宿主原生解释器执行，复用 shell 的 9p 命令通道 + 嵌套服务；
+  实测单次往返 ≈ 134ms（VM 内 `python3 -c pass` 为 3.1s），管道里可以直接 `npy gen.py | jq ...`。
+- **配套**：`tooling/python/build-cpython-ohos.sh`（交叉编译 + 打包）、
+  `tooling/linux-vm/npy-test.sh`（11 项端到端断言）、`bench.sh` 增加循环/管道/IO 负载；
+  `run_python` 与 `shell` 一样不进交互模式白名单、不进子代理工具面。
+- **实测依据**：同机 TCI/JIT 对照显示 CPU 密集负载慢 12–23×，说明换语言无效、JIT 也不够
+  （即便批下来 Python 仍比原生慢 1~1.5 个数量级），只有原生解释器能回到可用区间。
+
 ## 6.4.0 更新（Shell 工具 · 设备内真 Linux）
 
 > 一句话：模型现在能调 `shell`，跑的是**真的 Linux**（Alpine 3.22 + Linux 6.12 内核），

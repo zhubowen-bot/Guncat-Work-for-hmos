@@ -2,14 +2,14 @@
 
 > 中文 | [English](README_EN.md)
 
-**鸿蒙掌上 Codex** —— 用 ArkTS / ArkUI 从零构建的原生 HarmonyOS AI 客户端。**两个当红形态都在端侧真机跑通**：**Intelligent UI**（一句话直出可操作界面，对标 GPT 的 Intelligent UI）与 **Harness**（Codex 式多轮 Agent Loop + 沙箱工作区，DeepSeek Harness 的端侧移植）。模块化内核 + 三协议流式对话 + 46 个内置工具 + 32 个技能，设备端直出 PPT / Word / Excel / SVG。
+**鸿蒙掌上 Codex** —— 用 ArkTS / ArkUI 从零构建的原生 HarmonyOS AI 客户端。**两个当红形态都在端侧真机跑通**：**Intelligent UI**（一句话直出可操作界面，对标 GPT 的 Intelligent UI）与 **Harness**（Codex 式多轮 Agent Loop + 沙箱工作区，DeepSeek Harness 的端侧移植）。模块化内核 + 三协议流式对话 + 47 个内置工具 + 32 个技能，设备端直出 PPT / Word / Excel / SVG。
 
 <!-- 演示位（可选升级）：真机录屏 30–60 秒 —— 进工作模式 → 一句话生成 PPT → 产物卡片展开 → 切到交互模式拖滑块重算。动态 GIF 比静态截图更有说服力。 -->
 
 ![HarmonyOS](https://img.shields.io/badge/HarmonyOS-API%2024%20(6.1.1)-blue)
 ![version](https://img.shields.io/badge/version-6.4.0-blue)
 ![forms](https://img.shields.io/badge/Agent%20Forms-Intelligent%20UI%20%2B%20Harness-blueviolet)
-![tools](https://img.shields.io/badge/%E5%86%85%E7%BD%AE%E5%B7%A5%E5%85%B7-46-informational)
+![tools](https://img.shields.io/badge/%E5%86%85%E7%BD%AE%E5%B7%A5%E5%85%B7-47-informational)
 ![skills](https://img.shields.io/badge/%E6%8A%80%E8%83%BD-32-informational)
 [![license](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 [![CI](https://github.com/zhubowen-bot/Guncat-Work-for-hmos/actions/workflows/ci.yml/badge.svg)](https://github.com/zhubowen-bot/Guncat-Work-for-hmos/actions/workflows/ci.yml)
@@ -28,9 +28,9 @@
 | 形态 | 对标 | 在 Guncat Work 里的样子 |
 | --- | --- | --- |
 | ✦ **交互模式** | GPT 的 **Intelligent UI** | 一句话进来，一张**能拖、能点、能改参数并即时重算**的原生界面出去：图表 / 表格 / 指标卡 / 选项卡 / 表单控件全部原生渲染，默认零工具调用、一轮直出 |
-| 🛠 **工作模式** | **DeepSeek Harness**（dsh，Codex 式 Agent Loop） | 多轮工具循环 + 每会话独立沙箱工作区 + 46 个内置工具，长程任务自主执行，端侧直出 PPT / Word / Excel / SVG，产物卡片附行级 diff |
+| 🛠 **工作模式** | **DeepSeek Harness**（dsh，Codex 式 Agent Loop） | 多轮工具循环 + 每会话独立沙箱工作区 + 47 个内置工具，长程任务自主执行，端侧直出 PPT / Word / Excel / SVG，产物卡片附行级 diff |
 
-两个形态**共用同一套 Agent Loop 与沙箱工作区**，差别在行为纪律与**下发的工具面**——工作模式是「46 个内置工具全量 + 多轮工具循环 + 长程交付」，交互模式只下发 **27 个**（读素材 / 算真实数字 / 核实外部事实 / 出文件），长程工具（`todo_write` / `goal_*` / `schedule_*` / `subagent` …）根本不出现在它的请求里，所以是「快车道、一轮直出界面」。应用启动默认落在交互模式，空态大标题处的「交互模式 / 工作模式」胶囊可一键换挡。
+两个形态**共用同一套 Agent Loop 与沙箱工作区**，差别在行为纪律与**下发的工具面**——工作模式是「47 个内置工具全量 + 多轮工具循环 + 长程交付」，交互模式只下发 **27 个**（读素材 / 算真实数字 / 核实外部事实 / 出文件），长程工具（`todo_write` / `goal_*` / `schedule_*` / `subagent` …）根本不出现在它的请求里，所以是「快车道、一轮直出界面」。应用启动默认落在交互模式，空态大标题处的「交互模式 / 工作模式」胶囊可一键换挡。
 
 交互模式复刻的是 GPT 那套 Intelligent UI 的交付方式：回答不再是纯文本，而是一份**界面程序**，由应用渲染成原生可操作界面——柱状 / 折线 / 面积 / 横向条 / 饼环 / 径向 / 雷达 / 堆叠条、表格、指标卡、图片墙、选项卡 / 折叠面板 / 步骤条 / 卡片块，以及整套表单控件（滑块 / 开关 / 单选 / 多选 / 下拉 / 标签选择 / 选项卡 / 输入框 / 文本域）；控件的取值还能回传模型触发重算。工作模式则把 DeepSeek Harness（dsh）的核心 Agent Loop 完整移植到了端侧。
 
@@ -40,7 +40,7 @@
 
 Guncat Work 支持完整丰富的客户端功能：聊天模式内置通用、论文转换、法律 / 研究 / 筛滤检索与 LLM 评测等智能体；支持 Chat / Responses / Anthropic 三种主流协议接入、原生 Markdown（含 LaTeX 公式与 Mermaid 图表）、图片文档直传、CoreSpeechKit 朗读和原生语音输入等扩展 C 端功能。
 
-工作模式带沙箱工作区与工具调用能力，包含 46 个内置工具，覆盖文件增删改查与模式匹配搜索、任务清单、图片查看、网络下载、PDF 解析、Office 生成与读写编辑（PPT / Word / Excel 各自基于 JSON 中间层，可无损读回、算子式编辑）、数据管道清洗转换与格式互转、基于 JSVM-API 的 JS 执行沙箱 `run_js`，以及**设备内真 Linux 的 `shell`** —— QEMU 以 TCG 解释器（TCI）方式运行，不生成机器码、不需要 JIT 受限权限，Alpine 用户态经 virtio-9p 直连本会话工作区（`cat data/a.csv` 与 `read_file("data/a.csv")` 是同一份文件）。内置 32 个技能（5 个主 Skill 路由 + 7 个格式分支）把 PPT 设计规范、Doc JSON 语法、数据清洗配方等领域知识按需加载给模型。Office 文档与 PDF 全部本地解析，不消耗多模态配额。
+工作模式带沙箱工作区与工具调用能力，包含 47 个内置工具，覆盖文件增删改查与模式匹配搜索、任务清单、图片查看、网络下载、PDF 解析、Office 生成与读写编辑（PPT / Word / Excel 各自基于 JSON 中间层，可无损读回、算子式编辑）、数据管道清洗转换与格式互转、基于 JSVM-API 的 JS 执行沙箱 `run_js`，**设备内真 Linux 的 `shell`** —— QEMU 以 TCG 解释器（TCI）方式运行，不生成机器码、不需要 JIT 受限权限，Alpine 用户态经 virtio-9p 直连本会话工作区（`cat data/a.csv` 与 `read_file("data/a.csv")` 是同一份文件）；以及**原生 CPython 的 `run_python`** —— 解释器编成 HarmonyOS 原生 `.so` 在应用进程内直接跑（不经仿真，比 VM 里的 `python3` 快 2~3 个数量级），VM 里还带一个 `npy` 跨域桥让 shell 管道也能用上它。内置 32 个技能（5 个主 Skill 路由 + 7 个格式分支）把 PPT 设计规范、Doc JSON 语法、数据清洗配方等领域知识按需加载给模型。Office 文档与 PDF 全部本地解析，不消耗多模态配额。
 
 界面在手机与桌面之间自适应：宽屏（≥700vp）展开「左侧栏 / 会话列 / 工作区详情列」三栏布局，窄屏回退单列加抽屉。工作区文件可原地预览、一键分享，生成与改动附行级 diff，对话历史、配置与朗读偏好均本地持久化。工程上采用 MVVM 分层，三协议 SSE 统一进协议适配层，每个文档生成器都配有针对性的离线验证环境（Node 构建 + Python 结构校验 + tsc 类型检查）。
 
@@ -52,7 +52,7 @@ Guncat Work 支持完整丰富的客户端功能：聊天模式内置通用、�
 - **三协议接入**：OpenAI Completions（`/chat/completions`）、OpenAI Responses（`/responses`）、Anthropic Messages（`/messages`），均支持图片直传；深度思考与联网搜索按各协议显式控制。
 - **内置本地联网搜索**：软件内置、无需手动开关，工作模式与聊天模式都能调用，不受制于服务端联网开关。
 - **端侧直出 Office**：PPT / Word / Excel / SVG 由本地生成器产出，基于 JSON 中间层，文档可无损读回、算子式编辑；PDF 与 Office 全部本地解析，不消耗多模态配额。
-- **46 个内置工具**：文件增删改查与模式匹配搜索、任务清单、图片查看、网络下载、PDF 解析、Office 读写、数据管道清洗转换与格式互转、基于 JSVM-API 的 `run_js` 代码沙箱（不联网、不读写文件系统，后台线程执行并带超时保护），以及**设备内真 Linux 的 `shell`**（QEMU TCG 解释执行、不需要 JIT 权限；Alpine + busybox，可用 `apk add`，工作目录经 virtio-9p 与本会话工作区直连）。
+- **47 个内置工具**：文件增删改查与模式匹配搜索、任务清单、图片查看、网络下载、PDF 解析、Office 读写、数据管道清洗转换与格式互转、基于 JSVM-API 的 `run_js` 代码沙箱（不联网、不读写文件系统，后台线程执行并带超时保护），**设备内真 Linux 的 `shell`**（QEMU TCG 解释执行、不需要 JIT 权限；Alpine + busybox，可用 `apk add`，工作目录经 virtio-9p 与本会话工作区直连），以及**原生 CPython 的 `run_python`**（解释器编成原生 `.so`，进程内直跑、无仿真；VM 内另带 `npy` 桥供 shell 管道调用）。
 - **真 Linux，不是模拟器 API**：`shell` 里跑的是完整 Linux 用户态（内核 6.12 + Alpine 3.22，**预装 Python 3 / pip / jq**），管道/重定向/通配符/`sed`/`awk`/`find`/`tar` 都是真的；首启引导数十秒，之后同进程复用，空闲 10 分钟自动关机释放内存（2GB）。
 - **32 个技能**：5 个主 Skill 路由 + 7 个格式分支，命中即按需加载；PPT / Word / Excel 三个技能采用「门」式约束，交付前生成可核对的自检报告。
 - **原生 Markdown**：CommonMark 与 GFM 常用语法、代码高亮、表格、任务列表、LaTeX 行内与块级公式、Mermaid 图表，深浅色主题自动适配。
@@ -107,7 +107,7 @@ cp $HOME/hish-tci-build/deps/output/libqemu-system-aarch64-tci.so \
    $HOME/hish-tci-build/deps/output/libslirp.so.0 entry/libs/arm64-v8a/
 ```
 
-打好包的 HAP 约 166MB（含 QEMU 与两套镜像）。缺这些产物时应用照常构建与运行，只是调用 `shell`
+打好包的 HAP 约 185MB（含 QEMU、两套镜像与原生 CPython）。缺这些产物时应用照常构建与运行，只是调用 `shell`
 会返回明确的"运行库不可用"说明。
 
 ### 首次配置
@@ -146,8 +146,9 @@ cp $HOME/hish-tci-build/deps/output/libqemu-system-aarch64-tci.so \
 | 文档 | 内容 |
 | --- | --- |
 | [主要功能](docs/features.md) | 全部客户端功能与工程约定 |
-| [工作模式架构与维护指南](docs/architecture/work-mode.md) | Agent Loop、46 个工具、PPT / Word 生成链路、技能系统、`run_js` 沙箱、ArkTS 落地约束 |
+| [工作模式架构与维护指南](docs/architecture/work-mode.md) | Agent Loop、47 个工具、PPT / Word 生成链路、技能系统、`run_js` 沙箱、ArkTS 落地约束 |
 | [Shell 工具：设备内真 Linux](docs/architecture/linux-shell.md) | QEMU TCI（无 JIT）嵌入、virtio-9p 工作区一致性、文件式命令协议、生命周期与排障、镜像构建链 |
+| [原生 Python 与跨域桥](docs/architecture/native-python.md) | CPython 交叉编译、`run_python` 执行模型、`npy` 桥协议与性能数据、能力边界 |
 | [交互模式架构（Intelligent UI）](docs/architecture/interactive-mode.md) | 提示词分叉、`guncat-ui lang` 契约、流式成形、交互闭环、扩展入口 |
 | [项目结构](docs/architecture/project-structure.md) | 目录布局、数据流、核心组件 |
 | [使用指南](docs/guides/usage.md) | 分场景操作步骤 |

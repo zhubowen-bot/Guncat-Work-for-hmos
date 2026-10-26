@@ -18,6 +18,7 @@ import { WebFetchService } from './WebFetchService';
 import { SessionLogService } from './SessionLogService';
 import { JsCodeService } from './JsCodeService';
 import { LinuxShellService } from './LinuxShellService';
+import { PythonService } from './PythonService';
 import { ToolExecResult, WorkFileService } from './WorkFileService';
 import { Constants } from '../common/Constants';
 import { AbortSignal } from '../common/Types';
@@ -91,7 +92,8 @@ export class HarnessTools {
     return name === 'edit' || name === 'str_replace_editor' ||
       name === 'goal_create' || name === 'goal_update' ||
       name === 'schedule_create' || name === 'schedule_delete' ||
-      name === 'run_js' || name === LinuxShellService.TOOL_NAME;
+      name === 'run_js' || name === LinuxShellService.TOOL_NAME ||
+      name === PythonService.TOOL_NAME;
   }
 
   // ===== 分发(由 WorkFileService.dispatchTool 兜底转发) =====
@@ -183,6 +185,9 @@ export class HarnessTools {
     }
     if (name === LinuxShellService.TOOL_NAME) {
       return await LinuxShellService.run(context, convId, args);
+    }
+    if (name === PythonService.TOOL_NAME) {
+      return await PythonService.run(context, convId, args);
     }
     return HarnessTools.fail('未知工具: ' + name);
   }
@@ -666,6 +671,18 @@ export class HarnessTools {
         'timeout_ms', HarnessTools.strProp('可选: 超时毫秒数, 默认 60000, 范围 1000~240000'),
         'stdin', HarnessTools.strProp('可选: 传给命令的标准输入文本')),
       ['command']));
+    defs.push(HarnessTools.makeTool(PythonService.TOOL_NAME,
+      '在设备上的**原生 CPython 3.12** 解释器里执行一段 Python(应用进程内, 不经虚拟机、无仿真), 速度接近手机原生 —— 算数/统计/正则/JSON/CSV 处理首选它。' +
+      '**目录与其它工具完全一致**: 工作目录就是本会话工作区, 脚本里直接 `open("data/a.csv")` 与 read_file("data/a.csv") 读的是同一份文件; 用相对路径即可, 产物写到当前目录也立刻能被 read_file/transform_file 看到。' +
+      '与 shell 的分工: 这里只能跑 Python(**没有 subprocess/os.system/multiprocessing**, 不能调用 sed/awk/tar/git 等外部程序, 也没有 pip 装的第三方包); 需要调用 Unix 工具、装包或跑编译产物时用 shell。' +
+      '已内置标准库(纯 Python 模块 + json/csv/decimal/zlib/hashlib 等 C 扩展都可用; sqlite3 与 ssl 未编入, 也没有网络的第三方包)。' +
+      '返回值: 打印到 stdout 的内容随结果返回; 脚本用 `raise SystemExit(2)` 可指定退出码(非 0 不算工具失败); 异常会附 traceback。' +
+      '限制: 代码 ≤128KB, 默认 30 秒超时(timeout_ms 可放宽到 180 秒); 死循环会被 KeyboardInterrupt 打断, 但阻塞在 C 调用里的场景无法中断; 输出超过 20000 字符会截断并把全文存到工作区 .spill/ 供 read_file 读回。',
+      HarnessTools.props3(
+        'code', HarnessTools.strProp('要执行的 Python 源码(可多行; 相对路径以工作区为基准)'),
+        'cwd', HarnessTools.strProp('可选: 工作区内的子目录(相对路径, 如 "data"), 默认工作区根'),
+        'timeout_ms', HarnessTools.strProp('可选: 超时毫秒数, 默认 30000, 范围 1000~180000')),
+      ['code']));
     return defs;
   }
 

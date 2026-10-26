@@ -87,8 +87,12 @@ bash tooling/linux-vm/build-rootfs.sh
 
 - 注入 `/etc/guncat-setup`（挂载 proc/sys/devtmpfs、起 DHCP、挂载两个 virtio-9p 共享）
 - 注入 `/usr/local/bin/guncat-agent`（轮询任务通道并执行命令，把结果写回）
+- 注入 `/usr/local/bin/npy`（跨域桥：把 VM 里的 Python 调用转发给宿主原生解释器）
 - 重写 `/etc/inittab`：**不启动 OpenRC**（TCI 下每个服务脚本都是纯开销），只留 sysinit + agent + 串口控制台
 - 输出 `entry/src/main/resources/rawfile/vm/rootfs_guncat.qcow2`
+
+> 脚本类文件（`npy`、`guncat-agent`）在开机时会**优先用应用释放到共享目录的版本**覆盖安装
+> （`/mnt/guncat-ipc/guest/`），所以改这两个脚本不需要重建镜像；只有新增/升级 **apk 包**才需要重跑 3.1。
 
 ## 3.1 预装软件包（Python 等，可选但强烈建议）
 
@@ -108,6 +112,13 @@ PACKAGES="python3 py3-pip py3-numpy jq git" bash tooling/linux-vm/provision-pack
 ```bash
 # 0) 最有用的一条: 用宿主机的 qemu-system-aarch64 引导同一镜像, 跑全套协议断言
 bash tooling/linux-vm/smoke-test.sh          # 需要 apt install qemu-system-arm
+
+# 0.1) 跨域桥 npy 的端到端验证: 客人里的 npy 把 Python 转发给宿主原生解释器
+bash tooling/linux-vm/npy-test.sh            # 11 项断言(数值/stdin/argv/管道/退出码/路径)
+
+# 0.2) 性能对照: 同一镜像在 JIT 与 TCI 下的固定负载(定位"慢在指令仿真层")
+LABEL=jit bash tooling/linux-vm/bench.sh
+NET=0 LABEL=tci QEMU=/path/to/qemu-with-tcg-interpreter bash tooling/linux-vm/bench.sh
 
 # 1) 确认是解释器构建: 二进制里应能查到 tcg/tci.c, 且没有 aarch64 JIT 后端
 strings entry/libs/arm64-v8a/libqemu-system-aarch64-tci.so | grep -m1 'tcg/tci.c'

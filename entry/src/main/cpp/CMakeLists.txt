@@ -33,3 +33,14 @@ target_link_libraries(guncatvm PUBLIC
     libace_napi.z.so
     libhilog_ndk.z.so
     libdl.so)
+
+# libguncatpy.so: ArkTS 侧 import guncatpy from 'libguncatpy.so'
+# 原生 Python 工具: 运行期 dlopen libpython3.12.so(与 QEMU 同一套路, 不参与链接),
+# 因此 x86_64 模拟器构建也能编译通过, 运行期再报"本机不支持"。
+add_library(guncatpy SHARED
+    python/guncat_py.cpp)
+
+target_link_libraries(guncatpy PUBLIC
+    libace_napi.z.so
+    libhilog_ndk.z.so
+    libdl.so)
