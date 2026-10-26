@@ -1,7 +1,8 @@
-# Guncat Work: run_js 工具的 native 实现(JSVM-API 沙箱)
-# JSVM-API 是 C 接口(libjsvm.so), 用于在应用内嵌一个标准 JS 引擎执行动态代码。
+# Guncat Work 原生模块
+#   1) guncatjs: run_js 工具(JSVM-API 沙箱), 内嵌标准 JS 引擎执行动态代码
+#   2) guncatvm: shell 工具的 Linux VM 桥, dlopen QEMU(TCI 解释执行)并在同进程跑虚拟机
 cmake_minimum_required(VERSION 3.5.0)
-project(guncatjs)
+project(guncat_native)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,3 +23,13 @@ target_link_libraries(guncatjs PUBLIC
     libace_napi.z.so
     libjsvm.so
     libhilog_ndk.z.so)
+
+# libguncatvm.so: ArkTS 侧 import guncatvm from 'libguncatvm.so'
+# QEMU 运行库(libs/<abi>/libqemu-system-aarch64-tci.so)在运行期 dlopen, 不参与链接
+add_library(guncatvm SHARED
+    vm/guncat_vm.cpp)
+
+target_link_libraries(guncatvm PUBLIC
+    libace_napi.z.so
+    libhilog_ndk.z.so
+    libdl.so)

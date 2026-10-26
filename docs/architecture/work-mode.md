@@ -60,7 +60,7 @@ for step in 1..WORK_MAX_STEPS(200, 防失控保险):
 
 每轮改动与验证记录在 `docs/ITERATION_LOG.md`；当前待办见 `docs/BACKLOG.md`；dsh 移植对照见 `docs/PORT_NOTES.md`。
 
-## 3. 工具系统（45 个）
+## 3. 工具系统（46 个）
 
 分发链：`ChatViewModel` → `WorkToolRunner.execute()`（.ets 入口）→ Office 生成/parse_document/PPT/transform_file 就地实现，其余委托 `WorkFileService.executeTool()`（.ts），6.1 新增工具由 `HarnessTools.dispatch()`（.ts）兜底。
 
@@ -101,9 +101,12 @@ for step in 1..WORK_MAX_STEPS(200, 防失控保险):
 | `subagent`                                              | HarnessTools → SubagentService（经 `WorkFileService.subagentHook` 注入）         | 进程内子代理：与主任务共享工作区、独立上下文（工具面排除 subagent/ask_user/schedule/goal/todo_write），≤40 步；可并行派发（全局上限 4），每个子代理默认获得独立产出目录 `subagents/sa_<时间戳>_<序号>/`（可用 `output_dir` 指定），可读全工作区、写入自动重定向到该目录，最终报告作为工具结果交还并标注产出目录 |
 | `session_search`                                        | HarnessTools.toolSessionSearch → SessionLogService                          | 检索会话事件日志（JSONL），找回被上下文压缩掉的历史细节                                                                                                                                                                     |
 | `run_js`                                                | HarnessTools → JsCodeService → 原生 `libguncatjs.so`（JSVM-API）                | **设备内 JS 执行沙箱**：任意小程序化处理（计算/正则/JSON 重塑/统计/程序化生成）＋显式文件进出（`files` 只读预载、`write()` 落盘）；详见下节                                                                                                            |
+| `shell`                                                 | HarnessTools → LinuxShellService → 原生 `libguncatvm.so` + QEMU TCI            | **设备内真 Linux**（Alpine + Linux 6.12，QEMU 解释执行、无 JIT）：命令通道走 virtio-9p 文件协议，工作目录经 bind mount 指向本会话工作区（与 `read_file` 同批 inode）；详见 [linux-shell.md](linux-shell.md)                                                  |
 
 路径安全：所有工具路径经 `resolveSafe()` 校验——拒绝绝对路径、盘符与 `..` 穿越，只能在 `filesDir/workspaces/<convId>/` 内操作。
 `run_js` 的输入/输出同样走 `resolveSafe()`：脚本本身没有文件系统能力，进出只能经由 ArkTS 侧这层校验。
+`shell` 不走 `resolveSafe()`（路径解析发生在客人侧），但宿主只把 `filesDir/workspaces` 与 `filesDir/linux/ipc` 两个目录
+用 9p 注入 VM，客人执行前把 `/workspace` bind 到 `/mnt/workspaces/<convId>` —— 越界能力被挂载点本身限制住。
 
 ## 3.1 PPT 生成链路（Deck JSON 中间层）
 

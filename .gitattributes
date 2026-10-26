@@ -1,0 +1,8 @@
+# 行尾约定
+#
+# 仓库开启了 core.autocrlf=true(Windows 上检出会转 CRLF)。但下面这些文件是在
+# Linux / WSL / 虚拟机内部执行、或被 make 解析的, CRLF 会让 shebang 与命令解析直接报错
+# (典型症状: `bash: $'\r': command not found`), 所以显式钉死 LF。
+
+# Linux VM 构建链 + 客人侧脚本(进 Alpine 镜像执行)
+tooling/linux-vm/**  text eol=lf

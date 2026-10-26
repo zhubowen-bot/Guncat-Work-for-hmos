@@ -17,6 +17,7 @@ import { GoalService, GoalItem } from './GoalService';
 import { WebFetchService } from './WebFetchService';
 import { SessionLogService } from './SessionLogService';
 import { JsCodeService } from './JsCodeService';
+import { LinuxShellService } from './LinuxShellService';
 import { ToolExecResult, WorkFileService } from './WorkFileService';
 import { Constants } from '../common/Constants';
 import { AbortSignal } from '../common/Types';
@@ -90,7 +91,7 @@ export class HarnessTools {
     return name === 'edit' || name === 'str_replace_editor' ||
       name === 'goal_create' || name === 'goal_update' ||
       name === 'schedule_create' || name === 'schedule_delete' ||
-      name === 'run_js';
+      name === 'run_js' || name === LinuxShellService.TOOL_NAME;
   }
 
   // ===== 分发(由 WorkFileService.dispatchTool 兜底转发) =====
@@ -179,6 +180,9 @@ export class HarnessTools {
     }
     if (name === JsCodeService.TOOL_NAME) {
       return await JsCodeService.run(root, args);
+    }
+    if (name === LinuxShellService.TOOL_NAME) {
+      return await LinuxShellService.run(context, convId, args);
     }
     return HarnessTools.fail('未知工具: ' + name);
   }
@@ -648,6 +652,20 @@ export class HarnessTools {
         'files', HarnessTools.strProp('可选: 要预载为只读输入的工作区文件相对路径(如 "data/in.csv"), 多个用逗号或 JSON 数组分隔(最多 6 个, 单个 ≤512KB); 不传则脚本里没有可读输入, 需要文件内容时必须传'),
         'timeout_ms', HarnessTools.strProp('可选: 执行超时毫秒数, 默认 10000, 范围 1000~30000')),
       ['code']));
+    defs.push(HarnessTools.makeTool(LinuxShellService.TOOL_NAME,
+      '在设备上真实运行的 Linux(Alpine, QEMU 解释执行、无 JIT)里执行一条 shell 命令, 返回退出码与 stdout/stderr。' +
+      '**目录与其它工具完全一致**: 命令的工作目录就是本会话工作区 —— 与 read_file/write_file/edit/glob 看到的是同一个目录(经 virtio-9p 直接共享, 不是副本), 所以 `cat data/a.csv` 与 read_file("data/a.csv") 读的是同一份内容, 用 shell 改过的文件立刻能被 read_file 读到。' +
+      '适用: 批量重命名/批量转换、sed/awk/grep/find/xargs 流水线、tar/gzip 打包、跨文件统计与比对、需要真程序的活(busybox; 需要 python/jq 等可先 `apk add`)。' +
+      '**不要**用它做 read_file/write_file/search_files/glob/grep/transform_file 已经能做好的事(每次调用都有开销); 也不要逐条 `ls`/`cat` 摸索目录 —— 用 list_files/glob 更快。' +
+      '语法: 标准 sh(管道、重定向、通配符、变量、&&/||、for/while、函数)。相对路径以工作区根为基准, cwd 可切到子目录。' +
+      '开销: 首次调用需要引导虚拟机(冷启动数十秒, TCI 逐条解释执行, 比 JIT 慢但不需要受限权限), 之后同一进程内复用, 调用很快; 空闲 10 分钟后自动关机, 下次再冷启动。' +
+      '限制: 只能访问本会话工作区(/workspace, 隔离于其它会话); 单条命令默认 60 秒超时(可用 timeout_ms 放宽到 240 秒); 输出超过 60KB 会截断, 全文自动存到工作区 .spill/ 目录供 read_file 读回; 退出码非 0 不算工具失败(如 grep 无匹配返回 1), 请按退出码与 stderr 自行判断。',
+      HarnessTools.props4(
+        'command', HarnessTools.strProp('要执行的 shell 命令(可多行脚本; 引号/管道/重定向按 sh 语义)'),
+        'cwd', HarnessTools.strProp('可选: 工作区内的子目录(相对路径, 如 "data"), 默认工作区根'),
+        'timeout_ms', HarnessTools.strProp('可选: 超时毫秒数, 默认 60000, 范围 1000~240000'),
+        'stdin', HarnessTools.strProp('可选: 传给命令的标准输入文本')),
+      ['command']));
     return defs;
   }
 

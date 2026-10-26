@@ -2,6 +2,51 @@
 
 > [← 返回 README](README.md)
 
+## 6.4.0 更新（Shell 工具 · 设备内真 Linux）
+
+> 一句话：模型现在能调 `shell`，跑的是**真的 Linux**（Alpine 3.22 + Linux 6.12 内核），
+> 而不是我另造一个"模拟 shell"。QEMU 以 **TCG 解释器（TCI）**构建，不生成机器码，
+> 因此**不需要 JIT / 可执行内存这类难以申请的受限权限**，手机与上架包都能用。
+
+### 新增：`shell(command, cwd?, timeout_ms?, stdin?)` —— 第 46 个内置工具
+
+- **真 Linux 用户态**：管道、重定向、通配符、`sed`/`awk`/`find`/`xargs`/`tar`/`gzip` 全部是真的；
+  busybox 之外需要什么语言运行时可以自己装（`apk add python3` / `nodejs` / `jq` …），网络走 QEMU 内建
+  slirp 用户态栈，不需要新增权限。
+- **与其它工具同一目录（硬要求）**：宿主把 `filesDir/workspaces` 整棵目录用 virtio-9p 注入客人，
+  客人在执行每条命令前 `mount --bind /mnt/workspaces/<会话>` 到 `/workspace`。于是
+  `cat data/a.csv` 与 `read_file("data/a.csv")` 读的是**同一批 inode**，不是副本：
+  shell 写的文件立刻能被 `read_file` 读到，`write_file` 写的文件 shell 里 `cat` 也立刻可见。
+- **命令通道也是 9p**：任务写在 `filesDir/linux/ipc/<会话>/in/<id>/`，客人守护进程执行后把
+  `stdout`/`stderr`/`code`/`done` 写回 `out/<id>/`。**不用串口做 RPC** —— 没有终端回显、ANSI 转义与
+  二进制分界这类脆弱解析；串口只留作内核日志排障（native 侧存 64KB 环形缓冲，失败时附在错误里）。
+- **生命周期**：首次调用释放镜像（约 48MB，按 `versionCode` 缓存）并冷启动 VM（TCI 解释执行，数十秒）；
+  之后同进程复用；空闲 10 分钟下发 `poweroff` 释放 512MB 内存；进程退出即随进程销毁。
+- **失败语义**：命令退出码非 0 **不算工具失败**（`grep` 无匹配返回 1 是正常语义），由模型按退出码与
+  stderr 判断；只有 VM 不可用/引导失败才是 `ok=false`，且错误里带串口日志尾部。输出超 60KB 截断，
+  全文落到工作区 `.spill/shell-*.log` 供 `read_file` 读回。
+
+### 新增：原生模块 `libguncatvm.so` + 构建链 `tooling/linux-vm/`
+
+- `entry/src/main/cpp/vm/guncat_vm.cpp`：`dlopen` QEMU 动态库（优先 `libqemu-system-aarch64-tci.so`，
+  回退 JIT 版），在独立线程里跑 `qemu_system_entry()`，串口线程把内核日志写进环形缓冲；
+  导出 `startVM` / `status` / `serialTail` / `onData` / `onExit` / `sendInput` / `isAvailable`。
+- `tooling/linux-vm/`：可复现的构建链（`fetch-assets.sh` → `build-libqemu-tci.sh` → `build-rootfs.sh`），
+  含 TCI 版 QEMU 的交叉编译配方（改编自 HiSH 的 MIT 配方）、定制 Alpine 镜像的 sysinit 与任务代理、
+  以及**受限网络适配**（github.com 直链换 `codeload.github.com`、glib 的 `proxy-libintl` 子项目改为
+  直接解包，否则 meson 会尝试 `git clone` 而失败）。
+- 客人镜像刻意**不启动 OpenRC**：TCI 下每个服务脚本都是纯开销，只保留伪文件系统挂载、DHCP、
+  两个 9p 挂载、任务代理与串口控制台。
+
+### 提示词与工具面
+
+- 系统提示词新增 `shell` 的定位说明：**能用 read_file/write_file/search_files/glob/grep/transform_file
+  直接做的不要用 shell**（每次调用有开销）；shell 用于批量重命名/批量转换、`sed`/`awk`/`find` 流水线、
+  打包、跨文件统计这类"需要真程序"的活；并明确"目录与其它工具一致"这条口径，避免模型把 shell 里的文件
+  当成另一个世界。
+- 工具面：工作模式 **45 → 46** 个工具；交互模式仍是 **27 个**（`shell` 属于重工具，故意不进白名单）。
+- 版本号：`6.3.0` / 630 → **`6.4.0` / 640**（versionCode 变化会触发镜像重新释放）。
+
 ## 6.3.0 更新（交互模式 · Intelligent UI）
 
 > 6.3.0 期间交互模式做了**两轮**大改：先上线初版（严格 JSON DSL），随后**全面重写**为声明式界面语言 `guncat-ui lang`。两轮都属于 6.3.0（**不单列 6.4.0**，应用版本号保持 `6.3.0` / versionCode 720），下面按"由新到旧"合并记录。

@@ -1,9 +1,9 @@
 {
   "app": {
-    "bundleName": "com.bowenapp.guncataibeta",
+    "bundleName": "com.bowenapp.guncatai",
     "vendor": "example",
-    "versionCode": 720,
-    "versionName": "6.3.0",
+    "versionCode": 640,
+    "versionName": "6.4.0",
     "icon": "$media:layered_image",
     "label": "$string:app_name"
   }

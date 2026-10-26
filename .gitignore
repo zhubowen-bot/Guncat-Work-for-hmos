@@ -19,3 +19,11 @@ test/*/png.b64
 test/*/_check.txt
 test/*/_docsize.txt
 test/.npm-cache/
+
+# 注: Linux VM(shell 工具)的二进制产物**随仓库提供**（git 压缩后合计约 21MB）:
+#   entry/libs/arm64-v8a/libqemu-system-aarch64-tci.so、libslirp.so.0
+#   entry/src/main/resources/rawfile/vm/{kernel_aarch64,rootfs_guncat.qcow2}
+# 只有 JIT 版(未使用)与中间产物不跟踪。
+entry/libs/arm64-v8a/libqemu-system-aarch64.so
+entry/libs/arm64-v8a/libqemu-img.so
+

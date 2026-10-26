@@ -128,10 +128,13 @@ export class SubagentService {
   }
 
   // 子代理工具面: 从全量工具定义中排除自身(防递归)与交互/调度类(无宿主通道)
+  // 另外排除 shell: 子代理的工作区写入隔离(SubagentIsolation)只重定向"路径参数",
+  // 约束不了 shell 命令里的任意重定向/rm/mv, 留着它等于给子代理开了越界写入的后门。
   private static excludedTools(): string[] {
     return ['subagent', 'ask_user_question',
       'schedule_create', 'schedule_delete', 'schedule_list',
-      'goal_create', 'goal_update', 'todo_write'];
+      'goal_create', 'goal_update', 'todo_write',
+      Constants.WORK_SHELL_TOOL_NAME];
   }
 
   private static filteredToolDefs(): Record<string, Object>[] {

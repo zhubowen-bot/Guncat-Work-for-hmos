@@ -1,0 +1,53 @@
+#!/bin/sh
+# Guncat Linux VM: PID1(busybox init) sysinit 阶段的一次性准备。
+# 负责挂载伪文件系统、拉起网络、挂载宿主注入的两个 virtio-9p 共享目录。
+# 说明: 本镜像刻意不启动 OpenRC —— TCI 解释执行下每个服务都是纯开销,
+#       shell 工具需要的只有 伪文件系统 + 9p + 网络(DHCP)。
+set -u
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export TERM=dumb
+export LC_ALL=C.UTF-8
+
+mount -t proc     proc     /proc      2>/dev/null
+mount -t sysfs    sysfs    /sys       2>/dev/null
+mount -t devtmpfs devtmpfs /dev       2>/dev/null
+mkdir -p /dev/pts /dev/shm /tmp /run /workspace /mnt/workspaces /mnt/guncat-ipc
+mount -t devpts devpts /dev/pts        2>/dev/null
+mount -t tmpfs  -o mode=1777,nosuid,nodev tmpfs /tmp   2>/dev/null
+mount -t tmpfs  -o mode=1777,nosuid,nodev tmpfs /dev/shm 2>/dev/null
+mount -t tmpfs  -o mode=0755,nosuid,nodev tmpfs /run    2>/dev/null
+chmod 1777 /tmp /dev/shm 2>/dev/null
+
+hostname guncat-linux 2>/dev/null || echo guncat-linux > /proc/sys/kernel/hostname
+
+# ---- 网络: QEMU slirp 用户态网络, 内置 DHCP 拿 10.0.2.15 ----
+ip link set lo up 2>/dev/null
+ip link set eth0 up 2>/dev/null
+if command -v udhcpc >/dev/null 2>&1; then
+  udhcpc -i eth0 -b -q -t 6 -T 1 -s /usr/share/udhcpc/default.script >/dev/null 2>&1 &
+fi
+
+# ---- virtio-9p: 宿主把两个目录注入进来 ----
+# workspaces = 应用侧 filesDir/workspaces (所有会话的工作区)
+# guncatipc  = 应用侧 filesDir/linux/ipc (任务下发/结果回传通道)
+mount9p() {
+  tag="$1"
+  dir="$2"
+  n=0
+  while [ "$n" -lt 100 ]; do
+    if mount -t 9p -o trans=virtio,version=9p2000.L,msize=262144 "$tag" "$dir" 2>/dev/null; then
+      return 0
+    fi
+    n=$((n + 1))
+    sleep 0.1
+  done
+  return 1
+}
+
+mount9p workspaces /mnt/workspaces || echo "guncat: workspaces 9p mount failed" > /dev/kmsg 2>/dev/null
+mount9p guncatipc  /mnt/guncat-ipc || echo "guncat: guncatipc 9p mount failed"  > /dev/kmsg 2>/dev/null
+
+mkdir -p /run/guncat
+export PATH
+exit 0

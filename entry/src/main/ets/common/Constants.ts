@@ -233,6 +233,29 @@ export class Constants {
   static readonly WORK_JS_OUTPUT_TOTAL_KB: number = 4096;
   // 超时被放弃的执行(无法回收的线程)达到该数量后拒绝再执行, 避免持续耗电
   static readonly WORK_JS_MAX_ABANDONED: number = 2;
+  // shell 工具(真 Linux: QEMU TCG 解释执行, 无 JIT)
+  // 工具名集中在这里, 避免 service 之间互相 import 造成循环依赖
+  static readonly WORK_SHELL_TOOL_NAME: string = 'shell';
+  // 沙箱内目录布局: filesDir/linux/vm(内核与 rootfs 镜像) 与 filesDir/linux/ipc(命令通道)
+  static readonly WORK_LINUX_DIR: string = 'linux';
+  static readonly WORK_LINUX_MEMORY_MB: number = 512;
+  // 首次引导(冷启动)上限: TCI 解释执行下 boots 明显慢于 JIT, 给足余量
+  static readonly WORK_LINUX_BOOT_TIMEOUT_MS: number = 180000;
+  // 结果轮询间隔: 客人把 done 文件写进 9p 共享目录, 宿主轮询它
+  static readonly WORK_LINUX_JOB_POLL_MS: number = 120;
+  static readonly WORK_SHELL_DEFAULT_TIMEOUT_MS: number = 60000;
+  static readonly WORK_SHELL_MAX_TIMEOUT_MS: number = 240000;
+  // 单条命令正文 / stdin / 送回模型的输出 上限(输出超出部分落盘到工作区 .spill/)
+  static readonly WORK_SHELL_MAX_COMMAND_BYTES: number = 64 * 1024;
+  static readonly WORK_SHELL_MAX_STDIN_BYTES: number = 64 * 1024;
+  static readonly WORK_SHELL_MAX_OUTPUT_BYTES: number = 60 * 1024;
+  // 送回模型的输出字符上限(超出的完整内容拷进工作区 .spill/, 用 read_file 读回)
+  static readonly WORK_SHELL_HEAD_CHARS: number = 20000;
+  // 空闲多久让客人自己关机, 释放 VM 占的内存
+  static readonly WORK_SHELL_IDLE_SHUTDOWN_MS: number = 10 * 60 * 1000;
+  // shell 工具的执行护栏上限: 命令上限 + 冷启动 + 9p 往返余量
+  static readonly WORK_SHELL_TOOL_TIMEOUT_MS: number = 360000;
+
   // 工具并发执行的滚动池大小(对齐 dsh 的 maxParallelToolCalls, 只作用于只读并行段)
   static readonly WORK_MAX_PARALLEL_TOOLS: number = 4;
   static readonly WORK_ALLOW_PARALLEL_TOOLS: boolean = true;

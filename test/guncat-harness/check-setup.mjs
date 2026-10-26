@@ -135,6 +135,7 @@ for (const [relSrc, relDst, replaces] of [
   ['service/ToolCallStream.ts', 'ToolCallStream.ts', []],
   ['service/LocalWebSearch.ts', 'LocalWebSearch.ts', []],
   ['service/JsCodeService.ts', 'JsCodeService.ts', [["from 'libguncatjs.so'", "from './jsvm-shim'"]]],
+  ['service/LinuxShellService.ts', 'LinuxShellService.ts', [["from 'libguncatvm.so'", "from './vm-shim'"]]],
   ['service/WorkToolRunner.ets', 'WorkToolRunner.ts', []],
 ]) {
   port(relSrc, relDst, replaces);
@@ -173,6 +174,21 @@ writeFileSync(join(allDir, 'jsvm-shim.ts'),
   `export function runJs(code: string, options?: JsRunOptions): Promise<JsRunResult> {\n` +
   `  return Promise.reject(new Error('jsvm-shim: 原生模块仅在设备侧可用'));\n}\n` +
   `export function engineStatus(): string { return 'jsvm-shim'; }\n`);
+// shell 的原生模块(libguncatvm.so, QEMU TCI)同理: Node 侧只有类型
+writeFileSync(join(allDir, 'vm-shim.ts'),
+  `export interface VmStartOptions { argsLines: string; serialSocket: string; }\n` +
+  `export interface VmStartResult { ok: boolean; error: string; lib: string; }\n` +
+  `export interface VmStatus {\n  running: boolean;\n  starting: boolean;\n  lib: string;\n  loadError: string;\n  exitCode: number;\n}\n` +
+  `export function isAvailable(): string { return 'vm-shim: 原生模块仅在设备侧可用'; }\n` +
+  `export function startVM(options: VmStartOptions): VmStartResult {\n` +
+  `  return { ok: false, error: 'vm-shim', lib: '' };\n}\n` +
+  `export function status(): VmStatus {\n` +
+  `  return { running: false, starting: false, lib: '', loadError: 'vm-shim', exitCode: 0 };\n}\n` +
+  `export function serialTail(maxChars: number): string { return ''; }\n` +
+  `export function onData(cb: (data: ArrayBuffer) => void): void {}\n` +
+  `export function onExit(cb: () => void): void {}\n` +
+  `export function sendInput(data: ArrayBuffer): boolean { return false; }\n` +
+  `export function requestShutdown(): boolean { return false; }\n`);
 
 // ===== @kit 桩 =====
 writeFileSync(join(stubsDir, '@kit.CoreFileKit.ts'),
@@ -183,11 +199,11 @@ writeFileSync(join(stubsDir, '@kit.CoreFileKit.ts'),
   `  function accessSync(path: string): boolean;\n  function statSync(path: string): Stat;\n` +
   `  function mkdirSync(path: string, recursion?: boolean): void;\n  function listFileSync(path: string): string[];\n` +
   `  function openSync(path: string, mode: number): File;\n` +
-  `  function readSync(fd: number, buffer: ArrayBuffer, opts: { offset: number }): number;\n` +
-  `  function writeSync(fd: number, buffer: ArrayBuffer): number;\n` +
-  `  function writeSync(fd: number, buffer: ArrayBuffer, opts: { offset: number; length?: number }): number;\n` +
+  `  function readSync(fd: number, buffer: ArrayBuffer, opts: { offset: number; length?: number }): number;\n` +
+  `  function writeSync(fd: number, buffer: ArrayBuffer | string, opts?: { offset?: number; length?: number }): number;\n` +
   `  function closeSync(fileOrFd: File | number): void;\n` +
 `  function unlinkSync(path: string): void;  function rmdirSync(path: string): void;\n` +
+`  function copyFileSync(src: string, dest: string): void;\n` +
 `  function renameSync(oldPath: string, newPath: string): void;\n` +
 `  function moveFileSync(src: string, dst: string): void;  function moveDirSync(src: string, dst: string): void;\n}\n` +
   `export declare namespace picker {\n` +
@@ -195,16 +211,25 @@ writeFileSync(join(stubsDir, '@kit.CoreFileKit.ts'),
   `  class DocumentViewPicker { constructor(context: object); save(options: DocumentSaveOptions): Promise<string[]>; }\n}\n`);
 writeFileSync(join(stubsDir, '@kit.AbilityKit.ts'),
   `export declare namespace common {\n` +
-  `  interface ResourceManager { getRawFileContent(path: string): Promise<Uint8Array>; }\n` +
-  `  class UIAbilityContext { filesDir: string; cacheDir: string; resourceManager: ResourceManager; }\n}\n`);
+  `  interface RawFileDescriptor { fd: number; offset: number; length: number; }\n` +
+  `  interface ResourceManager {\n` +
+  `    getRawFileContent(path: string): Promise<Uint8Array>;\n` +
+  `    getRawFdSync(path: string): RawFileDescriptor;\n` +
+  `    closeRawFdSync(path: string): void;\n  }\n` +
+  `  class UIAbilityContext { filesDir: string; cacheDir: string; tempDir: string; resourceManager: ResourceManager; }\n}\n` +
+  `export declare namespace bundleManager {\n` +
+  `  enum BundleFlag { GET_BUNDLE_INFO_DEFAULT = 0, GET_BUNDLE_INFO_WITH_APPLICATION = 1 }\n` +
+  `  interface BundleInfo { name: string; versionCode: number; versionName: string; }\n` +
+  `  function getBundleInfoForSelfSync(flag: number): BundleInfo;\n}\n`);
 writeFileSync(join(stubsDir, '@kit.ArkTS.ts'),
   `export declare namespace util {\n` +
-  `  class TextEncoder { encode(input: string): Uint8Array; }\n` +
+  `  class TextEncoder { encode(input: string): Uint8Array; encodeInto(input?: string): Uint8Array; }\n` +
   `  class TextDecoder {\n    static create(encoding: string, opts?: { ignoreBOM?: boolean }): TextDecoder;\n` +
   `    decodeToString(input: Uint8Array, opts?: { stream: boolean }): string;\n  }\n` +
   `  class Base64Helper { decodeSync(src: string): Uint8Array; }\n}\n`);
 writeFileSync(join(stubsDir, '@kit.PerformanceAnalysisKit.ts'),
   `export declare const hilog: { error(domain: number, tag: string, msg: string, ...args: any[]): void;\n` +
+  `  warn(domain: number, tag: string, msg: string, ...args: any[]): void;\n` +
   `  info(domain: number, tag: string, msg: string, ...args: any[]): void; };\n`);
 writeFileSync(join(stubsDir, '@kit.BasicServicesKit.ts'),
   `export declare namespace zlib {\n  function decompressFile(src: string, dest: string): Promise<void>;\n}\n` +
@@ -226,6 +251,15 @@ writeFileSync(join(stubsDir, '@kit.NetworkKit.ts'),
   `    on(type: string, cb: (data: object) => void): void;\n` +
   `    off(type: string): void;\n  }\n` +
   `  function createHttp(): HttpRequest;\n}\n`);
+// shell 的镜像释放走 resourceManager.getRawFdSync(按偏移分块读, 避免整个镜像进内存)
+writeFileSync(join(stubsDir, '@kit.LocalizationKit.ts'),
+  `export declare namespace resourceManager {\n` +
+  `  interface RawFileDescriptor { fd: number; offset: number; length: number; }\n` +
+  `  interface Manager {\n` +
+  `    getRawFdSync(path: string): RawFileDescriptor;\n` +
+  `    closeRawFdSync(path: string): void;\n` +
+  `    getRawFileContentSync(path: string): Uint8Array;\n` +
+  `  }\n}\n`);
 writeFileSync(join(stubsDir, '@kit.ImageKit.ts'),
   `export declare namespace image {\n` +
   `  interface Size { width: number; height: number; }\n` +

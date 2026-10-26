@@ -1,0 +1,6 @@
+{
+  "name": "libguncatvm.so",
+  "types": "./index.d.ts",
+  "version": "1.0.0",
+  "description": "Guncat Work shell 工具的 Linux VM(QEMU TCI)原生模块类型声明"
+}
