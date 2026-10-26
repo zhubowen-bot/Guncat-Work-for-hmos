@@ -1,13 +1,12 @@
 # 第三方组件与许可声明
 
 > 本文档是本仓库（Guncat Work，Apache-2.0）随附的第三方组件声明。
-> `shell` 工具（设备内真 Linux）涉及的组件最多，集中列在 [1. Shell 工具（Linux VM）](#1-shell-工具linux-vm)。
+> `shell` 工具（设备内真 Linux）与 `run_python`（原生 CPython）涉及的组件最多，集中在第 1、2 节。
 > 完整许可原文见 [`LICENSES/`](LICENSES/)，同一份声明与原文也打包进 HAP 的 `resources/rawfile/licenses/`。
 
 ---
 
 ## 1. Shell 工具（Linux VM）
-
 ### 1.1 HiSH — MIT
 
 **用途**：本项目的 Linux VM 方案整体建立在 [HiSH](https://github.com/harmoninux/HiSH) 的实践之上，
@@ -97,7 +96,39 @@ Copyright (c) 1995,1996 Danny Gasparovski。原文见 [`LICENSES/libslirp-COPYRI
 
 ---
 
-## 2. 其它既有第三方组件
+## 2. 原生 Python（`run_python` 与 `npy` 桥）
+
+### 2.1 CPython 3.12 — PSF-2.0
+
+**用途**：`entry/libs/arm64-v8a/libpython3.12.so`、`rawfile/python/python312.zip`、
+`rawfile/python/lib-dynload/*.so`（51 个 C 扩展）。以动态库形式在应用进程内加载，不经虚拟机。
+
+| 项 | 值 |
+| --- | --- |
+| 版本 | CPython 3.12.15（<https://www.python.org/downloads/release/python-31215/>） |
+| 许可 | Python Software Foundation License 2.0（PSF-2.0）；全文见 [`LICENSES/CPython-LICENSE.txt`](LICENSES/CPython-LICENSE.txt) |
+| 我们的改动 | **未改 CPython 源码**；只做交叉编译（`--host=aarch64-linux-gnu` + OHOS clang、`--enable-shared`、裁剪扩展模块）与 strip。脚本见 [`tooling/python/build-cpython-ohos.sh`](tooling/python/build-cpython-ohos.sh) |
+| 源码获取 | 上述官方 tarball + 本仓库脚本即可复现同一产物 |
+
+CPython 内静态链接/随包分发的第三方代码（均由 CPython 自身的 LICENSE 覆盖并列出原文）：
+
+| 组件 | 许可 | 说明 |
+| --- | --- | --- |
+| expat | MIT | `pyexpat` 扩展（XML 解析） |
+| libmpdec | BSD-2-Clause | `_decimal` 扩展（十进制浮点） |
+| zlib | zlib License | `zlib` 扩展（与 §1.2 同一份 zlib 1.3.1 说明） |
+| asyncio / 标准库 | PSF-2.0 | `python312.zip` 内的纯 Python 模块 |
+
+> 未编入的模块：`_ssl`/`_hashlib`（无 OpenSSL）、`_sqlite3`、`_ctypes`（无 libffi）、
+> `_locale`、curses/readline/tkinter、`_bz2`/`_lzma`、`_uuid`、`_multiprocessing`。
+
+### 2.2 SQLite / OpenSSL / libffi
+
+本版本**没有**打包这三个库（因此 `sqlite3`、`ssl`、`ctypes` 不可用），无需声明。
+
+---
+
+## 3. 其它既有第三方组件
 
 | 组件 | 许可 | 说明 |
 | --- | --- | --- |
@@ -109,9 +140,9 @@ Copyright (c) 1995,1996 Danny Gasparovski。原文见 [`LICENSES/libslirp-COPYRI
 
 ---
 
-## 3. 维护约定
+## 4. 维护约定
 
 - **新增第三方代码或二进制**时，同步更新本文件与 `LICENSES/`，并把许可原文复制进
   `entry/src/main/resources/rawfile/licenses/`（随 HAP 分发）。
 - 更新 QEMU 分支 / 内核镜像时，更新本文档里的**提交号、版本与来源 URL**。
-- 自检：`ls LICENSES/` 应至少包含 `HiSH-MIT.txt`、`GPL-2.0.txt`、`LGPL-2.1.txt`、`libslirp-COPYRIGHT.txt`。
+- 自检：`ls LICENSES/` 应至少包含 `HiSH-MIT.txt`、`GPL-2.0.txt`、`LGPL-2.1.txt`、`libslirp-COPYRIGHT.txt`、`CPython-LICENSE.txt`。
