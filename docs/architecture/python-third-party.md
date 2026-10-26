@@ -207,26 +207,31 @@ certifi 也用文件路径拿 CA 包 —— zipimport 下这些路径是虚拟�
 所以 `vendor-pure.sh` 现在把它们单独放进 `$WORK/extras-pkgs/`，需要合并进 `extras.zip`
 （运行时解成真实文件）。已在 `DATA_PKGS` 里登记：docx、pptx、certifi。
 
-### scipy：Fortran 阻塞点已打通（2026-10 实测，构建中）
+### scipy：已完整交叉编译，运行期还差最后一步（2026-10）
 
-早先的结论是"缺 Fortran 编译器，做不了"。这个结论**被推翻了** —— 实际做了一遍：
+**编译阶段已全部通过**：scipy 1.14.1 + OpenBLAS 0.3.28(含 LAPACK)，1413 个目标全部链接成功，
+产物 93MB / 113 个扩展。这证明了 "OHOS 上能编 scipy" —— 之前"缺 Fortran 做不了"的结论是错的。
 
-| 步骤 | 结果 |
+关键步骤（脚本见 [`gfortran-shim.c`](../../tooling/python/gfortran-shim.c)、
+[`gfortran-rt-stub.c`](../../tooling/python/gfortran-rt-stub.c)、
+[`gcc-softfloat-shim.c`](../../tooling/python/gcc-softfloat-shim.c)）：
+
+| 步骤 | 说明 |
 | --- | --- |
-| `apt-get install gfortran-aarch64-linux-gnu` | ✅ 可用（GCC 15.2 交叉编译器） |
-| OpenBLAS 0.3.28 `TARGET=ARMV8 CC=<ohos clang> FC=<cross gfortran>` | ✅ 编出 `libopenblas.a`（22MB，**含 LAPACK**：`dgesv_`/`dpotrf_`/`dgemm_` 都在） |
-| 链成 OHOS 可用的 `libopenblas.so` | ✅ 11MB，未被解析的只剩 libc/libm 常规符号 |
-| qemu 下 `ctypes` 调 `dgesv_` 解 2×2 方程组 | ✅ `info=0`，解出 `[1.9, 1.3]`（这是我们按行主序传 `A` 给列主序 API 的**正确**结果，等于解了 `Aᵀx=b`） |
+| 交叉 Fortran | `apt-get install gfortran-aarch64-linux-gnu`（GCC 15.2） |
+| OpenBLAS | `TARGET=ARMV8 CC=<ohos clang> FC=<cross gfortran>`，产出含 LAPACK 的 `libopenblas.a` |
+| LAPACK 验证 | qemu 下 `ctypes` 调 `dgesv_`：`info=0`、解正确 |
+| scipy 构建 | meson 交叉文件里 `fc` 指向**包装器**：编译用 gfortran、链接用 OHOS clang（避免 DT_NEEDED libgfortran） |
+| 构建期工具 | `cython`/`f2py`/`pythran` 都在目标 python 里跑，包装器要加 `-P`（否则 meson 的 cwd 会让 `import signal` 命中 `scipy/signal`） |
 
-**关键发现**：LAPACK 实际只需要 **2 个** libgfortran 运行时符号 ——
-`_gfortran_concat_string`、`_gfortran_etime`。其余（格式化 I/O、异步 I/O、STOP）都用不到。
-所以不必交叉编译整个 libgfortran：手写这两个 + 三个 glibc 收尾符号的替身
-（[`gfortran-shim.c`](../../tooling/python/gfortran-shim.c)，约 60 行）即可，
-既避开 `__ctype_b_loc`/静态 TLS 这些 glibc 专有依赖，又不增加体积。
+**运行期剩余问题**：`_arpack`/`_odepack`/`_quadpack` 等少数模块仍然 `DT_NEEDED libgcc_s.so.1`，
+而它们用到了 libgcc 的 soft-float 符号（`__trunctfdf2`、`__extenddftf2`、`__powidf2` …）。
+glibc 版 `libgcc.a` 里这些符号是 **hidden visibility**，无法导出给动态链接器；
+OHOS 的 compiler-rt builtins 里也没有 aarch64 版本。
 
-**剩余工作**（下一轮）：scipy 自身还有 Fortran 源码（`linalg`/`special`/`optimize`），
-需要在 meson 交叉文件里指定 `fc = aarch64-linux-gnu-gfortran`，并把 `.pc` 指到这份 OpenBLAS。
-预计包体 +25~35MB（openblas 11MB + scipy 扩展 15~20MB）。
+已解决 `__trunctfdf2` / `__powidf2` / `__powisf2`（自己按 IEEE 754 位运算实现），
+剩下的推荐解法是给这些模块 **静态链 libgcc**（`-static-libgcc` 或直接把 `libgcc.a` 加进链接行），
+静态链接不受 hidden visibility 限制。**下一轮做这个**，预计包体 +30MB（openblas 11 + scipy 20）。
 
 ## 3. 已验证可用（2026-10）
 
