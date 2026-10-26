@@ -206,6 +206,19 @@ certifi 也用文件路径拿 CA 包 —— zipimport 下这些路径是虚拟�
 顺带一条经验：**`sitecustomize.py` 必须放在 extras（真实目录），不能进 zip**。
 放在 zip 里它会比 extras 那份更早被 import，补丁就不生效了 —— 这次就是这么踩的。
 
+### regex / psutil（2026-10，C 扩展，交叉编译）
+
+| 包 | 作用 | 备注 |
+| --- | --- | --- |
+| **regex 2024.11.6** | 支持 `\p{Han}` / `\p{Emoji}` / `\p{Nd}` 等 Unicode 属性、可变长度后顾、`\X` 字素簇 | 补上标准库 `re` 的已知短板 |
+| **psutil 6.1.0** | 进程/内存/磁盘/线程数等系统信息 | 设备上只反映应用沙箱可见的部分 |
+
+两者都是"setuptools 直接编"的类型。psutil 的构建脚本会**再起一个 qemu 进程**跑测试程序，
+嵌套调用不带 `-L`，所以必须设 `QEMU_LD_PREFIX=<rootfs>`，否则报
+`qemu-aarch64: Could not open '/lib/ld-musl-aarch64.so.1'`。
+
+同样走双层布局：`regex/_regex.so`、`psutil/*.abi3.so` 在 `libs/`，`.py` 在 `extras.zip`。
+
 ## 3. 已验证可用（2026-10）
 
 纯 Python 21 个：requests / urllib3 / certifi / idna / charset-normalizer / python-dateutil /
