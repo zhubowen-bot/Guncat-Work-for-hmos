@@ -1570,6 +1570,13 @@ console.log('[GuncatUiParts 切分]');
     check('交互模式形态 ' + si + ' 出卡片', p.hasUiSeg === true && p.hasUi === true &&
       p.segments.filter((s) => s.type === GuncatUiSegType.UI).length === 1);
   }
+  // 事故教训: 调用方省略 allowUi(或传 undefined)时必须仍按交互模式解析
+  check('allowUi 省略/undefined 时仍出卡片',
+    GuncatUiParts.build('root = Card([a])\na = TextContent("x")', true, undefined).hasUi === true &&
+    GuncatUiParts.build('root = Card([a])\na = TextContent("x")', true).hasUi === true);
+  check('allowUi 显式 false 才走纯文本',
+    GuncatUiParts.build('root = Card([a])\na = TextContent("x")', true, false).hasUi === false);
+
   check('交互模式: 纯文本不强行出卡片',
     GuncatUiParts.buildInteractive('就是一段普通结论, 没有任何程序。', true).hasUiSeg === false);
 

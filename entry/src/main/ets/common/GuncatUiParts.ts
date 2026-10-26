@@ -71,7 +71,11 @@ export class GuncatUiParts {
     if (content === null || content === undefined || content === '') {
       return parts;
     }
-    if (!allowUi) {
+    // 只有**显式传 false** 才进入工作模式分支。
+    // 事故教训: 这里千万别写 `if (!allowUi)` —— ArkTS 在调用方省略该参数时可能把 undefined
+    // 透传进来, `!undefined === true` 会让**交互模式**也走这条分支, 表现就是界面程序被原样
+    // 当正文吐出来(没有卡片、没有代码块、没有围栏, 直接一堆源码)。
+    if (allowUi === false) {
       // 工作模式: 不解析界面程序, 原样一个文本片段(交给 Markdown 渲染)
       let only: GuncatUiSeg = new GuncatUiSeg();
       only.type = GuncatUiSegType.TEXT;
