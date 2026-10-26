@@ -126,6 +126,13 @@ CPython 内静态链接/随包分发的第三方代码（均由 CPython 自身�
 
 本版本**没有**打包这三个库（因此 `sqlite3`、`ssl`、`ctypes` 不可用），无需声明。
 
+### 2.7 Pillow / libjpeg-turbo / libpng（C 扩展，交叉编译）
+
+- **Pillow 11.0.0** — HPND（Historical Permission Notice and Disclaimer，见 Pillow 仓库 LICENSE）；
+  构建脚本 `tooling/python/build-pillow-ohos.sh`，产物 `entry/libs/arm64-v8a/PIL/`；
+- **libjpeg-turbo 3.0.4** — BSD-3-Clause / IJG（`libjpeg.so.62` 随包）；
+- **libpng 1.6.44** — libpng-2.0（`libpng16.so.16` 随包）；zlib 1.3.1 — zlib license（已有）。
+
 ### 2.6 pandas / libffi（C 扩展，交叉编译）
 
 - **pandas 2.2.3** — BSD-3-Clause（Copyright (c) 2008-2011, AQR Capital Management, LLC, Lambda Foundry, Inc. and PyData Development Team）；

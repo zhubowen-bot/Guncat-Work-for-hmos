@@ -103,6 +103,27 @@ numpy 2.1.3 | sum 66 | fft [6.0,-2.0,-2.0,-2.0]
 pandas 2.2.3 | groupby {1: 3.0, 2: 3.0}
 ```
 
+### Pillow：已打通（2026-10，11.0.0）
+
+脚本 [`build-pillow-ohos.sh`](../../tooling/python/build-pillow-ohos.sh)。依赖链：
+zlib（已有）→ libpng 1.6.44 → libjpeg-turbo 3.0.4（cmake，`WITH_SIMD=OFF`，无 nasm 也可编）。
+
+两个必须知道的点：
+
+1. **`--disable-platform-guessing` 是必须的**：Pillow 的 `setup.py` 默认会把 host 的
+   `/usr/include`、`/usr/lib`、`/lib` 塞进编译/链接命令，交叉编译时会把 glibc 头和 x86 库拖进来，
+   表现为 `bits/libc-header-start.h not found` 或 `--fix-cortex-a53-843419 is only supported on
+   AArch64 targets`（这个报错其实是 host 的 `-L/usr/lib/x86_64-linux-gnu` 引起的）。
+2. **`setup.py` 要在目标 python 里跑**（qemu 下），这样 ABI 后缀才是 `cpython-312-aarch64`；
+   编译器仍由 `CC`/`LDSHARED` 指向 host 的交叉 clang。
+
+产物：`entry/libs/arm64-v8a/PIL/*.so`（1MB）+ `libjpeg.so.62` + `libpng16.so.16`；
+`.py` 部分进 `extras.zip`。支持 PNG/JPEG 读写、resize、滤镜，并与 numpy 互转
+（`np.array(img)` / `Image.fromarray`）。
+
+验证（qemu + 模拟真机布局）：新建 32×32 图 → 存 PNG（102 字节）→ 读回 → `np.array` 得到
+`(32,32,3) uint8`；JPEG 保存、resize、BLUR 滤镜均正常。
+
 ## 3. 已验证可用（2026-10）
 
 纯 Python 21 个：requests / urllib3 / certifi / idna / charset-normalizer / python-dateutil /
