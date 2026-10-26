@@ -43,6 +43,9 @@ pypdf
 tabulate
 tqdm
 "
+# 这些包在 PyPI 上同时有"平台轮子"和"纯 Python 轮子", 直接 --only-binary 会挑到 cpXXX 平台轮;
+# 显式指定 py3/any 平台把它们拉成纯 Python 版本。
+PURE_FORCED="${PURE_FORCED:-charset-normalizer}"
 PKGS="${PKGS:-$DEFAULT_PKGS}"
 SOURCE_PKGS="${SOURCE_PKGS:-pyyaml markupsafe}"
 mkdir -p "$WORK/src"
@@ -69,6 +72,13 @@ for pkg in $PKGS; do
     echo "   skip (no pure wheel)" >&2
     continue
   fi
+done
+
+for pkg in $PURE_FORCED; do
+  echo "== $pkg (pure, forced)"
+  python3 -m pip download "$pkg" --no-deps --only-binary=:all: \
+    --python-version 3.12 --implementation py --abi none --platform any \
+    --quiet --dest "$WORK/wheels" > "$WORK/pip-$pkg.log" 2>&1 || echo "   skip" >&2
 done
 
 for whl in "$WORK"/wheels/*.whl; do
@@ -117,6 +127,12 @@ for arc in "$WORK"/src/*.tar.gz; do
       cp -r "$tmp/src/markupsafe" "$STAGE/markupsafe" ;;
   esac
 done
+
+# 自带的小工具(网络自检等), 与三方包一起进 zip
+mkdir -p "$HERE/local-pkgs"
+if [ -d "$HERE/local-pkgs" ]; then
+  cp -f "$HERE"/local-pkgs/*.py "$STAGE/" 2>/dev/null || true
+fi
 
 # 去掉 __pycache__ 与测试目录, 减小体积
 find "$STAGE" -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true

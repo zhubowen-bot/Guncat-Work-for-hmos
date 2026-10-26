@@ -4,6 +4,7 @@
 | --- | --- | --- |
 | beautifulsoup4 | 4.15.0 | MIT License |
 | certifi | 2026.10.23 | MPL-2.0 |
+| charset-normalizer | 3.5.2 | MIT |
 | et_xmlfile | 2.0.0 | MIT |
 | idna | 3.20 | BSD-3-Clause |
 | Jinja2 | 3.1.6 | BSD License |
