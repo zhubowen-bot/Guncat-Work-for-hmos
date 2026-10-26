@@ -92,6 +92,12 @@ if (-not $skipPython) {
       Write-Error "文档里有坏链(exit $LASTEXITCODE) —— 修好再打包"
       exit 4
     }
+    Write-Host '== 第三方许可覆盖检查 =='
+    & wsl -d Ubuntu -u root -- bash -c "cd '$wslPath' && python3 tooling/license-check.py --strict" 2>&1 | Select-Object -Last 4
+    if ($LASTEXITCODE -ne 0) {
+      Write-Error "有随包组件缺少许可声明(exit $LASTEXITCODE) —— 补 THIRD_PARTY_NOTICES.md"
+      exit 5
+    }
     Write-Host '== 原生 Python 技术栈自检(22 项) =='
     & wsl -d Ubuntu -u root -- bash -c "cd '$wslPath' && SSL_CERT_FILE='$wslPath/entry/src/main/resources/rawfile/python/cacert.pem' bash tooling/python/run-verify-stack.sh" 2>&1 | Select-Object -Last 10
     if ($LASTEXITCODE -ne 0) {

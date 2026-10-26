@@ -57,6 +57,8 @@ reportlab
 "
 # 这些包在 PyPI 上同时有"平台轮子"和"纯 Python 轮子", 直接 --only-binary 会挑到 cpXXX 平台轮;
 # 显式指定 py3/any 平台把它们拉成纯 Python 版本。
+# 少数包(sdist 装的纯 Python 回退)取不到元数据里的许可, 这里手工兜底
+LICENSE_OVERRIDES="MarkupSafe=3.0.2|BSD-3-Clause PyYAML=6.0.2|MIT"
 PURE_FORCED="${PURE_FORCED:-charset-normalizer}"
 # 需要真实文件的包(模板/证书), 运行时必须在解压后的目录里
 DATA_PKGS="${DATA_PKGS:-docx pptx certifi reportlab}"
@@ -189,3 +191,21 @@ if [ -d "$WORK/extras-pkgs" ]; then
   ls "$WORK/extras-pkgs" | tr '\n' ' '; echo
 fi
 [ -n "$SKIPPED" ] && echo "跳过(需交叉编译):$SKIPPED" || true
+
+# 把许可摘要同步进 THIRD_PARTY_NOTICES.md 的 2.4 节(带标记, 幂等)
+NOTICE="$PROJ/THIRD_PARTY_NOTICES.md"
+if [ -f "$NOTICE" ] && [ -f "$LICENSE_MD" ]; then
+  python3 - "$NOTICE" "$LICENSE_MD" <<'PY'
+import pathlib, sys
+notice, lic = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+text = notice.read_text(encoding='utf-8')
+body = lic.read_text(encoding='utf-8').strip()
+start, end = '<!-- VENDOR-LICENSES:START -->', '<!-- VENDOR-LICENSES:END -->'
+block = f"{start}\n\n{body}\n\n{end}"
+if start in text and end in text:
+    head = text[:text.index(start)]
+    tail = text[text.index(end) + len(end):]
+    notice.write_text(head + block + tail, encoding='utf-8')
+    print('   THIRD_PARTY_NOTICES.md 的 vendor 许可表已同步')
+PY
+fi

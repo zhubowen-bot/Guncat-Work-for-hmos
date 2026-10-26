@@ -134,6 +134,15 @@ CPython 内静态链接/随包分发的第三方代码（均由 CPython 自身�
   按 GB2312 字符集子集化（保留字形轮廓，未修改字形设计）。
 - OFL 允许随软件分发与子集化；保留原版权声明与许可文本即可（见 `docs/legal/`）。
 
+### 2.14 scipy / OpenBLAS（C/Fortran 扩展，交叉编译）
+
+- **scipy 1.14.1** — BSD-3-Clause（Copyright (c) 2001-2002 Enthought, Inc. 2003-2024, SciPy Developers）；
+  构建脚本 `tooling/python/build-scipy-ohos.sh`，产物 `entry/libs/arm64-v8a/scipy/`（113 个扩展）
+  + `.py` 在 `extras.zip`；
+- **OpenBLAS 0.3.28** — BSD-3-Clause（`libopenblas.so` 随包，含 LAPACK）；
+- **运行时替身库**（本项目自己编写，非第三方）：`libgfortran.so.5`、`libgcc_s.so.1`、`libmvec.so.1`
+  —— 只提供 scipy 实际引用的少量符号，见 `tooling/python/gfortran-rt-stub.c` 等。
+
 ### 2.13 reportlab / watchdog（纯 Python 运行）
 
 - **reportlab 4.2.5** — BSD-3-Clause（ReportLab Inc.）；字体数据各有许可（见包内 `fonts/`）；
@@ -203,32 +212,45 @@ CPython 内静态链接/随包分发的第三方代码（均由 CPython 自身�
 由 [`tooling/python/vendor-pure.sh`](tooling/python/vendor-pure.sh) 从 PyPI 拉取**纯 Python 轮子**并打包，
 运行时挂在 `PYTHONPATH` 上（`filesDir/python/lib/python3.12/site-packages.zip`）。各包版本与许可：
 
+<!-- VENDOR-LICENSES:START -->
+
 # vendor 纯 Python 包许可摘要(自动生成, 勿手改)
 
 | 包 | 版本 | 许可 |
 | --- | --- | --- |
 | beautifulsoup4 | 4.15.0 | MIT License |
 | certifi | 2026.10.23 | MPL-2.0 |
+| charset-normalizer | 3.5.2 | MIT |
+| cssselect | 1.6.0 | BSD-3-Clause |
+| cycler | 0.12.1 | BSD License |
 | et_xmlfile | 2.0.0 | MIT |
 | idna | 3.20 | BSD-3-Clause |
 | Jinja2 | 3.1.6 | BSD License |
 | Markdown | 3.11.2 | BSD-3-Clause |
+| MarkupSafe | 3.0.2 | BSD-3-Clause |
+| mpmath | 1.4.1 | BSD-3-Clause |
 | openpyxl | 3.1.5 | MIT |
 | packaging | 26.3 | Apache-2.0 OR BSD-2-Clause |
+| pyparsing | 3.3.3 | MIT |
 | pypdf | 6.21.2 | BSD-3-Clause |
 | python-dateutil | 3.0.0 | Dual License |
+| python-docx | 1.2.0 | MIT |
+| python-pptx | 1.0.2 | MIT |
 | pytz | 2026.5 | MIT |
+| PyYAML | 6.0.2 | MIT |
+| qrcode | 8.2 | BSD |
 | requests | 2.34.2 | Apache-2.0 |
 | six | 1.17.0 | MIT |
 | soupsieve | 3.0.4 | MIT |
+| sympy | 1.14.0 | BSD |
 | tabulate | 0.10.0 | MIT |
 | tqdm | 4.70.1 | MPL-2.0 AND MIT |
 | typing_extensions | 4.16.0 | PSF-2.0 |
 | urllib3 | 2.8.0 | MIT |
 | xlrd | 2.0.2 | BSD |
+| xlsxwriter | 3.3.0 | BSD-2-Clause |
 
-（完整许可原文随各包位于 `site-packages.zip` 内的 `*.dist-info/` 目录。）
-
+<!-- VENDOR-LICENSES:END -->
 ### 2.3 OpenSSL / SQLite / bzip2 / xz —— 原生 Python 的可选依赖
 
 这几项是随后补进来的（交叉编译见 [`tooling/python/build-native-deps.sh`](tooling/python/build-native-deps.sh)），

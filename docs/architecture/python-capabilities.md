@@ -4,7 +4,7 @@ Guncat Work 内置的是**真正的 CPython 3.12.15**（aarch64 交叉编译，�
 `run_python` 里能用的东西和桌面 Python 基本一致。这份文档回答两个问题：**能做什么**、
 **边界在哪**。
 
-自检脚本：`python3 tooling/python/verify-python-stack.py`（20 项，真机布局下 20/20 通过）。
+自检脚本：`bash tooling/python/run-verify-stack.sh`（**22 项**，按真机布局在 qemu 里跑，22/22 通过）。
 
 ## 1. 标准库
 
@@ -36,9 +36,19 @@ pd.date_range("2026-01-01", periods=30, freq="D", tz="Asia/Shanghai")
 df.pivot_table(index="a", columns="b", values="c", aggfunc="mean")
 ```
 
-**边界**：没有 scipy（`scipy.optimize` / `scipy.sparse` / `scipy.signal` 不可用）。
-原因见 `docs/architecture/python-third-party.md`：scipy 需要 LAPACK（Fortran），
-而 OHOS 工具链没有 Fortran 编译器。numpy 的 `linalg`/`fft` 能覆盖大部分场景。
+```python
+from scipy import linalg, optimize, integrate, sparse, signal, interpolate, stats, special
+linalg.solve(A, b); linalg.eigvals(A); linalg.cholesky(S)
+sparse.csr_matrix(M).dot(v); sparse.linalg.spsolve(S, b); sparse.linalg.eigs(S, k=2)
+optimize.minimize(f, x0); optimize.curve_fit(model, x, y); optimize.least_squares(res, x0)
+integrate.quad(f, 0, 1); integrate.odeint(f, y0, t); integrate.solve_ivp(f, (0, 1), y0)
+stats.norm.cdf(x); stats.ttest_ind(a, b); stats.linregress(x, y)
+signal.butter(2, 0.2); signal.filtfilt(...); signal.find_peaks(y)
+interpolate.interp1d(x, y); interpolate.CubicSpline(x, y)
+```
+
+**边界**：scipy 已随包（1.14.1 + OpenBLAS/LAPACK），但**没有 SIMD 加速**（未编 xsimd），
+大规模矩阵运算比桌面慢一些，算法结果一致。
 
 ## 3. 绘图与图像
 
@@ -182,7 +192,6 @@ obs = Observer(); obs.schedule(Handler(), "工作区", recursive=True); obs.star
 
 | 限制 | 原因 / 替代 |
 | --- | --- |
-| 无 scipy | 缺 Fortran/LAPACK；用 numpy + 手写实现 |
 | 无 GUI 后端 | matplotlib 必须 `Agg`，输出 PNG/SVG/PDF |
 | 无 `tkinter` | 无窗口系统 |
 | 只有单线程执行器 | 超时保护依赖"跑在固定线程 + AST 注入检查点"；`threading` 可用但不要指望并发提速 |
@@ -193,5 +202,6 @@ obs = Observer(); obs.schedule(Handler(), "工作区", recursive=True); obs.star
 
 ## 12. 一句话建议
 
-写代码时按"**桌面 Python 能用什么，这里基本都能用**"来想；遇到 `scipy`、GUI、`fork`、
-运行期 `pip install` 这四类才需要换方案。
+写代码时按"**桌面 Python 能用什么，这里基本都能用**"来想 —— numpy / pandas / scipy /
+matplotlib / Pillow / lxml / 加密 / 文档 / 网络都齐了；只有 GUI、`fork`、运行期 `pip install`
+这三类需要换方案。
