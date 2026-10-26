@@ -1593,6 +1593,23 @@ console.log('[GuncatUiParts 切分]');
   check('交互模式: 纯文本不强行出卡片',
     GuncatUiParts.buildInteractive('就是一段普通结论, 没有任何程序。', true).hasUiSeg === false);
 
+  // Python 缺库提示(源码级): 启动器要把 ModuleNotFoundError 换成"下一步怎么做"的建议,
+  // 否则模型只会看到裸 traceback, 反复重试同一个 import。
+  {
+    const root = new URL('../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+    const launcher = readFileSync(root + '/entry/src/main/cpp/python/guncat_py.cpp', 'utf8');
+    check('launcher 有缺库提示表', launcher.indexOf('_GUNCAT_HINTS') >= 0);
+    check('launcher 的 traceback 走 _hint', launcher.indexOf('_hint(_fmt_exc())') >= 0);
+    check('提示表覆盖 scipy', launcher.indexOf("'scipy':") >= 0);
+    check('提示表覆盖 multiprocessing', launcher.indexOf("'multiprocessing':") >= 0);
+    const tools = readFileSync(root + '/entry/src/main/ets/service/HarnessTools.ts', 'utf8');
+    check('run_python 描述写明 matplotlib 要 Agg', tools.indexOf('use("Agg")') >= 0);
+    check('run_python 描述写明没有 scipy', tools.indexOf('scipy') >= 0);
+    const prompt = readFileSync(root + '/entry/src/main/ets/common/PromptBuilder.ts', 'utf8');
+    check('系统提示词写明能力边界', prompt.indexOf('没有 scipy') >= 0 &&
+      prompt.indexOf('无 multiprocessing') >= 0);
+  }
+
   check('hasProgram 判定', GuncatUiParts.hasProgram('root = Card([') === true &&
     GuncatUiParts.hasProgram('随便一段话') === false);
   check('needsRepair 判定', GuncatUiParts.needsRepair('root = Card([') === false &&

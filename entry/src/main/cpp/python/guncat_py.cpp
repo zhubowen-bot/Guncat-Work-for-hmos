@@ -275,6 +275,49 @@ def _fmt_exc():
             return 'unknown error'
 
 
+# 常见"没随包/在设备上不可用"的模块 → 给出可执行的替代建议。
+# 附在 traceback 后面, 让模型(和用户)当场知道下一步怎么做,
+# 而不是看到一句 ModuleNotFoundError 就反复重试同一个 import。
+_GUNCAT_HINTS = {
+    'scipy': 'scipy 未随包(交叉编译缺 Fortran/LAPACK)。用 numpy 覆盖: 线性代数 numpy.linalg、'
+             'FFT numpy.fft、统计 numpy.mean/std/percentile、插值 numpy.interp、卷积 numpy.convolve。',
+    'sklearn': 'scikit-learn 未随包(依赖 scipy)。分类/回归可手写 numpy 实现, '
+               '或用 pandas 做特征工程后调 numpy.linalg.lstsq。',
+    'tkinter': '设备上没有窗口系统, tkinter 不可用。要出图请用 matplotlib(Agg) 存 PNG。',
+    'PyQt5': '设备上没有 GUI 后端。用 matplotlib(Agg)/Pillow 生成图片文件。',
+    'cv2': 'OpenCV 未随包。图像处理用 Pillow(Image.open/resize/filter) 或 numpy。',
+    'torch': 'PyTorch 未随包(体积与工具链都不允许)。数值计算用 numpy。',
+    'tensorflow': 'TensorFlow 未随包。数值计算用 numpy。',
+    'numba': 'numba 未随包(需要 LLVM JIT)。热点循环用 numpy 向量化。',
+    'psycopg2': 'PostgreSQL 驱动未随包; 需要数据库时用 sqlite3(标准库, 已可用)。',
+    'pymysql': 'pymysql 未随包; 需要数据库时用 sqlite3(标准库, 已可用)。',
+    'multiprocessing': 'multiprocessing / ProcessPoolExecutor 在设备上不可用(缺 _multiprocessing, '
+                       '且超时保护依赖单线程执行器)。用 threading + 队列, 或 numpy 向量化。',
+    '_multiprocessing': '同 multiprocessing: 设备上不可用, 用 threading。',
+}
+
+
+def _hint(text):
+    """给 traceback 追加"下一步怎么办"的提示。"""
+    try:
+        if not text:
+            return text
+        extra = []
+        for _mod, _tip in _GUNCAT_HINTS.items():
+            if ("No module named '%s'" % _mod) in text:
+                extra.append('提示(%s): %s' % (_mod, _tip))
+        if 'No module named' in text and not extra:
+            extra.append('提示: 该模块没有随应用打包(运行期不能 pip install)。'
+                         'run_python 可用的库见工具描述; 需要新库请反馈。')
+        if 'Cannot load backend' in text or 'no display' in text:
+            extra.append('提示: 无 GUI 后端, 请先 matplotlib.use("Agg") 再 savefig 成文件。')
+        if not extra:
+            return text
+        return text.rstrip() + '\n\n' + '\n'.join(extra)
+    except BaseException:
+        return text
+
+
 _stage = 'boot'
 _ok = 0
 _code = 0
@@ -428,7 +471,7 @@ try:
             _error = 'SystemExit(%r)' % (_se.code,)
     except BaseException:
         _ok = 0
-        _error = _fmt_exc()
+        _error = _hint(_fmt_exc())
     finally:
         sys.stdout, sys.stderr = _saved_out, _saved_err
         _stage = 'write_result'
@@ -437,7 +480,7 @@ try:
     _stage = 'done'
 except BaseException:
     _ok = 0
-    _error = _fmt_exc()
+    _error = _hint(_fmt_exc())
 finally:
     if _ok == 0 and _diag_path:
         try:
