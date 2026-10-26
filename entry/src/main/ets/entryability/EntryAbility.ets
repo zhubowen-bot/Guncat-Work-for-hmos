@@ -14,6 +14,7 @@
  */
 
 import { AbilityConstant, ConfigurationConstant, UIAbility, Want, Configuration } from '@kit.AbilityKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { systemShare } from '@kit.ShareKit';
 import { window } from '@kit.ArkUI';
@@ -62,10 +63,12 @@ export default class EntryAbility extends UIAbility {
       }
       hilog.info(DOMAIN, 'testTag', 'Succeeded in loading the content.');
 
-      // 读取当前系统 colorMode, 按深浅色设置状态栏 & 导航栏颜色
+      // 初始化主窗口: 开启屏幕常亮, 并按当前系统 colorMode 设置状态栏 & 导航栏颜色
       try {
         const win = windowStage.getMainWindowSync();
         this.mainWindow = win;
+        // 屏幕常亮: 应用在前台期间不自动熄屏, 避免长程任务(流式回复/Agent 循环)被熄屏打断
+        this.keepScreenOn(win);
         this.applySystemBarTheme(win, isDark);
       } catch (e) {
         hilog.error(DOMAIN, 'testTag', 'Failed to set system bar. Cause: %{public}s', JSON.stringify(e));
@@ -145,6 +148,16 @@ export default class EntryAbility extends UIAbility {
     } catch (e) {
       hilog.error(DOMAIN, 'testTag', 'Failed to update system bar on config change. Cause: %{public}s', JSON.stringify(e));
     }
+  }
+
+  // 屏幕常亮: 应用打开后一直保持亮屏, 避免任务执行中因熄屏中断
+  // 参见 https://developer.huawei.com/consumer/cn/doc/doccenter-capabilities/brightness-control
+  private keepScreenOn(win: window.Window): void {
+    win.setWindowKeepScreenOn(true).then((): void => {
+      hilog.info(DOMAIN, 'testTag', '%{public}s', 'Succeeded in keeping the screen on.');
+    }).catch((err: BusinessError): void => {
+      hilog.error(DOMAIN, 'testTag', 'Failed to keep the screen on. Cause: %{public}s', JSON.stringify(err));
+    });
   }
 
   // 根据深浅色主题设置状态栏 & 导航栏颜色
