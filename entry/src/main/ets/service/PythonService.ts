@@ -10,6 +10,7 @@
 //   * 原生侧全局串行(解释器有 GIL, 且只有一个实例), 这里再用 promise 链排队, 保证不并发进解释器。
 import { common, bundleManager } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
+import { zlib } from '@kit.BasicServicesKit';
 import { resourceManager } from '@kit.LocalizationKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -104,9 +105,28 @@ export class PythonService {
       } catch (e) {
         hilog.warn(DOMAIN, TAG, 'extract site-packages failed: %{public}s', (e as Error).message);
       }
-      // numpy/pandas 的纯 Python 部分(它们的 .so 在应用 lib 目录, 由 sitecustomize 兜住)
+      // numpy/pandas/PIL/matplotlib/scipy 的纯 Python 部分。
+      // **必须解压成真实目录, 不能只把 zip 放那儿**: docx/pptx 的模板、pandas 的数据文件都用
+      // os.path 定位, zip 内路径一律 False(真机实测 PackageNotFoundError)。解压后还能省掉
+      // zipimport 的开销。
       try {
-        RawAsset.extract(context, RAW_EXTRAS, stdlib + '/extras');
+        let extrasZip: string = stdlib + '/extras.zip';
+        RawAsset.extract(context, RAW_EXTRAS, extrasZip);
+        let extrasDir: string = stdlib + '/extras';
+        // 旧版本把 extras.zip **原样**放在这个路径(是个文件), 现在要的是目录 —— 先清掉旧文件
+        if (fileIo.accessSync(extrasDir) && fileIo.statSync(extrasDir).isFile()) {
+          fileIo.unlinkSync(extrasDir);
+        }
+        if (!fileIo.accessSync(extrasDir)) {
+          fileIo.mkdirSync(extrasDir, true);
+        }
+        await zlib.decompressFile(extrasZip, extrasDir);
+        try {
+          fileIo.unlinkSync(extrasZip);   // 解压完就删, 省 ~77MB 沙箱空间
+        } catch (e) {
+          hilog.warn(DOMAIN, TAG, 'remove extras.zip failed: %{public}s', (e as Error).message);
+        }
+        hilog.info(DOMAIN, TAG, 'extras unpacked into %{public}s', extrasDir);
       } catch (e) {
         hilog.warn(DOMAIN, TAG, 'extract extras failed: %{public}s', (e as Error).message);
       }

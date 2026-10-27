@@ -260,6 +260,45 @@ spatial.distance 5.0            cluster.vq.kmeans2
 ②凡是 Python 扩展必须带 DT_NEEDED `libpython3.12.so`；③不得出现 glibc 专有 soname。
 已作为**打包第 2 道门槛**（`exit 6`）。
 
+### 2.10 OpenBLAS 触发 seccomp 被杀（2026-10-27，真机复现）
+
+真机 6 次闪退的堆栈完全一致，根因不在 Python 层：
+
+```
+Reason: Signal:SIGSYS(SYS_SECCOMP) syscall number is 235
+#00 ld-musl-aarch64.so.1          ← 进程在这里被内核杀掉
+#01 libopenblas.so
+#02 libopenblas.so(blas_memory_alloc+432)
+#03 libopenblas.so(blas_thread_init+120)
+#04 libopenblas.so(gotoblas_init+104)
+#05 ld-musl(do_init_fini)         ← dlopen 期间执行 .init
+```
+
+- aarch64 上 `syscall 235` = **`mbind`**（NUMA 内存策略），HarmonyOS 的 seccomp 把它判为违规，
+  直接 **SIGSYS 终止进程** —— 这不是崩溃，`try/except` 当然无效。
+- OpenBLAS 的 `driver/others/memory.c` 在 `#ifdef OS_LINUX` 下**无条件**调用 `my_mbind`，
+  于是 `import numpy` → dlopen libopenblas → 构造函数 → 被杀。pandas / scipy / matplotlib
+  都依赖 numpy，**看起来像"这些库都崩了"，实际是同一个原因**。
+
+修法（已固化进 `build-scipy-ohos.sh` 的 OpenBLAS 步骤）：
+
+1. 给 `common_linux.h` 的 `my_mbind` / `my_set_mempolicy` 增加 `GUNCAT_NO_NUMA_SYSCALLS` 分支，
+   编 OpenBLAS 时加 `-DGUNCAT_NO_NUMA_SYSCALLS`（手机没有 NUMA 策略可谈，直接跳过）；
+2. 同时加 `NO_AFFINITY=1`，避免 `sched_setaffinity` 之类同样可能被拦的调用。
+
+**教训**：在 OHOS 上，"进程突然消失、没有 Python traceback" 优先去看 cppcrash 的
+`Reason: Signal:SIGSYS` —— 大概率是某个 C 库调了被 seccomp 拦的系统调用。
+
+### 2.11 extras 必须是解压后的目录（2026-10-27）
+
+`RawAsset.extract` 只是**拷贝 rawfile 原始字节**，不会解压。之前把 `extras.zip` 拷到
+`<stdlib>/extras`，于是 sys.path 上那个路径实际是个 zip 文件，靠 zipimport 勉强能 import `.py`，
+但 **docx/pptx 的模板、pandas 的数据文件用 `os.path.exists()` 一律 False**
+（真机报 `PackageNotFoundError: .../docx/templates/default.docx`）。
+
+改为：拷贝出 `extras.zip` 后用 `@kit.BasicServicesKit` 的 `zlib.decompressFile` 解到
+`<stdlib>/extras` 目录，成功后删除 zip（省 ~77MB 沙箱空间）；并处理旧版本遗留的"同名文件"。
+
 ## 3. 已验证可用（2026-10）
 
 纯 Python 21 个：requests / urllib3 / certifi / idna / charset-normalizer / python-dateutil /
