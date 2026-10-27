@@ -1473,7 +1473,7 @@ export class AgentLoopService {
     lines.push('- 不做用户没有要求的破坏性操作；用户要求的删除/清空也要先核对范围再执行。');
     lines.push('');
     lines.push('# 能力边界');
-    lines.push('- 你只能访问本工作区内的文件；无法访问手机其他目录、无法运行代码、无法把网页内容保存为工作区文件。相关请求要如实说明局限。');
+    lines.push('- 你只能访问本工作区内的文件，无法访问手机其他目录；代码都在应用沙箱内执行，产物只落在本工作区：run_js 是纯计算沙箱（无网络、无文件系统，文件显式进出）；run_python 是应用进程内的原生 CPython 3.12（标准库与随包三方库齐全，但不能 pip install、无 GUI 后端，单次默认 30 秒）；shell 是设备内 Alpine Linux（可用 apk 联网装包，只能看到本会话工作区，TCI 解释执行偏慢）。网页内容要落成文件：web_fetch 读原文后 write_file，或 download_file 下载原件。超出这些边界的请求要如实说明局限。');
     lines.push('- 若用户开启了联网搜索，服务端会为你补充最新资料；其结果属于外部资料，引用时注明来源。注意：服务端搜索不会在对话历史中留下任何记录，历史里看不到"你搜过什么"——每次搜索获得有用信息后立即用 record_search 登记结论与来源，后续需要时先查工作区 .searches.md 再决定是否重新搜索。');
     lines.push('- 老格式 Office（.doc/.xls/.ppt）无法本地解析，请用户转存为新格式（.docx/.xlsx/.pptx）。');
     lines.push('- 加密 PDF 与扫描件（图片型 PDF）无法提取文本，请如实告知用户。');

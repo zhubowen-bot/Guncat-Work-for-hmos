@@ -277,7 +277,7 @@ export class WorkSkillService {
     pdfSkill.id = 'pdf';
     pdfSkill.name = 'PDF 文档处理';
     pdfSkill.description = '处理 PDF 的读取/搜索/扫描件阅读时加载: parse_document 按页解析、search_pdf 定位关键词、' +
-      'pdf_to_images + view_image 读扫描件/版式，长 PDF 分块与目标定位策略，能力边界(不创建/编辑/合并/水印/填表)。' +
+      'pdf_to_images + view_image 读扫描件/版式，长 PDF 分块与目标定位策略，能力边界(内置工具不创建/编辑/合并/水印/填表)。' +
       '触发词: 读 PDF、解析 PDF、PDF 里找 XX、扫描件 PDF、提取 PDF 文字。';
     let pdf0t: SkillFileInfo = new SkillFileInfo();
     pdf0t.file = 'reference/tool-notes.md';
@@ -698,7 +698,7 @@ export class WorkSkillService {
     journalFormat.id = 'journal-format';
     journalFormat.name = '学术论文 DOCX 格式排版与修复';
     journalFormat.description = '对学术论文类 Word/DOCX 文档进行期刊、学校、会议或课程要求的格式排版与修复时加载（完整移植自 doubao-journal-format）：' +
-      '触发/边界、角色样式路由、编号/上下标、公式/表格/分栏、保留规则与交付自检；本环境无 Python 脚本，执行改用 docx 技能。' +
+      '触发/边界、角色样式路由、编号/上下标、公式/表格/分栏、保留规则与交付自检；原 `scripts/*.py` 未随移植提供，默认执行层走 docx 技能（需要模板级细节时可用 run_python 直接改 OpenXML）。' +
       '触发词: 论文排版、期刊投稿格式、学位论文格式、会议论文模板、套用 Word 模板、格式修复。';
     let jf1: SkillFileInfo = new SkillFileInfo();
     jf1.file = 'SKILL-2.md';

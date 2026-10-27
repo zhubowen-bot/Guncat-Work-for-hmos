@@ -2,7 +2,8 @@
 // glob/grep(纯 TS 正则搜索, 对齐 tool-fs-search) / edit+str_replace_editor(对齐 tool-fs 与
 // str-replace-editor) / web_fetch(对齐 web-fetch-http) / ask_user_question(对齐 ask-user) /
 // schedule_*/goal_*(会话级提醒与目标) / subagent(进程内嵌套代理) / session_search(事件日志检索) /
-// run_js(JSVM-API 沙箱, 见 JsCodeService —— 无 shell 环境下的"执行代码"能力)。
+// run_js(JSVM-API 沙箱, 见 JsCodeService —— 纯计算场景的"执行代码"通道之一,
+// 另两条是 run_python(原生 CPython) 与 shell(设备内 Alpine))。
 // 与 WorkFileService 的既有 25 工具并存; dispatch 由 WorkFileService 兜底转发至此。
 import { fileIo } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
@@ -685,7 +686,7 @@ export class HarnessTools {
       '网络 requests(+certifi 根证书, 可直连外网)、guncat_net(分层网络自检 `check()` / `diagnose()` / `get()` / `download()`); ' +
       '其它 jinja2/PyYAML/openpyxl/xlrd/dateutil/pytz/markdown/tabulate/tqdm/qrcode。' +
       '**没有** GUI 后端、运行期 pip install; 需要数值优化/积分/稀疏矩阵时用 scipy。' +
-      '设备上**没有可用的 shell**(/bin/sh 被权限拒绝), `subprocess` 只能直接 exec 单个程序(设备自带 toybox: echo/ls/cat/grep/sed/sort/head/tail/wc/find/xargs/tar/gzip 等约 40 个, 没有 sh/awk/tr/jq/curl/unzip), 管道要在 Python 里用 Popen 自己接。需要管道语法、重定向、apk 生态或 GNU 工具时用 shell 工具(VM)。' +
+      '设备上**原生解释器所在的进程里没有 sh**(/bin/sh 被权限拒绝), `subprocess` 只能直接 exec 单个程序(设备自带 toybox: echo/ls/cat/grep/sed/sort/head/tail/wc/find/xargs/tar/gzip 等约 40 个, 没有 sh/awk/tr/jq/curl/unzip), 管道要在 Python 里用 Popen 自己接。需要管道语法、重定向、apk 生态或 GNU 工具时用 shell 工具(VM)。' +
       '并发: **纯 Python 计算别用线程/线程池** —— 实测 8 个 CPU 任务串行 162ms, 线程池(2~8 线程)要 1.2~1.4s(慢 7~8 倍, 全是 GIL 争用); 但**会释放 GIL 的 C 运算**(hashlib / zlib / bz2 / lzma / sqlite3 / 编解码)多线程是**真并行**: 实测 sha256 8 线程 2.7 倍、并行度到 8.6, 批量哈希/压缩就该这么干(分块 ≥64KB —— hashlib 单块 <2KB 不释放 GIL); I/O 等待型用线程池同样有效(10 次 sleep(0.05): 502ms → 67ms)。multiprocessing **只有 fork 上下文可用**(Process/Pipe 可以): spawn/forkserver 要重新 exec 解释器(嵌入式解释器没有可执行体, 会直接报错而不是静默 255), Queue/Pool/Lock 要 /dev/shm(沙箱里没有); 真要多进程用 `guncat_mp.map(func, items, workers=4)`(fork+pipe, 函数免 pickle, 单任务 >=100ms 才划算)。' +
       '返回值: 打印到 stdout 的内容随结果返回; 脚本用 `raise SystemExit(2)` 可指定退出码(非 0 不算工具失败); 异常会附 traceback。' +
       '**每次调用是独立的**: 解释器常驻, 但 globals / os.environ / sys.path / 日志级别 / warnings 过滤器 / random 种子 / numpy 打印选项都在调用结束时回滚, 想跨调用传状态就落文件; 标准库与三方库目录是只读的(写它会跨调用、跨会话生效), 要写文件用工作区相对路径或 tempfile.gettempdir()。' +

@@ -12,7 +12,7 @@ description: 将中文法律文书翻译为英文或中英双语，执行术语�
 你是一位面向律师实务的法律翻译与术语审校助手。你的核心任务是把中文法律文书准确、专业、可复核地翻译为英文，或对中英法律文本进行术语、结构、数字和法域一致性审校。输出可以是译文、审校报告、术语表，或排版完成的中英双语对照 Word 文档。
 
 > 环境要求（本项目）:
-> - 本环境无 Python/终端工具，不调用任何外部脚本；
+> - 本环境有 `run_python`（原生 CPython）与 `shell`（设备内 Alpine Linux），但本技能定位是人工翻译与审校，不调用外部脚本；
 > - 基础法律术语中英对照依靠本文件内置术语表与领域口径；
 > - 双语 Word 交付用项目内置 `write_docx`（先 `load_skill("docx")`），文本交付用 `write_file`；
 > - 医学文献翻译参考另见 `reference/medical-1.md` ~ `reference/medical-5.md`。
@@ -195,7 +195,7 @@ description: 将中文法律文书翻译为英文或中英双语，执行术语�
 
 ## 依赖（本项目）
 
-- 本环境无 Python/终端工具，不安装 `python-docx`；Word 交付使用项目内置 `write_docx`（先 `load_skill("docx")`），文本交付用 `write_file`。
+- `run_python` 随包自带 `python-docx` / `python-pptx` / `openpyxl`，但本技能的 Word 交付一律用项目内置 `write_docx`（先 `load_skill("docx")`），文本交付用 `write_file`；不得用脚本产物替代 `write_docx` 作为交付件。
 
 ## 参考文件（本项目）
 

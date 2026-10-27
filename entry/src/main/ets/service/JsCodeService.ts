@@ -1,8 +1,9 @@
 // JsCodeService: Guncat Work 的 run_js 工具 —— 在应用内嵌的 JS 引擎(JSVM-API)里执行 JS 代码。
 //
-// 为什么需要它: 工作模式没有 shell/终端/PTC, 确定性加工只能靠既有工具(transform_file 管道等);
-// run_js 补上"任意小程序化处理"这一块 —— 日期与数值计算、单位换算、正则清洗、JSON 重塑、
-// 统计与汇总、算法试算、批量生成结构化数据(产出 JSON 再交给 write_docx/write_xlsx/write_pptx)。
+// 为什么需要它: 确定性加工原本只能靠既有工具(transform_file 管道等); run_js 补上"任意小程序化处理"
+// 这一块 —— 它是三条执行通道里最轻、启动最快的一条(另两条是 run_python 与 shell):
+// 日期与数值计算、单位换算、正则清洗、JSON 重塑、统计与汇总、算法试算、
+// 批量生成结构化数据(产出 JSON 再交给 write_docx/write_xlsx/write_pptx)。
 //
 // 沙箱边界: 纯计算环境, 无网络、无文件系统、无模块加载(JSVM 不支持 ES Module)。
 // 文件进出只能由本服务显式桥接:

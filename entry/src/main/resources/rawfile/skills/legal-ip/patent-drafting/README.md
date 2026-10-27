@@ -4,4 +4,4 @@
 
 目录结构：`SKILL.md`（主流程与交付合同）、`sub-skills/`（三个阶段子 skill）、`references/writing-style.md`（措辞规范）。
 
-本项目适配：原 `scripts/patent_build.py` 因本环境无终端/脚本已移除，交付编译改为「人工自检清单 + `load_skill("docx")` + `write_docx` 生成 Word」，详见 `SKILL.md` 的“交付合同”一节。
+本项目适配：原 `scripts/patent_build.py` 未随移植打包，交付编译改为「人工自检清单 + `load_skill("docx")` + `write_docx` 生成 Word」，详见 `SKILL.md` 的“交付合同”一节。

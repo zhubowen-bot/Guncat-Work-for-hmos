@@ -15,7 +15,7 @@ description: 专门设计、生成和修改可直接在浏览器中打开的 HTM
 
 ## 关键步骤
 
-> 本环境**无终端/Python 工具**：不执行任何命令、不做本地/云电脑环境判定、不运行截图或内嵌脚本。产物一律用 `write_file` 直接写出。
+> 本环境**有 `shell`（设备内 Alpine Linux，可 `apk add`）与 `run_python`（原生 CPython 3.12），但没有浏览器/截图能力**：素材与环境层面的活可以做，页面渲染效果只能人工核对，不假装跑过浏览器自检。产物一律用 `write_file` 直接写出。
 
 **建目录**：每个任务在工作区根目录下新建语义化目录（如 `sales-dashboard/`），HTML 放在目录里，图片素材放进 `assets/`。迭代已有任务时进原目录改，不另起。
 
@@ -148,4 +148,4 @@ description: 专门设计、生成和修改可直接在浏览器中打开的 HTM
 
 ---
 
-> 本项目适配：本环境无 Python/终端/浏览器工具，不执行 embed/shot 脚本、不做在线发布；交付用 `write_file` 写出 `.html` 并告知文件路径，素材用 `download_file` 下载到 `assets/`，配图用 `write_svg`。原文的 HTML 编写规范、视觉与防 slop 红线保留。
+> 本项目适配：本环境没有浏览器工具（`shell`/`run_python` 可用），因此 embed/shot 这类需要真浏览器渲染的脚本不执行、也不做在线发布；交付用 `write_file` 写出 `.html` 并告知文件路径，素材用 `download_file` 下载到 `assets/`，配图用 `write_svg`。原文的 HTML 编写规范、视觉与防 slop 红线保留。

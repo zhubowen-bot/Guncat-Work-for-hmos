@@ -75,7 +75,7 @@ description: Excel 表格制作/修改/分析技能: Workbook JSON 语法、公�
 - `read_xlsx(path)`：读回 Workbook JSON。本应用生成的文件无损还原；外来 xlsx 近似导入（数值/文本/公式还原，样式细节丢失）。编辑前**先读它**。
 - `edit_xlsx(path, ops)`：ops 为 JSON 数组（详见 workbook-dsl.md 的算子表）。外来文件自动备份 `*_原版备份.xlsx`。
 - 数据来源：工作区已有文件（CSV/JSON/xlsx）用 `read_file`/`read_xlsx` 读取；大文件清洗转换用 `transform_file`（load_skill("data")）。
-- 图片不进入 xlsx（Excel 嵌入图片本环境不支持）。
+- 图片不进入 xlsx（内置 `write_xlsx` 不写图；确需嵌图可用 `run_python` + openpyxl 自行处理）。
 - 编辑/修复原则：先 `read_xlsx` 读回，再**最小改动**——只改任务要求的单元格/行/表，保留未要求改动的结构、公式与可保留的格式；外来文件备份是回滚快照，不要删。
 
 ## 开工前：拆解验收清单（所有工作流）

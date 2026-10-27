@@ -142,4 +142,4 @@ S级选题三项兼备，及格至少两项，只占一项要重新审视，零�
 - 原文为公众号长文写作方法论，本项目完整保留；交付用 `write_file`（Markdown）或 `load_skill("docx")` + `write_docx`（Word，Doc JSON 按公众号长文版式排版）。
 - 联网查资料/核实事实用 `search_web`/`web_fetch`；素材读取用 `read_file`/`parse_document`（PDF）/`download_file`（链接）。
 - 文中需要插图的位置用 `write_svg`（`svg` 技能）生成示意图或标注“图片”由用户供图；不要假装生成位图。
-- 本环境无终端/脚本，不执行任何外部命令；原文不依赖平台工具，无需删改。
+- 原文不依赖平台工具，无需删改；本环境虽有 `shell`/`run_python`，本技能也用不到外部命令。

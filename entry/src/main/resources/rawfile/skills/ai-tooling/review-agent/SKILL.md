@@ -56,4 +56,4 @@ risks.
 
 ---
 
-> 本项目适配（不替代原文）：本环境无 git/终端工具，`git merge-base` / `git diff` 等命令**不可执行**——请用户提供 diff/变更文件，用 `read_file`/`search_files` 读取待审代码与调用点后按原文的 P0–P3 缺陷优先格式输出。原文的判据、优先级与报告格式全部保留。
+> 本项目适配（不替代原文）：本环境没有独立的 git 工具，`shell` 里也未预装 git（需要时可在 VM 内 `apk add git` 联网安装），而且工作区通常不是 git 仓库、没有可 diff 的历史——因此 `git merge-base` / `git diff` 拿不到结果。请用户提供 diff/变更文件，用 `read_file`/`search_files` 读取待审代码与调用点后按原文的 P0–P3 缺陷优先格式输出。原文的判据、优先级与报告格式全部保留。

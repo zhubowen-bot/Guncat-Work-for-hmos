@@ -46,7 +46,7 @@ agent_created: true
 
 ### 第 6 步：校验与交付
 
-本环境无终端/脚本，不运行任何校验命令；改为人工核对每个 Mermaid 代码块（语法、引号、`-->|标签|` 写法、subgraph 闭合），修复明显报错后再交付。
+本环境有 `shell`/`run_python`，但**没有 Mermaid 渲染器**，无法真正跑图校验；改为人工核对每个 Mermaid 代码块（语法、引号、`-->|标签|` 写法、subgraph 闭合），修复明显报错后再交付。
 
 核对通过后，用 `write_file` 交付 `.md` 文件并告知文件路径，提示用户：GitHub / GitLab / VS Code / Typora / Obsidian 及 mermaid.live 均可直接渲染。可选定制：节点明细表另用 `load_skill("xlsx")` + `write_xlsx` 输出（节点/年份/贡献/解决的问题/改进自/被谁改进/来源），便于筛选与补录；需要静态图时用 `write_svg`（`svg` 技能）生成 SVG 版演进图作为附件。
 
@@ -57,4 +57,4 @@ agent_created: true
 
 ---
 
-> 本项目适配（不替代原文）：`scripts/validate_mermaid.py` 在本环境不可用已移除，校验改为人工核对；联网用 `search_web`/`web_fetch`，交付用 `write_file`，节点明细表可用 `load_skill("xlsx")` + `write_xlsx`，静态演进图可用 `write_svg`。原文的谱系叙事方法、Mermaid 模式与输出模板全部保留。
+> 本项目适配（不替代原文）：`scripts/validate_mermaid.py` 未随移植打包，本环境也没有 Mermaid 渲染器，校验改为人工核对；联网用 `search_web`/`web_fetch`，交付用 `write_file`，节点明细表可用 `load_skill("xlsx")` + `write_xlsx`，静态演进图可用 `write_svg`。原文的谱系叙事方法、Mermaid 模式与输出模板全部保留。

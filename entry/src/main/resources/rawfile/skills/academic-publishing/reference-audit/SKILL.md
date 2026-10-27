@@ -379,4 +379,4 @@ description: 用于用户提交论文、学位论文或参考文献清单后，�
 
 ---
 
-> 本项目适配（不替代原文）：本环境无 Python/终端，`scripts/lookup_metadata.py` 已移除，题录核验改用 `search_web`/`web_fetch` 查 Crossref/PubMed/arXiv/DOI 等权威来源；报告交付用 `write_file`（Markdown）或 `load_skill("docx")` + `write_docx`（Word）；待核验条目台账用 `load_skill("xlsx")` + `write_xlsx`。原文七阶段审计流程、引用角色判断与证据边界规则全部保留。
+> 本项目适配（不替代原文）：`scripts/lookup_metadata.py` 未随移植打包；题录核验默认用 `search_web`/`web_fetch` 查 Crossref/PubMed/arXiv/DOI 等权威来源，确需批量核验时可用 `run_python`（内置 requests，可联网）或 `shell` 自己写脚本查询；报告交付用 `write_file`（Markdown）或 `load_skill("docx")` + `write_docx`（Word）；待核验条目台账用 `load_skill("xlsx")` + `write_xlsx`。原文七阶段审计流程、引用角色判断与证据边界规则全部保留。

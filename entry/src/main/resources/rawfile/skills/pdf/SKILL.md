@@ -1,6 +1,6 @@
 ---
 name: pdf
-description: 处理 PDF 的读取/搜索/扫描件阅读时加载：parse_document 按页解析文字层、search_pdf 定位关键词、pdf_to_images + view_image 读扫描件/版式，长 PDF 分块与目标定位策略。当前环境不支持创建/编辑/合并/拆分/旋转/水印/加密/表单填写/OCR 文字层生成。触发词：读 PDF、解析 PDF、PDF 里找 XX、扫描件 PDF、提取 PDF 文字。
+description: 处理 PDF 的读取/搜索/扫描件阅读时加载：parse_document 按页解析文字层、search_pdf 定位关键词、pdf_to_images + view_image 读扫描件/版式，长 PDF 分块与目标定位策略。内置工具不支持创建/编辑/合并/拆分/旋转/水印/表单填写/OCR 文字层（这类操作只能用 run_python 自己写脚本，不在本技能承诺内）。触发词：读 PDF、解析 PDF、PDF 里找 XX、扫描件 PDF、提取 PDF 文字。
 ---
 
 # PDF 文档读取与扫描件阅读（本项目适配版）
@@ -20,7 +20,7 @@ description: 处理 PDF 的读取/搜索/扫描件阅读时加载：parse_docume
 ## 不触发本技能
 
 - 用户只是要写 Word/PPT/Excel 内容，PDF 只是输入素材 → 用对应 Office 技能；
-- 用户要**创建、编辑、合并、拆分、旋转、裁剪、加水印、加密/解密、填表、生成可搜索 PDF/OCR 文字层** → 本环境不支持，直接如实说明，不假装完成；
+- 用户要**创建、编辑、合并、拆分、旋转、裁剪、加水印、加密/解密、填表、生成可搜索 PDF/OCR 文字层** → 内置工具做不到，如实说明；确有必要时只能用 `run_python`（内置 pypdf / reportlab）自己写脚本处理，这不是本技能的交付承诺，产出必须逐页核对后才可交付，**不得假装已完成**；
 - 文件未提供、不可访问或未授权 → 不处理。
 
 ## 工作流（本项目）
@@ -34,15 +34,15 @@ description: 处理 PDF 的读取/搜索/扫描件阅读时加载：parse_docume
 
 ## 能力边界（照实说）
 
-当前环境**不支持**：
+内置工具**不支持**：
 - 创建/生成 PDF；
 - 编辑/合并/拆分/旋转/裁剪 PDF；
 - 加水印、加密/解密、表单填写；
 - 生成可搜索文字层/OCR 文本层。
 
 替代路径：
-- 要 PDF 交付 → 生成对应 Office 文件（`write_docx`/`write_pptx`/`write_xlsx`）由用户/系统导出；
-- 要编辑 PDF → 请用户提供可编辑源文件或使用专门 PDF 工具；
+- 要 PDF 交付 → 生成对应 Office 文件（`write_docx`/`write_pptx`/`write_xlsx`）由用户/系统导出，或按需用 `run_python` + reportlab 直接生成（自担版式风险）；
+- 要编辑 PDF → 请用户提供可编辑源文件或使用专门 PDF 工具；确需程序化处理可用 `run_python` + pypdf；
 - 要 OCR → 当前可转图后由模型视觉阅读，但不会产出可搜索 PDF。
 
 ## 自检
