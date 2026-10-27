@@ -18,6 +18,7 @@ import { LoopDecisions } from '../common/LoopDecisions';
 import { WorkLoopStateMachine } from '../common/WorkLoopStateMachine';
 import { WorkLoopPlanner, WorkLoopTurnInfo, WorkLoopStep } from '../common/WorkLoopPlanner';
 import { WorkLoopStepInfoBuilder } from '../common/WorkLoopStepInfoBuilder';
+import { SteerQueue } from '../common/SteerQueue';
 import { SessionLogAggregator } from '../common/SessionLogAggregator';
 import { AgentLoader } from '../service/AgentLoader';
 import { PluginHotLoader } from '../service/PluginHotLoader';
@@ -127,8 +128,10 @@ export class ChatViewModel {
   // 最近一次使用的真实智能体(退出工作模式时回切)
   private lastChatAgentId: string = '';
   // ===== Guncat Work 6.1 (dsh 移植) =====
-  // 插话队列(对齐 dsh 的 next-step steering): 任务执行中用户发送的消息在本轮结束后注入
-  private workSteerQueue: string[] = [];
+  // 插话队列(对齐 dsh 的 next-step steering): 任务执行中用户发送的消息先入队,
+  // 只在"安全插话点"(一轮工具结果全部落地、本轮 assistant 收尾之后)注入下一步请求;
+  // 绝不在工具/流式输出执行到一半时把它们切断(见 common/SteerQueue.ts 的边界说明)。
+  private workSteerQueue: SteerQueue = new SteerQueue();
   // 待回答的 ask_user_question(由 ChatPage 定时同步, 渲染问题卡片)
   pendingAsk: PendingAsk | null = null;
   // 已生成过 LLM 标题的会话(每会话一次, 应用运行期内)
@@ -1712,19 +1715,38 @@ export class ChatViewModel {
 
   // ===== Guncat Work 6.1: steering / ask_user / schedule / title =====
 
-  // 任务执行中的用户插话(对齐 dsh 的 steer): 消息进会话历史与插话队列,
-  // 本轮工具执行结束后作为"用户补充"注入下一步请求
+  // 任务执行中的用户插话(对齐 dsh 的 steer):
+  //   - 立刻进会话历史(用户马上能看到自己说的话, 也保证切会话/重启后不丢);
+  //   - 同时进插话队列, 等最近的**安全插话点**(本轮工具结果全部落地、本轮 assistant 收尾之后)
+  //     作为【用户补充】注入下一步请求 —— 不打断在途工具, 也不打断正在流式输出的这一轮。
   private steerWork(text: string): void {
     let conv: Conversation | null = this.currentConversation;
     if (conv === null ||
       (conv.mode !== Constants.MODE_WORK && conv.mode !== Constants.MODE_INTERACTIVE)) {
       return;
     }
-    let msg: Message = Message.ofUser(generateMessageId(), text, text, []);
+    let value: string = text.trim();
+    if (value === '') {
+      return;
+    }
+    let accepted: boolean = this.workSteerQueue.push(value);
+    if (!accepted) {
+      return;
+    }
+    let msg: Message = Message.ofUser(generateMessageId(), value, value, []);
     conv.messages.push(msg);
-    this.workSteerQueue.push(text);
     this.persistConversations();
     this.notifyUIChange();
+    // 留痕: 插话在哪个时刻入队、当时队列里有几条(排查"插话没回应"时看这一条)
+    if (this.context !== null) {
+      SessionLogService.append(this.context, conv.id, 'steer_queued',
+        { 'chars': value.length, 'queued': this.workSteerQueue.size() });
+    }
+    // 明确回执: 插话不是"发出去没反应", 而是排队到本轮结束后生效;
+    // 若循环正挂在 ask_user_question 上, 说清楚"先答题再接手", 否则回执会与实际时序不符
+    let reply: string = this.pendingAsk !== null ?
+      '已插话：先回答上面的问题，随后接手' : '已插话：本轮执行完就接手';
+    promptAction.showToast({ message: reply, duration: 2000 });
   }
 
   // ChatPage 每秒同步一次待回答提问(工具挂起在等答案, 事件无法主动推送 UI)
@@ -1809,8 +1831,10 @@ export class ChatViewModel {
       return;
     }
     if (this.isStreaming) {
-      // 工作模式任务执行中: 不打断, 转为插话(next-step steering)
-      if (this.workMode) {
+      // 任务执行中: 工作/交互模式不打断, 转为插话(next-step steering);
+      // 判定用 agentLoopMode 而不是 workMode —— 输入区的插话按钮对两种模式都开着,
+      // 这里若只认工作模式, 交互模式点了发送就变成一句"请稍候"的空响应。
+      if (this.agentLoopMode) {
         this.steerWork(userText);
         return;
       }
@@ -1987,7 +2011,8 @@ export class ChatViewModel {
     this.workRepeatKey = '';
     this.workRepeatCount = 0;
     this.workRepeatDetector.reset();
-    this.workSteerQueue = [];
+    // 新任务从空队列开始: 上一轮遗留的插话早已进了会话历史(会随历史一起带给模型), 不会丢
+    this.workSteerQueue.clear();
     this.pendingAsk = null;
     if (this.context !== null) {
       SubagentService.bind(this.apiConfig, this.loopThinkingEnabled, this.loopEffortForRequest,
@@ -2171,6 +2196,17 @@ export class ChatViewModel {
         planInfo.aborted = this.abortSignal.aborted;
         let plan = WorkLoopPlanner.decide(planInfo);
         if (plan.action === WorkLoopStep.FINISH) {
+          // 收尾前先看插话队列: 有插话时"收尾"就是最近的安全插话点 —— 本轮 assistant 已完整落地,
+          // 把用户补充注入历史后再跑一轮, 而不是 break 收工(否则这条插话只会留在队列里没人回应)
+          if (this.workSteerQueue.hasPending()) {
+            this.finalizeWorkTurn(turnMsg, false, conv);
+            messages.push(LoopMessage.fromTurn(turn));
+            let drainedFinish: string[] = this.workSteerQueue.drain();
+            for (let s: number = 0; s < drainedFinish.length; s++) {
+              messages.push(LoopMessage.user(SteerQueue.inject(drainedFinish[s])));
+            }
+            continue;
+          }
           finalAnswerText = turn.content;
           this.finalizeWorkTurn(turnMsg, false, conv);
           // 粘性 max-tokens(对齐 dsh): 输出顶到上限即收尾并提示续跑
@@ -2376,13 +2412,11 @@ export class ChatViewModel {
         for (let r: number = 0; r < reminders.length; r++) {
           messages.push(LoopMessage.user(reminders[r]));
         }
-        // 用户插话(next-step steering): 本轮结束后注入, 下一步请求可见
-        if (this.workSteerQueue.length > 0) {
-          let drained: string[] = this.workSteerQueue;
-          this.workSteerQueue = [];
-          for (let s: number = 0; s < drained.length; s++) {
-            messages.push(LoopMessage.user('【用户补充】' + drained[s]));
-          }
+        // 用户插话(next-step steering): 本轮工具结果已全部落地, 这是最近的安全插话点 ——
+        // 在下一轮请求之前把队列整体取出, 附在历史末尾
+        let drainedSteer: string[] = this.workSteerQueue.drain();
+        for (let s: number = 0; s < drainedSteer.length; s++) {
+          messages.push(LoopMessage.user(SteerQueue.inject(drainedSteer[s])));
         }
       }
 
@@ -2462,7 +2496,8 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
     this.workRepeatKey = '';
     this.workRepeatCount = 0;
     this.workRepeatDetector.reset();
-    this.workSteerQueue = [];
+    // 新任务从空队列开始: 上一轮遗留的插话早已进了会话历史(会随历史一起带给模型), 不会丢
+    this.workSteerQueue.clear();
     this.pendingAsk = null;
     if (this.context !== null) {
       SubagentService.bind(this.apiConfig, this.loopThinkingEnabled, this.loopEffortForRequest,
@@ -2589,6 +2624,33 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
           }
         });
       }
+      // 收尾竞态兜底: 循环已经决定收尾(或界面续写)之后才到达的插话, 队列里还留着。
+      // 这时不能再"等下一轮"——下一轮开始会清空队列; 也不能塞进已经定稿的历史。
+      // 补跑有限几轮, 把插话交给模型(依然是轮边界, 不打断任何在途工具)。
+      let tailSteerRounds: number = 0;
+      while (!this.abortSignal.aborted && !res.maxStepsReached &&
+        tailSteerRounds < Constants.WORK_STEER_TAIL_ROUNDS && this.workSteerQueue.hasPending()) {
+        tailSteerRounds++;
+        let drainedTail: string[] = this.workSteerQueue.drain();
+        for (let s: number = 0; s < drainedTail.length; s++) {
+          messages.push(LoopMessage.user(SteerQueue.inject(drainedTail[s])));
+        }
+        if (this.context !== null) {
+          SessionLogService.append(this.context, conv.id, 'steer_tail',
+            { 'round': tailSteerRounds, 'count': drainedTail.length });
+        }
+        startStep = startStep + Math.max(1, res.steps);
+        state = new WorkLoopStepState();
+        this.markStreamStart();
+        res = await WorkLoopDriverBridge.runWithStep(async (i: number): Promise<WorkLoopTurnInfo> => {
+          return await this.runDriverStep(conv, messages, metrics, turnToolEvents, state, i + startStep);
+        }, Constants.WORK_MAX_STEPS, (s: number, action: string, reason?: string): void => {
+          if (this.context !== null) {
+            SessionLogService.append(this.context, conv.id, 'driver_step',
+              { 'step': s, 'action': action, 'reason': reason !== undefined ? reason : '' });
+          }
+        });
+      }
       if (res.maxStepsReached) {
         step = Constants.WORK_MAX_STEPS;
       }
@@ -2597,7 +2659,8 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
       if (this.context !== null) {
         SessionLogService.append(this.context, conv.id, 'driver_summary', {
           'steps': res.steps, 'toolSteps': res.toolSteps, 'textSteps': res.textSteps,
-          'compactSteps': res.compactSteps, 'retries': res.retries,
+          'compactSteps': res.compactSteps, 'steerSteps': res.steerSteps, 'retries': res.retries,
+          'steerTailRounds': tailSteerRounds,
           'aborted': res.aborted, 'maxStepsReached': res.maxStepsReached,
           'finalReason': res.finalReason, 'finalState': res.finalState
         });
@@ -2682,6 +2745,8 @@ let info: WorkLoopTurnInfo = new WorkLoopTurnInfo();
         }
         let step: number = stepIndex;
         let lastTurn: LoopTurnResult | null = null;
+        // 本轮收尾时若有插话待注入: 记下"插话续跑"的单步信息, 让驱动继续而不是结束
+        let pendingSteerInfo: WorkLoopTurnInfo | null = null;
         for (let once: number = 0; once < 1; once++) {
 if (this.abortSignal.aborted) {
           state.turnEndStatus = 'aborted';
@@ -2805,6 +2870,20 @@ if (this.abortSignal.aborted) {
         planInfo.aborted = this.abortSignal.aborted;
         let plan = WorkLoopPlanner.decide(planInfo);
         if (plan.action === WorkLoopStep.FINISH) {
+          // 收尾前先看插话队列: 本轮 assistant 已经完整落地(没有工具在跑), 这里就是最近的安全插话点。
+          // 把插话注入历史后交给驱动再跑一轮, 而不是 break —— 否则这条插话只会留在队列里,
+          // 下轮开始被清空, 用户看到的是"插话成功却没人回应"。
+          if (this.workSteerQueue.hasPending()) {
+            this.finalizeWorkTurn(turnMsg, false, conv);
+            messages.push(LoopMessage.fromTurn(turn));
+            let drainedFinish: string[] = this.workSteerQueue.drain();
+            for (let s: number = 0; s < drainedFinish.length; s++) {
+              messages.push(LoopMessage.user(SteerQueue.inject(drainedFinish[s])));
+            }
+            pendingSteerInfo = WorkLoopStepInfoBuilder.steer(
+              drainedFinish.length, turn.content.length, turn.finishReason);
+            break;
+          }
           state.finalAnswerText = turn.content;
           this.finalizeWorkTurn(turnMsg, false, conv);
           // 粘性 max-tokens(对齐 dsh): 输出顶到上限即收尾并提示续跑
@@ -3012,14 +3091,15 @@ if (this.abortSignal.aborted) {
         for (let r: number = 0; r < reminders.length; r++) {
           messages.push(LoopMessage.user(reminders[r]));
         }
-        // 用户插话(next-step steering): 本轮结束后注入, 下一步请求可见
-        if (this.workSteerQueue.length > 0) {
-          let drained: string[] = this.workSteerQueue;
-          this.workSteerQueue = [];
-          for (let s: number = 0; s < drained.length; s++) {
-            messages.push(LoopMessage.user('【用户补充】' + drained[s]));
-          }
+        // 用户插话(next-step steering): 本轮工具结果已全部落地, 这是最近的安全插话点 ——
+        // 在下一轮请求之前把队列整体取出, 附在历史末尾
+        let drainedSteer: string[] = this.workSteerQueue.drain();
+        for (let s: number = 0; s < drainedSteer.length; s++) {
+          messages.push(LoopMessage.user(SteerQueue.inject(drainedSteer[s])));
         }
+        }
+        if (pendingSteerInfo !== null) {
+          return pendingSteerInfo;
         }
         if (lastTurn !== null) {
           return WorkLoopStepInfoBuilder.tool(lastTurn.toolCalls.length,

@@ -2,6 +2,29 @@
 
 > [← 返回 README](README.md)
 
+## 未发布（插话：执行中点发送没反应）
+
+> 依据真机反馈：任务执行中在输入框输入一句话点发送，输入框里的字消失了，但任务毫无反应。
+
+- **修复：执行中点发送被界面层直接吞掉（根因）**。`ChatPage.handleSend()` 里有一句无条件的
+  `if (this.vm.isStreaming) return`，而输入框在"确认已发送"后立刻清空文本 —— 于是插话按钮的实际
+  效果是"字消失、任务无感"，`ChatViewModel.sendMessage()` 里那条插话分支永远走不到。
+  现在发送路由收敛到纯逻辑 `SendRoute.decide()`：空闲 → 正常发送；执行中 + 工作/交互模式 → 插话；
+  执行中 + 聊天模式 → 提示等待。
+- **修复：交互模式执行中发送被当成"请稍候"**。`sendMessage()` 的插话分支原本只认 `workMode`，
+  而输入区的插话按钮对工作/交互两种模式都开着；统一改为 `agentLoopMode`。
+- **修复：插话可能"入队了却没人回应"**。原实现只在一轮工具结果落地后取队列：如果插话是在模型
+  已经决定收尾时进来的，队列会在下一轮开始被清空，用户看到的是自己的补充挂在时间线上、却没有下文。
+  现在收尾点也是安全插话点 —— 收尾前先看队列，有插话就注入历史再跑一轮（`WorkLoopStep.STEER`），
+  另有收尾竞态兜底（`WORK_STEER_TAIL_ROUNDS`）。
+- **安全边界写死并抽成纯逻辑**：插话只入队，注入只发生在轮边界（本轮工具结果全部落地 / 本轮
+  assistant 收尾之后）。既不中止在途工具与流式输出，也不拆散 `tool_calls` 与 `tool_result` 的协议配对。
+  队列与路由判定在 `common/SteerQueue.ts`，由 harness 断言守着。
+- **回执**：插话入队后提示「已插话：本轮执行完就接手」，不再让用户猜"到底传没传进去"。
+- **测试**：`test/guncat-harness` 增至 **589 项**（新增 SteerQueue / SendRoute / 计划器 STEER /
+  驱动续跑 / 模拟器等价 / builder / mapper 断言）；`tsc -p check/tsconfig.json` exit 0；
+  `assembleHap` **BUILD SUCCESSFUL**。
+
 ## 未发布（run_python 内存与 matplotlib 缓存）
 
 > 依据一轮实机复测：一次无法复现的闪退（高置信度归因于内存压力）+ 每次 import matplotlib 都在

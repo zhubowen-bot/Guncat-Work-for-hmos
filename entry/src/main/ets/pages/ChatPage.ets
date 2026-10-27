@@ -17,6 +17,7 @@ import { WorkArtifactFile, WorkArtifactSummary, WorkArtifactUtil } from '../comm
 import { Constants } from '../common/Constants';
 import { GuncatUiEvent } from '../common/GuncatUiRuntime';
 import { GuncatUiParts } from '../common/GuncatUiParts';
+import { SendRoute } from '../common/SteerQueue';
 import { Message } from '../model/Message';
 import { Agent } from '../model/Agent';
 import { Conversation } from '../model/Conversation';
@@ -1685,10 +1686,16 @@ struct ChatPage {
   }
 
   private handleSend(text: string): void {
-    if (text.trim() === '') {
+    // 执行中点击发送必须先落到"插话"上, 不能在这里被 isStreaming 直接吞掉:
+    // 之前这里无条件 `if (isStreaming) return`, 而输入框在确认"已发送"后就把文本清空了,
+    // 于是插话按钮点下去的实际效果是"字消失、任务无感"。
+    // 路由判定收敛在 SendRoute(纯逻辑, 有断言守着): 空闲→发送; 执行中+Agent Loop→插话; 执行中+聊天→提示等待。
+    let route: string = SendRoute.decide(text, this.vm.isStreaming, this.vm.agentLoopMode);
+    if (route === SendRoute.IGNORE) {
       return;
     }
-    if (this.vm.isStreaming) {
+    if (route === SendRoute.WAIT) {
+      this.showToast('AI 正在回复中，请稍候');
       return;
     }
     if (this.vm.apiConfig.apiKey === '') {
@@ -1700,7 +1707,8 @@ struct ChatPage {
       this.showToast('请先选择一个智能体');
       return;
     }
-    // 注意: inputText 的清空由 MessageInputView 内部 onClick 在确认真正发送后才执行
+    // 注意: inputText 的清空由 MessageInputView 内部 onClick 在确认真正发送后才执行;
+    // 插话(route=STEER)同样走 sendMessage, 由 VM 入队并在安全插话点注入(不打断任务)。
     this.vm.sendMessage(text);
     this.refreshTick++;
     this.scrollToBottomDelayed();

@@ -16,6 +16,8 @@ export class WorkLoopDriverResult {
   toolSteps: number = 0;
   textSteps: number = 0;
   compactSteps: number = 0;
+  // 因为"用户插话待回应"而接着跑的一轮(不是工具轮, 也不是收尾)
+  steerSteps: number = 0;
   retries: number = 0;
   aborted: boolean = false;
   maxStepsReached: boolean = false;
@@ -80,6 +82,9 @@ export class WorkLoopDriver {
         if (hooks.onToolBatch !== undefined) {
           hooks.onToolBatch(info.toolCallsCount);
         }
+      } else if (d.action === WorkLoopStep.STEER) {
+        // 安全插话点: 本轮已收尾, 插话已注入历史, 继续下一轮(不结束、不计工具步)
+        r.steerSteps++;
       } else if (d.action === WorkLoopStep.FINISH || d.action === WorkLoopStep.TEXT) {
         r.textSteps++;
         r.finalReason = d.reason;

@@ -28,6 +28,7 @@ import { WorkLoopSimulator } from './gen/WorkLoopSimulator.ts';
 import { RetryAfterParser } from './gen/RetryAfterParser.ts';
 import { LoopTurnInfoMapper } from './gen/LoopTurnInfoMapper.ts';
 import { WorkLoopStepInfoBuilder } from './gen/WorkLoopStepInfoBuilder.ts';
+import { SteerQueue, SendRoute } from './gen/SteerQueue.ts';
 import { WorkLoopDriver, WorkLoopDriverConfig } from './gen/WorkLoopDriver.ts';
 import { PluginToolExecutor, PluginToolResult } from './gen/PluginToolExecutor.ts';
 import { LoopError } from './gen/LoopError.ts';
@@ -826,6 +827,24 @@ console.log('[WorkLoopPlanner]');
   check('describe 压缩', WorkLoopPlanner.describe(compactInfo) === '上下文溢出压缩');
   const noOut = new WorkLoopTurnInfo();
   check('describe 无输出', WorkLoopPlanner.describe(noOut) === '无输出收尾');
+
+  // 插话(steering): 本轮已收尾但用户补了话 —— 必须续跑一轮, 不能当作收尾把补充丢掉
+  const steerInfo = new WorkLoopTurnInfo();
+  steerInfo.contentLength = 8;
+  steerInfo.finishReason = 'stop';
+  steerInfo.steerCount = 2;
+  d = WorkLoopPlanner.decide(steerInfo);
+  check('插话待回应 → steer 续跑(不收尾)', d.action === WorkLoopStep.STEER && d.reason === 'steer');
+  check('describe 插话续跑', WorkLoopPlanner.describe(steerInfo) === '插话续跑 2');
+  // 有工具调用的轮次仍先把工具跑完, 插话不能抢在工具批次前面(安全边界)
+  steerInfo.toolCallsCount = 1;
+  check('工具轮优先于插话', WorkLoopPlanner.decide(steerInfo).action === WorkLoopStep.TOOL);
+  steerInfo.toolCallsCount = 0;
+  // 中止优先: 用户点了停止就不再为插话续跑
+  steerInfo.aborted = true;
+  check('中止优先于插话', WorkLoopPlanner.decide(steerInfo).action === WorkLoopStep.ABORT);
+  steerInfo.aborted = false;
+  check('无插话仍按原逻辑收尾', WorkLoopPlanner.decide(new WorkLoopTurnInfo()).reason === 'no_output');
 }
 
 // ===== PluginManifestLoader =====
@@ -975,6 +994,17 @@ console.log('[WorkLoopSimulator]');
     return t;
   }, 3);
   check('步数上限兜底', max.steps === 3 && max.finalReason === 'max_steps');
+
+  const steered = WorkLoopSimulator.run((i) => {
+    const t = new WorkLoopTurnInfo();
+    t.contentLength = 3;
+    if (i === 0) {
+      t.steerCount = 1;
+    }
+    return t;
+  }, 10);
+  check('插话续跑(模拟器同驱动)', steered.steps === 2 && steered.steerSteps === 1 &&
+    steered.textSteps === 1 && steered.finalReason === 'final_answer');
 }
 
 // ===== WorkLoopDriver ↔ WorkLoopSimulator 等价 =====
@@ -1163,6 +1193,46 @@ console.log('[WorkLoopDriver]');
     out.compactSteps === 1 && out.toolSteps === 1 && out.textSteps === 1);
 }
 
+{
+  // 插话续跑: 第 2 步"已收尾 + 插话待回应"不能结束循环, 要接着跑第 3 步
+  const actions = [];
+  const out = await WorkLoopDriver.run({
+    async runTurn(i) {
+      const t = new WorkLoopTurnInfo();
+      if (i === 0) {
+        t.toolCallsCount = 1;
+      } else if (i === 1) {
+        t.contentLength = 6;
+        t.finishReason = 'stop';
+        t.steerCount = 1;
+      } else {
+        t.contentLength = 4;
+        t.finishReason = 'stop';
+      }
+      return t;
+    },
+    onStep(s, a) { actions.push(a); }
+  }, new WorkLoopDriverConfig());
+  check('插话续跑不结束循环', actions.join(',') === 'tool,steer,finish');
+  check('插话续跑计数', out.steerSteps === 1 && out.steps === 3 && out.textSteps === 1);
+  check('插话续跑后正常收尾', out.isFinished() === true && out.finalReason === 'final_answer');
+}
+
+{
+  // 插话续跑也要受 maxSteps 兜底, 不能因为用户不停地插话而无限循环
+  const cfg = new WorkLoopDriverConfig();
+  cfg.maxSteps = 2;
+  const out = await WorkLoopDriver.run({
+    async runTurn() {
+      const t = new WorkLoopTurnInfo();
+      t.contentLength = 1;
+      t.steerCount = 1;
+      return t;
+    }
+  }, cfg);
+  check('插话续跑受 maxSteps 兜底', out.maxStepsReached === true && out.steps === 2);
+}
+
 // ===== LoopTurnInfoMapper =====
 console.log('[LoopTurnInfoMapper]');
 
@@ -1177,6 +1247,10 @@ console.log('[LoopTurnInfoMapper]');
     'aborted': true, 'toolCallsCount': 0, 'contentLength': 0, 'finishReason': ''
   });
   check('mapper 中止字段', aborted.aborted === true && aborted.maxStepsReached === false);
+  const steered = LoopTurnInfoMapper.map({
+    'toolCallsCount': 0, 'contentLength': 12, 'finishReason': 'stop', 'steerCount': 2
+  });
+  check('mapper 透传插话计数', steered.steerCount === 2);
 }
 
 // ===== WorkLoopStepInfoBuilder =====
@@ -1190,6 +1264,51 @@ console.log('[WorkLoopStepInfoBuilder]');
     fin.finishReason === 'max_tokens' && fin.aborted === false);
   const tool = WorkLoopStepInfoBuilder.tool(3, 0, 'tool-calls');
   check('builder 工具步', tool.toolCallsCount === 3 && tool.finishReason === 'tool-calls');
+  const steer = WorkLoopStepInfoBuilder.steer(2, 9, 'stop');
+  check('builder 插话续跑步', steer.steerCount === 2 && steer.toolCallsCount === 0 &&
+    steer.contentLength === 9 && steer.aborted === false);
+  check('builder 收尾/工具步默认无插话', WorkLoopStepInfoBuilder.finish(1, 'stop').steerCount === 0 &&
+    WorkLoopStepInfoBuilder.tool(1, 1, 'tool-calls').steerCount === 0);
+}
+
+// ===== SteerQueue / SendRoute =====
+console.log('[SteerQueue]');
+
+{
+  const q = new SteerQueue();
+  check('空插话不入队', q.push('   \n  ') === false && q.hasPending() === false && q.size() === 0);
+  check('插话入队并去首尾空白', q.push('  把标题换成小写  ') === true &&
+    q.size() === 1 && q.hasPending() === true);
+  q.push('再加一列日期');
+  check('多条插话按入队顺序保存', q.size() === 2);
+
+  const drained = q.drain();
+  check('安全点整体取走且保持顺序',
+    drained.length === 2 && drained[0] === '把标题换成小写' && drained[1] === '再加一列日期');
+  check('取走后队列清空', q.hasPending() === false && q.size() === 0);
+  check('重复 drain 为空(不会重复注入)', q.drain().length === 0);
+
+  q.push('A');
+  const first = q.drain();
+  q.push('B');
+  check('取走后新插话仍能入队', first[0] === 'A' && q.drain()[0] === 'B');
+
+  q.push('中止后不该留');
+  q.clear();
+  check('clear 清空队列', q.hasPending() === false);
+  check('注入文本带【用户补充】前缀', SteerQueue.inject('  改一下口径 ') === '【用户补充】改一下口径');
+}
+
+console.log('[SendRoute]');
+
+{
+  check('「执行中点了没反应」的根因: 不能判成 IGNORE',
+    SendRoute.decide('先别管格式', true, true) !== SendRoute.IGNORE);
+  check('空输入忽略', SendRoute.decide('   ', false, true) === SendRoute.IGNORE);
+  check('空闲 → 正常发送', SendRoute.decide('做一份周报', false, true) === SendRoute.SEND);
+  check('工作模式执行中 → 插话', SendRoute.decide('先别管格式', true, true) === SendRoute.STEER);
+  check('交互模式执行中 → 插话', SendRoute.decide('改成柱状图', true, true) === SendRoute.STEER);
+  check('聊天模式执行中 → 提示等待', SendRoute.decide('你好', true, false) === SendRoute.WAIT);
 }
 
 // ===== PluginToolExecutor =====

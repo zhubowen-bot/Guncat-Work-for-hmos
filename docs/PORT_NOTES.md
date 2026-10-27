@@ -13,7 +13,7 @@ HarmonyOS 原生应用（基座为 GuncatAI_HMOS-APP 的「工作模式」），
 | 追加式会话事件日志(JSONL) | `core/session` + `session-persistence-jsonl` | `service/SessionLogService.ts`，`<filesDir>/sessions/<convId>.jsonl`，`turn_start / assistant_message / tool_result / turn_end` 留痕，"进入请求的必留痕" |
 | 有界并行工具池 + 模型序提交 | `core/agent-loop/tool-calls.ts`（rolling pool / exclusive barriers） | `ChatViewModel.executeWorkLoop`：只读调用段并发，池上限 `WORK_MAX_PARALLEL_TOOLS=4`；改动类调用串行屏障 |
 | 粘性 max-tokens | turn 以 max-tokens 收尾 | `AgentLoopService.extractFinishReason`（三协议）+ 循环收尾标注"发送'继续'" |
-| 用户插话（steering） | inbox `next-step` 队列 | 任务执行中发送消息 → `workSteerQueue` → 本轮工具结束后注入`【用户补充】`；不打断任务 |
+| 用户插话（steering） | inbox `next-step` 队列 | 任务执行中发送消息 → `common/SteerQueue.ts` → 仅在**轮边界**注入`【用户补充】`（本轮工具结果全部落地后；已决定收尾时改为再跑一轮）；不打断任务、不拆散 tool_calls/tool_result |
 | 工具结果溢出暂存 | `spill` 包 | `service/SpillStore.ts`：全文落盘工作区 `.spill/`，模型收头尾节选+定位提示，可 read_file 读回 |
 | 重复调用提醒 | `guard` repeat-tool reminder | `noteWorkRepeat`（沿用基座，3/5/8 次提醒） |
 | 前缀复用式上下文压缩 | `compaction-basic` | 沿用基座两级压缩（修剪→前缀复用摘要→整条裁剪），usage 锚定预算 |

@@ -69,6 +69,7 @@ port('common/GuncatUiPrompt.ts', 'GuncatUiPrompt.ts', []);
 port('common/GuncatUiParts.ts', 'GuncatUiParts.ts', []);;
 port('common/LoopTurnInfoMapper.ts', 'LoopTurnInfoMapper.ts', []);
 port('common/WorkLoopStepInfoBuilder.ts', 'WorkLoopStepInfoBuilder.ts', []);
+port('common/SteerQueue.ts', 'SteerQueue.ts', []);
 port('model/ToolCallRecord.ts', 'ToolCallRecord.ts', []);
 port('common/Types.ts', 'Types.ts', [["from '../model/ToolCallRecord'", "from './ToolCallRecord.ts'"]]);
 console.log('done');

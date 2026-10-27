@@ -26,4 +26,15 @@ export class WorkLoopStepInfoBuilder {
     info.aborted = false;
     return info;
   }
+
+  // 本轮已收尾, 且安全插话点上取走了 steerCount 条用户插话: 驱动继续跑一轮而不是结束。
+  static steer(steerCount: number, contentLength: number, finishReason: string): WorkLoopTurnInfo {
+    let info: WorkLoopTurnInfo = new WorkLoopTurnInfo();
+    info.toolCallsCount = 0;
+    info.contentLength = contentLength;
+    info.finishReason = finishReason;
+    info.aborted = false;
+    info.steerCount = steerCount;
+    return info;
+  }
 }

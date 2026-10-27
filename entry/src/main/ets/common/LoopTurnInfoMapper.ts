@@ -20,6 +20,10 @@ export class LoopTurnInfoMapper {
     info.aborted = turn['aborted'] === true;
     info.contextOverflow = turn['contextOverflow'] === true;
     info.maxStepsReached = turn['maxStepsReached'] === true;
+    let sc: Object | undefined = turn['steerCount'];
+    if (typeof sc === 'number') {
+      info.steerCount = sc as number;
+    }
     return info;
   }
 }

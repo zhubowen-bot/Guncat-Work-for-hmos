@@ -7,6 +7,8 @@ export class WorkLoopStep {
   static readonly FINISH: string = 'finish';
   static readonly ABORT: string = 'abort';
   static readonly COMPACT: string = 'compact';
+  // 用户插话已到安全注入点: 不收尾, 带着【用户补充】再跑一轮
+  static readonly STEER: string = 'steer';
 }
 
 export class WorkLoopTurnInfo {
@@ -16,6 +18,8 @@ export class WorkLoopTurnInfo {
   aborted: boolean = false;
   maxStepsReached: boolean = false;
   contextOverflow: boolean = false;
+  // 本轮收尾前从插话队列取走的条数; > 0 表示"本轮收尾 + 插话待回应", 驱动应继续而不是结束
+  steerCount: number = 0;
 }
 
 export class WorkLoopDecision {
@@ -34,6 +38,14 @@ export class WorkLoopPlanner {
     if (info.maxStepsReached) {
       d.action = WorkLoopStep.FINISH;
       d.reason = 'max_steps';
+      return d;
+    }
+    // 插话优先于收尾: 模型已经给出最终回答, 但用户在这一轮里补了话,
+    // 这条补充必须真的被模型看到(否则用户看到的是"插话成功却没人回应")。
+    // 只加在"本轮没有任何工具调用"之后才安全 —— 有工具调用时仍先跑完工具。
+    if (info.steerCount > 0 && info.toolCallsCount === 0) {
+      d.action = WorkLoopStep.STEER;
+      d.reason = 'steer';
       return d;
     }
     if (info.toolCallsCount > 0) {
@@ -67,6 +79,9 @@ export class WorkLoopPlanner {
     }
     if (d.action === WorkLoopStep.TOOL) {
       return '工具调用 ' + info.toolCallsCount.toString();
+    }
+    if (d.action === WorkLoopStep.STEER) {
+      return '插话续跑 ' + info.steerCount.toString();
     }
     if (d.reason === 'max_steps') {
       return '步数耗尽';

@@ -71,6 +71,7 @@ for (const [relSrc, relDst, replaces] of [
   ['common/SubagentIsolation.ts', 'SubagentIsolation.ts', []],
   ['common/LoopTurnInfoMapper.ts', 'LoopTurnInfoMapper.ts', []],
   ['common/WorkLoopStepInfoBuilder.ts', 'WorkLoopStepInfoBuilder.ts', []],
+  ['common/SteerQueue.ts', 'SteerQueue.ts', []],
   ['common/Types.ts', 'Types.ts', []],
   ['common/GuncatUiLang.ts', 'GuncatUiLang.ts', []],
   ['common/GuncatUiLibrary.ts', 'GuncatUiLibrary.ts', []],

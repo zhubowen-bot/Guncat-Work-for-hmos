@@ -46,17 +46,21 @@ for step in 1..WORK_MAX_STEPS(200, 防失控保险):
 - **前缀缓存设计**：系统提示词全静态（构建一次不再变）；日期/文件树/任务清单以「运行时上下文」快照 user 消息追加到历史末尾、且仅在内容变化时追加；历史严格追加式增长（压缩是唯一改写历史的操作）——相邻两轮请求共享逐字节相同前缀，模型侧 KV 缓存可跨轮命中，写文件后也只有末尾一小段需要重算。
 - **中断**：`stopStreaming()` 同时调用 `ChatService.abort()` 与 `AgentLoopService.abort()`；中断轮若无产出则移除消息，否则追加「⏹ 任务已手动停止」。
 - **步数保险**：`WORK_MAX_STEPS(200)` 仅作为失控保护（防止工具调用死循环持续消耗），正常长任务触不到；触发后在最后一条消息标注「发送“继续”可接着执行」。
+- **用户插话（steering，对齐 dsh 的 next-step 注入）**：任务执行中用户再发一条消息**不打断任务**，而是进 `SteerQueue`（`common/SteerQueue.ts`）排队；只在**轮边界**注入 ——
+  ① 本轮工具结果全部落地、assistant 收尾之后，作为 `【用户补充】` 进下一轮请求；
+  ② 本轮已经决定收尾、但队列里还有插话时，计划器返回 `WorkLoopStep.STEER` 让驱动再跑一轮（收尾竞态另由 `WORK_STEER_TAIL_ROUNDS` 兜底），否则这条补充会挂在时间线上却没人回应。
+  任何在途工具/流式输出都不会被切断，`tool_calls` 与 `tool_result` 的协议配对也不会被拆散。执行中点发送该走哪条路（正常发送 / 插话 / 提示等待）由 `SendRoute.decide()` 一处判定。
 
 ## 2.1 核心层纯逻辑迭代（R13–R64，维护者看这里）
 
 6.1 之后对 Agent Loop 核心层做了系统性迭代，把“可决策、可测试”的部分抽成 `common/` 纯逻辑模块，运行期只做 IO 注入。改循环逻辑先看这批文件：
 
-- **决策/编排层**：`ToolScheduler`（调度分组 + `SchedulerSummary` 统计）、`RepeatDetector`（重复防护）、`LoopDecisions`（快照去重/溢出压缩/max_tokens/无效步判定）、`WorkLoopPlanner`（单轮 TOOL/FINISH/ABORT/COMPACT + `describe` 可读描述）、`WorkLoopSimulator`（全循环回归）、`WorkLoopDriver`（循环主体纯驱动：状态机+计划器+重试/压缩回调）、`WorkLoopDriverBridge` + `LoopTurnInfoMapper` + `WorkLoopStepInfoBuilder`（真实循环接入桥梁/单步信息纯构造）、`WorkLoopStateMachine`（idle/running/paused/awaiting_user/aborting）。
+- **决策/编排层**：`ToolScheduler`（调度分组 + `SchedulerSummary` 统计）、`RepeatDetector`（重复防护）、`LoopDecisions`（快照去重/溢出压缩/max_tokens/无效步判定）、`WorkLoopPlanner`（单轮 TOOL/FINISH/ABORT/COMPACT/STEER + `describe` 可读描述）、`WorkLoopSimulator`（全循环回归）、`WorkLoopDriver`（循环主体纯驱动：状态机+计划器+重试/压缩回调）、`SteerQueue` + `SendRoute`（插话队列 + 执行中发送路由，只在轮边界注入）、`WorkLoopDriverBridge` + `LoopTurnInfoMapper` + `WorkLoopStepInfoBuilder`（真实循环接入桥梁/单步信息纯构造）、`WorkLoopStateMachine`（idle/running/paused/awaiting_user/aborting）。
 - **协议层**：`LLMProtocol`（协议/端点单一事实源）、`ToolDefAdapter`（三协议工具形态）、`SSEProtocolAdapter` + `SSEAdapterFactory`（SSE 解析统一流水线，工作/聊天共用）。
 - **错误/重试**：`RetryPolicy`（指数退避+jitter+retry-after+可重试 kind）、`RetryAfterParser`（Retry-After 头解析）、`ToolRetryPolicy`（工具级重试）、`LoopError`（显式 `retryable`/`userMessage`，纯层可单测）。
 - **插件/技能**：`ToolRegistry`（工具+技能元数据单一事实源）、`PluginManifestLoader`（manifest 解析/apply/unload）、`PluginHotLoader`（rawfile 热加载/reloadAll）、`PluginToolExecutor`（插件工具声明式实现注册）、`SkillDirectoryFormatter`（技能目录 full_index/trigger_only A/B）。
 - **可观测**：`LoopMetrics`（重试/压缩/max_tokens 计数）、`SessionLogAggregator`（协议维度 + 工具延迟 p50/p90/p99 + 跨会话聚合）、`PromptBudget`（token 预算估算）。
-- **测试**：`test/guncat-harness` 纯逻辑用例 **521 项全绿**；改 `common/` 后跑 `node setup.mjs && node test-core.mjs`，再 `node check-setup.mjs && tsc -p check/tsconfig.json`，最后 `assembleHap` 真机构建。
+- **测试**：`test/guncat-harness` 纯逻辑用例 **589 项全绿**；改 `common/` 后跑 `node setup.mjs && node test-core.mjs`，再 `node check-setup.mjs && tsc -p check/tsconfig.json`，最后 `assembleHap` 真机构建。
 
 每轮改动与验证记录在 `docs/ITERATION_LOG.md`；当前待办见 `docs/BACKLOG.md`；dsh 移植对照见 `docs/PORT_NOTES.md`。
 

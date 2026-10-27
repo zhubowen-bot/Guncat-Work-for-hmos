@@ -8,6 +8,7 @@ export class WorkLoopSimResult {
   toolSteps: number = 0;
   textSteps: number = 0;
   compactSteps: number = 0;
+  steerSteps: number = 0;
   aborted: boolean = false;
   finalReason: string = '';
   decisions: string[] = [];
@@ -30,6 +31,8 @@ export class WorkLoopSimulator {
       r.steps++;
       if (d.action === WorkLoopStep.TOOL) {
         r.toolSteps++;
+      } else if (d.action === WorkLoopStep.STEER) {
+        r.steerSteps++;
       } else if (d.action === WorkLoopStep.FINISH || d.action === WorkLoopStep.TEXT) {
         r.textSteps++;
         r.finalReason = d.reason;

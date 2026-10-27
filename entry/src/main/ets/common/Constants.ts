@@ -282,6 +282,9 @@ export class Constants {
   // 循环主体是否走 WorkLoopDriver 纯驱动(接入桥梁见 service/WorkLoopDriverBridge.ts):
   // 已切换为 true, 由驱动接管循环级状态机/计划器; 如需回退旧 executeWorkLoop 改回 false 即可
   static readonly WORK_USE_DRIVER_LOOP: boolean = true;
+  // 插话兜底续跑上限: 循环已经决定收尾之后才到达的插话(收尾竞态), 最多再补几轮把它交给模型;
+  // 正常路径不会走到这里(收尾前会先检查队列), 这个上限只防"用户不停插话"把循环拖成死循环
+  static readonly WORK_STEER_TAIL_ROUNDS: number = 4;
   // 单次工具调用的兜底超时(ms): 兜住个别工具自身无超时控制的同步重活(如大 Office/PDF 处理),
   // 超时后返回 ERROR 结果并继续循环, 不无限期占住 Agent Loop。网络类工具自身超时更短。
   static readonly WORK_TOOL_TIMEOUT_MS: number = 180000;
