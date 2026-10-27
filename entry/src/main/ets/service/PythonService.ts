@@ -113,11 +113,19 @@ export class PythonService {
         let extrasZip: string = stdlib + '/extras.zip';
         RawAsset.extract(context, RAW_EXTRAS, extrasZip);
         let extrasDir: string = stdlib + '/extras';
-        // 旧版本把 extras.zip **原样**放在这个路径(是个文件), 现在要的是目录 —— 先清掉旧文件
-        if (fileIo.accessSync(extrasDir) && fileIo.statSync(extrasDir).isFile()) {
-          fileIo.unlinkSync(extrasDir);
-        }
-        if (!fileIo.accessSync(extrasDir)) {
+        // 旧版本把 extras.zip **原样**放在这个路径(是个文件), 现在要的是目录。
+        // 这里不用 statSync().isFile() —— harness 的类型桩里没有该方法(CI 会报 TS2339),
+        // 而且"先建目录, 失败就当同名文件清掉重建"本身更省事、更稳。
+        try {
+          if (!fileIo.accessSync(extrasDir)) {
+            fileIo.mkdirSync(extrasDir, true);
+          }
+        } catch (e) {
+          try {
+            fileIo.unlinkSync(extrasDir);
+          } catch (e2) {
+            hilog.warn(DOMAIN, TAG, 'remove stale extras failed: %{public}s', (e2 as Error).message);
+          }
           fileIo.mkdirSync(extrasDir, true);
         }
         await zlib.decompressFile(extrasZip, extrasDir);

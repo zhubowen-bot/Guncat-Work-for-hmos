@@ -11,7 +11,9 @@ powershell -ExecutionPolicy Bypass -File tools/build-check.ps1
 
 默认只跑**快速门槛**（合起来几秒）；`-Full` 才跑 24 项运行库自检（qemu，约 10 分钟）。
 
-快速门槛（每次都跑，任一失败即中止）：
+快速门槛（每次都跑，任一失败即中止，合计约 1 分钟）：
+0. `test/guncat-harness/check-setup.mjs` + `tsc -p check/tsconfig.json` —— **与 CI 完全一致**的
+   服务层类型检查（失败 `exit 7`）。不跑这一步就会出现"本地通过、GitHub 报 TS2339"的来回。
 1. `tooling/docs-check.py --strict` —— 文档相对链接/锚点检查（坏链 `exit 4`）；
 2. `tooling/python/check-sonames.py --strict` —— **随包 .so 依赖闭合**：soname 齐全、
    Python 扩展都带 `libpython3.12.so`、无 glibc 泄漏（失败 `exit 6`）；

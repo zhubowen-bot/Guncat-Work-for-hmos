@@ -85,6 +85,28 @@ try {
 } catch {
   $hasRootfs = $false
 }
+# ===== 服务层类型检查（与 CI 完全一致，约 3 秒）=====
+# CI 会跑 `node check-setup.mjs && npx tsc -p check/tsconfig.json`；本地不跑的话，
+# 就会出现"本地构建通过、GitHub 报 TS2339"这种来回（真踩过：fileIo.statSync(...).isFile 在
+# harness 的类型桩里不存在）。放在这里把它挡在推送之前。
+Write-Host '== 服务层类型检查(tsc) =='
+$npx = Get-Command npx -ErrorAction SilentlyContinue
+if ($null -ne $npx) {
+  Push-Location (Join-Path (Get-Location) 'test\guncat-harness')
+  try {
+    & node check-setup.mjs 2>&1 | Out-Null
+    & npx -y -p typescript@5.5.4 tsc -p check/tsconfig.json 2>&1 | Select-Object -Last 8
+    if ($LASTEXITCODE -ne 0) {
+      Write-Error "服务层类型检查失败(exit $LASTEXITCODE) —— 修好再打包/推送"
+      exit 7
+    }
+  } finally {
+    Pop-Location
+  }
+} else {
+  Write-Host '   （未找到 npx，跳过类型检查）'
+}
+
 if ($hasRootfs) {
   $here = (Get-Location).Path
   $drive = $here.Substring(0, 1).ToLower()

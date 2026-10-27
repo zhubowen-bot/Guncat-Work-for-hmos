@@ -1,4 +1,4 @@
-# 用 PowerPoint COM 把 pptx 导出为 PNG(视觉自检用)
+﻿# 用 PowerPoint COM 把 pptx 导出为 PNG(视觉自检用)
 param([string]$PptxPath, [string]$OutDir)
 $ErrorActionPreference = 'Stop'
 $pp = New-Object -ComObject PowerPoint.Application

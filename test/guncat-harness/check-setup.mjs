@@ -210,7 +210,7 @@ writeFileSync(join(allDir, 'py-shim.ts'),
 // ===== @kit 桩 =====
 writeFileSync(join(stubsDir, '@kit.CoreFileKit.ts'),
   `export declare namespace fileIo {\n` +
-  `  interface Stat { size: number; mtime: number; isDirectory(): boolean; }\n` +
+  `  interface Stat { size: number; mtime: number; isDirectory(): boolean; isFile(): boolean; }\n` +
   `  interface File { fd: number; }\n` +
   `  enum OpenMode { READ_ONLY = 0, READ_WRITE = 1, CREATE = 2, TRUNC = 4, APPEND = 8 }\n` +
   `  function accessSync(path: string): boolean;\n  function statSync(path: string): Stat;\n` +
