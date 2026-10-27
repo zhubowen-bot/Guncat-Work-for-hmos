@@ -5,9 +5,11 @@
 //     不经过 QEMU 仿真 —— 同一段脚本比 VM 里的 python3 快 2~3 个数量级。
 //   * 工作目录固定为**会话工作区**, 与 shell / read_file / write_file 看到的是同一批文件
 //     (原生侧直接走 POSIX 文件 API, 不存在"两套目录"的问题)。
-//   * 没有 fork/exec: subprocess / os.system / multiprocessing 不可用, 需要调 Unix 工具的
-//     场景请用 shell 工具(或 VM 内的 `npy` 桥反过来调原生 Python)。
+//   * 没有 shell: subprocess 只能直接 exec 单个程序; multiprocessing 只有 fork 上下文可用
+//     (spawn/forkserver 要重新 exec 解释器, 原生侧会明确抛错), Queue/Pool 要 /dev/shm。
+//     需要调 Unix 工具请用 shell 工具(或 VM 内的 `npy` 桥反过来调原生 Python)。
 //   * 原生侧全局串行(解释器有 GIL, 且只有一个实例), 这里再用 promise 链排队, 保证不并发进解释器。
+//     超时未回收的任务没结束前, 原生侧会直接拒绝新调用(不排队), 任务结束后自动恢复。
 import { common, bundleManager } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { zlib } from '@kit.BasicServicesKit';
@@ -219,13 +221,9 @@ export class PythonService {
     } catch (e) {
       state = 0;
     }
-    if (state === 2) {
-      return PythonService.failResult('[python 已停用] 本会话连续 10 次超时且有任务未能中断; ' +
-        '为免持续占 CPU, 已停止执行 Python, 请重启应用。');
-    }
     if (state === 1) {
-      return PythonService.failResult('[python 忙] 上一次 Python 调用超时且未能中断, 仍在后台运行; ' +
-        '它结束后会自动恢复(不会排队)。请稍后再试。');
+      return PythonService.failResult('[python 忙] 上一次 Python 调用还在执行(超时后未能中断, 仍在后台运行); ' +
+        '它一结束就自动恢复(不会排队)。请稍后再试。');
     }
     // 串行化: 前一个调用结束后才开始(无论成功失败)
     await PythonService.chain.catch((): void => {});

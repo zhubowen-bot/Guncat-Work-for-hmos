@@ -2,6 +2,43 @@
 
 > [← 返回 README](README.md)
 
+## 未发布（run_python 运行环境体检修复）
+
+> 依据一次实机体检报告（进程常驻 + 解释器复用带来的系统性缺陷），逐条在源码里复核后修掉
+> 确认存在的 6 类问题；同时补了一个桌面侧的启动器回归测试（`tooling/python/launcher-test.py`）。
+
+- **修复：两次正常超时就把整个会话的 Python 锁死**。回收计数按 `timedOut` 记账，而硬超时
+  （AST 截止抛 `TimeoutError`）其实是**干净回收**的，也被算了进去；阈值只有 2，且计数只增不减，
+  于是"写个死循环 → 超时 → 再写个死循环"之后，后续所有 Python 调用都被拒绝，只能重启应用。
+  现在只统计**软超时**（宿主放弃等待、线程还卡在调用里），并且任务真正结束时把计数减回去 ——
+  自愈，不需要重启。顺带删掉了"连续 10 次软超时永久停用"这条与实现口径对不上的封禁状态。
+- **修复：超时任务未结束时新调用会覆盖队列槽位**。原生侧现在先看 `g_busy`，忙就**直接拒绝**
+  （与"不排队"的承诺一致），避免 `g_pending` 被覆盖导致调用永久等待。
+- **修复：6 类进程级状态跨调用泄漏**。解释器常驻，但 `os.environ` / `sys.path` / `logging`
+  根级别 / `warnings.filters` / `random` 种子 / numpy 打印选项与 `seterr` 全是进程级状态，
+  一次调用改了下一轮还在（实机复现：`random.seed(12345)` 后下一轮首个 `random()` 就是该种子的首值、
+  `warnings.simplefilter("ignore")` 之后警告一直被吞）。现在每次调用前后做快照/回滚，
+  `sys.modules` 的 import 缓存仍保留（那是常驻解释器的性能来源）。
+- **修复：`sys.stdout` 是裸 `StringIO`**。没有 `.buffer`、`fileno()` 抛 `UnsupportedOperation`，
+  而 `os.write(1, …)` 直接绕过捕获漏到宿主 stdout（既不进结果也不报错）。改成把 fd 1/2
+  `dup2` 到 scratch 里的真实文件 + 包着 fd 的 `TextIOWrapper`：`print` / `buffer.write` /
+  `fileno()` / `os.write` 四条路径都落进同一份输出（`dup` 失败时回退 StringIO）。
+- **修复：解释器安装树可写（跨会话代码注入）**。`sys.prefix` 下的文件是此后每次调用、
+  每个会话都会 import 的代码，往里写文件在实机上是成功的。现在用审计钩子
+  （`sys.addaudithook`）拦住 `open(..., "w")` / `os.mkdir` / `os.remove` / `os.chmod` 等写操作，
+  抛带解释的 `PermissionError`；读与工作区写入不受影响。
+- **修复：`multiprocessing` 的 spawn 静默失败**。嵌入式解释器没有可重新 exec 的 Python
+  可执行体，spawn/forkserver 的子进程会以 `exitcode=255` 结束而且 `start()`/`join()` 不抛异常
+  （最危险的静默错误）。现在在 `multiprocessing` 首次 import 后把 `spawn.get_executable`
+  换掉，直接抛一条说明"改用 fork / `guncat_mp` / threading"的 `RuntimeError`。
+- **其它**：`for` 循环的超时采样从每 8192 轮改为**每 256 轮**（掩码是常量，每轮开销不变；
+  循环体慢时 8192 轮要等几十秒才看表，等于没有超时）；诊断里的 `sys.path` 改用**启动快照**，
+  并把运行期被改出来的条目单独标成 `path(runtime-added)=`；`/tmp` 不存在时给出
+  `tempfile.gettempdir()` 的提示；pyarrow/parquet 缺库提示。
+- **测试**：新增 `tooling/python/launcher-test.py` —— 从 `guncat_py.cpp` 里抽出启动器模板，
+  在桌面 CPython 上按"同一个 `__main__` globals 反复 exec"的语义跑 38 项回归（捕获、状态隔离、
+  超时、只读守卫、spawn 守卫、诊断），`node test/guncat-harness/test-core.mjs` 里也加了源码级守卫。
+
 ## 未发布（工作模式误渲染交互卡片）
 
 - **修复：交互模式一张卡片都不显示（回归）**。上一版把 `isUiFence` 收紧成"只有显式语言才算

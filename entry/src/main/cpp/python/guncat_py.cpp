@@ -12,9 +12,12 @@
 //   * 用户代码的 globals 每次都是全新的 dict，互不串味；
 //   * 工作目录切到调用方给的 workDir（就是会话工作区），脚本可直接用相对路径读写，
 //     与 shell / read_file / write_file 看到的是同一批文件；
-//   * stdout/stderr 在 Python 层用 io.StringIO 捕获，写成文件再读回（避免在 C++ 里解析）；
-//   * 超时：看门狗线程调 PyErr_SetInterrupt() 触发 KeyboardInterrupt（纯 Python 循环有效，
-//     阻塞在 C 调用里的情况无法中断，按"放弃等待"处理，与 run_js 的策略一致）。
+//   * stdout/stderr 用**真实文件对象 + dup2 重定向 fd 1/2** 捕获：print、sys.stdout.buffer、
+//     fileno()、os.write(1) 四条路径都落在同一份文件里（StringIO 那条老路会让后三条失效）；
+//   * 解释器常驻，所以每次调用前后做一遍**进程级状态快照/回滚**（sys.path / os.environ /
+//     warnings / logging / random / numpy 打印选项），用户上一次调用的副作用不会漏到下一次；
+//   * 超时：启动器用 ast 给循环注入截止检查（到点抛 TimeoutError，纯 Python 层，不伤进程），
+//     宿主侧再兜一层"软超时"（放弃等待 + 熔断），阻塞在 C 调用里的按"放弃等待"处理。
 #include <dlfcn.h>
 #include <unistd.h>
 
@@ -67,7 +70,10 @@ struct PyApi {
 std::mutex g_mutex;
 PyApi g_api;
 std::atomic<bool> g_running{false};
-// 超时被放弃、但仍在后台占着解释器的调用数(与 run_js 同策略: 不无限累积)
+// 仍在后台跑、**还没回收**的软超时调用数。
+// 只统计软超时: 硬超时(AST 截止)在启动器里抛 TimeoutError 后线程已经把调用做完并归还了
+// 解释器, 属于"已回收", 不能算进来 —— 早先按 timedOut 计数, 结果两次正常的超时就把
+// 整个会话的 Python 永久锁死(实测复现)。这个计数是**活的**: 僵尸任务一结束就减回去。
 std::atomic<int> g_abandoned{0};
 constexpr int kMaxAbandoned = 2;
 constexpr const char* kLibName = "libpython3.12.so";
@@ -225,7 +231,7 @@ int32_t PropToInt(napi_env env, napi_value obj, const char* name, int32_t defVal
     return out;
 }
 
-// 启动器: 用户代码在子命名空间里执行, 输出被 io.StringIO 捕获后落盘。
+// 启动器: 用户代码在子命名空间里执行, 输出被重定向到文件后由宿主读回。
 // 全部状态走环境变量里的文件路径, 避免把用户代码拼进 Python 源码字符串。
 //
 // 两条硬要求(踩过坑):
@@ -235,6 +241,7 @@ int32_t PropToInt(napi_env env, napi_value obj, const char* name, int32_t defVal
 //   2. 无论如何都要写 meta(含 stage + traceback), 失败时再写一份 diag(sys.path/import 探测),
 //      让"解释器起没起来、stdlib 在哪、哪个扩展加载不了"在工具返回值里一眼可见。
 const char* kLauncher = R"PYSRC(
+
 import sys, os, io, time
 
 # 注意: 这些路径是 native 侧在每次调用时**直接拼进源码**的, 不走环境变量。
@@ -289,11 +296,16 @@ _GUNCAT_HINTS = {
     'torch': 'PyTorch 未随包(体积与工具链都不允许)。数值计算用 numpy。',
     'tensorflow': 'TensorFlow 未随包。数值计算用 numpy。',
     'numba': 'numba 未随包(需要 LLVM JIT)。热点循环用 numpy 向量化。',
+    'pyarrow': 'pyarrow/parquet 未随包。持久化用 to_csv / to_pickle / to_json, '
+               '或 openpyxl 写 xlsx。',
+    'fastparquet': 'parquet 后端未随包。持久化用 to_csv / to_pickle / to_json。',
     'psycopg2': 'PostgreSQL 驱动未随包; 需要数据库时用 sqlite3(标准库, 已可用)。',
     'pymysql': 'pymysql 未随包; 需要数据库时用 sqlite3(标准库, 已可用)。',
-    'multiprocessing': 'multiprocessing / ProcessPoolExecutor 在设备上不可用(缺 _multiprocessing, '
-                       '且超时保护依赖单线程执行器)。用 threading + 队列, 或 numpy 向量化。',
-    '_multiprocessing': '同 multiprocessing: 设备上不可用, 用 threading。',
+    'multiprocessing': 'multiprocessing 只有 fork 上下文可用: Process/Pipe 可以, '
+                       '但 spawn/forkserver 要重新 exec 解释器(嵌入式解释器没有可执行体), '
+                       'Queue/Pool/Lock 要 /dev/shm(沙箱里没有)。'
+                       '并行用 guncat_mp.map(func, items, workers=4) 或 threading。',
+    '_multiprocessing': '同上: 只用 fork 相关的 API, 别碰 Queue/Pool/Lock。',
 }
 
 
@@ -311,6 +323,18 @@ def _hint(text):
                          'run_python 可用的库见工具描述; 需要新库请反馈。')
         if 'Cannot load backend' in text or 'no display' in text:
             extra.append('提示: 无 GUI 后端, 请先 matplotlib.use("Agg") 再 savefig 成文件。')
+        # 设备上没有 /tmp: pandas.to_pickle("/tmp/x.pkl") 之类会报"目录不存在",
+        # 用户容易误判成自己路径写错, 这里直接给可用替代。
+        if '/tmp' in text and ('No such file or directory' in text or
+                               'non-existent' in text or "does not exist" in text):
+            extra.append('提示: 设备上没有 /tmp。临时文件用 tempfile.gettempdir() / '
+                         'NamedTemporaryFile(实际落在应用缓存目录), 或直接写当前工作区的相对路径。')
+        if '解释器安装目录' in text or 'Read-only file system' in text:
+            extra.append('提示: 标准库/三方库目录是只读的(写它会跨调用、跨会话生效)。'
+                         '要写文件用工作区相对路径或 tempfile.gettempdir()。')
+        if '没有可重新 exec 的 python 可执行体' in text:
+            extra.append('提示: 并行请用 guncat_mp.map(func, items, workers=4); '
+                         'I/O 并发用 threading / ThreadPoolExecutor。')
         if not extra:
             return text
         return text.rstrip() + '\n\n' + '\n'.join(extra)
@@ -318,14 +342,403 @@ def _hint(text):
         return text
 
 
+# ===== 一次性防护(解释器常驻, 这些钩子只装一次就永久生效) =====
+# 为什么写在启动器里而不是 sitecustomize: sitecustomize 在 extras 目录里, 换它要重打
+# 运行库 zip; 启动器跟着 libguncatpy.so 走, 装上就生效。
+_GUNCAT_WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+_GUNCAT_MUT_EVENTS = frozenset((
+    'os.remove', 'os.rmdir', 'os.mkdir', 'os.rename', 'os.replace', 'os.link',
+    'os.symlink', 'os.chmod', 'os.chown', 'os.truncate', 'os.utime', 'shutil.rmtree',
+))
+
+
+def _under(path, root):
+    """path 是否落在 root 里(纯字符串, 不做 realpath —— 审计钩子里不能触发 IO)。"""
+    if not path or not root:
+        return False
+    try:
+        p = path if os.path.isabs(path) else os.path.join(os.getcwd(), path)
+        p = os.path.normpath(p)
+    except BaseException:
+        return False
+    root = root.rstrip('/').rstrip('\\')
+    if p == root:
+        return True
+    return p.startswith(root + '/') or p.startswith(root + '\\')
+
+
+def _patch_multiprocessing():
+    """让 spawn/forkserver 当场报错, 而不是静默 exitcode=255。
+
+    嵌入式解释器没有可执行体(sys.executable 为空), multiprocessing 的 spawn 却要重新
+    exec 一个 python —— 子进程起不来, 而 start()/join() 全程不抛异常, 用户会误以为
+    子进程跑过了。这是最危险的一类失败(静默错误), 所以换成明确的 RuntimeError。
+    """
+    try:
+        import multiprocessing.spawn as _spawn
+        if getattr(_spawn, '_guncat_patched', False):
+            return
+        _spawn._guncat_patched = True
+
+        def _no_executable(*_a, **_k):
+            raise RuntimeError(
+                'run_python 不支持 multiprocessing 的 spawn / forkserver 启动方式: '
+                '设备上的解释器是编进应用里的 libpython(.so), 没有可重新 exec 的 python '
+                '可执行体, 子进程会以 exitcode=255 静默失败(既不报错也不执行)。'
+                '请改用: 默认 fork 上下文(Process / Pipe)、guncat_mp.map(func, items)、'
+                '或者 threading / ThreadPoolExecutor。')
+
+        _spawn.get_executable = _no_executable
+    except BaseException:
+        pass
+
+
+class _MpPatchLoader:
+    def __init__(self, inner):
+        self._inner = inner
+
+    def create_module(self, spec):
+        return self._inner.create_module(spec)
+
+    def exec_module(self, module):
+        self._inner.exec_module(module)
+        _patch_multiprocessing()
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+class _MpPatchFinder:
+    """multiprocessing 首次 import 之后立刻打补丁(不改导入结果, 只包一层)。"""
+
+    _done = False
+
+    def find_spec(self, fullname, path=None, target=None):
+        if self._done or fullname != 'multiprocessing':
+            return None
+        self._done = True
+        try:
+            import importlib.machinery as _machinery
+            spec = _machinery.PathFinder.find_spec(fullname, path)
+            if spec is None or spec.loader is None:
+                return None
+            spec.loader = _MpPatchLoader(spec.loader)
+            return spec
+        except BaseException:
+            return None
+
+
+def _install_guards():
+    if getattr(sys, '_guncat_guarded', False):
+        return
+    sys._guncat_guarded = True
+    # 启动快照: 只在这里记一次"环境本来长什么样"。诊断里必须用快照,
+    # 否则用户上一轮改脏的 sys.path 会被当成环境信息打出来(实测出现过 path=/FAKE/LEAK/PATH)。
+    try:
+        sys._guncat_boot = {
+            'version': sys.version.replace('\n', ' '),
+            'prefix': sys.prefix,
+            'executable': sys.executable,
+            'path': list(sys.path),
+        }
+    except BaseException:
+        pass
+    try:
+        if 'multiprocessing' in sys.modules:
+            _patch_multiprocessing()
+        else:
+            sys.meta_path.insert(0, _MpPatchFinder())
+    except BaseException:
+        pass
+    # 解释器安装树只读: 里面的文件会被**此后每一次调用**导入, 写进去等于跨会话代码注入。
+    _root = ''
+    try:
+        _root = os.path.normpath(sys.prefix or '')
+    except BaseException:
+        _root = ''
+    if not _root:
+        return
+
+    def _deny(path):
+        raise PermissionError(
+            'run_python 不允许修改解释器安装目录(%s): %s。'
+            '标准库/三方库是只读的(改了会跨调用、跨会话生效); '
+            '要写文件请用工作区相对路径或 tempfile.gettempdir()。' % (_root, path))
+
+    def _audit(event, args):
+        try:
+            if event == 'open':
+                _p = args[0] if args else None
+                if not isinstance(_p, str):
+                    return
+                _mode = args[1] if len(args) > 1 else None
+                _flags = args[2] if len(args) > 2 else 0
+                _writing = False
+                if isinstance(_mode, str) and ('w' in _mode or 'a' in _mode or
+                                               'x' in _mode or '+' in _mode):
+                    _writing = True
+                if isinstance(_flags, int) and (_flags & _GUNCAT_WRITE_FLAGS):
+                    _writing = True
+                if _writing and _under(_p, _root):
+                    _deny(_p)
+            elif event in _GUNCAT_MUT_EVENTS:
+                for _a in args[:2]:
+                    if isinstance(_a, str) and _under(_a, _root):
+                        _deny(_a)
+        except PermissionError:
+            raise
+        except BaseException:
+            return
+
+    try:
+        sys.addaudithook(_audit)
+    except BaseException:
+        pass
+
+
+# ===== 跨调用状态隔离 =====
+# 解释器常驻的代价: os.environ / sys.path / warnings.filters / logging 级别 /
+# random 种子 / numpy 打印选项 全是**进程级**状态, 一次调用改了, 下次还在。
+# 危害不是单次, 而是故障不可复现(警告被吞、模块解析命中错的东西、随机实验不可重复)。
+_GUNCAT_STATE_MODULES = ('warnings', 'logging', 'random')
+_GUNCAT_NP_PRINT_KEYS = ('edgeitems', 'linewidth', 'threshold', 'precision', 'suppress',
+                         'nanstr', 'infstr', 'formatter', 'sign', 'floatmode')
+
+
+def _save_state():
+    st = {'mods': {}}
+    try:
+        st['path'] = list(sys.path)
+    except BaseException:
+        pass
+    try:
+        st['env'] = dict(os.environ)
+    except BaseException:
+        pass
+    try:
+        for _m in _GUNCAT_STATE_MODULES:
+            st['mods'][_m] = _m in sys.modules
+    except BaseException:
+        pass
+    if 'warnings' in sys.modules:
+        try:
+            st['warn_filters'] = list(sys.modules['warnings'].filters)
+        except BaseException:
+            pass
+    if 'logging' in sys.modules:
+        try:
+            _l = sys.modules['logging']
+            st['log_level'] = _l.root.level
+            st['log_handlers'] = list(_l.root.handlers)
+            st['log_disable'] = _l.root.manager.disable
+        except BaseException:
+            pass
+    if 'numpy' in sys.modules:
+        try:
+            _np = sys.modules['numpy']
+            st['np_print'] = _np.get_printoptions()
+            st['np_err'] = _np.geterr()
+        except BaseException:
+            pass
+    return st
+
+
+def _restore_state(st):
+    try:
+        if 'path' in st:
+            sys.path[:] = st['path']
+    except BaseException:
+        pass
+    try:
+        if 'env' in st:
+            _env = os.environ
+            for _k in list(_env.keys()):
+                if _k not in st['env']:
+                    try:
+                        del _env[_k]
+                    except BaseException:
+                        pass
+            for _k, _v in st['env'].items():
+                if _env.get(_k) != _v:
+                    try:
+                        _env[_k] = _v
+                    except BaseException:
+                        pass
+    except BaseException:
+        pass
+    # 本次调用才第一次 import 的模块回不到"原始状态", 直接复位成默认值。
+    _mods = st.get('mods') or {}
+    if 'warnings' in sys.modules:
+        try:
+            _w = sys.modules['warnings']
+            if _mods.get('warnings') and 'warn_filters' in st:
+                _w.filters[:] = st['warn_filters']
+            elif not _mods.get('warnings'):
+                _w.resetwarnings()
+        except BaseException:
+            pass
+    if 'logging' in sys.modules:
+        try:
+            _l = sys.modules['logging']
+            if _mods.get('logging'):
+                if 'log_level' in st:
+                    _l.root.setLevel(st['log_level'])
+                if 'log_handlers' in st:
+                    _l.root.handlers[:] = st['log_handlers']
+                if 'log_disable' in st:
+                    _l.root.manager.disable = st['log_disable']
+            else:
+                _l.root.setLevel(_l.WARNING)
+                _l.root.handlers[:] = []
+                _l.root.manager.disable = 0
+        except BaseException:
+            pass
+    if 'random' in sys.modules:
+        # 随机数状态一律重新播种(≈ 每次运行都是新进程), 而不是恢复快照:
+        # 恢复快照会让每个调用都从同一个状态开始, "连跑两次结果一样"更让人困惑。
+        try:
+            sys.modules['random'].seed()
+        except BaseException:
+            pass
+    if 'numpy' in sys.modules:
+        try:
+            _np = sys.modules['numpy']
+            _kw = {}
+            if 'np_print' in st:
+                for _k in _GUNCAT_NP_PRINT_KEYS:
+                    if _k in st['np_print']:
+                        _kw[_k] = st['np_print'][_k]
+            if _kw:
+                _np.set_printoptions(**_kw)
+            elif 'np_print' not in st:
+                _np.set_printoptions(precision=8, threshold=1000, edgeitems=3,
+                                     linewidth=75, suppress=False)
+            if 'np_err' in st:
+                _np.seterr(**_np_err_kwargs(st['np_err']))
+            else:
+                _np.seterr(all='warn')
+        except BaseException:
+            pass
+
+
+def _np_err_kwargs(err):
+    out = {}
+    for _k in ('divide', 'over', 'under', 'invalid'):
+        if _k in err:
+            out[_k] = err[_k]
+    return out
+
+
+# ===== 输出捕获 =====
+# 为什么不是 io.StringIO: 那玩意没有 .buffer, fileno() 抛 UnsupportedOperation,
+# 而 os.write(1, ...) 更是直接绕过缓冲写到宿主进程的 stdout(既不在结果里也不报错)。
+# 改成"真实文件对象 + dup2 重定向 fd 1/2": print / sys.stdout.buffer / fileno / os.write
+# 四条路径落到同一个文件, 顺序也自然。
+_io_state = {'active': False}
+
+
+def _capture_start():
+    st = _io_state
+    st['saved_out'] = sys.stdout
+    st['saved_err'] = sys.stderr
+    try:
+        st['fd1'] = os.dup(1)
+        st['fd2'] = os.dup(2)
+        _f1 = os.open(_out_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        _f2 = os.open(_err_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.dup2(_f1, 1)
+            os.dup2(_f2, 2)
+        finally:
+            os.close(_f1)
+            os.close(_f2)
+        st['out_stream'] = io.TextIOWrapper(io.FileIO(1, 'w', closefd=False),
+                                            encoding='utf-8', errors='replace',
+                                            write_through=True)
+        st['err_stream'] = io.TextIOWrapper(io.FileIO(2, 'w', closefd=False),
+                                            encoding='utf-8', errors='replace',
+                                            write_through=True)
+        sys.stdout = st['out_stream']
+        sys.stderr = st['err_stream']
+        st['active'] = 'fd'
+    except BaseException:
+        # 兜底: 回到 StringIO(功能退化, 但至少还能跑)
+        try:
+            sys.stdout = st['saved_out']
+            sys.stderr = st['saved_err']
+        except BaseException:
+            pass
+        for _k in ('fd1', 'fd2'):
+            _fd = st.get(_k)
+            if _fd is not None:
+                try:
+                    os.dup2(_fd, 1 if _k == 'fd1' else 2)
+                except BaseException:
+                    pass
+                try:
+                    os.close(_fd)
+                except BaseException:
+                    pass
+                st[_k] = None
+        st['out_stream'] = io.StringIO()
+        st['err_stream'] = io.StringIO()
+        sys.stdout = st['out_stream']
+        sys.stderr = st['err_stream']
+        st['active'] = 'stringio'
+
+
+def _capture_stop():
+    st = _io_state
+    if not st.get('active'):
+        return
+    _kind = st['active']
+    st['active'] = False
+    _out_s = st.get('out_stream')
+    _err_s = st.get('err_stream')
+    for _s in (_out_s, _err_s):
+        try:
+            _s.flush()
+        except BaseException:
+            pass
+    # 只 flush 不 close: 用户可能留了后台线程往 sys.stdout 里写, close 会让它抛
+    # "I/O operation on closed file"。包装器是 FileIO(closefd=False), 丢掉引用后
+    # 由 GC 回收, 不会关掉 fd 1/2。
+    st['out_stream'] = None
+    st['err_stream'] = None
+    try:
+        sys.stdout = st['saved_out']
+        sys.stderr = st['saved_err']
+    except BaseException:
+        pass
+    if _kind == 'stringio':
+        _write(_out_path, _out_s.getvalue())
+        _write(_err_path, _err_s.getvalue())
+        return
+    for _k, _target in (('fd1', 1), ('fd2', 2)):
+        _fd = st.get(_k)
+        if _fd is None:
+            continue
+        try:
+            os.dup2(_fd, _target)
+        except BaseException:
+            pass
+        try:
+            os.close(_fd)
+        except BaseException:
+            pass
+        st[_k] = None
+
+
 _stage = 'boot'
 _ok = 0
 _code = 0
 _error = ''
-_out = None
-_errbuf = None
+_state = None
 
 try:
+    _stage = 'install_guards'
+    _install_guards()
+
     _stage = 'argv'
     _argv = ['-c']
     if _argv_path:
@@ -366,33 +779,29 @@ try:
             _cf.close()
 
     _stage = 'capture'
-    _out = io.StringIO()
-    _errbuf = io.StringIO()
-    _saved_out, _saved_err = sys.stdout, sys.stderr
-    sys.stdout, sys.stderr = _out, _errbuf
+    _capture_start()
+    _state = _save_state()
 
     _stage = 'compile'
     _deadline_s = __GUNCAT_DEADLINE__
-    _tick_n = 0
     _tick_dl = (time.monotonic() + _deadline_s) if _deadline_s and _deadline_s > 0 else None
 
     def _guard_iter(_it):
-        # 非 range 的 for 循环: 用生成器包装, 每 4096 项看一次表。
+        # 非 range 的 for 循环: 用生成器包装, 每 256 项看一次表。
         # (range 循环走另一个更便宜的方案: 直接用循环变量取模, 不用函数调用。)
         _n = 0
         _dl = _tick_dl
         for _v in _it:
             _n += 1
-            if (_n & 4095) == 0 and _dl is not None and time.monotonic() > _dl:
+            if (_n & 255) == 0 and _dl is not None and time.monotonic() > _dl:
                 raise TimeoutError('run_python 超时(ast-deadline)')
             yield _v
 
     def _arm(_code_src):
         # 给**所有 while 循环**的循环体首行插入截止检查(含 while True 与 while <条件式>)。
-        # for 循环不注入: 逐次迭代的检查会让紧凑数值循环慢 2~3 倍, 代价不划算, 改为在
-        # 提示词/文档里明确警告"for 不受超时保护, 必须自己写边界"。
+        # for 循环用"每 256 轮看一次表": 逐轮检查会让紧凑数值循环慢 2~3 倍, 代价不划算。
         # 为什么是这里: 实机证明信号中断不可用(要么被丢弃, 要么直接杀进程),
-        # 而纯 Python 层的检查绝不会伤到进程; 普通循环不注入, 保持零开销。
+        # 而纯 Python 层的检查绝不会伤到进程。
         try:
             import ast as _ast
             _tree = _ast.parse(_code_src, '<run_python>', 'exec')
@@ -437,14 +846,16 @@ try:
                              isinstance(_it.func, _ast.Name) and _it.func.id == 'range' and
                              isinstance(node.target, _ast.Name))
                 if _is_range:
-                    # range 循环: `if not (i & 8191): <看表>` —— 每轮只多两次算术, 约 30ns
+                    # range 循环: `if not (i & 255): <看表>` —— 每轮只多两次算术, 约 30ns。
+                    # 掩码是常量, 所以 8/256/8192 的每轮开销完全一样: 取小值只为让"慢循环体"
+                    # (比如每轮 5ms)也来得及中断 —— 8192 轮要等 40 秒才看表, 等于没有超时。
                     _mask = _ast.UnaryOp(op=_ast.Not(),
-                                         operand=_ast.BinOp(left=_ast.Name(id=node.target.id, ctx=_ast.Load()),
-                                                            op=_ast.BitAnd(),
-                                                            right=_ast.Constant(8191)))
+                                          operand=_ast.BinOp(left=_ast.Name(id=node.target.id, ctx=_ast.Load()),
+                                                             op=_ast.BitAnd(),
+                                                             right=_ast.Constant(255)))
                     node.body.insert(0, _ast.If(test=_mask, body=[_check], orelse=[]))
                 else:
-                    # 其它可迭代对象: 包一层生成器(每 4096 项看表一次)
+                    # 其它可迭代对象: 包一层生成器(每 256 项看表一次)
                     node.iter = _ast.Call(func=_ast.Name(id='__guncat_iter', ctx=_ast.Load()),
                                           args=[_it], keywords=[])
                 return node
@@ -454,7 +865,7 @@ try:
     _stage = 'exec'
     _globals = {
         '__name__': '__main__', '__file__': _code_path,
-        '__guncat_deadline': (time.monotonic() + _deadline_s) if _deadline_s and _deadline_s > 0 else None,
+        '__guncat_deadline': _tick_dl,
         '__guncat_now': time.monotonic,
         '__guncat_timeout': TimeoutError,
         '__guncat_iter': _guard_iter,
@@ -473,17 +884,23 @@ try:
         _ok = 0
         _error = _hint(_fmt_exc())
     finally:
-        sys.stdout, sys.stderr = _saved_out, _saved_err
+        _stage = 'restore'
+        if _state is not None:
+            _restore_state(_state)
         _stage = 'write_result'
-        _write(_out_path, _out.getvalue())
-        _write(_err_path, _errbuf.getvalue())
+        _capture_stop()
     _stage = 'done'
 except BaseException:
     _ok = 0
     _error = _hint(_fmt_exc())
 finally:
+    try:
+        _capture_stop()
+    except BaseException:
+        pass
     if _ok == 0 and _diag_path:
         try:
+            _boot = getattr(sys, '_guncat_boot', None) or {}
             _lines = [
                 'version=' + sys.version.replace('\n', ' '),
                 'prefix=' + sys.prefix,
@@ -493,8 +910,20 @@ finally:
                 'argv=' + repr(sys.argv),
                 'stage=' + _stage,
             ]
-            for _p in sys.path:
-                _lines.append('path=' + str(_p))
+            if _boot:
+                _lines.append('boot version=' + str(_boot.get('version')))
+                _lines.append('boot prefix=' + str(_boot.get('prefix')))
+                _lines.append('boot executable=' + str(_boot.get('executable')))
+                _boot_path = _boot.get('path') or []
+                for _p in _boot_path:
+                    _lines.append('path=' + str(_p))
+                # 运行期被用户代码改出来的条目单独标出来: 别把用户噪音当环境信息
+                for _p in sys.path:
+                    if _p not in _boot_path:
+                        _lines.append('path(runtime-added)=' + str(_p))
+            else:
+                for _p in sys.path:
+                    _lines.append('path=' + str(_p))
             for _m in ('posix', 'io', 'os', 'encodings', 'codecs', '_codecs',
                        'json', '_json', 'csv', '_csv', 'zlib', 'math', 'binascii'):
                 try:
@@ -785,8 +1214,6 @@ std::condition_variable g_queueCv;
 std::shared_ptr<PyJob> g_pending;
 std::atomic<bool> g_runnerStarted{false};
 std::atomic<int> g_busy{0};          // 排队 + 执行中的调用数(>0 表示运行时忙)
-std::atomic<int> g_softStreak{0};    // 连续软超时次数(正常完成一次就清零)
-std::atomic<bool> g_banned{false};   // 连续 10 次软超时: 本会话永久停用 Python
 
 void RunnerLoop() {
     for (;;) {
@@ -816,11 +1243,12 @@ void RunnerLoop() {
         }
         job->cv.notify_all();
         g_busy.fetch_sub(1);
-        if (!orphan) {
-            g_softStreak.store(0);  // 正常跑完一次, 连续超时计数清零
-        }
         if (orphan) {
-            OH_LOG_WARN(LOG_APP, "abandoned python call finished (rc=%{public}d)", out.exitCode);
+            // 僵尸任务终于跑完了: 把"未回收"计数减回去, 本会话的 Python 立刻恢复可用。
+            // 这一步是"超时回收"的闭环 —— 没有它, 计数只增不减, 两次超时就永久锁死会话。
+            g_abandoned.fetch_sub(1);
+            OH_LOG_WARN(LOG_APP, "abandoned python call finished (rc=%{public}d), python re-enabled",
+                        out.exitCode);
         }
     }
 }
@@ -866,30 +1294,26 @@ PyRunOutcome DispatchToRunner(const PyRunOptions& opt) {
     if (!job->cv.wait_until(lock, limit, [&job]() { return job->done; })) {
         job->abandoned = true;
         lock.unlock();
-        const int streak = g_softStreak.fetch_add(1) + 1;
-        if (streak >= 10) {
-            g_banned.store(true);
-            OH_LOG_WARN(LOG_APP, "python soft timeout x%{public}d, banning python for this session", streak);
-        }
+        g_abandoned.fetch_add(1);
         out.ok = false;
         out.timedOut = true;
         out.softTimeout = true;
         out.exitCode = -1;
         out.error = "执行超过 " + std::to_string(timeoutMs) +
                     " ms 且未能中断(任务仍在后台运行)。"
-                    "在它结束之前, run_python 会直接拒绝(不会排队); 等它跑完即自动恢复。"
-                    "连续 10 次超时才会停用本会话的 Python(需要重启应用)。";
+                    "在它结束之前, run_python 会直接拒绝(不会排队); 等它跑完即自动恢复"
+                    "(最多允许 2 个这样的任务同时挂着, 不做无限累积)。";
         OH_LOG_WARN(LOG_APP, "python soft timeout after %{public}d ms (job abandoned)", timeoutMs);
         return out;
     }
     return job->out;
 }
 
-// 0=可用 1=忙(有超时任务仍在跑, 等它结束自动恢复) 2=已封禁(连续 3 次超时)
+// 0=可用 1=忙(还有调用在跑/在回收, 结束即恢复)。
+// 早先还有一个"连续 10 次软超时 → 本会话永久停用"的封禁状态(2): 它把"用户写了死循环"
+// 升级成"整个会话再也不能用 Python, 只能重启应用", 而且计数口径和文档对不上。现在
+// 改用活的 g_abandoned 计数(见上), 僵尸任务结束即自动恢复, 不需要重启。
 int PyRuntimeState() {
-    if (g_banned.load()) {
-        return 2;
-    }
     return g_busy.load() > 0 ? 1 : 0;
 }
 
@@ -919,7 +1343,7 @@ napi_value JsIsAvailable(napi_env env, napi_callback_info) {
     return MakeString(env, api.ok ? std::string() : api.error);
 }
 
-// pyState(): 0=可用 1=忙(超时任务还在跑, 结束即恢复) 2=已封禁(连续 3 次超时)
+// pyState(): 0=可用 1=忙(上一个调用还在跑/在回收, 结束即恢复)
 napi_value JsPyState(napi_env env, napi_callback_info) {
     napi_value out = nullptr;
     napi_create_int32(env, PyRuntimeState(), &out);
@@ -968,23 +1392,17 @@ napi_value JsRunPython(napi_env env, napi_callback_info info) {
     if (g_abandoned.load() >= kMaxAbandoned) {
         napi_set_named_property(env, result, "ok", MakeBool(env, false));
         napi_set_named_property(env, result, "error",
-            MakeString(env, "已有多次超时未回收的 Python 调用, 为避免持续占 CPU 本会话不再执行; 重启应用后重试"));
+            MakeString(env, "已有 2 个超时后仍在后台运行的 Python 调用(未回收), 为避免持续占 CPU 暂不执行。"
+                            "它们一结束就自动恢复, 不需要重启应用。"));
         return result;
     }
-
-    if (PyRuntimeState() == 2) {
-        napi_value result = nullptr;
-        napi_create_object(env, &result);
+    if (g_busy.load() > 0) {
+        // 上一个调用还在跑(通常是超时被放弃、仍在后台执行的任务)。
+        // 绝不排队: 队列只有一个槽位, 排进来会覆盖/饿死, 而且把 CPU 越烧越满。
         napi_set_named_property(env, result, "ok", MakeBool(env, false));
-        napi_set_named_property(env, result, "timedOut", MakeBool(env, true));
-        napi_set_named_property(env, result, "softTimeout", MakeBool(env, true));
-        napi_set_named_property(env, result, "exitCode", MakeInt(env, -1));
-        napi_set_named_property(env, result, "stdout", MakeString(env, ""));
-        napi_set_named_property(env, result, "stderr", MakeString(env, ""));
-        napi_set_named_property(env, result, "durationMs", MakeInt(env, 0));
-        napi_set_named_property(env, result, "error", MakeString(env,
-            "上一次 Python 调用超时且未能中断, 仍在后台运行; 为免继续占 CPU, 本会话已停止执行 Python。"
-            "请等待它自行结束或重启应用。"));
+        napi_set_named_property(env, result, "error",
+            MakeString(env, "上一个 Python 调用还没结束(超时后仍在后台运行, 未能中断)。"
+                            "它结束后会自动恢复, 这里不会排队。"));
         return result;
     }
 
@@ -1001,9 +1419,9 @@ napi_value JsRunPython(napi_env env, napi_callback_info info) {
     }
     g_running.store(false);
 
-    if (outcome.timedOut) {
-        g_abandoned.fetch_add(1);
-    }
+    // 注意: 这里**不能**按 outcome.timedOut 记账 —— 硬超时(AST 截止)是干净回收的,
+    // 只有 softTimeout(宿主放弃等待、线程还卡在调用里)才算"未回收"。
+    // 那个计数已经在 DispatchToRunner 里加、在 RunnerLoop 里任务真正结束时减。
     std::string errHead = outcome.error.size() > 160 ? outcome.error.substr(0, 160) : outcome.error;
     OH_LOG_INFO(LOG_APP, "run_python ok=%{public}d timeout=%{public}d rc=%{public}d %{public}lldms err=%{public}s",
         outcome.ok ? 1 : 0, outcome.timedOut ? 1 : 0, outcome.exitCode,

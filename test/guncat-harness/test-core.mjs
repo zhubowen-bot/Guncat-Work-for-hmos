@@ -1607,8 +1607,32 @@ console.log('[GuncatUiParts 切分]');
     check('run_python 描述写明没有 scipy', tools.indexOf('scipy') >= 0);
     const prompt = readFileSync(root + '/entry/src/main/ets/common/PromptBuilder.ts', 'utf8');
     // scipy 已在 2026-10 打通, 边界改成了"无 GUI 后端 / 无 multiprocessing / 不能 pip install"
-    check('系统提示词写明能力边界', prompt.indexOf('无 multiprocessing') >= 0 &&
+    check('系统提示词写明能力边界', prompt.indexOf('multiprocessing 仅 fork 上下文') >= 0 &&
       prompt.indexOf('pip install') >= 0 && prompt.indexOf('无 GUI 后端') >= 0);
+  }
+
+  // run_python 运行环境: 这几条是实机体检暴露过的系统性缺陷, 用源码级断言钉死。
+  {
+    const root = new URL('../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+    const cpp = readFileSync(root + '/entry/src/main/cpp/python/guncat_py.cpp', 'utf8');
+    check('launcher: 每次调用回滚进程级状态', cpp.indexOf('_restore_state(_state)') >= 0 &&
+      cpp.indexOf("st['env']") >= 0 && cpp.indexOf("st['path']") >= 0 &&
+      cpp.indexOf("st['warn_filters']") >= 0);
+    check('launcher: 用真实 fd 捕获输出(buffer/fileno 可用)',
+      cpp.indexOf('io.FileIO(1') >= 0 && cpp.indexOf('os.dup2') >= 0);
+    check('launcher: 解释器树只读(审计钩子)', cpp.indexOf('sys.addaudithook(_audit)') >= 0 &&
+      cpp.indexOf('_GUNCAT_MUT_EVENTS') >= 0);
+    check('launcher: spawn 静默失败改成明确异常', cpp.indexOf('_patch_multiprocessing') >= 0 &&
+      cpp.indexOf("_spawn.get_executable = _no_executable") >= 0);
+    check('launcher: for 超时采样 256 轮', cpp.indexOf('_ast.Constant(255)') >= 0 &&
+      cpp.indexOf('_ast.Constant(8191)') < 0);
+    check('launcher: 诊断用启动快照', cpp.indexOf('sys._guncat_boot') >= 0);
+    check('native: 超时回收只认软超时且会减回去',
+      (cpp.match(/g_abandoned\.fetch_add/g) || []).length === 1 &&
+      (cpp.match(/g_abandoned\.fetch_sub/g) || []).length === 1);
+    check('native: 没有永久封禁状态', cpp.indexOf('g_banned') < 0 && cpp.indexOf('g_softStreak') < 0);
+    const py = readFileSync(root + '/entry/src/main/ets/service/PythonService.ts', 'utf8');
+    check('ArkTS: 不再有"已停用"分支', py.indexOf('state === 2') < 0);
   }
 
   check('hasProgram 判定', GuncatUiParts.hasProgram('root = Card([') === true &&

@@ -237,13 +237,15 @@ obs = Observer(); obs.schedule(Handler(), "工作区", recursive=True); obs.star
 | 无 GUI 后端 | matplotlib 必须 `Agg`，输出 PNG/SVG/PDF |
 | 无 `tkinter` | 无窗口系统 |
 | 只有单线程执行器 | 超时保护依赖"跑在固定线程 + AST 注入检查点"；`threading` 可用但不要指望并发提速 |
-| 不能用 `os.fork` / `multiprocessing` | 沙箱与超时模型限制 |
+| `multiprocessing` 只有 fork 上下文 | `Process`/`Pipe`/`Manager` 可用；`Queue`/`Pool`/`Lock` 要 `/dev/shm`（沙箱里没有），`spawn`/`forkserver` 要重新 exec 解释器（嵌入式解释器没有可执行体，会直接报错而不是静默失败）。并行用 `guncat_mp` |
 | 无 `pip install` | 包是随应用打包的（离线可用），运行期不能装新包 |
 | 文件路径 | 只能读写应用沙箱与用户选择的工作区目录 |
-| 超时 | 单次调用有超时；被硬超时打断后，长时间死循环会被熔断（连续 10 次则停用 python 工具，重启应用恢复） |
+| 超时 | `while`/`for` 到点抛 `TimeoutError`（`for` 每 256 轮采样一次）；阻塞在 C 调用里的只能放弃等待 —— 任务结束前拒绝新调用（不排队），结束后自动恢复，**不会永久停用** |
+| 跨调用状态 | 解释器常驻，但 `globals`/`os.environ`/`sys.path`/日志级别/`warnings` 过滤器/`random` 种子/numpy 打印选项每次调用结束都会回滚；跨调用传状态请落文件 |
+| 标准库目录只读 | `sys.prefix` 下的文件被审计钩子保护，写入会抛 `PermissionError`（改它会跨调用、跨会话生效） |
 
 ## 12. 一句话建议
 
 写代码时按"**桌面 Python 能用什么，这里基本都能用**"来想 —— numpy / pandas / scipy /
-matplotlib / Pillow / lxml / 加密 / 文档 / 网络都齐了；只有 GUI、`fork`、运行期 `pip install`
-这三类需要换方案。
+matplotlib / Pillow / lxml / 加密 / 文档 / 网络都齐了；只有 GUI、`multiprocessing` 的
+`Queue`/`Pool`/`spawn`、运行期 `pip install` 这几类需要换方案。

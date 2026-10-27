@@ -83,7 +83,9 @@ bash tooling/python/build-cpython-ohos.sh
 加载器会先装 libpython 再直接绑定符号 —— 和 `libqemu` 找 `libslirp.so.0` 是同一条路径。
 
 关掉的扩展：`_ssl`/`_hashlib`（无 OpenSSL）、`_sqlite3`、`_ctypes`（无 libffi）、`_locale`、
-`curses`/`readline`/`_tkinter`、`_bz2`/`_lzma`、`_uuid`、`_multiprocessing` 等。
+`curses`/`readline`/`_tkinter`、`_bz2`/`_lzma`、`_uuid`、`_multiprocessing` 等
+（后续已按 §6.1 与 [python-third-party.md](python-third-party.md) 补回 `_ssl`/`_hashlib`/`_sqlite3`/
+`_bz2`/`_lzma`/`_multiprocessing`，这里的清单是最初那版的裁剪结果）。
 `json`/`csv`/`decimal`/`zlib`/`hashlib`（无 OpenSSL 部分）/`math`/`statistics` 等都可用。
 
 ## 5. 运行期布局与释放
@@ -126,14 +128,34 @@ finders)、导出 `GUNCAT_PY_LIBDIR` 给 PyCryptodome 这类用 ctypes 按路径
 
 ## 6. 执行模型与限制
 
-* **单实例、串行**：native 侧有 `g_running` 互斥，ArkTS 侧还有 promise 链；两个调用不会同时进解释器。
-* **globals 隔离**：每次执行用全新 dict，但 **import 缓存复用**（第二次起 `import json` 几乎免费）。
-* **stdout/stderr 捕获**：Python 层用 `io.StringIO` 换掉 `sys.stdout/sys.stderr`，结束后落盘再读回。
-* **超时**：看门狗线程到点调 `PyErr_SetInterrupt()`，纯 Python 循环会在下个字节码边界抛
-  `KeyboardInterrupt`；阻塞在 C 调用里的无法中断，按"放弃等待"处理（两次后本会话停用，与 `run_js` 同策略）。
-* **没有 fork/exec**：`subprocess`、`os.system`、`multiprocessing` 不可用；要调 Unix 工具请用 `shell`。
-* **没有网络**：未编 `_ssl`，`urllib` 的 https 不可用；HTTP 需求走 ArkTS 侧工具。
-* **第三方包**：镜像里 `pip` 装的包在 VM 里；原生解释器只有标准库（要 numpy/pandas 需另外交叉编译）。
+* **单实例、串行**：native 侧有 `g_running`/`g_busy` 前置判定，ArkTS 侧还有 promise 链；两个调用
+  不会同时进解释器。超时后被"放弃等待"的任务没结束之前，新调用**直接拒绝**（不排队，避免把 CPU
+  烧满），任务一结束自动恢复 —— 不需要重启应用。
+* **globals 隔离 + 进程级状态回滚**：每次执行用全新 dict；除此之外每次调用前后对 `sys.path` /
+  `os.environ` / `warnings.filters` / logging 根级别与 handler / `random`（重新播种）/ numpy 打印
+  选项与 `seterr` 做快照与回滚。解释器常驻不能让上一轮的副作用漏到下一轮（实机复现过：
+  `random.seed(12345)` 后下一轮首个 `random()` 就是该种子的首值、`warnings.simplefilter("ignore")`
+  会一直吞警告、`sys.path.append(...)` 会改变后续模块解析）。`sys.modules` 的 import 缓存**故意
+  保留** —— 这是常驻解释器的全部性能来源。
+* **stdout/stderr 捕获**：不再用 `io.StringIO`（它没有 `.buffer`，`fileno()` 抛
+  `UnsupportedOperation`，而 `os.write(1, …)` 会直接漏到宿主进程的 stdout）。现在把 fd 1/2
+  `dup2` 到 scratch 里的真实文件，`sys.stdout/sys.stderr` 换成包着 fd 的 `TextIOWrapper`：
+  `print` / `sys.stdout.buffer.write` / `sys.stdout.fileno()` / `os.write(1, …)` 四条路径都落进
+  同一份输出，顺序自然。`dup` 失败时回退到 StringIO。
+* **超时**：启动器用 `ast` 给循环注入截止检查（`while` 逐轮、`for` 每 256 轮），到点抛
+  `TimeoutError('run_python 超时(ast-deadline)')`；阻塞在 C 调用里的无法中断，宿主按"放弃等待"处理。
+* **fork 可以，exec 不行**：`os.fork()` 可用（`guncat_mp` 就靠它），`subprocess` 只能直接 exec
+  单个程序（没有 shell）；`multiprocessing` 只支持 fork 上下文 —— `spawn`/`forkserver` 要重新 exec
+  解释器，而设备上的解释器是 `.so`、没有可执行体（`sys.executable` 为空），现在会**明确抛
+  RuntimeError**（早先是静默 `exitcode=255`，`start()`/`join()` 都不报错）；`Queue`/`Pool`/`Lock`
+  要 `/dev/shm`（沙箱里没有），用 `guncat_mp`。
+* **网络**：`ssl` / `_hashlib` 与 `cacert.pem` 随包，`requests` / `urllib` 的 https 可用。
+* **第三方包**：numpy / pandas / scipy / Pillow / matplotlib / lxml / PyCryptodome 等已随包
+  （见 §6.1）；运行期不能 `pip install`。
+* **解释器安装树只读**：`sys.prefix` 下的文件由审计钩子（`sys.addaudithook`）保护，
+  `open(..., "w")` / `os.mkdir` / `os.remove` / `os.chmod` 等一律 `PermissionError`。那棵树是
+  **此后每一次调用、每一个会话**都会 import 的代码，写进去等于持久代码注入（实机验证过：
+  往 `sys.prefix` 写文件是成功的）。
 
 ## 6.1 标准库可用性（实机口径）
 
@@ -147,7 +169,8 @@ finders)、导出 `GUNCAT_PY_LIBDIR` 给 PyCryptodome 这类用 ctypes 按路径
 | 不可用 | 原因 |
 | --- | --- |
 | `ctypes` | 未编 libffi |
-| `curses` / `readline` / `tkinter` / `multiprocessing` / `_locale` / `dbm.gnu` | 依赖库或 fork，沙箱里用不上 |
+| `curses` / `readline` / `tkinter` / `_locale` / `dbm.gnu` | 依赖库或窗口系统，沙箱里用不上 |
+| `multiprocessing` 的 `Queue`/`Pool`/`Lock`、`spawn`/`forkserver` | 需要 `/dev/shm` 或重新 exec 解释器；`fork` 上下文与 `guncat_mp` 可用（见 §6） |
 
 > 2026-10 补充：`sqlite3`（SQLite 3.45.3）、`ssl`/`_hashlib`（OpenSSL 3.0.15）、`bz2`（bzip2 1.0.8）、
 > `lzma`（xz 5.4.6）已通过 [`build-native-deps.sh`](../../tooling/python/build-native-deps.sh) 交叉编译进来，
@@ -170,9 +193,9 @@ finders)、导出 `GUNCAT_PY_LIBDIR` 给 PyCryptodome 这类用 ctypes 按路径
 
 现在的方案是**两层, 全在可控范围内**:
 
-1. **硬截止(AST 注入)**: 执行前用 `ast` 给 `while True` / `while 1` 这类常量真循环的循环体首行插入
+1. **硬截止(AST 注入)**: 执行前用 `ast` 给**所有 while 循环**的循环体首行、以及 `for` 循环的循环体插入
    `if __guncat_deadline and __guncat_now() > __guncat_deadline: raise TimeoutError('run_python 超时(ast-deadline)')`。
-   纯 Python 层, 不可能伤到进程; 普通循环不注入, 零开销。实测 `while True` 在 1.5 秒时准点抛出。
+   纯 Python 层, 不可能伤到进程。实测 `while True` 在 1.5 秒时准点抛出。
 2. **软超时(宿主侧)**: 宿主等 `timeout_ms + 1.5s` 仍没结束, 就放弃等待并返回"超时(未中断, 任务仍在后台运行)"。
    覆盖 AST 管不到的情况(超长 `for`、阻塞在 C 调用里)。
 
@@ -182,15 +205,22 @@ finders)、导出 `GUNCAT_PY_LIBDIR` 给 PyCryptodome 这类用 ctypes 按路径
 | --- | --- | --- |
 | `while True:` / `while 1:` | ✅ | 到点抛 `TimeoutError('run_python 超时(ast-deadline)')`, 可被用户 `try/except` 接住, 通道保持可用 |
 | `while <条件式>:`(如 `while time.time()-t0 < 2:`) | ✅ | 同上 |
-| `for i in range(N):` | ✅ | 每 8192 轮用循环变量取模看表, 微循环 +42%、真实逐行处理约 +5% |
-| `for x in <其它可迭代>` | ✅ | 包一层生成器, 每 4096 项看表 |
+| `for i in range(N):` | ✅ | 每 256 轮用循环变量取模看表（每轮只多一次位运算, 微循环 +42%、真实逐行处理约 +5%） |
+| `for x in <其它可迭代>` | ✅ | 包一层生成器, 每 256 项看表 |
 
-`for` 循环用**采样**: range 循环每轮只做一次 `i & 8191`(四次算术, 约 30ns), 每 8192 轮才真正看表一次;
-其它可迭代对象包一层生成器, 每 4096 项看表。实测 500 万次 range 循环 320ms → 453ms(+42%),
+`for` 循环用**采样**: range 循环每轮只做一次 `i & 255`(约 30ns), 每 256 轮才真正看表一次;
+其它可迭代对象包一层生成器, 每 256 项看表。掩码是常量, 所以 8191 与 255 的**每轮开销完全一样**;
+取小值是因为循环体慢时(比如每轮 5ms)采样间隔会被放大 —— 8192 轮要等 40 秒才看表, 等于没有超时。实测 500 万次 range 循环 320ms → 453ms(+42%),
 遍历 100 万元素列表 49ms → 103ms; 真实工作负载(CSV 逐行、字符串处理)里循环体本身是微秒级, 开销可忽略。
 
-**熔断策略**: 软超时后, 只要那个任务还在跑, `run_python` 就**直接拒绝**(不排队); 任务一结束(`g_busy` 归零)
-自动恢复。连续 10 次软超时(中间没有一次正常完成)才永久停用本会话的 Python, 需要重启应用。
+**性能边界(实测, 不是缺陷)**: 会话首次调用约有 2 倍冷态开销(缺页 + CPU 升频), 之后进入稳态;
+连续满载 3 秒后移动端 TDP 降频约 14%(1500³ 矩阵乘前段 100ms → 后段 114ms)。设 `timeout_ms` 时
+按实测耗时的 **1.2 倍**留余量。
+
+**熔断策略**: 软超时后, 只要那个任务还在跑, `run_python` 就**直接拒绝**(不排队); 任务一结束
+(`g_busy` 归零)自动恢复。同时最多允许 **2 个**未回收任务挂着(只计软超时 —— 硬超时是干净回收的,
+不计数), 超过就暂时拒绝新调用, 等它们结束。**没有「永久停用」**: 早先按 `timedOut` 记账, 两次正常
+的 `TimeoutError` 就把整个会话的 Python 锁死(只能重启应用), 这个缺陷已修掉。
 
 执行本身固定在一个**专属线程**上(第一次调用时创建, 由它 `Py_Initialize`, 之后所有调用都投递给它) ——
 解释器的线程态、GIL 记录都绑在初始化它的线程上, NAPI 回调落在别的线程会出各种怪问题。
@@ -209,6 +239,8 @@ mini path=/data/app/el1/bundle/.../libs/arm64
 mini import _json=FAIL ModuleNotFoundError("No module named '_json'")
 ```
 
+- `path(runtime-added)=...` → 这一条不是环境配置，而是**用户代码在运行期改出来的**（诊断用启动快照,
+  不会再把上一轮调用的脏 `sys.path` 当成环境信息）；
 - `import _json=FAIL ... cannot open shared object file` → 扩展模块没随包/没加载（见 §5 的 libs 目录）；
 - `import zlib=FAIL ... libz.so` → 少了 `libz.so`；
 - 若看到 `rc=0` 且 meta/stdout/diag **全是空的** → 启动器没拿到路径（历史 bug：CPython 在
@@ -220,6 +252,7 @@ mini import _json=FAIL ModuleNotFoundError("No module named '_json'")
 
 | 测试 | 覆盖 | 结果 |
 | --- | --- | --- |
+| [`launcher-test.py`](../../tooling/python/launcher-test.py) | **38 项**启动器回归(桌面 CPython 直接跑模板): 输出捕获(含 fd 级 `os.write`/`buffer`/`fileno`)、跨调用状态隔离、超时(while/for)、只读守卫、spawn 守卫、诊断 | 38/38 通过 |
 | [`verify-python-stack.py`](../../tooling/python/verify-python-stack.py) | **21 项**技术栈自检: 标准库(sqlite3/ssl/压缩/hash)、ctypes、numpy、pandas、Pillow、matplotlib、**中文渲染**、qrcode、lxml、regex、bs4、PyCryptodome、docx/pptx/xlsxwriter、sympy、psutil、requests+certifi、openpyxl/yaml/jinja2、reportlab、watchdog | 21/21 通过 |
 | [`run-verify-stack.sh`](../../tooling/python/run-verify-stack.sh) | **按真机布局**组装环境(qemu): extras 解压到临时目录、libs 只给 `.so`、`PYTHONPATH=stdlib:site-packages:extras:libs` | 同上 |
 | [`build-python-stack.sh`](../../tooling/python/build-python-stack.sh) | 12 个阶段全量重建(幂等) | 可一键重建 |
