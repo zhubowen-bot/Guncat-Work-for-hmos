@@ -184,6 +184,31 @@ sympy.solve(x**2 - 4, x)          # [-2, 2]
 sympy.sqrt(2).evalf(20)
 ```
 
+## 9.5 多进程与并行（设备实测边界）
+
+设备沙箱里 **`/dev/shm` 不可访问**，所以 `multiprocessing` 的 `Lock / Semaphore / Queue /
+Pool / Value / Array` 都会在 `_multiprocessing.SemLock()` 处抛 `PermissionError`；
+但 `fork` 本身可用 —— `Process`（裸）、`Pipe`、`Manager`、`Process` + `mmap` 都能工作。
+
+| 可用 | 不可用（/dev/shm 限制） |
+|---|---|
+| `Process`、`Pipe`、`Manager` | `Lock` / `RLock` / `Semaphore` / `Event` / `Condition` / `Barrier` |
+| `Process` + `mmap` | `Queue` / `SimpleQueue` / `Pool` / `Value` / `Array` |
+
+为此随包提供 **`guncat_mp`**（fork + Pipe，不碰信号量）：
+
+```python
+import guncat_mp
+results = guncat_mp.map(heavy, [a, b, c, d], workers=4)   # 顺序与输入一致
+guncat_mp.cpu_count(); guncat_mp.available()
+```
+
+- 不用 pickle 函数，lambda / 闭包也能用（fork 直接继承）；
+- 子进程异常会带回 traceback，不会静默失败。
+
+实测（设备）：4 进程并行 = 串行的 **2.1x**；同样任务用 4 线程反而慢 8.9x（GIL）。
+**建议**：先试 numpy/scipy 向量化，其次 `guncat_mp`，最后才是手工 `Process` + `Pipe`。
+
 ## 10. 文件监控
 
 ```python

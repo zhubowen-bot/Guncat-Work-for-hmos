@@ -277,6 +277,13 @@ def _multiprocessing():
     return "%s pool ok, cpus=%d" % (mp.get_start_method(), mp.cpu_count())
 
 
+def _guncat_mp():
+    """不依赖 /dev/shm 的并行 map（设备上 Pool 因 SemLock 不可用，这是替代方案）。"""
+    import guncat_mp
+    assert guncat_mp.map(abs, [-1, -2], workers=2) == [1, 2]
+    return "workers=%d" % guncat_mp.cpu_count()
+
+
 def _reportlab():
     from reportlab.pdfgen import canvas
     buf = io.BytesIO()
@@ -319,6 +326,7 @@ CHECKS = [
     ("requests", _requests),
     ("openpyxl/yaml/jinja2", _openpyxl_yaml_jinja),
     ("multiprocessing", _multiprocessing),
+    ("guncat_mp", _guncat_mp),
     ("reportlab", _reportlab),
     ("watchdog", _watchdog),
 ]

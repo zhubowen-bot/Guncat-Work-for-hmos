@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $path = (Resolve-Path 'entry/src/main/ets/viewmodel/ChatViewModel.ets').Path
 $text = [System.IO.File]::ReadAllText($path)
 $driverStartMarker = 'private async executeWorkLoopDriver(conv: Conversation): Promise<void> {'
