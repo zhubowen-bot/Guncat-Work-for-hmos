@@ -1604,7 +1604,7 @@ console.log('[GuncatUiParts 切分]');
     check('提示表覆盖 multiprocessing', launcher.indexOf("'multiprocessing':") >= 0);
     const tools = readFileSync(root + '/entry/src/main/ets/service/HarnessTools.ts', 'utf8');
     check('run_python 描述写明 matplotlib 要 Agg', tools.indexOf('use("Agg")') >= 0);
-    check('run_python 描述写明没有 scipy', tools.indexOf('scipy') >= 0);
+    check('run_python 描述写明 scipy 可用', tools.indexOf('**scipy**') >= 0);
     const prompt = readFileSync(root + '/entry/src/main/ets/common/PromptBuilder.ts', 'utf8');
     // scipy 已在 2026-10 打通, 边界改成了"无 GUI 后端 / 无 multiprocessing / 不能 pip install"
     check('系统提示词写明能力边界', prompt.indexOf('multiprocessing 仅 fork 上下文') >= 0 &&

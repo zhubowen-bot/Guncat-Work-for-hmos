@@ -1,6 +1,6 @@
 # PPT 视觉组件目录（参考 QwenWork pptx components）
 
-在真实平台中，以下 12 类视觉组件是经过设计的"难对齐形状"；我们的 `write_pptx` 没有 python-pptx 组件库，因此**用原生版式 + write_svg 组合实现**。先判断内容该用哪种组件，再决定实现路径。
+在真实平台中，以下 12 类视觉组件是经过设计的"难对齐形状"；`write_pptx` 是应用内置生成器（不是 python-pptx 那套对象 API），没有现成组件，因此**用原生版式 + write_svg 组合实现**（确实需要 python-pptx 时在 run_python 里直接用，已随包）。先判断内容该用哪种组件，再决定实现路径。
 
 ## 选型流程
 

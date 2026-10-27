@@ -286,10 +286,12 @@ def _fmt_exc():
 # 附在 traceback 后面, 让模型(和用户)当场知道下一步怎么做,
 # 而不是看到一句 ModuleNotFoundError 就反复重试同一个 import。
 _GUNCAT_HINTS = {
-    'scipy': 'scipy 未随包(交叉编译缺 Fortran/LAPACK)。用 numpy 覆盖: 线性代数 numpy.linalg、'
-             'FFT numpy.fft、统计 numpy.mean/std/percentile、插值 numpy.interp、卷积 numpy.convolve。',
-    'sklearn': 'scikit-learn 未随包(依赖 scipy)。分类/回归可手写 numpy 实现, '
-               '或用 pandas 做特征工程后调 numpy.linalg.lstsq。',
+    'scipy': 'scipy 已随包, 直接用: linalg / optimize / sparse / integrate / signal / '
+              'interpolate / stats / special 都可用。出现这个错说明运行库没释放完整(重启应用即可), '
+              '不要改用 numpy 手写实现。',
+    'sklearn': 'scikit-learn 未随包。分类/回归用 scipy 现成的: '
+               'scipy.optimize.minimize/curve_fit、scipy.cluster.vq、scipy.stats; '
+               '线性模型直接 numpy.linalg.lstsq。不要从零手写算法。',
     'tkinter': '设备上没有窗口系统, tkinter 不可用。要出图请用 matplotlib(Agg) 存 PNG。',
     'PyQt5': '设备上没有 GUI 后端。用 matplotlib(Agg)/Pillow 生成图片文件。',
     'cv2': 'OpenCV 未随包。图像处理用 Pillow(Image.open/resize/filter) 或 numpy。',
