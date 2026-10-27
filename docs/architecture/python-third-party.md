@@ -243,6 +243,23 @@ spatial.distance 5.0            cluster.vq.kmeans2
 
 体积：scipy 30MB(.so) + 33MB(.py, 进 extras) + openblas 10MB ≈ **+73MB**。
 
+## 2.9 真机反馈修复（2026-10-27）
+
+真机自测暴露了三类**只有设备才会显现**的问题 —— 我的 qemu 验证当时被 Alpine rootfs 里的
+同名库遮住了。三个根因与修法：
+
+| 症状 | 根因 | 修法 |
+| --- | --- | --- |
+| `PIL` 报 `Error loading shared library libz.so.1` | 我们只发了 `libz.so`，而 `.so` 的 DT_NEEDED 写的是 `libz.so.1`（soname ≠ 文件名） | 补 `libz.so.1` 实体副本；`libqhull_r.so.8.0` 同理 |
+| `lxml`/`regex`/`scipy` 报 `PyErr_NoMemory: symbol not found` | 这些扩展由 setuptools/meson 直接链接，**没有 DT_NEEDED libpython3.12.so**；设备上全局符号作用域不生效 | 全部重新链接并加 `-Wl,--no-as-needed -lpython3.12`（PIL/lxml/regex/psutil/kiwisolver/Crypto/scipy/numpy 共 168 个 `.so`） |
+| `scipy` 报 `libc.so.6` 缺失 | `ohos-fc` 包装器在"只链 `.o`"时落到了 gfortran 驱动，DT_NEEDED 变成 glibc 的 `libc.so.6`/`libm.so.6` | 包装器改为**任何链接都走 OHOS clang**，并过滤 meson 传来的 glibc `-L`/`-l`；同时把 `--version` 类查询原样交给 gfortran（否则 meson 误判编译器、传 `-Minform` 这类 g95 参数） |
+| `numpy` 无 BLAS（1.4 GFLOPS） | 编 numpy 时 OpenBLAS 还不存在 | 用 `-Dblas=openblas -Dlapack=openblas` 重编，`np.show_config()` 现在报告 `blas: openblas / lapack: openblas` |
+
+**新增静态守卫** [`check-sonames.py`](../../tooling/python/check-sonames.py)：不需要设备就能查出这类问题 ——
+扫一遍 `entry/libs` 的每个 `.so`，要求①每条 DT_NEEDED 都能在随包目录或系统白名单里找到；
+②凡是 Python 扩展必须带 DT_NEEDED `libpython3.12.so`；③不得出现 glibc 专有 soname。
+已作为**打包第 2 道门槛**（`exit 6`）。
+
 ## 3. 已验证可用（2026-10）
 
 纯 Python 21 个：requests / urllib3 / certifi / idna / charset-normalizer / python-dateutil /

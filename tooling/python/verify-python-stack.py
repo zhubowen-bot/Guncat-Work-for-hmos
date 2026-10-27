@@ -67,7 +67,12 @@ def _numpy():
     fft = [round(float(x.real), 1) for x in np.fft.fft(np.arange(4))]
     assert fft == [6.0, -2.0, -2.0, -2.0], fft
     assert round(float(np.linalg.det(np.array([[1.0, 2.0], [3.0, 4.0]]))), 1) == -2.0
-    return np.__version__
+    # 必须真的启用 BLAS/LAPACK(真机上曾出现过"声明支持但 blas=none"的情况)
+    cfg = np.show_config(mode="dicts")
+    blas = cfg["Build Dependencies"]["blas"].get("name")
+    lapack = cfg["Build Dependencies"]["lapack"].get("name")
+    assert blas == "openblas" and lapack == "openblas", "numpy 未启用 BLAS/LAPACK: %s/%s" % (blas, lapack)
+    return "%s blas=%s" % (np.__version__, blas)
 
 
 def _scipy():

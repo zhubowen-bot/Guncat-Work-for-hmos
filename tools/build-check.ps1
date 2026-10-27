@@ -92,6 +92,12 @@ if (-not $skipPython) {
       Write-Error "文档里有坏链(exit $LASTEXITCODE) —— 修好再打包"
       exit 4
     }
+    Write-Host '== 原生库依赖闭合检查 =='
+    & wsl -d Ubuntu -u root -- bash -c "cd '$wslPath' && python3 tooling/python/check-sonames.py --strict" 2>&1 | Select-Object -Last 5
+    if ($LASTEXITCODE -ne 0) {
+      Write-Error "随包 .so 依赖不闭合(exit $LASTEXITCODE) —— 补 soname 或重新链接"
+      exit 6
+    }
     Write-Host '== 第三方许可覆盖检查 =='
     & wsl -d Ubuntu -u root -- bash -c "cd '$wslPath' && python3 tooling/license-check.py --strict" 2>&1 | Select-Object -Last 4
     if ($LASTEXITCODE -ne 0) {
