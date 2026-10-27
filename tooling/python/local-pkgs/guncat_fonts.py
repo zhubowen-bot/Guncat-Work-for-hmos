@@ -22,6 +22,17 @@ import sys
 FONT_NAME = "SourceHanSansSC-Regular.otf"
 _FONT_FAMILY = "Source Han Sans SC"
 
+# 随包字体没落地时的回退: 用系统字库。
+# 真机实测 /system/fonts 下这几个都是**全量** CJK 字形(0 缺字):
+#   HarmonyOS_Sans_SC.ttf / NotoSansCJK-Regular.ttc / ShuS-SC.ttf / NotoSerifCJK-Regular.ttc
+# 注意 HYQiHeiL3.ttf 是子集化字体(实测缺 191 字), 不要用。
+SYSTEM_FONTS = (
+    "/system/fonts/HarmonyOS_Sans_SC.ttf",
+    "/system/fonts/NotoSansCJK-Regular.ttc",
+    "/system/fonts/ShuS-SC.ttf",
+    "/system/fonts/NotoSerifCJK-Regular.ttc",
+)
+
 _cached_path = None
 _registered = False
 
@@ -46,12 +57,16 @@ def _candidates():
 
 
 def path() -> str | None:
-    """返回随包中文字体路径; 找不到返回 None。"""
+    """返回可用的中文字体路径; 优先随包字体, 其次系统字库, 都没有返回 None。"""
     global _cached_path
     if _cached_path and os.path.isfile(_cached_path):
         return _cached_path
     for directory in _candidates():
         candidate = os.path.join(directory, FONT_NAME)
+        if os.path.isfile(candidate):
+            _cached_path = candidate
+            return candidate
+    for candidate in SYSTEM_FONTS:
         if os.path.isfile(candidate):
             _cached_path = candidate
             return candidate

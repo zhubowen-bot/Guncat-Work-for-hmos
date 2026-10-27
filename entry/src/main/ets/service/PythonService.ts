@@ -139,7 +139,13 @@ export class PythonService {
       // 中文字体(思源黑体 GB2312 子集, OFL-1.1): 放在 stdlib 同级 fonts/,
       // guncat_fonts 会在这个位置找它, matplotlib 一 import 就自动注册(画中文不再是方块)
       try {
-        RawAsset.extract(context, RAW_FONT, stdlib + '/fonts/' + FONT_FILE);
+        let fontDir: string = stdlib + '/fonts';
+        // 目录不存在时 fileIo.openSync(CREATE) 会直接失败 —— 之前就是漏了这句 mkdir,
+        // 导致字体从未落地、guncat_fonts.path() 在真机上恒为 None(真机实测发现)
+        if (!fileIo.accessSync(fontDir)) {
+          fileIo.mkdirSync(fontDir, true);
+        }
+        RawAsset.extract(context, RAW_FONT, fontDir + '/' + FONT_FILE);
       } catch (e) {
         hilog.warn(DOMAIN, TAG, 'extract cjk font failed: %{public}s', (e as Error).message);
       }

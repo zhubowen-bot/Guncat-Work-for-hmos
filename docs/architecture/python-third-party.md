@@ -299,6 +299,26 @@ Reason: Signal:SIGSYS(SYS_SECCOMP) syscall number is 235
 改为：拷贝出 `extras.zip` 后用 `@kit.BasicServicesKit` 的 `zlib.decompressFile` 解到
 `<stdlib>/extras` 目录，成功后删除 zip（省 ~77MB 沙箱空间）；并处理旧版本遗留的"同名文件"。
 
+### 2.12 中文字体为何在真机上是 None（2026-10-27 修复）
+
+`guncat_fonts.path()` 在真机返回 `None`、`use_cjk()` 无效，根因是**字体文件从未落地**：
+`RawAsset.extract` 用 `fileIo.openSync(..., CREATE)` 写目标文件，而 `<stdlib>/fonts/` 目录
+不存在时这一步直接失败，异常被 `catch` 里打成一条 warn 就过去了。
+
+修法：解压前先 `mkdir -p <stdlib>/fonts`；另外 `path()` 增加**系统字库回退**
+（真机实测 `/system/fonts/HarmonyOS_Sans_SC.ttf` 等 4 个字体都是 0 缺字，
+而 `HYQiHeiL3.ttf` 是子集字体、缺 191 字，已排除）。
+
+### 2.13 multiprocessing（2026-10-27）
+
+`_multiprocessing` 之前没编（`multiprocessing` 能 import 但起不了进程）。现已随包：
+用 CPython 源码的 `Modules/_multiprocessing/{multiprocessing,semaphore}.c` 交叉编译，
+与 `_posixshmem` 配合，`Pool.map` / `Process.start()` 在 qemu 里实测可用（fork 启动方式）。
+
+**设备侧注意**：OHOS 沙箱可能限制 `fork`，若 `Process.start()` 让应用消失，
+基本就是被 seccomp/SELinux 拦了（和 OpenBLAS 的 `mbind` 同类）——那种情况用
+`threading` + numpy/scipy 向量化替代。自检里已加入 `multiprocessing` 一项（真起进程跑 `Pool.map`）。
+
 ## 3. 已验证可用（2026-10）
 
 纯 Python 21 个：requests / urllib3 / certifi / idna / charset-normalizer / python-dateutil /

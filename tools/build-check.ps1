@@ -68,7 +68,7 @@ foreach ($pkg in @('hvigor', 'hvigor-ohos-plugin')) {
 # 直接调用 workspace 里的 hvigor: 外层 wrapper 会因 workspace 校验路径不一致而误报 ENOENT
 $hvigor = Join-Path $ohosDir 'hvigor\bin\hvigor.js'
 
-# ===== 原生 Python 技术栈自检(22 项) =====
+# ===== 原生 Python 技术栈自检(23 项) =====
 # 只在"本机装了 WSL 且有 Alpine rootfs"时跑; 条件不足就跳过(CI/他人机器未必有)。
 # 加 -SkipPythonStack 可强制跳过。失败直接退出 3, 避免带着坏掉的运行库打包。
 $skipPython = $args -contains '-SkipPythonStack'
@@ -104,7 +104,7 @@ if (-not $skipPython) {
       Write-Error "有随包组件缺少许可声明(exit $LASTEXITCODE) —— 补 THIRD_PARTY_NOTICES.md"
       exit 5
     }
-    Write-Host '== 原生 Python 技术栈自检(22 项) =='
+    Write-Host '== 原生 Python 技术栈自检(23 项) =='
     & wsl -d Ubuntu -u root -- bash -c "cd '$wslPath' && SSL_CERT_FILE='$wslPath/entry/src/main/resources/rawfile/python/cacert.pem' bash tooling/python/run-verify-stack.sh" 2>&1 | Select-Object -Last 10
     if ($LASTEXITCODE -ne 0) {
       Write-Error "Python 技术栈自检失败(exit $LASTEXITCODE) —— 先修好运行库再打包"

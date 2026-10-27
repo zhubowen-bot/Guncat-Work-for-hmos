@@ -84,7 +84,11 @@ font = guncat_fonts.pillow_font(24)      # ImageFont 对象
 ImageDraw.Draw(im).text((10, 10), "中文", font=font, fill="black")
 ```
 想换字体：`guncat_fonts.use_cjk("/path/your.ttf")`。
-边界：子集只含 GB2312（6763 汉字），生僻字会显示成方块。
+
+字体来源顺序：随包思源黑体(GB2312 子集) → **系统字库回退**
+(`/system/fonts/HarmonyOS_Sans_SC.ttf`、`NotoSansCJK-Regular.ttc`、`ShuS-SC.ttf`、`NotoSerifCJK-Regular.ttc`，
+实测都是 0 缺字)。注意 `/system/fonts/HYQiHeiL3.ttf` 是子集化字体(缺 191 字)，已排除。
+边界：随包子集只含 GB2312（6763 汉字），生僻字请用系统字体或自带 ttf。
 
 ## 4. 解析与文本
 

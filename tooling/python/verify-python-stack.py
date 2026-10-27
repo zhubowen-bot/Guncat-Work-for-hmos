@@ -268,6 +268,15 @@ def _openpyxl_yaml_jinja():
     return "%s/%s/%s" % (openpyxl.__version__, yaml.__version__, jinja2.__version__)
 
 
+def _multiprocessing():
+    """真起子进程跑一次 Pool.map —— 只有 _multiprocessing 与 _posixshmem 都在才可能通过。"""
+    import multiprocessing as mp
+    with mp.Pool(2) as pool:
+        got = pool.map(abs, [-1, -2, -3])
+    assert got == [1, 2, 3], got
+    return "%s pool ok, cpus=%d" % (mp.get_start_method(), mp.cpu_count())
+
+
 def _reportlab():
     from reportlab.pdfgen import canvas
     buf = io.BytesIO()
@@ -309,6 +318,7 @@ CHECKS = [
     ("psutil", _psutil),
     ("requests", _requests),
     ("openpyxl/yaml/jinja2", _openpyxl_yaml_jinja),
+    ("multiprocessing", _multiprocessing),
     ("reportlab", _reportlab),
     ("watchdog", _watchdog),
 ]
