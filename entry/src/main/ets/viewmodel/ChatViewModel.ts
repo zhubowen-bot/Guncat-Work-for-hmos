@@ -120,7 +120,7 @@ export class ChatViewModel {
       let cfg: ApiConfig | null = await StorageManager.loadApiConfig(this.context);
       let legacyApi: ApiConfig = cfg !== null ? cfg : ApiConfig.default();
       let legacyMm: MultimodalConfig = await StorageManager.loadMultimodalConfig(this.context);
-      this.apiProfiles.push(ApiProfile.fromLegacy('默认配置', legacyApi, legacyMm));
+      this.apiProfiles.push(ApiProfile.fromLegacy('默认配置', legacyApi, legacyMm, true));
       await StorageManager.saveApiProfiles(this.context, this.apiProfiles);
     }
     let savedProfileId: string = await StorageManager.loadString(

@@ -7,6 +7,42 @@ export class LLMProtocol {
   static readonly RESPONSES: string = 'responses';
   static readonly ANTHROPIC: string = 'anthropic';
 
+  // Opencode Go 网关(https://opencode.ai/inference/go/...)要求每个请求都带
+  // x-opencode-session: <稳定会话 ID>, 网关据此做路由与 prompt cache;
+  // 其他服务商不认识这个头, 所以只在命中该网关时下发。
+  static readonly OPENCODE_SESSION_HEADER: string = 'x-opencode-session';
+  static readonly OPENCODE_GATEWAY_HOST: string = 'opencode.ai';
+  private static sessionSeed: string = '';
+
+  // 绑定当前对话: 同一对话内的所有请求复用同一个会话值(跨重启由对话 ID 保持稳定)
+  static bindConversationSession(conversationId: string): void {
+    if (conversationId !== '') {
+      LLMProtocol.sessionSeed = conversationId;
+    }
+  }
+
+  // 是否 Opencode 网关(Go 订阅沿用同一域名, 只是 Base URL 带 /go)
+  static isOpenCodeGateway(baseUrl: string): boolean {
+    return baseUrl.trim().toLowerCase().indexOf(LLMProtocol.OPENCODE_GATEWAY_HOST) !== -1;
+  }
+
+  // 会话头取值: 有对话 ID 时用 ses_<对话ID>; 极端情况下还没绑定对话,
+  // 生成一次进程内稳定的兜底值, 避免每次请求换 ID 打断缓存。
+  static sessionHeaderValue(): string {
+    if (LLMProtocol.sessionSeed === '') {
+      LLMProtocol.sessionSeed = 'local_' + Date.now().toString();
+    }
+    return 'ses_' + LLMProtocol.sessionSeed;
+  }
+
+  // 补齐服务商要求的特殊请求头(目前只有 Opencode Go 的会话头)
+  static applyProviderHeaders(baseUrl: string, headers: Record<string, string>): void {
+    if (!LLMProtocol.isOpenCodeGateway(baseUrl)) {
+      return;
+    }
+    headers[LLMProtocol.OPENCODE_SESSION_HEADER] = LLMProtocol.sessionHeaderValue();
+  }
+
   // provider 字符串 → 协议: openai-responses→responses, anthropic-messages→anthropic, 其余→completions
   static pick(provider: string): string {
     if (provider === 'openai-responses') {

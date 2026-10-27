@@ -81,7 +81,7 @@ struct TableOcrPage {
     try {
       this.profiles = await this.loadProfiles(context);
     } catch (e) {
-      this.profiles = [ApiProfile.fromLegacy('默认配置', ApiConfig.default(), MultimodalConfig.default())];
+      this.profiles = [ApiProfile.fromLegacy('默认配置', ApiConfig.default(), MultimodalConfig.default(), true)];
     }
     this.modelOptions = this.buildModelOptions(this.profiles);
     let savedProvider: string = await StorageManager.loadString(
@@ -97,7 +97,7 @@ struct TableOcrPage {
       let api: ApiConfig | null = await StorageManager.loadApiConfig(context);
       let legacyApi: ApiConfig = api !== null ? api : ApiConfig.default();
       let legacyMm: MultimodalConfig = await StorageManager.loadMultimodalConfig(context);
-      return [ApiProfile.fromLegacy('默认配置', legacyApi, legacyMm)];
+      return [ApiProfile.fromLegacy('默认配置', legacyApi, legacyMm, true)];
     }
     return profiles;
   }

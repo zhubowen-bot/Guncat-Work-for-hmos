@@ -8,6 +8,7 @@ import { Attachment } from '../model/Attachment';
 import { ApiConfig } from '../model/ApiConfig';
 import { MultimodalConfig } from '../model/MultimodalConfig';
 import { ApiProfile } from '../model/ApiProfile';
+import { LLMProtocol } from '../common/LLMProtocol';
 import { FileItem, StreamCallbacks, AbortSignal, ParsedFileResult } from '../common/Types';
 import { ToolExecutionGuard } from '../common/ToolExecutionGuard';
 import { LoopMetrics } from '../common/LoopMetrics';
@@ -262,11 +263,21 @@ export class ChatViewModel {
       let cfg: ApiConfig | null = await StorageManager.loadApiConfig(this.context);
       let legacyApi: ApiConfig = cfg !== null ? cfg : ApiConfig.default();
       let legacyMm: MultimodalConfig = await StorageManager.loadMultimodalConfig(this.context);
-      this.apiProfiles.push(ApiProfile.fromLegacy('默认配置', legacyApi, legacyMm));
+      this.apiProfiles.push(ApiProfile.fromLegacy('默认配置', legacyApi, legacyMm, true));
       await StorageManager.saveApiProfiles(this.context, this.apiProfiles);
     }
+    // 预置方案: 补齐 Deepseek / Opencode Go; 旧的 DeepSeek 主域名方案并入 Deepseek 预置
     let savedProfileId: string = await StorageManager.loadString(
       this.context, Constants.LS_KEY_CURRENT_API_PROFILE_ID, '');
+    let presetId: string = ApiProfile.ensurePresetProfiles(this.apiProfiles, savedProfileId);
+    if (presetId !== '') {
+      await StorageManager.saveApiProfiles(this.context, this.apiProfiles);
+    }
+    // 当前方案被合并进预置时, 选中项跟着落到预置上, 不要退回列表第一项
+    if (savedProfileId !== '' && !ApiProfile.hasProfileId(this.apiProfiles, savedProfileId) &&
+      presetId !== '') {
+      savedProfileId = presetId;
+    }
     let selectedProfile: ApiProfile = this.apiProfiles[0];
     for (let i: number = 0; i < this.apiProfiles.length; i++) {
       if (this.apiProfiles[i].id === savedProfileId) {
@@ -353,6 +364,7 @@ export class ChatViewModel {
         await this.startNewConversation();
       } else {
         this.currentConversationId = latest.id;
+        LLMProtocol.bindConversationSession(latest.id);
         if (this.context !== null) {
           await StorageManager.saveString(this.context, Constants.LS_KEY_CURRENT_CONV_ID, latest.id);
         }
@@ -417,6 +429,7 @@ export class ChatViewModel {
       return;
     }
     this.currentConversationId = convId;
+    LLMProtocol.bindConversationSession(convId);
     // 立刻通知 UI (scrollTo bottom + rebuildPreviewItems), 不等 storage 落盘
     this.notifyUIChange();
     if (this.context !== null) {
@@ -469,6 +482,7 @@ export class ChatViewModel {
     let conv: Conversation = Conversation.create(this.currentAgent.id, '', mode);
     this.conversations.unshift(conv);
     this.currentConversationId = conv.id;
+    LLMProtocol.bindConversationSession(conv.id);
     if (this.context !== null) {
       await StorageManager.saveString(this.context, Constants.LS_KEY_CURRENT_CONV_ID, conv.id);
     }
@@ -540,6 +554,7 @@ export class ChatViewModel {
       if (this.context !== null && this.currentConversationId !== '') {
         await StorageManager.saveString(this.context, Constants.LS_KEY_CURRENT_CONV_ID, this.currentConversationId);
       }
+      LLMProtocol.bindConversationSession(this.currentConversationId);
     }
     this.persistConversations();
     // 立即通知 UI 重建侧栏/抽屉的会话列表投影, 删除后马上从列表消失
@@ -1111,6 +1126,82 @@ export class ChatViewModel {
     this.applyApiProfile(profile);
     await this.persistApiProfiles();
     this.notifyUIChange();
+  }
+
+  // 删除一套配置(带确认弹窗): 内置方案(默认配置 / 预置方案)不可删, 只删用户自己新建的
+  async deleteApiProfile(profileId: string): Promise<boolean> {
+    if (this.isStreaming) {
+      return false;
+    }
+    let index: number = -1;
+    for (let i: number = 0; i < this.apiProfiles.length; i++) {
+      if (this.apiProfiles[i].id === profileId) {
+        index = i;
+        break;
+      }
+    }
+    if (index < 0) {
+      return false;
+    }
+    let target: ApiProfile = this.apiProfiles[index];
+    if (target.builtin) {
+      promptAction.showToast({ message: '默认配置与预置方案不可删除', duration: 2000 });
+      return false;
+    }
+    if (this.apiProfiles.length <= 1) {
+      promptAction.showToast({ message: '至少保留一套配置', duration: 2000 });
+      return false;
+    }
+    try {
+      let res: promptAction.ShowDialogSuccessResponse = await promptAction.showDialog({
+        title: '删除配置',
+        message: '确定删除「' + target.name + '」吗？该操作不可恢复。',
+        buttons: [
+          { text: '取消', color: '#6B7280' },
+          { text: '删除', color: '#E05252' }
+        ]
+      });
+      if (res.index !== 1) {
+        return false;
+      }
+    } catch (e) {
+      // 用户取消或弹窗不可用
+      return false;
+    }
+    let wasCurrent: boolean = target.id === this.currentApiProfileId;
+    this.apiProfiles.splice(index, 1);
+    if (wasCurrent && this.apiProfiles.length > 0) {
+      // 落到相邻的一套(优先前一套), 保证始终有一个可用的当前配置
+      let nextIndex: number = index > 0 ? index - 1 : 0;
+      this.applyApiProfile(this.apiProfiles[nextIndex]);
+    }
+    await this.persistApiProfiles();
+    this.notifyUIChange();
+    promptAction.showToast({ message: '配置已删除', duration: 2000 });
+    return true;
+  }
+
+  // 模型选择器按"方案 + 模型"逐项选择: 切换方案并把当前模型落到点中的那个
+  async selectApiProfileModel(profileId: string, model: string): Promise<void> {
+    if (this.isStreaming) {
+      return;
+    }
+    for (let i: number = 0; i < this.apiProfiles.length; i++) {
+      if (this.apiProfiles[i].id !== profileId) {
+        continue;
+      }
+      let profile: ApiProfile = this.apiProfiles[i];
+      let target: string = model.trim();
+      profile.apiConfig.models = ApiConfig.normalizeModels(profile.apiConfig.models, target);
+      if (target !== '') {
+        profile.apiConfig.model = target;
+      }
+      this.applyApiProfile(profile);
+      // 模型是选择器里的可持久化状态, 选完要落盘, 下次启动保持同一模型
+      await this.persistApiProfiles();
+      this.notifyUIChange();
+      return;
+    }
   }
 
   async saveCurrentApiProfile(

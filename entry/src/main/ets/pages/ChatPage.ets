@@ -677,10 +677,12 @@ struct ChatPage {
         initProfileName: this.vm.currentApiProfile !== null ? this.vm.currentApiProfile.name : '默认配置',
         profileNames: this.getApiProfileNames(),
         selectedProfileIndex: this.vm.currentApiProfileIndex,
+        canDeleteProfile: this.vm.currentApiProfile !== null && !this.vm.currentApiProfile.builtin,
         initProvider: this.vm.apiConfig.provider,
         initBaseUrl: this.vm.apiConfig.baseUrl,
         initApiKey: this.vm.apiConfig.apiKey,
         initModel: this.vm.apiConfig.model,
+        initModels: this.vm.apiConfig.modelList(),
         initTemperature: this.vm.apiConfig.temperature !== null ? this.vm.apiConfig.temperature.toString() : '',
         initTopP: this.vm.apiConfig.topP !== null ? this.vm.apiConfig.topP.toString() : '',
         initMaxTokens: this.vm.apiConfig.maxTokens !== null ? this.vm.apiConfig.maxTokens.toString() : '',
@@ -697,6 +699,13 @@ struct ChatPage {
         onAddProfile: () => {
           this.vm.addApiProfile().then(() => {
             this.refreshTick++;
+          });
+        },
+        onDeleteProfile: () => {
+          this.vm.deleteApiProfile(this.vm.currentApiProfileId).then((deleted: boolean) => {
+            if (deleted) {
+              this.refreshTick++;
+            }
           });
         },
         onSelectProfile: (index: number) => {
@@ -1700,7 +1709,8 @@ struct ChatPage {
   @Builder
   private buildModelSelector() {
     Row() {
-      Text(this.vm.currentApiProfile !== null ? this.vm.currentApiProfile.name : '模型')
+      // 胶囊只显示模型名: 服务商只在下方弹层里显示, 不在这里拼 "· 服务商"
+      Text(this.currentModelLabel())
         // 字号固定 12, 与右侧 ToggleSwitch 完全一致(此前 13 且带 6~13 自适应缩放, 造成大小不一)
         .fontSize(12)
         .lineHeight(16)
@@ -1747,32 +1757,58 @@ struct ChatPage {
     Column() {
       Scroll() {
         Column() {
-          ForEach(this.vm.apiProfiles, (profile: ApiProfile) => {
-            Row() {
-              Text(profile.name)
-                .fontSize(14)
-                .fontColor($r('app.color.text_primary'))
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
+          // 只列填了 API Key 的方案; 每个方案下的多个模型逐个成行(服务商显示在模型名下方)
+          if (this.selectableProfiles().length === 0) {
+            Text('暂无可用模型\n请先在设置中填写 API Key')
+              .fontSize(12)
+              .fontColor($r('app.color.text_secondary'))
+              .lineHeight(20)
+              .textAlign(TextAlign.Center)
+              .width('100%')
+              .padding({ left: 12, right: 12, top: 12, bottom: 12 })
+          }
+          ForEach(this.selectableProfiles(), (profile: ApiProfile) => {
+            ForEach(profile.apiConfig.modelList(), (modelName: string) => {
+              Row() {
+                Column() {
+                  Text(modelName)
+                    .fontSize(14)
+                    .fontColor($r('app.color.text_primary'))
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .width('100%')
+                  Text(profile.name)
+                    .fontSize(11)
+                    .fontColor($r('app.color.text_secondary'))
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .width('100%')
+                    .margin({ top: 2 })
+                }
+                .alignItems(HorizontalAlign.Start)
                 .layoutWeight(1)
-              if (profile.id === this.vm.currentApiProfileId) {
-                Text('✓')
-                  .fontSize(14)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor($r('app.color.brand'))
+
+                if (profile.id === this.vm.currentApiProfileId &&
+                  modelName === this.vm.apiConfig.model) {
+                  Text('✓')
+                    .fontSize(14)
+                    .fontWeight(FontWeight.Bold)
+                    .fontColor($r('app.color.brand'))
+                }
               }
-            }
-            .width('100%')
-            .height(42)
-            .padding({ left: 12, right: 12 })
-            .borderRadius(12)
-            .backgroundColor(profile.id === this.vm.currentApiProfileId ?
-              $r('app.color.brand_light') : Color.Transparent)
-            .onClick(() => {
-              this.vm.selectApiProfile(profile.id);
-              this.modelMenuOpen = false;
-              this.refreshTick++;
-            })
+              .width('100%')
+              .height(48)
+              .padding({ left: 12, right: 12 })
+              .borderRadius(12)
+              .backgroundColor(profile.id === this.vm.currentApiProfileId &&
+                modelName === this.vm.apiConfig.model ?
+                $r('app.color.brand_light') : Color.Transparent)
+              .onClick(() => {
+                this.vm.selectApiProfileModel(profile.id, modelName);
+                this.modelMenuOpen = false;
+                this.refreshTick++;
+              })
+            }, (modelName: string) => profile.id + '|' + modelName)
           }, (profile: ApiProfile) => profile.id)
         }
         .width('100%')
@@ -1884,6 +1920,24 @@ struct ChatPage {
     .backgroundColor($r('app.color.surface'))
     .borderRadius(18)
     .shadow({ radius: 16, color: '#1A000000', offsetX: 0, offsetY: 6 })
+  }
+
+  // 胶囊只显示模型名(服务商只在弹层里显示)
+  private currentModelLabel(): string {
+    let name: string = this.vm.apiConfig.model.trim();
+    return name !== '' ? name : '选择模型';
+  }
+
+  // 模型选择框只列已填 API Key 的方案: 预置方案只是快捷填入项, 没 Key 时不应出现
+  private selectableProfiles(): ApiProfile[] {
+    let list: ApiProfile[] = [];
+    for (let i: number = 0; i < this.vm.apiProfiles.length; i++) {
+      let profile: ApiProfile = this.vm.apiProfiles[i];
+      if (profile.apiConfig.apiKey.trim() !== '' && profile.apiConfig.modelList().length > 0) {
+        list.push(profile);
+      }
+    }
+    return list;
   }
 
   private getApiProfileOptions(): SelectOption[] {

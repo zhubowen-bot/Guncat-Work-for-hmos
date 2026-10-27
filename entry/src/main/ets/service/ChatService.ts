@@ -1208,6 +1208,8 @@ export class ChatService {
         } else {
           headers['Authorization'] = 'Bearer ' + config.apiKey;
         }
+        // Opencode Go 等网关要求的特殊请求头
+        LLMProtocol.applyProviderHeaders(config.baseUrl, headers);
         httpRequest.requestInStream(url, {
           method: http.RequestMethod.POST,
           header: headers,

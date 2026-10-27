@@ -336,6 +336,8 @@ export class AgentLoopService {
         } else {
           headers['Authorization'] = 'Bearer ' + config.apiKey;
         }
+        // Opencode Go 等网关要求的特殊请求头
+        LLMProtocol.applyProviderHeaders(config.baseUrl, headers);
         let retryAfterHeader: string = '';
         try {
           httpRequest.on('headersReceive', (header: Object) => {
