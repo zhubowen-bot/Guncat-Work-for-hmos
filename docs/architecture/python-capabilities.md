@@ -203,10 +203,23 @@ results = guncat_mp.map(heavy, [a, b, c, d], workers=4)   # 顺序与输入一�
 guncat_mp.cpu_count(); guncat_mp.available()
 ```
 
-- 不用 pickle 函数，lambda / 闭包也能用（fork 直接继承）；
-- 子进程异常会带回 traceback，不会静默失败。
+- 不用 pickle **函数**，lambda / 闭包都能用（fork 直接继承）；
+- **返回值必须可 pickle**（经 `pickle` 从子进程回传）：文件句柄 / socket / lambda 会失败，
+  此时报错会明确说"结果不可 pickle"，不会误报成"fork 被限制"；
+- 子进程异常带回完整 traceback（最多显示 3 个）。
 
-实测（设备）：4 进程并行 = 串行的 **2.1x**；同样任务用 4 线程反而慢 8.9x（GIL）。
+**什么时候不该用**（真机实测）：单次 fork+管道开销约 **60–90ms**，所以
+
+| 单任务计算量 | 串行 | 4 进程 | 结论 |
+| --- | --- | --- | --- |
+| 1 万次迭代（18ms） | 18ms | 299ms | 亏 16 倍 |
+| 100 万次（665ms） | 665ms | 488ms | 1.36x，刚回本 |
+| 300 万次（1.8s） | 1807ms | 917ms | 1.97x |
+| 1000 万次（6.2s） | 6195ms | 2159ms | 2.87x |
+
+**单任务 < 100ms 就别并行**（20 万行 CSV 聚合总耗时 146ms，并行反而慢 4 倍，pandas 更快）。
+workers 甜点在 **4–6**；12 个反而降到 1.72x（内存带宽竞争）。默认 `min(8, cpu_count)`。
+
 **建议**：先试 numpy/scipy 向量化，其次 `guncat_mp`，最后才是手工 `Process` + `Pipe`。
 
 ## 10. 文件监控

@@ -315,6 +315,10 @@ Reason: Signal:SIGSYS(SYS_SECCOMP) syscall number is 235
 用 CPython 源码的 `Modules/_multiprocessing/{multiprocessing,semaphore}.c` 交叉编译，
 与 `_posixshmem` 配合，`Pool.map` / `Process.start()` 在 qemu 里实测可用（fork 启动方式）。
 
+配套的 [`guncat_mp.py`](../../tooling/python/local-pkgs/guncat_mp.py) 提供 fork+Pipe 的并行 `map`
+（`Pool` 因 `/dev/shm` 不可用）。真机实测：4 进程 2.07x、4 线程 0.10x；
+单任务 < 100ms 时并行反亏（fork 开销 60–90ms），结果必须可 pickle。
+
 **设备侧注意**：OHOS 沙箱可能限制 `fork`，若 `Process.start()` 让应用消失，
 基本就是被 seccomp/SELinux 拦了（和 OpenBLAS 的 `mbind` 同类）——那种情况用
 `threading` + numpy/scipy 向量化替代。自检里已加入 `multiprocessing` 一项（真起进程跑 `Pool.map`）。
