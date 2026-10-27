@@ -5,6 +5,7 @@
 import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
 import { ApiConfig } from '../model/ApiConfig';
+import { LLMProtocol } from '../common/LLMProtocol';
 
 function sanitizeFileName(name: string): string {
   return name.replace(/["\r\n]/g, '_');
@@ -89,6 +90,8 @@ export class FileUploadService {
           } else {
             headers['Authorization'] = 'Bearer ' + config.apiKey;
           }
+          // Opencode Go 等网关要求的特殊请求头
+          LLMProtocol.applyProviderHeaders(config.baseUrl, headers);
           httpRequest.request(url, {
             method: http.RequestMethod.POST,
             header: headers,

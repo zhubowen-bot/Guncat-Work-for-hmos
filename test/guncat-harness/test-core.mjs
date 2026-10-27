@@ -680,6 +680,21 @@ console.log('[LLMProtocol]');
     'https://x.com/v1/chat/completions');
   check('autoSuffix=false 原样', LLMProtocol.resolveEndpoint(' https://x.com/custom ', 'completions', false) ===
     'https://x.com/custom');
+  // 预置方案 Deepseek 直填主域名, 必须落到 Anthropic 兼容端点
+  check('deepseek 主域名 → anthropic 端点', LLMProtocol.resolveEndpoint(
+    'https://api.deepseek.com', 'anthropic', true) === 'https://api.deepseek.com/anthropic/v1/messages');
+  // 预置方案 Opencode Go: /inference/go/anthropic + /v1/messages
+  check('opencode go 端点', LLMProtocol.resolveEndpoint(
+    'https://opencode.ai/inference/go/anthropic', 'anthropic', true) ===
+    'https://opencode.ai/inference/go/anthropic/v1/messages');
+  // Opencode Go 要求每个请求带稳定会话头, 其他服务商不发
+  LLMProtocol.bindConversationSession('conv_test_1');
+  const ocHeaders = {};
+  LLMProtocol.applyProviderHeaders('https://opencode.ai/inference/go/anthropic', ocHeaders);
+  check('opencode go 会话头', ocHeaders['x-opencode-session'] === 'ses_conv_test_1');
+  const plainHeaders = {};
+  LLMProtocol.applyProviderHeaders('https://api.deepseek.com', plainHeaders);
+  check('非 opencode 网关不发会话头', plainHeaders['x-opencode-session'] === undefined);
 }
 
 // ===== RepeatDetector =====

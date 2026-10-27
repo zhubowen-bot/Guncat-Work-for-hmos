@@ -15,12 +15,16 @@ export struct SettingsPanel {
   @Prop initProfileName: string = '默认配置';
   @Prop profileNames: string[] = [];
   @Prop selectedProfileIndex: number = 0;
+  // 当前方案是否可删除: 默认配置与预置方案为内置方案, 只有用户自建配置可删
+  @Prop canDeleteProfile: boolean = false;
   // 父组件传入的初始值 (只读). 父级用 @State vm 传过来,
   // 每次重新打开 SettingsPanel (条件渲染导致组件重建) 时 aboutToAppear 会重新同步
   @Prop initProvider: string = 'openai-completions';
   @Prop initBaseUrl: string = '';
   @Prop initApiKey: string = '';
   @Prop initModel: string = '';
+  // 该方案可填多个模型名称(当前选中的模型在对话页的模型选择器里切换)
+  @Prop initModels: string[] = [];
   @Prop initTemperature: string = '';
   @Prop initTopP: string = '';
   @Prop initMaxTokens: string = '';
@@ -38,6 +42,9 @@ export struct SettingsPanel {
   @State baseUrl: string = '';
   @State apiKey: string = '';
   @State model: string = '';
+  // 模型名称编辑列表(可增删); modelFormTick 只在切换方案时递增, 用来刷新列表内的输入框
+  @State models: string[] = [];
+  @State modelFormTick: number = 0;
   @State temperature: string = '';
   @State topP: string = '';
   @State maxTokens: string = '';
@@ -66,6 +73,7 @@ export struct SettingsPanel {
     search: SearchEngineSettings) => void =
     (_name: string, _a: ApiConfig, _m: MultimodalConfig, _s: SearchEngineSettings): void => {};
   private onAddProfile: () => void = (): void => {};
+  private onDeleteProfile: () => void = (): void => {};
   private onSelectProfile: (index: number) => void = (_index: number): void => {};
 
   aboutToAppear(): void {
@@ -94,6 +102,9 @@ export struct SettingsPanel {
     this.baseUrl = this.initBaseUrl;
     this.apiKey = this.initApiKey;
     this.model = this.initModel;
+    this.models = this.initModels.length > 0 ?
+      this.initModels.slice() : (this.initModel.trim() !== '' ? [this.initModel] : ['']);
+    this.modelFormTick++;
     this.temperature = this.initTemperature;
     this.topP = this.initTopP;
     this.maxTokens = this.initMaxTokens;
@@ -184,6 +195,22 @@ export struct SettingsPanel {
                 .margin({ left: 8 })
                 .onClick(() => {
                   this.onAddProfile();
+                })
+
+                // 只有用户自建配置可删; 默认配置与预置方案置灰, 点了会说明原因
+                Button() {
+                  SymbolGlyph($r('sys.symbol.trash'))
+                    .fontSize(18)
+                    .fontColor([$r('app.color.danger')])
+                }
+                .width(44)
+                .height(44)
+                .borderRadius(14)
+                .backgroundColor($r('app.color.danger_light'))
+                .margin({ left: 8 })
+                .opacity(this.canDeleteProfile ? 1 : 0.4)
+                .onClick(() => {
+                  this.onDeleteProfile();
                 })
               }
               .width('100%')
@@ -289,18 +316,71 @@ export struct SettingsPanel {
                 })
 
               this.buildSectionHeader('模型名称 / Endpoint ID')
-              TextInput({ placeholder: this.getModelPlaceholder(), text: this.model })
-                .width('100%')
-                .height(44)
-                .borderRadius(16)
-                .backgroundColor($r('app.color.surface_secondary'))
+              Column() {
+                ForEach(this.models, (name: string, index: number) => {
+                  Row() {
+                    TextInput({ placeholder: this.getModelPlaceholder(), text: name })
+                      .layoutWeight(1)
+                      .height(44)
+                      .borderRadius(16)
+                      .backgroundColor($r('app.color.surface_secondary'))
+                      .padding({ left: 12, right: 12 })
+                      .fontSize(14)
+                      .fontColor($r('app.color.text_primary'))
+                      .placeholderColor($r('app.color.text_secondary'))
+                      .onChange((v: string) => {
+                        this.updateModelName(index, v);
+                      })
+                    // 至少保留一行, 只填一个模型时仍然和原来一样简单
+                    if (this.models.length > 1) {
+                      Button() {
+                        Text('✕')
+                          .fontSize(14)
+                          .fontColor($r('app.color.text_secondary'))
+                      }
+                      .width(36)
+                      .height(44)
+                      .borderRadius(12)
+                      .backgroundColor(Color.Transparent)
+                      .margin({ left: 4 })
+                      .onClick(() => {
+                        this.removeModelName(index);
+                      })
+                    }
+                  }
+                  .width('100%')
+                  .margin({ top: 8 })
+                  .alignItems(VerticalAlign.Center)
+                }, (name: string, index: number) =>
+                  this.modelFormTick.toString() + '-' + index.toString())
+
+                Row() {
+                  SymbolGlyph($r('sys.symbol.plus'))
+                    .fontSize(14)
+                    .fontColor([$r('app.color.brand')])
+                  Text('添加模型')
+                    .fontSize(13)
+                    .fontColor($r('app.color.brand'))
+                    .margin({ left: 4 })
+                }
+                .height(40)
                 .padding({ left: 12, right: 12 })
-                .fontSize(14)
-                .fontColor($r('app.color.text_primary'))
-                .placeholderColor($r('app.color.text_secondary'))
-                .onChange((v: string) => {
-                  this.model = v;
+                .borderRadius(14)
+                .backgroundColor($r('app.color.brand_light'))
+                .margin({ top: 8 })
+                .onClick(() => {
+                  this.addModelName();
                 })
+
+                Text('可填写多个模型名称：模型选择器会逐个列出，当前使用的模型在对话页切换。')
+                  .fontSize(11)
+                  .fontColor($r('app.color.text_secondary'))
+                  .width('100%')
+                  .lineHeight(18)
+                  .margin({ top: 6 })
+              }
+              .width('100%')
+              .alignItems(HorizontalAlign.Start)
 
               // 高级参数切换
               this.buildAdvancedSection()
@@ -856,13 +936,56 @@ export struct SettingsPanel {
     cfg.provider = this.provider;
     cfg.baseUrl = this.baseUrl.trim();
     cfg.apiKey = this.apiKey.trim();
-    cfg.model = this.model.trim();
+    // 空行会被丢弃; 当前模型若已被删掉就落到第一个模型, 保证 model 始终属于 models
+    let names: string[] = ApiConfig.normalizeModels(this.models, '');
+    let current: string = this.model.trim();
+    if (names.indexOf(current) === -1) {
+      current = names.length > 0 ? names[0] : '';
+    }
+    cfg.model = current;
+    cfg.models = names;
     cfg.extraBody = this.extraBody.trim();
     cfg.temperature = this.temperature !== '' ? parseFloat(this.temperature) : null;
     cfg.topP = this.topP !== '' ? parseFloat(this.topP) : null;
     cfg.maxTokens = this.maxTokens !== '' ? parseInt(this.maxTokens) : null;
     cfg.autoSuffix = this.autoSuffix;
     return cfg;
+  }
+
+  // 改写某一行模型名: 当前选中的那一行保持选中(避免改个名就把当前模型跳到第一行)
+  private updateModelName(index: number, value: string): void {
+    if (index < 0 || index >= this.models.length) {
+      return;
+    }
+    let old: string = this.models[index].trim();
+    if (old !== '' && this.model.trim() === old) {
+      this.model = value;
+    }
+    let next: string[] = this.models.slice();
+    next[index] = value;
+    this.models = next;
+  }
+
+  private addModelName(): void {
+    let next: string[] = this.models.slice();
+    next.push('');
+    this.models = next;
+    // 增删行会改变下标, 递增 tick 让列表按新下标整体重建, 避免复用旧行的输入框内容
+    this.modelFormTick++;
+  }
+
+  private removeModelName(index: number): void {
+    if (this.models.length <= 1 || index < 0 || index >= this.models.length) {
+      return;
+    }
+    let next: string[] = [];
+    for (let i: number = 0; i < this.models.length; i++) {
+      if (i !== index) {
+        next.push(this.models[i]);
+      }
+    }
+    this.models = next;
+    this.modelFormTick++;
   }
 
   private buildMmConfig(): MultimodalConfig {
