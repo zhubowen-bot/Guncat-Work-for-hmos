@@ -225,6 +225,21 @@ finders)、导出 `GUNCAT_PY_LIBDIR` 给 PyCryptodome 这类用 ctypes 按路径
 执行本身固定在一个**专属线程**上(第一次调用时创建, 由它 `Py_Initialize`, 之后所有调用都投递给它) ——
 解释器的线程态、GIL 记录都绑在初始化它的线程上, NAPI 回调落在别的线程会出各种怪问题。
 
+## 6.3 内存(进程被杀是 SIGKILL, 捕获不到)
+
+* **常驻成本**: 解释器不重启, 已经 import 的库就一直占着 —— 全库(numpy/pandas/scipy/
+  matplotlib/PIL/docx/openpyxl/requests/lxml)加载后本进程 RSS 约 **1.1~1.2 GB**, `VmHWM` 同一量级。
+  这是常驻换来的速度的代价, 不是泄漏。
+* **每次调用会释放用户命名空间**: `exec` 用的 dict 挂在 `__main__._globals` 上, 早先要等**下一次**
+  调用才被替换 —— 上一次脚本里 400 MB 的数组会一直占着 RSS(实测对象确实还活着)。现在
+  `finally` 里 `_globals.clear()`, 并且只在本次 RSS > 400 MB 时才 `gc.collect()`(避免空调用白付开销)。
+* **内存提醒**: 调用前后读 `/proc/self/status` + `/proc/meminfo`(不 import psutil); 满足任一条就提醒:
+  系统可用 < 2 GB、本进程 RSS > 1.5 GB、本次调用把 `VmHWM` 顶高 > 512 MB。提醒放在工具结果最前面
+  (单独字段, 不混进 stderr/error), 同时写 hilog。
+  已知失败时会附 `mem rss=... peak=... avail=... (kB)`。
+* **为什么不做硬配额**: `setrlimit` 是**进程级**的, 会一起约束 ArkTS 线程, 值给错就换成另一种崩法;
+  真正能挡住 SIGKILL 的只有"解释器跑在子进程里", 那是重写执行架构的事。现在走"可观测 + 提醒"。
+
 ## 7. 排障信号
 
 `run_python`/`npy` 失败时，返回值里会带**运行库诊断**（native 侧在启动器没写出结果时用最小脚本再探一次）：
@@ -252,7 +267,7 @@ mini import _json=FAIL ModuleNotFoundError("No module named '_json'")
 
 | 测试 | 覆盖 | 结果 |
 | --- | --- | --- |
-| [`launcher-test.py`](../../tooling/python/launcher-test.py) | **38 项**启动器回归(桌面 CPython 直接跑模板): 输出捕获(含 fd 级 `os.write`/`buffer`/`fileno`)、跨调用状态隔离、超时(while/for)、只读守卫、spawn 守卫、诊断 | 38/38 通过 |
+| [`launcher-test.py`](../../tooling/python/launcher-test.py) | **43 项**启动器回归(桌面 CPython 直接跑模板): 输出捕获(含 fd 级 `os.write`/`buffer`/`fileno`)、跨调用状态隔离、超时(while/for)、只读守卫、spawn 守卫、用户命名空间释放、MPLCONFIGDIR、内存提示、诊断 | Windows 42/42、Linux 43/43(无 numpy 时跳过 2 项) |
 | [`verify-python-stack.py`](../../tooling/python/verify-python-stack.py) | **21 项**技术栈自检: 标准库(sqlite3/ssl/压缩/hash)、ctypes、numpy、pandas、Pillow、matplotlib、**中文渲染**、qrcode、lxml、regex、bs4、PyCryptodome、docx/pptx/xlsxwriter、sympy、psutil、requests+certifi、openpyxl/yaml/jinja2、reportlab、watchdog | 21/21 通过 |
 | [`run-verify-stack.sh`](../../tooling/python/run-verify-stack.sh) | **按真机布局**组装环境(qemu): extras 解压到临时目录、libs 只给 `.so`、`PYTHONPATH=stdlib:site-packages:extras:libs` | 同上 |
 | [`build-python-stack.sh`](../../tooling/python/build-python-stack.sh) | 12 个阶段全量重建(幂等) | 可一键重建 |

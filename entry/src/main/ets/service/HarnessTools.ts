@@ -689,6 +689,7 @@ export class HarnessTools {
       '并发: **纯 Python 计算别用线程/线程池** —— 实测 8 个 CPU 任务串行 162ms, 线程池(2~8 线程)要 1.2~1.4s(慢 7~8 倍, 全是 GIL 争用); 但**会释放 GIL 的 C 运算**(hashlib / zlib / bz2 / lzma / sqlite3 / 编解码)多线程是**真并行**: 实测 sha256 8 线程 2.7 倍、并行度到 8.6, 批量哈希/压缩就该这么干(分块 ≥64KB —— hashlib 单块 <2KB 不释放 GIL); I/O 等待型用线程池同样有效(10 次 sleep(0.05): 502ms → 67ms)。multiprocessing **只有 fork 上下文可用**(Process/Pipe 可以): spawn/forkserver 要重新 exec 解释器(嵌入式解释器没有可执行体, 会直接报错而不是静默 255), Queue/Pool/Lock 要 /dev/shm(沙箱里没有); 真要多进程用 `guncat_mp.map(func, items, workers=4)`(fork+pipe, 函数免 pickle, 单任务 >=100ms 才划算)。' +
       '返回值: 打印到 stdout 的内容随结果返回; 脚本用 `raise SystemExit(2)` 可指定退出码(非 0 不算工具失败); 异常会附 traceback。' +
       '**每次调用是独立的**: 解释器常驻, 但 globals / os.environ / sys.path / 日志级别 / warnings 过滤器 / random 种子 / numpy 打印选项都在调用结束时回滚, 想跨调用传状态就落文件; 标准库与三方库目录是只读的(写它会跨调用、跨会话生效), 要写文件用工作区相对路径或 tempfile.gettempdir()。' +
+      '**内存**: 解释器常驻, 已经 import 的库会一直占着(全库加载约 1.1~1.2 GB); 系统可用内存 < 2 GB 或本进程 RSS > 800 MB 时, 结果最前面会多一条内存提醒。大文件分块读、大对象用完 `del` + `gc.collect()` —— 一次分配几百 MB 有被系统直接 SIGKILL 的风险(Python 里捕获不到, 用户看到的是应用闪退)。' +
       '限制与超时: 代码 ≤128KB, 默认 30 秒超时(timeout_ms 可放宽到 180 秒)。**`while` 与 `for` 循环到点都会抛 TimeoutError**(while 逐轮检查; for 每 256 轮采样一次, range 循环每轮只多一次位运算、实测紧凑循环 +5~40%, 真实逐行处理可忽略); 阻塞在 C 调用里的仍无法中断 —— 那种情况工具会返回"超时(未中断)", 任务继续在后台跑, 期间 run_python 直接拒绝(不排队), 它一结束就自动恢复(最多允许 2 个这样的任务同时挂着, 不需要重启)。输出超过 20000 字符会截断并把全文存到工作区 .spill/ 供 read_file 读回; int→str 上限已放宽到 10 万位。',
       HarnessTools.props3(
         'code', HarnessTools.strProp('要执行的 Python 源码(可多行; 相对路径以工作区为基准)'),

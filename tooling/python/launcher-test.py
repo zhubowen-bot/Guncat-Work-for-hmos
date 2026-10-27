@@ -59,7 +59,9 @@ class Runtime:
         diag_path = s / "diag.txt"
         argv_path = s / "argv.txt"
         stdin_path = s / "stdin.txt"
-        for p in (out_path, err_path, meta_path, diag_path):
+        warn_path = s / "warn.txt"
+        cache_dir = s / "cache"
+        for p in (out_path, err_path, meta_path, diag_path, warn_path):
             if p.exists():
                 p.unlink()
         code_path.write_text(code, encoding="utf-8")
@@ -75,6 +77,8 @@ class Runtime:
                   .replace("__GUNCAT_DIAG__", str(diag_path).replace("\\", "/"))
                   .replace("__GUNCAT_ARGV__", str(argv_path).replace("\\", "/"))
                   .replace("__GUNCAT_STDIN__", str(stdin_path if stdin is not None else "").replace("\\", "/"))
+                  .replace("__GUNCAT_WARN__", str(warn_path).replace("\\", "/"))
+                  .replace("__GUNCAT_CACHE__", str(cache_dir).replace("\\", "/"))
                   .replace("__GUNCAT_DEADLINE__", "%.3f" % (timeout_ms / 1000.0)))
 
         t0 = time.monotonic()
@@ -111,6 +115,7 @@ class Runtime:
             "error": error,
             "stage": stage,
             "diag": diag,
+            "warning": warn_path.read_text(encoding="utf-8").strip() if warn_path.exists() else "",
             "duration_ms": dur,
             "timed_out": (not ok) and ("run_python 超时" in error),
         }
@@ -223,6 +228,21 @@ def main() -> int:
     check("for range 最终被中断", r["timed_out"], r["error"][:200])
     check("for range 中断延迟 < 3s(每 256 轮采样)", dt < 3.0, f"{dt:.2f}s")
 
+    print("[调用结束释放用户命名空间]")
+    run('payload = bytearray(10_000_000)\nprint("allocated")\n')
+    g = rt.main.get("_globals")
+    check("_globals 仍存在(下一次调用会复用)", isinstance(g, dict), str(type(g)))
+    check("上一次调用的大对象已释放", isinstance(g, dict) and "payload" not in g, str(list(g)[:5]))
+
+    print("[内存与 matplotlib 缓存]")
+    r = run('import os\n'
+            'p = os.environ.get("MPLCONFIGDIR", "")\n'
+            'print("mpl=" + p)\n'
+            'print("exists=%s" % os.path.isdir(p))\n')
+    check("MPLCONFIGDIR 已指向可写目录", "mpl=" in r["stdout"] and
+          "mpl=\n" not in r["stdout"] and "exists=True" in r["stdout"], r["stdout"])
+    check("正常调用不产生内存警告", r["warning"] == "", r["warning"])
+
     print("[解释器安装树只读]")
     r = run('import sys, os\n'
             'def probe(label, fn):\n'
@@ -256,21 +276,25 @@ def main() -> int:
     check("spawn 的可执行体探测抛明确异常", "patched=yes" in r["stdout"], r["stdout"])
 
     print("[numpy 选项不跨调用]")
-    r = run('import numpy\n'
+    has_numpy = "numpy-ok" in run(
+        'import numpy\nprint("numpy-ok" if hasattr(numpy, "set_printoptions") else "numpy-broken")\n')["stdout"]
+    if not has_numpy:
+        print("  skip (本机没有 numpy)")
+    else:
+        run('import numpy\n'
             'numpy.set_printoptions(precision=2)\n'
             'numpy.seterr(all="ignore")\n'
             'print("set")\n')
-    r = run('import numpy\n'
+        run('import numpy\n'
             'print("precision=%d" % numpy.get_printoptions()["precision"])\n'
             'print("divide=%s" % numpy.geterr()["divide"])\n'
-            'print("array=" + str(numpy.array([1.23456789])))\n'
             'numpy.set_printoptions(precision=2)\n'
             'numpy.seterr(all="ignore")\n')
-    r2 = run('import numpy\n'
-             'print("precision=%d" % numpy.get_printoptions()["precision"])\n'
-             'print("divide=%s" % numpy.geterr()["divide"])\n')
-    check("numpy 打印精度不跨调用", "precision=8" in r2["stdout"], r2["stdout"])
-    check("numpy 错误处理不跨调用", "divide=warn" in r2["stdout"], r2["stdout"])
+        r2 = run('import numpy\n'
+                 'print("precision=%d" % numpy.get_printoptions()["precision"])\n'
+                 'print("divide=%s" % numpy.geterr()["divide"])\n')
+        check("numpy 打印精度不跨调用", "precision=8" in r2["stdout"], r2["stdout"])
+        check("numpy 错误处理不跨调用", "divide=warn" in r2["stdout"], r2["stdout"])
 
     print("[output capture fallback (dup2 unavailable)]")
     fb = template.replace("st['fd1'] = os.dup(1)", "raise OSError('forced fallback')")
@@ -285,6 +309,10 @@ def main() -> int:
     check("缺库给出 traceback", (not r["ok"]) and "ModuleNotFoundError" in r["error"], r["error"][:200])
     check("缺库附带提示", "提示" in r["error"], r["error"][:400])
     check("失败时带诊断", "version=" in r["error"] and "path=" in r["error"], r["error"][:200])
+    if os.path.exists("/proc/self/status"):
+        check("诊断带内存数字", "mem rss=" in r["error"], r["error"][:300])
+    else:
+        print("  skip 诊断内存数字(非 Linux)")
 
     r = run('open("/tmp/guncat-no-such-dir/x.txt", "w")\n')
     check("/tmp 不存在时给 tempfile 提示", "tempfile.gettempdir()" in r["error"], r["error"][:400])
@@ -302,6 +330,15 @@ def main() -> int:
     print("[超时后通道仍可用]")
     r = run('print("still alive")\n')
     check("超时后下一次调用正常", r["ok"] and "still alive" in r["stdout"], r["error"])
+
+    print("[内存提醒: 只有真吃内存才触发]")
+    if os.path.exists("/proc/self/status"):
+        r = run('data = bytearray(600 * 1024 * 1024)\nprint(len(data))\n')
+        check("大分配触发内存提醒", r["warning"].startswith("内存:"), r["warning"])
+        r = run('print("small")\n')
+        check("提醒不会一直粘着", r["warning"] == "", r["warning"])
+    else:
+        print("  skip (非 Linux)")
 
     print(f"\n{PASS} passed, {FAIL} failed")
     os.chdir(ROOT)

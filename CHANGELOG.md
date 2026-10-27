@@ -2,6 +2,28 @@
 
 > [← 返回 README](README.md)
 
+## 未发布（run_python 内存与 matplotlib 缓存）
+
+> 依据一轮实机复测：一次无法复现的闪退（高置信度归因于内存压力）+ 每次 import matplotlib 都在
+> 临时目录重建字体缓存。前者做了可观测与释放，后者按警告建议修掉。
+
+- **修复：上一次调用的大对象一直挂着**。`exec` 用的 dict 挂在 `__main__._globals` 上，要等**下一次**
+  调用才被替换——上一次脚本里 400 MB 的数组会一直占着 RSS（本地实测对象确实还活着）。这正好解释了
+  "单独跑没事、连着跑就崩"。现在调用结束就 `_globals.clear()`，并且只在本次 RSS > 400 MB 时才
+  `gc.collect()`（空调用不白付这几毫秒）。
+- **修复：`MPLCONFIGDIR` 未设置**。matplotlib 的字体缓存默认落在不可写目录，于是每次 import 都在
+  临时目录重建（真机实测首次 import 5 秒）。现在把 `MPLCONFIGDIR` 指到应用 cache 目录，缓存只建一次。
+  没有改 `sitecustomize.py`——它在 `extras.zip` 里，改了要重打运行库才生效；放启动器里下次打包就生效，
+  `npy` 桥也一起受益。
+- **新增：内存提醒（只提醒，不拒绝）**。调用前后读 `/proc/self/status` + `/proc/meminfo`（不 import
+  psutil）；系统可用 < 2 GB、本进程 RSS > 1.5 GB、或本次调用把 `VmHWM` 顶高 > 512 MB 时，结果最前面
+  多一行提醒（独立字段，不混进 stderr/error），同时写 hilog；失败诊断里附 `mem rss= peak= avail=`。设备侧 OOM 是 SIGKILL，
+  Python 里捕获不到，所以只能做到"撞线前给信号"。
+- **没有做硬配额**：`setrlimit` 是进程级的，会一起约束 ArkTS 线程，值给错就换一种崩法；真正能挡住
+  SIGKILL 的只有把解释器放进子进程，那是重写执行架构。
+- **测试**：`launcher-test.py` 增至 **42 项**（新增：用户命名空间释放、MPLCONFIGDIR 生效、正常调用
+  不产生内存警告、诊断带内存数字）。
+
 ## 未发布（run_python 运行环境体检修复）
 
 > 依据一次实机体检报告（进程常驻 + 解释器复用带来的系统性缺陷），逐条在源码里复核后修掉

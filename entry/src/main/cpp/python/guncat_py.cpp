@@ -171,7 +171,8 @@ std::string RenderScript(const char* tpl, const std::string& deadlineText,
                          const std::string& codePath, const std::string& outPath,
                          const std::string& errPath, const std::string& metaPath,
                          const std::string& diagPath, const std::string& argvPath,
-                         const std::string& stdinPath) {
+                         const std::string& stdinPath, const std::string& warnPath,
+                         const std::string& cacheDir) {
     std::string script(tpl);
     ReplaceAll(script, "__GUNCAT_CODE__", PyLiteral(codePath));
     ReplaceAll(script, "__GUNCAT_OUT__", PyLiteral(outPath));
@@ -180,6 +181,8 @@ std::string RenderScript(const char* tpl, const std::string& deadlineText,
     ReplaceAll(script, "__GUNCAT_DIAG__", PyLiteral(diagPath));
     ReplaceAll(script, "__GUNCAT_ARGV__", PyLiteral(argvPath));
     ReplaceAll(script, "__GUNCAT_STDIN__", PyLiteral(stdinPath));
+    ReplaceAll(script, "__GUNCAT_WARN__", PyLiteral(warnPath));
+    ReplaceAll(script, "__GUNCAT_CACHE__", PyLiteral(cacheDir));
     ReplaceAll(script, "__GUNCAT_DEADLINE__", deadlineText);
     return script;
 }
@@ -255,6 +258,8 @@ _meta_path = '__GUNCAT_META__'
 _diag_path = '__GUNCAT_DIAG__'
 _argv_path = '__GUNCAT_ARGV__'
 _stdin_path = '__GUNCAT_STDIN__'
+_warn_path = '__GUNCAT_WARN__'
+_cache_dir = '__GUNCAT_CACHE__'
 
 
 def _write(path, text):
@@ -342,6 +347,106 @@ def _hint(text):
         return text.rstrip() + '\n\n' + '\n'.join(extra)
     except BaseException:
         return text
+
+
+# ===== 内存(设备上进程被杀是 SIGKILL, Python 里根本捕获不到) =====
+# 阈值按真机口径定的: 系统 12 GB, 全库加载后本进程 RSS 约 1.2 GB。
+_GUNCAT_MEM_AVAIL_WARN_KB = 2 * 1024 * 1024      # 系统可用 < 2 GB 就提醒
+# 全库加载后 RSS 本来就有 1.1~1.2 GB, 所以 RSS 的门槛要明显高于它, 否则每次调用都在念。
+_GUNCAT_MEM_RSS_WARN_KB = 1536 * 1024            # 本进程 RSS > 1.5 GB 才提醒
+_GUNCAT_MEM_GROWTH_WARN_KB = 512 * 1024          # 本次调用把 VmHWM 顶高 > 512 MB 也提醒
+_GUNCAT_MEM_GC_KB = 400 * 1024                   # 这么大才值得跑一次 gc.collect()
+
+
+def _read_mem():
+    """读 /proc 拿内存数字(kB); 非 Linux 或读不到时返回 None。
+
+    不用 psutil: 那要 import 一个模块(约 20ms), 这点开销每次调用都付不划算。
+    """
+    _info = {}
+    try:
+        _f = open('/proc/self/status', 'r')
+        try:
+            for _line in _f:
+                if _line.startswith('VmRSS:'):
+                    _info['rss'] = int(_line.split()[1])
+                elif _line.startswith('VmHWM:'):
+                    _info['peak'] = int(_line.split()[1])
+        finally:
+            _f.close()
+    except BaseException:
+        pass
+    try:
+        _f = open('/proc/meminfo', 'r')
+        try:
+            for _line in _f:
+                if _line.startswith('MemAvailable:'):
+                    _info['avail'] = int(_line.split()[1])
+                    break
+        finally:
+            _f.close()
+    except BaseException:
+        pass
+    return _info or None
+
+
+def _fmt_mb(kb):
+    return '%.0f MB' % (kb / 1024.0)
+
+
+def _mem_note(before, after):
+    """内存紧张时给一句可执行的提醒; 正常情况返回空串(不要每次都啰嗦)。
+
+    三种触发条件: 系统可用 < 2 GB; 本进程 RSS > 1.5 GB; 本次调用把 VmHWM 顶高 > 512 MB。
+    最后一个才是"这一次脚本吃得多"的信号 —— 全靠 RSS 门槛会把全库加载后的正常状态也报出来。
+    """
+    try:
+        _m = after or before or {}
+        _b = before or {}
+        _avail = _m.get('avail')
+        _rss = _m.get('rss')
+        _peak = _m.get('peak')
+        # VmHWM 是进程累计峰值: 只有"这一次把水线顶高了"才算本次调用的信号,
+        # 否则一次大分配会让此后每一次调用都在念同一句话。
+        _hot = ((_avail and _avail < _GUNCAT_MEM_AVAIL_WARN_KB) or
+                (_rss and _rss > _GUNCAT_MEM_RSS_WARN_KB) or
+                (_peak and _b.get('peak') and
+                 (_peak - _b.get('peak')) > _GUNCAT_MEM_GROWTH_WARN_KB))
+        if not _hot:
+            return ''
+        _notes = []
+        if _avail:
+            _notes.append('设备可用 %.1f GB' % (_avail / 1048576.0))
+        if _rss:
+            _notes.append('本进程 RSS ' + _fmt_mb(_rss))
+        if _peak:
+            _notes.append('峰值 ' + _fmt_mb(_peak))
+        return ('内存: ' + '；'.join(_notes) +
+                '。大数组 / 大 DataFrame 可能被系统直接杀掉(SIGKILL, Python 里捕获不到), '
+                '建议分块处理, 用完 del + gc.collect()。')
+    except BaseException:
+        return ''
+
+
+def _release_globals(g, mem):
+    """把上一次调用的用户命名空间放掉。
+
+    踩过的坑: exec 用的 dict 挂在 __main__._globals 上, 下一次调用才被替换 ——
+    上一次脚本里 400MB 的数组会一直占着 RSS(实测对象确实还活着)。内存吃紧时
+    这就是"单独跑没事、连着跑就崩"的放大器。
+    """
+    if g is None:
+        return
+    try:
+        g.clear()
+    except BaseException:
+        return
+    try:
+        if mem and (mem.get('rss') or 0) > _GUNCAT_MEM_GC_KB:
+            import gc
+            gc.collect()
+    except BaseException:
+        pass
 
 
 # ===== 一次性防护(解释器常驻, 这些钩子只装一次就永久生效) =====
@@ -443,6 +548,17 @@ def _install_guards():
             'executable': sys.executable,
             'path': list(sys.path),
         }
+    except BaseException:
+        pass
+    # matplotlib 的字体缓存默认落在不可写目录, 于是每次 import 都在临时目录重建
+    # (真机实测首次 import 到 5 秒)。指到应用 cache 目录, 缓存只建一次。
+    try:
+        if _cache_dir:
+            _mpl_dir = os.path.join(_cache_dir, 'matplotlib')
+            if not os.path.isdir(_mpl_dir):
+                os.makedirs(_mpl_dir, exist_ok=True)
+            if os.path.isdir(_mpl_dir):
+                os.environ.setdefault('MPLCONFIGDIR', _mpl_dir)
     except BaseException:
         pass
     try:
@@ -736,10 +852,17 @@ _ok = 0
 _code = 0
 _error = ''
 _state = None
+_globals = None
+_mem_before = None
+_mem_after = None
+_warn = ''
 
 try:
     _stage = 'install_guards'
     _install_guards()
+
+    _stage = 'memory'
+    _mem_before = _read_mem()
 
     _stage = 'argv'
     _argv = ['-c']
@@ -887,8 +1010,11 @@ try:
         _error = _hint(_fmt_exc())
     finally:
         _stage = 'restore'
+        _mem_after = _read_mem()
         if _state is not None:
             _restore_state(_state)
+        _stage = 'release'
+        _release_globals(_globals, _mem_after)
         _stage = 'write_result'
         _capture_stop()
     _stage = 'done'
@@ -900,6 +1026,12 @@ finally:
         _capture_stop()
     except BaseException:
         pass
+    try:
+        _warn = _mem_note(_mem_before, _mem_after)
+        if _warn:
+            _write(_warn_path, _warn)
+    except BaseException:
+        _warn = ''
     if _ok == 0 and _diag_path:
         try:
             _boot = getattr(sys, '_guncat_boot', None) or {}
@@ -912,6 +1044,10 @@ finally:
                 'argv=' + repr(sys.argv),
                 'stage=' + _stage,
             ]
+            if _mem_before or _mem_after:
+                _m = _mem_after or _mem_before or {}
+                _lines.append('mem rss=%s peak=%s avail=%s (kB)' % (
+                    _m.get('rss', '?'), _m.get('peak', '?'), _m.get('avail', '?')))
             if _boot:
                 _lines.append('boot version=' + str(_boot.get('version')))
                 _lines.append('boot prefix=' + str(_boot.get('prefix')))
@@ -985,6 +1121,8 @@ struct PyRunOptions {
     std::string stdinPath;
     // 可选: CA 证书包路径(ssl 用); 空串则沿用系统默认
     std::string certFile;
+    // 可选: 应用 cache 目录(matplotlib 的 MPLCONFIGDIR 指到这里, 字体缓存只建一次)
+    std::string cacheDir;
     int32_t timeoutMs = 60000;
 };
 
@@ -996,6 +1134,8 @@ struct PyRunOutcome {
     std::string stdoutText;
     std::string stderrText;
     std::string error;
+    // 非致命提醒(目前只有内存): 单独一个字段, 不要混进 error / stderr
+    std::string warning;
     int64_t durationMs = 0;
 };
 
@@ -1056,6 +1196,8 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
     const std::string metaPath = opt.scratchDir + "/meta.txt";
     const std::string diagPath = opt.scratchDir + "/diag.txt";
     const std::string argvPath = opt.scratchDir + "/argv.txt";
+    const std::string warnPath = opt.scratchDir + "/warn.txt";
+    ::unlink(warnPath.c_str());
     ::unlink(outPath.c_str());
     ::unlink(errPath.c_str());
     ::unlink(metaPath.c_str());
@@ -1108,7 +1250,7 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
     char deadlineBuf[32];
     snprintf(deadlineBuf, sizeof(deadlineBuf), "%.3f", timeoutSeconds);
     std::string script = RenderScript(kLauncher, deadlineBuf, codePath, outPath, errPath, metaPath,
-                                      diagPath, argvPath, opt.stdinPath);
+                                      diagPath, argvPath, opt.stdinPath, warnPath, opt.cacheDir);
     int rc = api.runSimpleString(script.c_str());
     api.gilRelease(state);
 
@@ -1128,7 +1270,7 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
         OH_LOG_WARN(LOG_APP, "launcher produced no meta (rc=%{public}d), running mini diag", rc);
         ::unlink(diagPath.c_str());
         std::string mini = RenderScript(kMiniDiag, deadlineBuf, codePath, outPath, errPath, metaPath,
-                                        diagPath, argvPath, opt.stdinPath);
+                                        diagPath, argvPath, opt.stdinPath, std::string(), std::string());
         int state2 = api.gilEnsure();
         int rc2 = api.runSimpleString(mini.c_str());
         api.gilRelease(state2);
@@ -1172,6 +1314,10 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
     out.ok = (okFlag == "1");
     out.stdoutText = ReadFile(outPath);
     out.stderrText = ReadFile(errPath);
+    out.warning = Trim(ReadFile(warnPath));
+    if (!out.warning.empty()) {
+        OH_LOG_WARN(LOG_APP, "run_python memory warning: %{public}s", out.warning.c_str());
+    }
     // 硬超时由启动器的 AST 截止检查抛出, 消息里带固定标记
     out.timedOut = !out.ok && out.error.find("run_python 超时") != std::string::npos;
     if (!out.ok) {
@@ -1371,6 +1517,7 @@ napi_value JsRunPython(napi_env env, napi_callback_info info) {
         opt.argvJson = PropToString(env, args[0], "argvJson");
         opt.stdinPath = PropToString(env, args[0], "stdinPath");
         opt.certFile = PropToString(env, args[0], "certFile");
+        opt.cacheDir = PropToString(env, args[0], "cacheDir");
         if (!opt.argvJson.empty()) {
             opt.argvText = opt.argvJson;  // 字段名沿用 argvJson, 内容是"一行一个参数"的纯文本
         }
@@ -1435,6 +1582,7 @@ napi_value JsRunPython(napi_env env, napi_callback_info info) {
     napi_set_named_property(env, result, "stdout", MakeString(env, outcome.stdoutText));
     napi_set_named_property(env, result, "stderr", MakeString(env, outcome.stderrText));
     napi_set_named_property(env, result, "error", MakeString(env, outcome.error));
+    napi_set_named_property(env, result, "warning", MakeString(env, outcome.warning));
     napi_set_named_property(env, result, "durationMs", MakeInt(env, outcome.durationMs));
     return result;
 }

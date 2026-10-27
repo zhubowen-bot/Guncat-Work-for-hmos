@@ -1633,6 +1633,15 @@ console.log('[GuncatUiParts 切分]');
     check('native: 没有永久封禁状态', cpp.indexOf('g_banned') < 0 && cpp.indexOf('g_softStreak') < 0);
     const py = readFileSync(root + '/entry/src/main/ets/service/PythonService.ts', 'utf8');
     check('ArkTS: 不再有"已停用"分支', py.indexOf('state === 2') < 0);
+    check('launcher: 调用结束释放用户命名空间', cpp.indexOf('_release_globals(_globals, _mem_after)') >= 0);
+    check('launcher: 设置 MPLCONFIGDIR', cpp.indexOf("'MPLCONFIGDIR'") >= 0 &&
+      cpp.indexOf("os.path.join(_cache_dir, 'matplotlib')") >= 0);
+    check('launcher: 内存提醒(诊断带数字)', cpp.indexOf('_GUNCAT_MEM_AVAIL_WARN_KB') >= 0 &&
+      cpp.indexOf("'mem rss=") >= 0);
+    check('原生: 内存提醒走独立字段', cpp.indexOf('out.warning = Trim(ReadFile(warnPath))') >= 0 &&
+      cpp.indexOf('"warning"') >= 0);
+    check('ArkTS: 把 cacheDir 传给原生并展示提醒', py.indexOf('cacheDir: context.cacheDir') >= 0 &&
+      py.indexOf('r.warning') >= 0);
   }
 
   check('hasProgram 判定', GuncatUiParts.hasProgram('root = Card([') === true &&

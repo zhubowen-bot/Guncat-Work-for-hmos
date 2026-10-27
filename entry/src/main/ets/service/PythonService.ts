@@ -212,6 +212,7 @@ export class PythonService {
       argvJson: argvText,
       stdinPath: stdinPath,
       certFile: PythonService.runtimeDir(context) + '/cacert.pem',
+      cacheDir: context.cacheDir,
       timeoutMs: timeoutMs
     };
     // 熔断/忙判定放在入队之前: 上一次超时未结束的任务还在跑, 新调用绝不排队(会把 CPU 烧满)
@@ -293,6 +294,10 @@ export class PythonService {
       header = '[python 失败 · ' + (elapsedMs / 1000).toFixed(2) + 's]';
     }
     let parts: string[] = [header];
+    // 内存吃紧时原生侧会给一条提醒(不是错误): 放在最前面, 别埋在 stderr 里
+    if (r.warning !== undefined && r.warning !== '') {
+      parts.push(r.warning);
+    }
     let stdout: string = r.stdout !== undefined ? r.stdout : '';
     let stderr: string = r.stderr !== undefined ? r.stderr : '';
     if (stdout !== '') {
@@ -390,5 +395,6 @@ interface PyRunOptionsLike {
   argvJson: string;
   stdinPath: string;
   certFile: string;
+  cacheDir: string;
   timeoutMs: number;
 }

@@ -197,10 +197,10 @@ writeFileSync(join(allDir, 'vm-shim.ts'),
 writeFileSync(join(allDir, 'py-shim.ts'),
   `export interface PyRunOptions {\n` +
   `  code: string;\n  workDir?: string;\n  scratchDir?: string;\n  pythonHome?: string;\n` +
-  `  pythonPath?: string;\n  argvJson?: string;\n  stdinPath?: string;\n  certFile?: string;\n  timeoutMs?: number;\n}\n` +
+  `  pythonPath?: string;\n  argvJson?: string;\n  stdinPath?: string;\n  certFile?: string;\n  cacheDir?: string;\n  timeoutMs?: number;\n}\n` +
   `export interface PyRunResult {\n` +
   `  ok: boolean;\n  timedOut: boolean;\n  softTimeout: boolean;\n  exitCode: number;\n  stdout: string;\n  stderr: string;\n` +
-  `  error: string;\n  durationMs: number;\n}\n` +
+  `  error: string;\n  warning?: string;\n  durationMs: number;\n}\n` +
   `export function isAvailable(): string { return 'py-shim: 原生模块仅在设备侧可用'; }\n` +
   `export function pyState(): number { return 0; }\n` +
   `export function runPython(options: PyRunOptions): PyRunResult {\n` +

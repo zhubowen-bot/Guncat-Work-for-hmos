@@ -19,6 +19,8 @@ export interface PyRunOptions {
   argvJson?: string;
   /** CA 证书包路径(ssl 用), 缺省用系统默认 */
   certFile?: string;
+  /** 应用 cache 目录(matplotlib 的 MPLCONFIGDIR 指到这里, 字体缓存只建一次) */
+  cacheDir?: string;
   /** 超时毫秒数, 默认 60000 */
   timeoutMs?: number;
 }
@@ -39,6 +41,8 @@ export interface PyRunResult {
   stderr: string;
   /** ok=false 时的错误说明(traceback) */
   error: string;
+  /** 非致命提醒(目前只有内存吃紧); 空串表示没有 */
+  warning?: string;
   /** 执行耗时(毫秒) */
   durationMs: number;
 }
@@ -47,7 +51,7 @@ export interface PyRunResult {
 export const isAvailable: () => string;
 
 /** 在常驻解释器里执行一段 Python(同步调用, 调用方应放到异步任务里) */
-/** 0=可用 1=忙(超时任务仍在跑, 结束即恢复) 2=已封禁(连续 3 次超时) */
+/** 0=可用 1=忙(上一个调用还在跑/在回收, 结束即恢复) */
 export const pyState: () => number;
 
 export const runPython: (options: PyRunOptions) => PyRunResult;
