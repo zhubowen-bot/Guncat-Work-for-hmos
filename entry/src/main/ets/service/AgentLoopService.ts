@@ -566,7 +566,7 @@ export class AgentLoopService {
         let dropped: number = AgentLoopService.dropInlineImages(
           messages, AgentLoopService.IMAGE_RETRY_DROP_NOTE);
         if (dropped > 0) {
-          reason += '（已移除 ' + dropped.toString() + ' 张图片后重试）';
+          reason += '；已移除 ' + dropped.toString() + ' 张图片';
         }
       }
       attempt++;

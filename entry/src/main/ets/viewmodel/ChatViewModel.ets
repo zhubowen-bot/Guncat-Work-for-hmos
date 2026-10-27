@@ -2138,12 +2138,16 @@ export class ChatViewModel {
 
         callbacks.onRetry = (attempt: number, reason: string): void => {
           metrics.recordRetry();
-          // 重试会重新流式输出: 先清掉上一次尝试的部分内容避免重复, 保留压缩标注
-          turnMsg.content = compactNote + '⚠️ ' + reason + '，自动重试(第 ' +
-            attempt.toString() + ' 次)…\n\n';
+          // 重试会重新流式输出: 清掉上一次尝试已流出的正文/思考/未完成工具行, 避免"旧半截 + 新全文"。
+          // 重试提示只做临时 toast, 不写进回答正文 —— 正文里的话会永久留在消息里, 很难看。
+          turnMsg.content = compactNote;
           turnMsg.reasoning = '';
           turnMsg.toolCalls = [];
           this.scheduleStreamUpdate();
+          promptAction.showToast({
+            message: reason + '，正在自动重试(第 ' + attempt.toString() + ' 次)…',
+            duration: 3000
+          });
         };
 
         // 记录请求字符量, 与 usage 的真实 prompt tokens 配对, 推导本会话字符→token 比例
@@ -2450,9 +2454,9 @@ export class ChatViewModel {
           (err.message !== undefined ? err.message : '任务执行失败');
         let last: Message | null = conv.messages.length > 0 ? conv.messages[conv.messages.length - 1] : null;
         if (last !== null && last.role === 'assistant') {
-          this.appendTurnNote(last, '⚠️ ' + msg);
+          this.appendTurnNote(last, '【请求失败】' + msg);
         } else {
-          let errMsg: Message = Message.ofAssistant(generateMessageId(), '⚠️ ' + msg);
+          let errMsg: Message = Message.ofAssistant(generateMessageId(), '【请求失败】' + msg);
           errMsg.displayContent = errMsg.content;
           conv.messages.push(errMsg);
         }
@@ -2696,9 +2700,9 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
           (err.message !== undefined ? err.message : '任务执行失败');
         let last: Message | null = conv.messages.length > 0 ? conv.messages[conv.messages.length - 1] : null;
         if (last !== null && last.role === 'assistant') {
-          this.appendTurnNote(last, '⚠️ ' + msg);
+          this.appendTurnNote(last, '【请求失败】' + msg);
         } else {
-          let errMsg: Message = Message.ofAssistant(generateMessageId(), '⚠️ ' + msg);
+          let errMsg: Message = Message.ofAssistant(generateMessageId(), '【请求失败】' + msg);
           errMsg.displayContent = errMsg.content;
           conv.messages.push(errMsg);
         }
@@ -2810,12 +2814,16 @@ if (this.abortSignal.aborted) {
 
         callbacks.onRetry = (attempt: number, reason: string): void => {
           metrics.recordRetry();
-          // 重试会重新流式输出: 先清掉上一次尝试的部分内容避免重复, 保留压缩标注
-          turnMsg.content = compactNote + '⚠️ ' + reason + '，自动重试(第 ' +
-            attempt.toString() + ' 次)…\n\n';
+          // 重试会重新流式输出: 清掉上一次尝试已流出的正文/思考/未完成工具行, 避免"旧半截 + 新全文"。
+          // 重试提示只做临时 toast, 不写进回答正文 —— 正文里的话会永久留在消息里, 很难看。
+          turnMsg.content = compactNote;
           turnMsg.reasoning = '';
           turnMsg.toolCalls = [];
           this.scheduleStreamUpdate();
+          promptAction.showToast({
+            message: reason + '，正在自动重试(第 ' + attempt.toString() + ' 次)…',
+            duration: 3000
+          });
         };
 
         // 记录请求字符量, 与 usage 的真实 prompt tokens 配对, 推导本会话字符→token 比例
@@ -3411,12 +3419,16 @@ if (this.abortSignal.aborted) {
       callbacks.onRetry = (attempt: number, reason: string): void => {
         // 请求级自动重试开始(网络中断/流截断/429/5xx): 先清掉上一次尝试的半截正文、思考与
         // 未完成的工具行, 否则重试成功后会出现"旧半截 + 新全文"的重复(安卓版踩过的坑)。
-        assistantMsg.content = '⚠️ ' + reason + '，正在自动重试(第 ' +
-          attempt.toString() + ' 次)…\n\n';
+        // 重试提示只做临时 toast, 不写进回答正文(会永久留在消息里)。
+        assistantMsg.content = '';
         assistantMsg.reasoning = '';
         assistantMsg.toolCalls = [];
         this.updateLiveTokenSpeed(assistantMsg, streamStartMs);
         this.scheduleStreamUpdate();
+        promptAction.showToast({
+          message: reason + '，正在自动重试(第 ' + attempt.toString() + ' 次)…',
+          duration: 3000
+        });
       };
       callbacks.onError = (err: string): void => {
         failed = true;
@@ -3574,9 +3586,9 @@ if (this.abortSignal.aborted) {
 
   private handleStreamError(msg: Message, err: string): void {
     if (msg.content === '') {
-      msg.content = '⚠️ ' + err;
+      msg.content = '【请求失败】' + err;
     } else {
-      msg.content = msg.content + '\n\n⚠️ ' + err;
+      msg.content = msg.content + '\n\n【请求失败】' + err;
     }
     msg.displayContent = msg.content;
     this.markStreamEnd();
