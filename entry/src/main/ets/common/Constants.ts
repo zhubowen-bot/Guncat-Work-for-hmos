@@ -111,8 +111,11 @@ export class Constants {
   static readonly WORK_SUMMARY_MAX_CHARS: number = 2400;
   // 深度思考条展开时工具结果的最大展示字符数
   static readonly WORK_STEP_DISPLAY_CHARS: number = 500;
-  // LLM 请求自动重试次数(429/5xx/网络传输/空响应), 指数退避 500ms→8s+抖动
-  static readonly WORK_LLM_RETRY_MAX: number = 3;
+  // LLM 请求自动重试次数(429/5xx/408/409/425/网络传输/流截断/空响应), 指数退避 500ms→8s+抖动;
+  // 对齐安卓版: 3 → 5。手机网络抖动通常 1~2 次就恢复, 5 次以内足够, 再多用户会觉得"卡死"。
+  static readonly WORK_LLM_RETRY_MAX: number = 5;
+  // 聊天模式单轮流式请求的自动重试次数(聊天是一次性请求, 不必和长程任务一样多)
+  static readonly CHAT_LLM_RETRY_MAX: number = 3;
   // 聊天模式本地联网搜索工具循环的最大搜索轮数(每轮可含多次 local_web_search 调用)。
   // 仅作防失控保险, 正常任务触不到; 对齐工作模式的宽松策略
   static readonly CHAT_SEARCH_MAX_ROUNDS: number = 50;

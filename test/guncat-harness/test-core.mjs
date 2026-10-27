@@ -1,6 +1,7 @@
 // Guncat Work 6.1 核心逻辑测试: PathMatcher / DiffUtil / EditCore / FileSearchCore
 // 运行: node setup.mjs && node test-core.mjs (Node ≥ 22.6 原生 TS strip)
 import { PathMatcher } from './gen/PathMatcher.ts';
+import { Constants } from './gen/Constants.ts';
 import { DiffUtil, FileDiff } from './gen/DiffUtil.ts';
 import { EditCore } from './gen/EditCore.ts';
 import { FileSearchCore, GrepOptions } from './gen/FileSearchCore.ts';
@@ -23,6 +24,8 @@ import { WorkLoopPlanner, WorkLoopTurnInfo, WorkLoopStep } from './gen/WorkLoopP
 import { PluginManifestLoader } from './gen/PluginManifestLoader.ts';
 import { SkillDirectoryFormatter } from './gen/SkillDirectoryFormatter.ts';
 import { RetryPolicy } from './gen/RetryPolicy.ts';
+import { HttpTimeouts } from './gen/HttpTimeouts.ts';
+import { HttpErrorClassifier } from './gen/HttpErrorClassifier.ts';
 import { ToolRetryPolicy } from './gen/ToolRetryPolicy.ts';
 import { WorkLoopSimulator } from './gen/WorkLoopSimulator.ts';
 import { RetryAfterParser } from './gen/RetryAfterParser.ts';
@@ -775,6 +778,61 @@ console.log('[SSEProtocolAdapter]');
   check('失败优先停止', stopped === true);
 }
 
+// ===== 协议终止事件(流截断检测) =====
+console.log('[SSE completion]');
+
+{
+  // completions: 最后一块带非空 finish_reason
+  check('completions finish_reason 算完整结束', SSEProtocolAdapter.detectComplete('openai',
+    '{"choices":[{"delta":{},"finish_reason":"stop"}]}') === true);
+  check('completions tool_calls 也算完整结束', SSEProtocolAdapter.detectComplete('openai',
+    '{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}') === true);
+  check('completions 增量块不算结束', SSEProtocolAdapter.detectComplete('openai',
+    '{"choices":[{"delta":{"content":"hi"}}]}') === false);
+  check('completions finish_reason 为 null 不算结束', SSEProtocolAdapter.detectComplete('openai',
+    '{"choices":[{"delta":{},"finish_reason":null}]}') === false);
+  check('坏 JSON 不误判为结束', SSEProtocolAdapter.detectComplete('openai',
+    '{"choices":[{"finish_reason":"stop"') === false);
+  check('choices 为空不误判', SSEProtocolAdapter.detectComplete('openai',
+    '{"choices":[]}') === false);
+
+  // anthropic: message_stop, 或 message_delta.delta.stop_reason 非空
+  check('anthropic message_stop 算完整结束', SSEProtocolAdapter.detectComplete('anthropic',
+    '{"type":"message_stop"}') === true);
+  check('anthropic stop_reason 兜底算结束', SSEProtocolAdapter.detectComplete('anthropic',
+    '{"type":"message_delta","delta":{"stop_reason":"end_turn"}}') === true);
+  check('anthropic 内容块不算结束', SSEProtocolAdapter.detectComplete('anthropic',
+    '{"type":"content_block_delta","delta":{"text":"hi"}}') === false);
+  check('anthropic 空 stop_reason 不算结束', SSEProtocolAdapter.detectComplete('anthropic',
+    '{"type":"message_delta","delta":{"stop_reason":""}}') === false);
+
+  // responses: response.completed / response.incomplete
+  check('responses completed 算完整结束', SSEProtocolAdapter.detectComplete('responses',
+    '{"type":"response.completed","response":{}}') === true);
+  check('responses incomplete 也算结束', SSEProtocolAdapter.detectComplete('responses',
+    '{"type":"response.incomplete"}') === true);
+  check('responses 文本增量不算结束', SSEProtocolAdapter.detectComplete('responses',
+    '{"type":"response.output_text.delta","delta":"hi"}') === false);
+
+  // 适配器流水线: extractComplete 命中要触发 ctx.onComplete
+  const adapter2 = new SSEProtocolAdapter();
+  adapter2.protocol = 'fake';
+  adapter2.extractComplete = (s) => s.indexOf('END') >= 0;
+  let completeCount = 0;
+  const ctx3 = new SSEParseContext();
+  ctx3.onComplete = () => { completeCount++; };
+  adapter2.handleLine('END', ctx3);
+  adapter2.handleLine('more', ctx3);
+  check('适配器派发 onComplete', completeCount === 1);
+  // 默认适配器不误报结束(未注入 extractComplete 时)
+  const plain = new SSEProtocolAdapter();
+  let plainComplete = 0;
+  const ctx4 = new SSEParseContext();
+  ctx4.onComplete = () => { plainComplete++; };
+  plain.handleLine('{"choices":[{"delta":{}}]}', ctx4);
+  check('默认适配器不误报结束', plainComplete === 0);
+}
+
 // ===== WorkLoopStateMachine =====
 console.log('[WorkLoopStateMachine]');
 
@@ -919,12 +977,80 @@ console.log('[RetryPolicy]');
   check('达上限不重试', d.shouldRetry === false && d.reason === 'max_retries');
   d = p.decide('rate_limit', 0, 300, 0.5);
   check('retry-after 尊重', d.delayMs === 300 && d.reason === 'retry_after');
+  // 安卓版踩过的坑: Retry-After 被 8s 的指数退避封顶截断 → 429 要求等 20s 时只等 8s,
+  // 白撞一次后就把任务判死。现在服务端建议单独封顶(60s), 与指数退避互不干扰。
   d = p.decide('rate_limit', 0, 20000, 0.5);
-  check('retry-after 封顶', d.delayMs === 8000);
+  check('retry-after 不被 8s 退避截断', d.delayMs === 20000 && d.reason === 'retry_after');
+  d = p.decide('rate_limit', 0, 120000, 0.5);
+  check('retry-after 单独封顶 60s', d.delayMs === 60000);
   d = p.decide('transport', 0, -1, 0.0);
   check('抖动下限', d.delayMs === 400);
   d = p.decide('transport', 0, -1, 1.0);
   check('抖动上限', d.delayMs === 600);
+  // 分类与策略的契约: transport 可重试, protocol 不可 —— 断流被误判成 protocol 时
+  // 重试策略整套失效(安卓版真事故), 这里把这条契约钉住。
+  const policy = new RetryPolicy(5, 500, 8000, 0.2);
+  check('transport 走重试', policy.decide('transport', 0).shouldRetry === true);
+  check('protocol 不重试', policy.decide('protocol', 0).shouldRetry === false);
+  check('默认上限 3 次', new RetryPolicy().maxRetries === 3);
+  check('Retry-After 默认封顶 60s', new RetryPolicy().maxRetryAfterMs === 60000);
+  // 重试预算(对齐安卓版: 长任务 5 次, 聊天 3 次)
+  check('工作模式重试预算 5 次', Constants.WORK_LLM_RETRY_MAX === 5);
+  check('聊天模式重试预算 3 次', Constants.CHAT_LLM_RETRY_MAX === 3);
+}
+
+// ===== HttpTimeouts =====
+console.log('[HttpTimeouts]');
+
+{
+  // 小请求维持 30s
+  check('小请求 30s', HttpTimeouts.connectTimeoutForBody('x'.repeat(1024)) === 30000);
+  check('刚好 256KB 仍是 30s', HttpTimeouts.connectTimeoutForBody('x'.repeat(256 * 1024)) === 30000);
+  // 1MB: 30s + 1024KB/100KBps=10.24s → 40240ms
+  check('1MB 请求放大到 ~40s', HttpTimeouts.connectTimeoutForBody('x'.repeat(1024 * 1024)) === 40240);
+  // 10MB: 102.4s 上传预算 → 132400ms
+  check('10MB 请求放大到 ~132s', HttpTimeouts.connectTimeoutForBody('x'.repeat(10 * 1024 * 1024)) === 132400);
+  // 封顶 180s
+  check('超大请求封顶 180s', HttpTimeouts.connectTimeoutForBody('x'.repeat(20 * 1024 * 1024)) === 180000);
+  check('可传入自定义基础值', HttpTimeouts.connectTimeoutForBody('x'.repeat(512 * 1024), 10000) === 15120);
+
+  // 传输错误翻译: 用户主动停止走 abortSignal, 到这里的 abort 基本都是本机超时
+  const abortErr = new Error('The user aborted a request');
+  abortErr.name = 'AbortError';
+  check('AbortError → 传输中止说明', HttpTimeouts.describeTransportError(abortErr).indexOf('传输阶段被中止') >= 0);
+  check('超时文案', HttpTimeouts.describeTransportError(new Error('Timeout was reached'))
+    .indexOf('网络请求超时') >= 0);
+  check('鸿蒙错误码也算超时', HttpTimeouts.describeTransportError(new Error('code 2300028'))
+    .indexOf('网络请求超时') >= 0);
+  check('连接重置文案', HttpTimeouts.describeTransportError(new Error('Connection reset by peer'))
+    .indexOf('网络连接中断') >= 0);
+  check('空消息兜底', HttpTimeouts.describeTransportError(new Error('')) === '网络请求失败');
+  check('普通错误原样透出', HttpTimeouts.describeTransportError(new Error('boom')) === 'boom');
+  check('瞬时错误判定', HttpTimeouts.looksTransient(new Error('socket hang up')) === true &&
+    HttpTimeouts.looksTransient(new Error('400 bad request')) === false);
+}
+
+// ===== HttpErrorClassifier =====
+console.log('[HttpErrorClassifier]');
+
+{
+  check('401 归 auth(不重试)', HttpErrorClassifier.kindForStatus(401) === 'auth' &&
+    HttpErrorClassifier.isRetryableStatus(401) === false);
+  check('403 归 auth(不重试)', HttpErrorClassifier.kindForStatus(403) === 'auth');
+  check('429 归 rate_limit(重试)', HttpErrorClassifier.kindForStatus(429) === 'rate_limit' &&
+    HttpErrorClassifier.isRetryableStatus(429) === true);
+  // 安卓版把 408/409/425 漏在"其他 4xx"里, 于是网关瞬时超时被判成不可重试
+  check('408 归 transport(重试)', HttpErrorClassifier.kindForStatus(408) === 'transport' &&
+    HttpErrorClassifier.isRetryableStatus(408) === true);
+  check('425 归 transport(重试)', HttpErrorClassifier.kindForStatus(425) === 'transport');
+  check('409 归 server(重试)', HttpErrorClassifier.kindForStatus(409) === 'server' &&
+    HttpErrorClassifier.isRetryableStatus(409) === true);
+  check('400 归 http(不重试)', HttpErrorClassifier.kindForStatus(400) === 'http' &&
+    HttpErrorClassifier.isRetryableStatus(400) === false);
+  check('500 归 server(重试)', HttpErrorClassifier.kindForStatus(500) === 'server' &&
+    HttpErrorClassifier.isRetryableStatus(503) === true);
+  check('状态码文案含数字', HttpErrorClassifier.messageForStatus(429).indexOf('频繁') >= 0 &&
+    HttpErrorClassifier.messageForStatus(502).indexOf('502') >= 0);
 }
 
 // ===== ToolRetryPolicy =====

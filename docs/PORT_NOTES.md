@@ -17,7 +17,7 @@ HarmonyOS 原生应用（基座为 GuncatAI_HMOS-APP 的「工作模式」），
 | 工具结果溢出暂存 | `spill` 包 | `service/SpillStore.ts`：全文落盘工作区 `.spill/`，模型收头尾节选+定位提示，可 read_file 读回 |
 | 重复调用提醒 | `guard` repeat-tool reminder | `noteWorkRepeat`（沿用基座，3/5/8 次提醒） |
 | 前缀复用式上下文压缩 | `compaction-basic` | 沿用基座两级压缩（修剪→前缀复用摘要→整条裁剪），usage 锚定预算 |
-| LLM 请求重试 | `llm-retry` | 沿用基座（指数退避+抖动，429/5xx/transport/empty） |
+| LLM 请求重试 | `llm-retry` | `RetryPolicy`（指数退避+抖动，429/5xx/408/409/425/transport/流截断/empty；工作模式 5 次、聊天 3 次；`Retry-After` 独立封顶 60s）+ `HttpErrorClassifier` + `HttpTimeouts`（按请求体放大 connectTimeout）；**兜底 catch 必须保留 `LoopError` 分类**，否则重试静默失效（安卓版踩过的坑） |
 | LLM 会话标题 | `session-title` | `AgentLoopService.generateSessionTitle`，每会话一次，失败静默 |
 | 提问/交互 | `ask_user` + `ui-user-questions` | `service/AskUserBridge.ts` + `views/AskUserCard.ets`：单选/多选/文字补充，提交按钮统一发送，超时与中断兜底 |
 | 会话提醒 | `schedule` | `service/ScheduleService.ts`（`.schedule.json` 持久化，循环≥300s，到期注入用户消息，运行中走插话通道） |

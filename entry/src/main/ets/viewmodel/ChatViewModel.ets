@@ -3408,6 +3408,16 @@ if (this.abortSignal.aborted) {
           call.preparing = true;
         }
       };
+      callbacks.onRetry = (attempt: number, reason: string): void => {
+        // 请求级自动重试开始(网络中断/流截断/429/5xx): 先清掉上一次尝试的半截正文、思考与
+        // 未完成的工具行, 否则重试成功后会出现"旧半截 + 新全文"的重复(安卓版踩过的坑)。
+        assistantMsg.content = '⚠️ ' + reason + '，正在自动重试(第 ' +
+          attempt.toString() + ' 次)…\n\n';
+        assistantMsg.reasoning = '';
+        assistantMsg.toolCalls = [];
+        this.updateLiveTokenSpeed(assistantMsg, streamStartMs);
+        this.scheduleStreamUpdate();
+      };
       callbacks.onError = (err: string): void => {
         failed = true;
         this.handleStreamError(assistantMsg, err);

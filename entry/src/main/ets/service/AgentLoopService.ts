@@ -29,6 +29,8 @@ import { SSEProtocolAdapter, SSEParseContext } from '../common/SSEProtocolAdapte
 import { RetryPolicy } from '../common/RetryPolicy';
 import { RetryAfterParser } from '../common/RetryAfterParser';
 import { LoopError } from '../common/LoopError';
+import { HttpTimeouts } from '../common/HttpTimeouts';
+import { HttpErrorClassifier } from '../common/HttpErrorClassifier';
 import { GuncatUiPrompt } from '../common/GuncatUiPrompt';
 import { GuncatUiLang, GuncatUiFences, UiNode } from '../common/GuncatUiLang';
 import { GuncatUiLibrary } from '../common/GuncatUiLibrary';
@@ -208,6 +210,9 @@ export class AgentLoopService {
     let settled: boolean = false;
     let statusCode: number = 0;
     let dataEnded: boolean = false;
+    // 是否收到协议终止事件(finish_reason / message_stop / response.completed / [DONE])。
+    // 没收到就闭合连接 = 半截流, 必须重试, 不能当成正常回答收尾。
+    let sawComplete: boolean = false;
     let failedMsg: string = '';
     let startTime: number = Date.now();
     let result: LoopTurnResult = new LoopTurnResult();
@@ -251,6 +256,9 @@ export class AgentLoopService {
           result.finishReason = finish;
         }
       };
+      ctx.onComplete = (): void => {
+        sawComplete = true;
+      };
       sseAdapter.handleLine(sseData, ctx);
       // 三种协议统一收口: 工具调用在流式生成过程中即时上抛(调用数或参数量变化时)
       if (callAcc.calls.length > 0) {
@@ -268,6 +276,19 @@ export class AgentLoopService {
 
     try {
       await new Promise<void>((resolve: () => void, reject: (e: Error) => void) => {
+        // 2xx 流结束时统一走这里: 没收到终止事件就不算成功, 按 transport 错误重试。
+        // 半截回答如果被当成最终答案, 模型会"安静地停下", 用户只能手动发"继续"(安卓版踩过的坑)。
+        let settleStream = (): void => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          if (!sawComplete && !abortSignal.aborted) {
+            reject(new LoopError('响应流在结束事件前中断（网络或代理断开）', 0, 'transport'));
+            return;
+          }
+          resolve();
+        };
         httpRequest.on('dataReceive', (data: ArrayBuffer) => {
           if (abortSignal.aborted) {
             return;
@@ -287,13 +308,22 @@ export class AgentLoopService {
             for (let i: number = 0; i < lines.length; i++) {
               let line: string = lines[i];
               let trimmed: string = line.trim();
-              if (trimmed === '' || trimmed === Constants.SSE_DONE_TOKEN) {
+              if (trimmed === '') {
+                continue;
+              }
+              // [DONE] 也是终止信号: 部分网关只发它、不发 finish_reason
+              if (trimmed === Constants.SSE_DONE_TOKEN) {
+                sawComplete = true;
                 continue;
               }
               if (!trimmed.startsWith(Constants.SSE_DATA_PREFIX)) {
                 continue;
               }
               let sseData: string = trimmed.substring(Constants.SSE_DATA_PREFIX.length);
+              if (sseData === Constants.SSE_DONE_TOKEN) {
+                sawComplete = true;
+                continue;
+              }
               handleSseLine(sseData);
             }
           } catch (e) {
@@ -305,24 +335,28 @@ export class AgentLoopService {
         httpRequest.on('dataEnd', () => {
           if (lineBuffer !== '') {
             let trimmed: string = lineBuffer.trim();
-            if (trimmed.startsWith(Constants.SSE_DATA_PREFIX) && trimmed !== Constants.SSE_DONE_TOKEN) {
-              try {
-                handleSseLine(trimmed.substring(Constants.SSE_DATA_PREFIX.length));
-              } catch (e) {
-                let err: Error = e as Error;
-                if (!settled) {
-                  settled = true;
-                  reject(err);
+            if (trimmed.startsWith(Constants.SSE_DATA_PREFIX)) {
+              let sseData: string = trimmed.substring(Constants.SSE_DATA_PREFIX.length);
+              if (sseData === Constants.SSE_DONE_TOKEN) {
+                sawComplete = true;
+              } else {
+                try {
+                  handleSseLine(sseData);
+                } catch (e) {
+                  let err: Error = e as Error;
+                  if (!settled) {
+                    settled = true;
+                    reject(err);
+                  }
+                  return;
                 }
-                return;
               }
             }
             lineBuffer = '';
           }
           dataEnded = true;
           if (statusCode >= 200 && statusCode < 300 && !settled) {
-            settled = true;
-            resolve();
+            settleStream();
           }
         });
 
@@ -354,7 +388,9 @@ export class AgentLoopService {
           method: http.RequestMethod.POST,
           header: headers,
           extraData: bodyStr,
-          connectTimeout: 30000,
+          // 图片 base64 会把请求体撑到 10MB+; 固定 30s 会在手机慢速上传途中把请求掐断,
+          // 重试仍带同一张图 → 连卡五次。按请求体大小放大上传预算(封顶 180s)。
+          connectTimeout: HttpTimeouts.connectTimeoutForBody(bodyStr),
           readTimeout: 300000,
           usingProtocol: http.HttpProtocol.HTTP1_1
         }).then((code: number) => {
@@ -365,25 +401,15 @@ export class AgentLoopService {
           if (code < 200 || code >= 300) {
             if (!settled) {
               settled = true;
-              let msg: string = '';
-              let kind: string = 'http';
-              if (code === 401) {
-                msg = 'API Key 无效，请检查设置';
-                kind = 'auth';
-              } else if (code === 429) {
-                msg = '请求过于频繁，请稍后再试';
-                kind = 'rate_limit';
-              } else if (code >= 400 && code < 500) {
-                msg = 'API 请求错误 (' + code + ')';
+              // 状态码 → 分类统一走 HttpErrorClassifier: 408/425 归 transport、409 归 server,
+              // 分类决定能不能自动重试(protocol/auth/http 不重试)。
+              let kind: string = HttpErrorClassifier.kindForStatus(code);
+              let msg: string = HttpErrorClassifier.messageForStatus(code);
+              if (kind === HttpErrorClassifier.KIND_HTTP) {
                 let detail: string = AgentLoopService.extractHttpErrorDetail(errorBody);
                 if (detail !== '') {
                   msg += ': ' + detail;
                 }
-              } else if (code >= 500) {
-                msg = '服务器错误 (' + code + ')，请稍后再试';
-                kind = 'server';
-              } else {
-                msg = '请求失败，状态码: ' + code;
               }
               let retryAfterMs: number = RetryAfterParser.parseMs(retryAfterHeader);
               reject(new LoopError(msg, code, kind, retryAfterMs));
@@ -391,8 +417,7 @@ export class AgentLoopService {
             return;
           }
           if (dataEnded && !settled) {
-            settled = true;
-            resolve();
+            settleStream();
           }
         }).catch((err: Error) => {
           if (abortSignal.aborted) {
@@ -405,14 +430,19 @@ export class AgentLoopService {
           if (!settled) {
             settled = true;
             // 网络层异常(连接失败/超时/DNS 等)归类为 transport, 可自动重试
-            let msg: string = err.message !== undefined ? err.message : '网络请求失败';
-            reject(new LoopError(msg, 0, 'transport'));
+            reject(new LoopError(HttpTimeouts.describeTransportError(err), 0, 'transport'));
           }
         });
       });
     } catch (e) {
       let err: Error = e as Error;
       if (!abortSignal.aborted) {
+        // 已经是分类错误(LoopError)就原样上抛: 网络中断/流截断是 transport, 必须留给
+        // runTurnWithRetry 重试。此前这里无条件包成 protocol, 等于把 transport 判成不可重试,
+        // 偶发断流会直接终止整个任务(安卓版踩过同一个坑, RetryPolicy 因此从未生效)。
+        if (err instanceof LoopError) {
+          throw err;
+        }
         if (failedMsg === '' && err.message !== undefined) {
           failedMsg = err.message;
         }
@@ -453,9 +483,37 @@ export class AgentLoopService {
     AgentLoopService.activeRequests = [];
   }
 
+  // 重试时图片被摘掉后补进上下文的说明(不要写得像用户的新指令)
+  private static readonly IMAGE_RETRY_DROP_NOTE: string =
+    '【视觉输入未送达】上一张图片的请求在传输阶段超时，这张图片已从重试上下文中移除，' +
+    '以免继续卡住。工作区原图仍在；如仍需查看，请先确认图片已压到 1MB 以内，' +
+    '再重新调用 view_image。';
+
+  // 请求超时后把内联图片从循环历史里摘掉，只留一句说明。
+  //
+  // 为什么必须这么做(用户报障): view_image 之后那张图会作为 user 多模态消息留在 messages 里;
+  // 一旦请求在传输阶段超时, runTurnWithRetry 会把**同一份 base64 图片**重复发送 5 次,
+  // 每次都卡在同样的超时上。用户手动停止再发「继续」之所以能恢复, 是因为 imageDataUrl
+  // 本来就不持久化, 重新加载历史时图片已经被丢掉了。这里让自动重试走同一条生路。
+  // 只改内存里的循环历史; imageDataUrl 从不落盘, 因此不影响会话记录。返回摘掉的图片条数。
+  static dropInlineImages(messages: LoopMessage[], note: string): number {
+    let count: number = 0;
+    for (let i: number = 0; i < messages.length; i++) {
+      let m: LoopMessage = messages[i];
+      if (m.role !== 'user' || m.imageDataUrl === '') {
+        continue;
+      }
+      m.content = (m.content === '' ? '' : m.content + '\n') + note;
+      m.imageDataUrl = '';
+      count++;
+    }
+    return count;
+  }
+
   // 带自动重试的请求执行(对齐 DeepSeek Harness 的 llm-retry):
-  // 429/5xx/网络传输/空响应按指数退避自动重试; 鉴权/协议/参数错误直接上抛。
-  // maxRetries 为重试次数上限(不含首次), 退避 500ms 起步、封顶 8s, 附 ±20% 抖动。
+  // 429/5xx/408/409/425/网络传输/流截断/空响应按指数退避自动重试; 鉴权/协议/参数错误直接上抛。
+  // maxRetries 为重试次数上限(不含首次), 退避 500ms 起步、封顶 8s, 附 ±20% 抖动;
+  // 服务端 Retry-After 单独封顶 60s(不被 8s 的指数退避截断)。
   static async runTurnWithRetry(config: ApiConfig, messages: LoopMessage[],
     thinkingEnabled: boolean, reasoningEffort: string, webSearchEnabled: boolean,
     callbacks: LoopTurnCallbacks, abortSignal: AbortSignal,
@@ -500,8 +558,19 @@ export class AgentLoopService {
       if (!rd.shouldRetry) {
         throw failed;
       }
+      // 图片请求在传输阶段失败后, 重试前先把图片摘掉: 同一份 base64 再发一次大概率
+      // 仍卡在同一处; 摘掉后至少能拿到模型回应, 并让它按需重新 view_image。
+      // 只对 transport / empty 生效 —— 429/5xx 与图片内容无关, 不该牺牲视觉上下文。
+      let reason: string = failed.message;
+      if (failed.kind === 'transport' || failed.kind === 'empty') {
+        let dropped: number = AgentLoopService.dropInlineImages(
+          messages, AgentLoopService.IMAGE_RETRY_DROP_NOTE);
+        if (dropped > 0) {
+          reason += '（已移除 ' + dropped.toString() + ' 张图片后重试）';
+        }
+      }
       attempt++;
-      callbacks.onRetry(attempt, failed.message);
+      callbacks.onRetry(attempt, reason);
       await AgentLoopService.retryBackoffMs(rd.delayMs, abortSignal);
       if (abortSignal.aborted) {
         throw failed;

@@ -63,6 +63,8 @@ for (const [relSrc, relDst, replaces] of [
   ['common/SkillDirectoryFormatter.ts', 'SkillDirectoryFormatter.ts', []],
   ['common/RetryPolicy.ts', 'RetryPolicy.ts', []],
   ['common/ToolRetryPolicy.ts', 'ToolRetryPolicy.ts', []],
+  ['common/HttpTimeouts.ts', 'HttpTimeouts.ts', []],
+  ['common/HttpErrorClassifier.ts', 'HttpErrorClassifier.ts', []],
   ['common/WorkLoopSimulator.ts', 'WorkLoopSimulator.ts', []],
   ['common/RetryAfterParser.ts', 'RetryAfterParser.ts', []],
   ['common/WorkLoopDriver.ts', 'WorkLoopDriver.ts', []],

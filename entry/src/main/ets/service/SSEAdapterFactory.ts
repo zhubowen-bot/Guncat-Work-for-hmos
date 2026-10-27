@@ -84,6 +84,11 @@ export class SSEAdapterFactory {
       }
       return '';
     };
+    // 协议终止事件: 流式请求只有收到它才算完整结束。缺了它(连接被代理/网络掐断)
+    // 时调用方必须按 transport 错误重试, 不能把半截正文当成最终回答。
+    adapter.extractComplete = (sseData: string): boolean => {
+      return SSEProtocolAdapter.detectComplete(protocol, sseData);
+    };
     return adapter;
   }
 }

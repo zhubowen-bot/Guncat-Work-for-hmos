@@ -90,6 +90,10 @@ export class StreamCallbacks {
   onToolCalls: (calls: ToolCallRecord[]) => void = (_calls: ToolCallRecord[]): void => {};
   onError: (error: string) => void = (_error: string): void => {};
   onDone: (fullContent: string) => void = (_fullContent: string): void => {};
+  // 请求级自动重试开始(attempt 从 1 起): 调用方应清掉上一次尝试已流出的半截正文/思考,
+  // 避免重试成功后出现"旧半截 + 新全文"的重复(安卓版踩过的坑)。
+  onRetry: (attempt: number, reason: string) => void =
+    (_attempt: number, _reason: string): void => {};
 }
 
 // 流式取消信号

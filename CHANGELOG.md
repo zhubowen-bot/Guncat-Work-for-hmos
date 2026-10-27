@@ -2,6 +2,34 @@
 
 > [← 返回 README](README.md)
 
+## 未发布（网络中断与自动重试）
+
+> 依据真机反馈：稍微遇到网络波动或代理断开，任务就断在半路。参考安卓版的重试实践，同时避开它踩过的坑。
+
+- **修复：自动重试从未真正生效（根因，与安卓版同一个坑）**。`AgentLoopService.runTurn` 的兜底 `catch`
+  把所有 `LoopError` 无条件重新包成 `protocol`，于是 429 / 5xx / 网络传输 / 流截断在分类层被写成
+  "不可重试"，配好的 `RetryPolicy` 一次也没跑过。现在分类错误原样上抛，只有
+  `rate_limit / server / transport / empty` 才进重试。
+- **修复：断流被当成"正常说完"**。三种协议现在都识别终止事件（Completions 的 `finish_reason` /
+  `[DONE]`、Anthropic 的 `message_stop` / `stop_reason`、Responses 的 `response.completed` /
+  `response.incomplete`）。以前只要 HTTP 200、`dataEnd` 一到就 resolve，半截正文会被当成最终回答，
+  表现就是"任务安静地停住，发继续又能接着干"；现在没收到终止事件一律按 transport 错误重试。
+- **重试预算与等待**：工作模式 3 → 5 次，聊天模式新增 3 次；`Retry-After` 不再被 8s 的指数退避
+  截断（服务端建议单独封顶 60s）；408 / 425 归 `transport`、409 归 `server`（都可重试），
+  401/403/400 仍不重试。状态码 → 分类的统一口径收进 `common/HttpErrorClassifier.ts`。
+- **大请求体不再被固定 30s 掐断**（安卓版因此出现"用了 `view_image` 之后一直重连不上"）：
+  `connectTimeout` 按请求体大小放大（256KB 以内维持 30s，之后按约 100KB/s 给上传留预算，封顶 180s）；
+  底层传输错误翻译成人话（超时 / 连接中断 / 传输中止），不再只抛英文原文。
+- **重试不再带着同一张图死磕**：transport / empty 失败后，重试前把内联图片从循环历史里摘掉并说明
+  原因，让模型按需重新 `view_image`（图片本来就不落盘）。
+- **聊天模式也会重试**：单轮流式请求失败（含被截断）自动重试；重试前通过新增的 `onRetry` 回调
+  清掉上一次的半截正文 / 思考 / 未完成工具行，避免"旧半截 + 新全文"。
+- **用户可见反馈**：工作模式沿用"⚠️ 请求中断，正在自动重试(第 n 次)…"，聊天模式同样给出提示；
+  重试用尽才报错，不再出现"静默停住"。
+- **测试**：`test/guncat-harness` 增至 **633 项**（新增 Retry-After 口径、HttpTimeouts、
+  HttpErrorClassifier、三协议终止事件、适配器 `onComplete` 派发、重试预算常量）；
+  `tsc -p check/tsconfig.json` exit 0；`assembleHap` **BUILD SUCCESSFUL**。
+
 ## 未发布（插话：执行中点发送没反应）
 
 > 依据真机反馈：任务执行中在输入框输入一句话点发送，输入框里的字消失了，但任务毫无反应。

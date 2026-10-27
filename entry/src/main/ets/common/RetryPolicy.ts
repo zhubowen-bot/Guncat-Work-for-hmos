@@ -12,23 +12,28 @@ export class RetryPolicy {
   baseDelayMs: number = 500;
   maxDelayMs: number = 8000;
   jitterRatio: number = 0.2;
+  // 服务端 Retry-After 单独封顶: 指数退避封顶 maxDelayMs(8s) 是怕重试风暴,
+  // 但 429 明确要求等 60s 时只等 8s 等于白撞一次, 随后就把整个任务判死(安卓版踩过的坑)。
+  maxRetryAfterMs: number = 60000;
   retryableKinds: string[] = ['rate_limit', 'server', 'transport', 'empty'];
 
   constructor(maxRetries: number = 3, baseDelayMs: number = 500,
     maxDelayMs: number = 8000, jitterRatio: number = 0.2,
-    retryableKinds: string[] = ['rate_limit', 'server', 'transport', 'empty']) {
+    retryableKinds: string[] = ['rate_limit', 'server', 'transport', 'empty'],
+    maxRetryAfterMs: number = 60000) {
     this.maxRetries = maxRetries;
     this.baseDelayMs = baseDelayMs;
     this.maxDelayMs = maxDelayMs;
     this.jitterRatio = jitterRatio;
     this.retryableKinds = retryableKinds.slice();
+    this.maxRetryAfterMs = maxRetryAfterMs;
   }
 
   isRetryable(kind: string): boolean {
     return this.retryableKinds.indexOf(kind) !== -1;
   }
 
-  // attempt 为已发生的重试次数(0 起); retryAfterMs >=0 时尊重服务端建议(封顶 maxDelayMs);
+  // attempt 为已发生的重试次数(0 起); retryAfterMs >=0 时尊重服务端建议(封顶 maxRetryAfterMs);
   // seed ∈ [0,1) 控制抖动(测试传固定值, 运行期用 Math.random)。
   // maxRetriesOverride 允许单次调用覆盖实例 maxRetries(供工具级策略复用)。
   decide(kind: string, attempt: number, retryAfterMs: number = -1, seed: number = 0.5,
@@ -45,7 +50,7 @@ export class RetryPolicy {
     }
     d.shouldRetry = true;
     if (retryAfterMs >= 0) {
-      d.delayMs = Math.min(retryAfterMs, this.maxDelayMs);
+      d.delayMs = Math.min(retryAfterMs, this.maxRetryAfterMs);
       d.reason = 'retry_after';
       return d;
     }

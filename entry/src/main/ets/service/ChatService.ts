@@ -12,6 +12,11 @@ import { StreamCallbacks, AbortSignal } from '../common/Types';
 import { Constants } from '../common/Constants';
 import { LLMProtocol } from '../common/LLMProtocol';
 import { SSEProtocolAdapter, SSEParseContext } from '../common/SSEProtocolAdapter';
+import { RetryPolicy } from '../common/RetryPolicy';
+import { RetryAfterParser } from '../common/RetryAfterParser';
+import { LoopError } from '../common/LoopError';
+import { HttpTimeouts } from '../common/HttpTimeouts';
+import { HttpErrorClassifier } from '../common/HttpErrorClassifier';
 import { SSEAdapterFactory } from './SSEAdapterFactory';
 import { util } from '@kit.ArkTS';
 import { ToolCallAccumulator, collectCompletionsToolDelta, collectResponsesToolItem,
@@ -48,6 +53,8 @@ export class ChatStreamResult {
   toolCalls: ToolCallRecord[] = [];
   thinkingSignature: string = '';
   redactedThinking: string = '';
+  // 本轮累积的正文(供重试层判断"空响应", 也供 onDone 收尾)
+  content: string = '';
 }
 
 // 本地内置联网搜索 search_web 的 function tool 定义(协议相关形态):
@@ -1038,7 +1045,94 @@ export function deriveStreamStats(usage: Record<string, Object> | null, elapsedM
 export class ChatService {
   private static activeRequest: http.HttpRequest | null = null;
 
+  // 聊天模式的一轮流式请求(带请求级自动重试)。
+  //
+  // 为什么聊天模式也要重试: 手机网络/代理偶发断流时, 以前只会 onError 一句"请求失败",
+  // 用户得整轮重发。这里按与工作模式同一套 RetryPolicy 处理 429/5xx/408/409/425/
+  // 网络传输/流截断/空响应; 鉴权与协议错误不重试。
+  // 重试前必须通过 onRetry 让界面清掉上一次尝试的半截正文, 否则会出现"旧半截 + 新全文"。
   static async streamChat(
+    config: ApiConfig,
+    agent: Agent | null,
+    history: Message[],
+    userText: string,
+    thinkingEnabled: boolean,
+    webSearchEnabled: boolean,
+    callbacks: StreamCallbacks,
+    abortSignal: AbortSignal
+  ): Promise<ChatStreamResult> {
+    let attempt: number = 0;
+    let policy: RetryPolicy = new RetryPolicy(Constants.CHAT_LLM_RETRY_MAX, 500, 8000, 0.2,
+      ['rate_limit', 'server', 'transport', 'empty']);
+    while (true) {
+      let failed: LoopError | null = null;
+      try {
+        let result: ChatStreamResult = await ChatService.streamChatOnce(
+          config, agent, history, userText, thinkingEnabled, webSearchEnabled, callbacks, abortSignal);
+        if (abortSignal.aborted) {
+          return result;
+        }
+        // 空响应(代理/网关偶发返回 200 但什么都不发): 按可重试错误处理, 不让一轮白跑
+        if ((result.content === '' && result.toolCalls.length === 0)) {
+          failed = new LoopError('模型返回了空响应', 0, 'empty');
+        } else {
+          callbacks.onDone(result.content);
+          return result;
+        }
+      } catch (e) {
+        let err: Error = e as Error;
+        if (err instanceof LoopError) {
+          failed = err as LoopError;
+        } else {
+          failed = new LoopError(
+            HttpTimeouts.describeTransportError(err), 0, 'transport');
+        }
+      }
+      if (abortSignal.aborted || failed === null || !failed.retryable) {
+        if (!abortSignal.aborted && failed !== null) {
+          callbacks.onError(failed.userMessage);
+        }
+        return new ChatStreamResult();
+      }
+      let rd = policy.decide(failed.kind, attempt, failed.retryAfterMs, Math.random());
+      if (!rd.shouldRetry) {
+        callbacks.onError(failed.userMessage);
+        return new ChatStreamResult();
+      }
+      attempt++;
+      callbacks.onRetry(attempt, failed.message);
+      await ChatService.retryBackoffMs(rd.delayMs, abortSignal);
+      if (abortSignal.aborted) {
+        return new ChatStreamResult();
+      }
+    }
+  }
+
+  // 按给定毫秒数分片睡眠以便及时感知中断
+  private static async retryBackoffMs(delayMs: number, abortSignal: AbortSignal): Promise<void> {
+    let deadline: number = Date.now() + delayMs;
+    while (Date.now() < deadline) {
+      if (abortSignal.aborted) {
+        return;
+      }
+      let slice: number = Math.min(200, deadline - Date.now());
+      if (slice <= 0) {
+        break;
+      }
+      await ChatService.sleep(slice);
+    }
+  }
+
+  private static sleep(ms: number): Promise<void> {
+    return new Promise<void>((resolve: () => void) => {
+      setTimeout(() => {
+        resolve();
+      }, ms);
+    });
+  }
+
+  // 单次流式请求(不重试): 失败一律抛 LoopError(带 kind), 由外层决定是否重试。
+  private static async streamChatOnce(
     config: ApiConfig,
     agent: Agent | null,
     history: Message[],
@@ -1065,9 +1159,10 @@ export class ChatService {
     ChatService.activeRequest = httpRequest;
     let acc: StreamAccumulator = new StreamAccumulator();
     let lineBuffer: string = '';
-    let receivedAnyData: boolean = false;
-    let aborted: boolean = false;
     let failedMsg: string = '';
+    // 是否收到协议终止事件(finish_reason / message_stop / response.completed / [DONE])。
+    // 没收到就闭合连接 = 半截流, 必须报错让外层重试, 不能当成正常结束。
+    let sawComplete: boolean = false;
     // 深度思考累积 + 请求起始时间(用于由 usage 派生 token 速度)
     let fullReasoning: string = '';
     let startTime: number = Date.now();
@@ -1107,6 +1202,9 @@ export class ChatService {
         let stats: number[] = deriveStreamStats(usageObj, Date.now() - startTime);
         callbacks.onUsage(stats[0], stats[1]);
       };
+      ctx.onComplete = (): void => {
+        sawComplete = true;
+      };
       sseAdapter.handleLine(sseData, ctx);
       // 工具调用流式生成过程中即时上抛(调用数或累计参数量变化时)
       if (callAcc.calls.length > 0) {
@@ -1127,11 +1225,23 @@ export class ChatService {
         let statusCode: number = 0;
         let dataEnded: boolean = false;
         let settled: boolean = false;
+        // 2xx 流结束时统一走这里: 没有终止事件就是半截流, 明确报错(外层会重试),
+        // 而不是静默收尾把半截回答留给用户。
+        let settleStream = (): void => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          if (!sawComplete && !abortSignal.aborted) {
+            reject(new LoopError('响应流在结束事件前中断（网络或代理断开）', 0, 'transport'));
+            return;
+          }
+          resolve();
+        };
         httpRequest.on('dataReceive', (data: ArrayBuffer) => {
           if (abortSignal.aborted) {
             return;
           }
-          receivedAnyData = true;
           try {
             let chunk: string = acc.append(data);
             lineBuffer += chunk;
@@ -1144,13 +1254,23 @@ export class ChatService {
             for (let i: number = 0; i < lines.length; i++) {
               let line: string = lines[i];
               let trimmed: string = line.trim();
-              if (trimmed === '' || trimmed === Constants.SSE_DONE_TOKEN) {
+              if (trimmed === '') {
+                continue;
+              }
+              // [DONE] 也是终止信号: 部分网关只发它、不发 finish_reason
+              if (trimmed === Constants.SSE_DONE_TOKEN) {
+                sawComplete = true;
                 continue;
               }
               if (!trimmed.startsWith(Constants.SSE_DATA_PREFIX)) {
                 continue;
               }
-              processSseData(trimmed.substring(Constants.SSE_DATA_PREFIX.length));
+              let sseData: string = trimmed.substring(Constants.SSE_DATA_PREFIX.length);
+              if (sseData === Constants.SSE_DONE_TOKEN) {
+                sawComplete = true;
+                continue;
+              }
+              processSseData(sseData);
             }
           } catch (e) {
             let err: Error = e as Error;
@@ -1161,24 +1281,28 @@ export class ChatService {
         httpRequest.on('dataEnd', () => {
           if (lineBuffer !== '') {
             let trimmed: string = lineBuffer.trim();
-            if (trimmed.startsWith(Constants.SSE_DATA_PREFIX) && trimmed !== Constants.SSE_DONE_TOKEN) {
-              try {
-                processSseData(trimmed.substring(Constants.SSE_DATA_PREFIX.length));
-              } catch (e) {
-                let err: Error = e as Error;
-                if (!settled) {
-                  settled = true;
-                  reject(err);
+            if (trimmed.startsWith(Constants.SSE_DATA_PREFIX)) {
+              let sseData: string = trimmed.substring(Constants.SSE_DATA_PREFIX.length);
+              if (sseData === Constants.SSE_DONE_TOKEN) {
+                sawComplete = true;
+              } else {
+                try {
+                  processSseData(sseData);
+                } catch (e) {
+                  let err: Error = e as Error;
+                  if (!settled) {
+                    settled = true;
+                    reject(err);
+                  }
+                  return;
                 }
-                return;
               }
             }
             lineBuffer = '';
           }
           dataEnded = true;
           if (statusCode !== 0 && statusCode >= 200 && statusCode < 300 && !settled) {
-            settled = true;
-            resolve();
+            settleStream();
           }
         });
 
@@ -1210,11 +1334,24 @@ export class ChatService {
         }
         // Opencode Go 等网关要求的特殊请求头
         LLMProtocol.applyProviderHeaders(config.baseUrl, headers);
+        let retryAfterHeader: string = '';
+        try {
+          httpRequest.on('headersReceive', (header: Object) => {
+            let h: Record<string, Object> = header as Record<string, Object>;
+            let ra: Object | undefined = h['retry-after'];
+            if (typeof ra === 'string') {
+              retryAfterHeader = ra as string;
+            }
+          });
+        } catch (e) {
+          // 个别平台不支持 headersReceive 时忽略, Retry-After 降级为默认退避
+        }
         httpRequest.requestInStream(url, {
           method: http.RequestMethod.POST,
           header: headers,
           extraData: bodyStr,
-          connectTimeout: 30000,
+          // 与工作模式同一口径: 带图请求体很大时按体积放大上传预算, 避免慢速上传被 30s 掐断
+          connectTimeout: HttpTimeouts.connectTimeoutForBody(bodyStr),
           readTimeout: 180000,
           usingProtocol: http.HttpProtocol.HTTP1_1
         }).then((code: number) => {
@@ -1225,25 +1362,18 @@ export class ChatService {
           if (code < 200 || code >= 300) {
             if (!settled) {
               settled = true;
-              let msg: string = '';
-              if (code === 401) {
-                msg = 'API Key 无效，请检查设置';
-              } else if (code === 429) {
-                msg = '请求过于频繁，请稍后再试';
-              } else if (code >= 400 && code < 500) {
-                msg = 'API 请求错误 (' + code + ')，请检查配置';
-              } else if (code >= 500) {
-                msg = '服务器错误 (' + code + ')，请稍后再试';
-              } else {
-                msg = '请求失败，状态码: ' + code;
+              let kind: string = HttpErrorClassifier.kindForStatus(code);
+              let msg: string = HttpErrorClassifier.messageForStatus(code);
+              if (kind === HttpErrorClassifier.KIND_HTTP) {
+                msg += '，请检查配置';
               }
-              reject(new Error(msg));
+              let retryAfterMs: number = RetryAfterParser.parseMs(retryAfterHeader);
+              reject(new LoopError(msg, code, kind, retryAfterMs));
             }
             return;
           }
           if (dataEnded && !settled) {
-            settled = true;
-            resolve();
+            settleStream();
           }
         }).catch((err: Error) => {
           if (abortSignal.aborted) {
@@ -1256,7 +1386,8 @@ export class ChatService {
           }
           if (!settled) {
             settled = true;
-            reject(err);
+            // 网络层异常(连接失败/超时/DNS 等)归类为 transport, 可交给外层自动重试
+            reject(new LoopError(HttpTimeouts.describeTransportError(err), 0, 'transport'));
           }
         });
       });
@@ -1264,23 +1395,24 @@ export class ChatService {
       streamResult.toolCalls = ChatService.normalizeChatToolCalls(callAcc.calls);
       streamResult.thinkingSignature = thinkingSignature;
       streamResult.redactedThinking = redactedThinking;
+      streamResult.content = acc.fullContent;
     } catch (e) {
       let err: Error = e as Error;
-      if (abortSignal.aborted) {
-        aborted = true;
-      } else {
+      if (!abortSignal.aborted) {
+        // 已经是分类错误(LoopError)就原样上抛: 网络中断/流截断是 transport,
+        // 必须留给外层 streamChat 的重试循环。只把协议层抛出的裸错误归为 protocol。
+        if (err instanceof LoopError) {
+          throw err;
+        }
         if (failedMsg === '' && err.message !== undefined) {
           failedMsg = err.message;
         }
         if (failedMsg === '') {
           failedMsg = '请求失败';
         }
-        callbacks.onError(failedMsg);
+        throw new LoopError(failedMsg, 0, 'protocol');
       }
     } finally {
-      if (abortSignal.aborted) {
-        aborted = true;
-      }
       ChatService.activeRequest = null;
       try {
         httpRequest.off('dataReceive');
@@ -1288,9 +1420,6 @@ export class ChatService {
         httpRequest.destroy();
       } catch (e) {
         // ignore
-      }
-      if (!aborted) {
-        callbacks.onDone(acc.fullContent);
       }
     }
     return streamResult;

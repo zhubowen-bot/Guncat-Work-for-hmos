@@ -55,6 +55,8 @@ port('common/PluginManifestLoader.ts', 'PluginManifestLoader.ts', []);
 port('common/SkillDirectoryFormatter.ts', 'SkillDirectoryFormatter.ts', []);
 port('common/RetryPolicy.ts', 'RetryPolicy.ts', []);
 port('common/ToolRetryPolicy.ts', 'ToolRetryPolicy.ts', []);
+port('common/HttpTimeouts.ts', 'HttpTimeouts.ts', []);
+port('common/HttpErrorClassifier.ts', 'HttpErrorClassifier.ts', []);
 port('common/WorkLoopSimulator.ts', 'WorkLoopSimulator.ts', []);
 port('common/RetryAfterParser.ts', 'RetryAfterParser.ts', []);
 port('common/WorkLoopDriver.ts', 'WorkLoopDriver.ts', []);

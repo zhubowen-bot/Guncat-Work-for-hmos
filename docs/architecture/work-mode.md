@@ -57,10 +57,25 @@ for step in 1..WORK_MAX_STEPS(200, 防失控保险):
 
 - **决策/编排层**：`ToolScheduler`（调度分组 + `SchedulerSummary` 统计）、`RepeatDetector`（重复防护）、`LoopDecisions`（快照去重/溢出压缩/max_tokens/无效步判定）、`WorkLoopPlanner`（单轮 TOOL/FINISH/ABORT/COMPACT/STEER + `describe` 可读描述）、`WorkLoopSimulator`（全循环回归）、`WorkLoopDriver`（循环主体纯驱动：状态机+计划器+重试/压缩回调）、`SteerQueue` + `SendRoute`（插话队列 + 执行中发送路由，只在轮边界注入）、`WorkLoopDriverBridge` + `LoopTurnInfoMapper` + `WorkLoopStepInfoBuilder`（真实循环接入桥梁/单步信息纯构造）、`WorkLoopStateMachine`（idle/running/paused/awaiting_user/aborting）。
 - **协议层**：`LLMProtocol`（协议/端点单一事实源）、`ToolDefAdapter`（三协议工具形态）、`SSEProtocolAdapter` + `SSEAdapterFactory`（SSE 解析统一流水线，工作/聊天共用）。
-- **错误/重试**：`RetryPolicy`（指数退避+jitter+retry-after+可重试 kind）、`RetryAfterParser`（Retry-After 头解析）、`ToolRetryPolicy`（工具级重试）、`LoopError`（显式 `retryable`/`userMessage`，纯层可单测）。
+- **错误/重试**：`RetryPolicy`（指数退避+jitter+retry-after 独立封顶 60s+可重试 kind）、`RetryAfterParser`（Retry-After 头解析）、`ToolRetryPolicy`（工具级重试）、`HttpErrorClassifier`（状态码 → 分类/文案，408/425→transport、409→server）、`HttpTimeouts`（按请求体放大 connectTimeout + 传输错误人话化）、`LoopError`（显式 `retryable`/`userMessage`，纯层可单测）。
 - **插件/技能**：`ToolRegistry`（工具+技能元数据单一事实源）、`PluginManifestLoader`（manifest 解析/apply/unload）、`PluginHotLoader`（rawfile 热加载/reloadAll）、`PluginToolExecutor`（插件工具声明式实现注册）、`SkillDirectoryFormatter`（技能目录 full_index/trigger_only A/B）。
 - **可观测**：`LoopMetrics`（重试/压缩/max_tokens 计数）、`SessionLogAggregator`（协议维度 + 工具延迟 p50/p90/p99 + 跨会话聚合）、`PromptBudget`（token 预算估算）。
-- **测试**：`test/guncat-harness` 纯逻辑用例 **589 项全绿**；改 `common/` 后跑 `node setup.mjs && node test-core.mjs`，再 `node check-setup.mjs && tsc -p check/tsconfig.json`，最后 `assembleHap` 真机构建。
+- **测试**：`test/guncat-harness` 纯逻辑用例 **633 项全绿**；改 `common/` 后跑 `node setup.mjs && node test-core.mjs`，再 `node check-setup.mjs && tsc -p check/tsconfig.json`，最后 `assembleHap` 真机构建。
+
+## 2.2 网络中断与自动重试（对齐安卓版，2026-10）
+
+手机网络上"偶发断流"不是异常而是常态（切 Wi-Fi/蜂窝、代理抖动、网关掐连接）。目标是**不把一次抖动变成一次任务失败**，同时不做会放大故障的傻重试。
+
+| 层 | 行为 |
+| --- | --- |
+| 分类 | `LoopError.kind` 决定能不能重试：`rate_limit / server / transport / empty` 重试；`auth / http / protocol` 直接上抛。**注意**：`runTurn` 的兜底 `catch` 必须原样上抛 `LoopError` —— 无条件重包成 `protocol` 会让整套重试静默失效（安卓版真事故）。 |
+| 终止事件 | 三协议都要求收到终止事件才算完整结束：Completions `finish_reason` 或 `[DONE]`、Anthropic `message_stop` 或 `message_delta.delta.stop_reason`、Responses `response.completed` / `response.incomplete`。没收到 = 半截流 = `transport` 错误，绝不冒充"正常说完"。 |
+| 等待 | 指数退避 500ms → 8s + ±20% jitter；服务端 `Retry-After` 单独封顶 **60s**（不被 8s 退避截断），否则 429 让你等 20s 时只等 8s 等于白撞一次。重试预算：工作模式 **5** 次、聊天模式 **3** 次，辅助请求（界面补救/会话标题）1~2 次。 |
+| 状态码 | `HttpErrorClassifier`：401/403→auth（不重试）、429→rate_limit、408/425→transport、409→server、其余 4xx→http（不重试）、5xx→server。 |
+| 大请求体 | `connectTimeout` 按请求体放大：≤256KB 维持 30s，超出按约 100KB/s 给上传留预算，封顶 180s。否则 `view_image` 的 base64 大图会在慢速上传途中被 30s 掐断，重试又带同一张图 → 连卡五次。 |
+| 图片 | `transport / empty` 失败后，重试前把内联图片从循环历史摘掉并说明原因，让模型按需重新 `view_image`（图片本来就不落盘）；429/5xx 与图片无关，不动视觉上下文。 |
+| 半截输出 | 重试前经 `onRetry` 清掉上一次已流出的正文/思考/未完成工具行，并提示"请求中断，正在自动重试(第 n 次)"，避免"旧半截 + 新全文"。 |
+| 不该重试 | 用户主动停止（`abortSignal`）、鉴权/参数错误、内容审查/协议事件错误、上下文超限（走压缩重试，不是网络重试）。 |
 
 每轮改动与验证记录在 `docs/ITERATION_LOG.md`；当前待办见 `docs/BACKLOG.md`；dsh 移植对照见 `docs/PORT_NOTES.md`。
 
