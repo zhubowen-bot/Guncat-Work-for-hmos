@@ -1,8 +1,12 @@
-# Guncat Work
+# Guncat Work（鸿蒙版）
 
 > 中文 | [English](README_EN.md)
 
 **鸿蒙手机上的原生 AI 工作台** —— 用 ArkTS / ArkUI 从零构建，非套壳。**鸿蒙手机可用，不止鸿蒙电脑。**：**完整 Linux `shell`**（内核 6.12 + Alpine 3.22，`apk add` 可用）与**原生 CPython 3.12**（编成 HarmonyOS `.so` 在进程内直跑，numpy / pandas / scipy / matplotlib 全离线）都在机内真跑，**47 个工具 + 32 个技能**的 Agent Loop 端侧闭环，**Intelligent UI**（一句话直出可操作界面）与 **Harness**（多轮工具循环 + 沙箱工作区）两种当红形态真机跑通，PPT / Word / Excel / 绘图端侧直出。
+
+电脑版见 [Guncat Work（电脑版）](https://github.com/zhubowen-bot/Guncat-Work-for-pc)（Electron 38）。
+
+安卓版见 [Guncat Work（安卓版）](https://github.com/zhubowen-bot/Guncat-Work-for-android)（Java 壳 + WebView（SPA））。
 
 <!-- 演示位（可选升级）：真机录屏 30–60 秒 —— 进工作模式 → 一句话生成 PPT → 产物卡片展开 → 切到交互模式拖滑块重算。动态 GIF 比静态截图更有说服力。 -->
 
