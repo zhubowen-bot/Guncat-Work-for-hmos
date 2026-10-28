@@ -1,0 +1,68 @@
+[2026-10-28T00:52:08.920] [DEBUG] debug-file - env: nodejsVersion=v18.20.1
+[2026-10-28T00:52:09.380] [DEBUG] debug-file - hvigor build process will be closed with an error.
+[2026-10-28T00:52:09.409] [ERROR] debug-file - BUILD FAILED in 92 h 20 min 27 s 89 ms 
+[2026-10-28T00:52:08.921] [DEBUG] debug-file - env: hvigor-config.json5 content = {
+  properties: { 'hvigor.dependency.useNpm': true },
+  modelVersion: '',
+  dependencies: {}
+}
+[2026-10-28T00:52:09.436] [DEBUG] debug-file - Create  resident worker with id: 0.
+[2026-10-28T00:52:09.386] [ERROR] debug-file - [31m00304035 Not Found
+Error Message: Cannot find project build file build-profile.json5 under folder: C:\Users\a1519\Documents\GitHub\Guncat-Work-for-hmos\test\guncat-harness.
+
+* Try the following:
+  > Make sure that the project has build-profile.json5 file.
+[39m
+
+[31m* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --debug option to get more log output.
+
+[2026-10-28T00:52:09.432] [DEBUG] debug-file - Since there is no instance or instance is terminated, create a new worker pool.
+[2026-10-28T00:52:08.924] [DEBUG] debug-file - env: daemon=false
+[2026-10-28T00:52:09.440] [DEBUG] debug-file - Create  resident worker with id: 1.
+[2026-10-28T00:52:09.386] [DEBUG] debug-file - ERROR: stacktrace = AdaptorError: [31m00304035 Not Found
+Error Message: Cannot find project build file build-profile.json5 under folder: C:\Users\a1519\Documents\GitHub\Guncat-Work-for-hmos\test\guncat-harness.
+
+* Try the following:
+  > Make sure that the project has build-profile.json5 file.
+[39m
+    at HvigorLogger.printErrorExit (C:\Program Files\Huawei\DevEco Studio\tools\hvigor\hvigor\src\base\log\hvigor-log.js:1:5087)
+    at initEnvConfigProps (C:\Program Files\Huawei\DevEco Studio\tools\hvigor\hvigor\src\base\boot\hooks\init-env-config-props.js:1:946)
+    at boot (C:\Program Files\Huawei\DevEco Studio\tools\hvigor\hvigor\src\base\boot\index.js:1:1679)
+    at startHvigorBuild (C:\Program Files\Huawei\DevEco Studio\tools\hvigor\hvigor\src\cli\main\cli.js:1:7867)
+    at C:\Program Files\Huawei\DevEco Studio\tools\hvigor\hvigor\bin\hvigor.js:50:64
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+[2026-10-28T00:52:09.433] [DEBUG] debug-file - Worker pool is initialized with config:  {
+  minPoolNum: 2,
+  maxPoolNum: undefined,
+  maxCoreSize: undefined,
+  cacheCapacity: undefined,
+  cacheTtl: undefined
+}
+[2026-10-28T00:52:08.924] [DEBUG] debug-file - no-daemon, use the default node options
+[2026-10-28T00:52:09.446] [DEBUG] debug-file - Current worker pool is stopped or closed.
+[2026-10-28T00:52:09.386] [ERROR] debug-file - AdaptorError: [31m00304035 Not Found
+Error Message: Cannot find project build file build-profile.json5 under folder: C:\Users\a1519\Documents\GitHub\Guncat-Work-for-hmos\test\guncat-harness.
+
+* Try the following:
+  > Make sure that the project has build-profile.json5 file.
+[39m
+    at HvigorLogger.printErrorExit (C:\Program Files\Huawei\DevEco Studio\tools\hvigor\hvigor\src\base\log\hvigor-log.js:1:5087)
+    at initEnvConfigProps (C:\Program Files\Huawei\DevEco Studio\tools\hvigor\hvigor\src\base\boot\hooks\init-env-config-props.js:1:946)
+    at boot (C:\Program Files\Huawei\DevEco Studio\tools\hvigor\hvigor\src\base\boot\index.js:1:1679)
+    at startHvigorBuild (C:\Program Files\Huawei\DevEco Studio\tools\hvigor\hvigor\src\cli\main\cli.js:1:7867)
+    at C:\Program Files\Huawei\DevEco Studio\tools\hvigor\hvigor\bin\hvigor.js:50:64
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+[2026-10-28T00:52:09.447] [DEBUG] debug-file - Clear worker 0.
+[2026-10-28T00:52:09.447] [DEBUG] debug-file - Worker 0 has been cleared.
+[2026-10-28T00:52:09.447] [DEBUG] debug-file - Current idle worker size: 1.
+[2026-10-28T00:52:09.447] [DEBUG] debug-file - Current busy worker size: 0.
+[2026-10-28T00:52:09.447] [DEBUG] debug-file - Clear worker 1.
+[2026-10-28T00:52:09.447] [DEBUG] debug-file - Worker 1 has been cleared.
+[2026-10-28T00:52:09.447] [DEBUG] debug-file - Current idle worker size: 0.
+[2026-10-28T00:52:09.447] [DEBUG] debug-file - Current busy worker size: 0.
+[2026-10-28T00:52:09.447] [DEBUG] debug-file - hvigor build process will be closed.
+[2026-10-28T00:52:09.450] [DEBUG] debug-file - worker[0] exits with exit code 0.
+[2026-10-28T00:52:09.452] [DEBUG] debug-file - worker[1] exits with exit code 0.
+[2026-10-28T00:52:09.453] [DEBUG] debug-file - Current worker pool is terminated.

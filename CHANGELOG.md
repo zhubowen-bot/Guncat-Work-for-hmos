@@ -114,6 +114,22 @@
   纯 Python 计算不要用线程/线程池（实测慢 7~8 倍，GIL 争用）；但 `hashlib`/`zlib`/`bz2`/`lzma`/`sqlite3` 等释放 GIL 的 C 运算多线程是真并行（sha256 8 线程 2.7 倍，分块需 ≥64KB）；`multiprocessing` 只有 fork 上下文可用（spawn/forkserver 会明确报错），真多进程走 `guncat_mp.map`；int→str 上限放宽到 10 万位。
 - 扩展总数 51 → **56**。
 
+#### 随包能力：scipy、字体与稳定性
+
+- **scipy 打通**：补齐 libgcc soft-float 的四个转换函数（`__trunctfdf2` / `__extenddftf2` /
+  `__floatsitf` / `__powidf2` 等，全部用 IEEE 754 位运算实现，不调用浮点以免自递归），1413 个
+  目标全链接通过；包体增加约 70MB。
+- **中文开箱可用**：随包思源黑体，matplotlib 中文标签不再显示为方块。此前真机的 `path()` /
+  `use_cjk()` 恒为 `None`，根因不是缺字体文件，而是 `RawAsset.extract` 用 `openSync(CREATE)`
+  写文件、`<stdlib>/fonts/` 目录不存在时直接失败且只被打成一条 warn；现解压前先建目录。
+- **补齐三方库**：regex（`\p{Han}` 等 Unicode 属性正则）、psutil、PyCryptodome（AES/RSA/ECC/
+  SHA3）、reportlab（PDF）、watchdog（inotify 文件监控）、qrcode、XlsxWriter、`guncat_mp`
+  （不依赖 `/dev/shm` 的 fork 并行 map）。
+- **修掉真机闪退**：6 份崩溃日志堆栈一致（`SIGSYS(SYS_SECCOMP)`，syscall 235），根因是 OpenBLAS
+  在 `blas_memory_alloc` 里调 `mbind` 被沙箱拒绝；改为避开该路径，并修掉 extras 未解压的问题。
+- **修掉 `guncat_mp` 的探测缺陷**：`available()` 曾恒为 `True`（内部用 `workers=1` 探测，走的是
+  本地串行分支，根本没 fork），真禁 fork 时仍报可用；改为裸 `fork` + `waitpid` 探测并缓存结果。
+
 #### 运行环境体检修复
 
 > 依据一次实机体检报告（进程常驻 + 解释器复用带来的系统性缺陷），逐条在源码里复核后修掉
@@ -172,6 +188,27 @@
   SIGKILL 的只有把解释器放进子进程，那是重写执行架构。
 - **测试**：`launcher-test.py` 增至 **42 项**（新增：用户命名空间释放、MPLCONFIGDIR 生效、正常调用
   不产生内存警告、诊断带内存数字）。
+
+### 模型配置：预置方案、多模型与服务商
+
+- **预置两套方案**：Deepseek（Anthropic Messages，`deepseek-flash`）与 Opencode Go（Anthropic
+  Messages，`deepseek-v4.1-flash`）。启动时只补齐缺失项，已填 Key 的方案不覆盖。
+- **旧配置迁移**：把 `https://api.deepseek.com` 方案并入 Deepseek 预置，Key、模型、参数与多模态
+  配置一并带过去；旧方案正在使用时，保留其当前模型。
+- **一套配置多个模型**：`ApiConfig` 新增 `models` 列表，旧存档的单 `model` 自动迁移；设置页的模型
+  改为可增删的模型行。
+- **选择器按「方案 × 模型」逐行展示**：胶囊只显示模型名，菜单显示服务商；未填 API Key 的方案不进入
+  选择器。
+- **可删除自建配置**：默认配置与预置方案受保护；删除当前方案后自动切到相邻方案并落盘。
+- **Opencode Go 会话头**：网关要求每个请求带 `x-opencode-session`，按当前对话生成稳定值，流式对话、
+  Agent Loop、Files API 三处请求统一注入。
+- **测试**：`LLMProtocol` 补 4 条断言（端点与会话头）。
+
+### 长任务保活：屏幕常亮
+
+- **前台不熄屏**：`window.setWindowKeepScreenOn(true)`，应用在前台期间不自动熄屏，长程任务（流式
+  回复、Agent 循环）不会因为屏幕熄灭被打断。切后台仍由数据搬运长时任务（`DATA_TRANSFER`）接管，
+  回到前台立即释放。
 
 ### 工作区生命周期：删除会话时的连带清理与孤儿回收
 
