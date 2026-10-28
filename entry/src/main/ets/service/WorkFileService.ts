@@ -18,6 +18,7 @@ import { arrayBufferToBase64 } from '../common/Utils';
 import { ToolRegistry } from '../common/ToolRegistry';
 import { Constants } from '../common/Constants';
 import { FileObservation } from '../common/FileObservation';
+import { OrphanSweep } from '../common/OrphanSweep';
 import { LocalWebSearch, LocalSearchOutcome, LOCAL_SEARCH_TOOL_DESC_WORK, LOCAL_SEARCH_TOOL_DESC_WORK_FALLBACK,
   LOCAL_SEARCH_QUERY_PROP_DESC, LOCAL_SEARCH_TOOL_NAME, LOCAL_SEARCH_LEGACY_TOOL_NAME,
   isLocalSearchToolName } from './LocalWebSearch';
@@ -119,10 +120,15 @@ export class WorkFileService {
 
   // ===== 路径基础 =====
 
-  // 会话工作区根目录
+  // 工作区根目录
   static workspaceRoot(context: common.UIAbilityContext, convId: string): string {
     return context.filesDir + '/' + Constants.WORKSPACE_ROOT_DIR + '/' +
       WorkFileService.sanitizeConvId(convId);
+  }
+
+  // 会话 id 在磁盘上的目录名(启动清扫要按同一口径把"存活会话"换算成目录名, 否则会误删)
+  static workspaceDirName(convId: string): string {
+    return WorkFileService.sanitizeConvId(convId);
   }
 
   // 会话 id 由 generateConversationId 生成, 此处兜底过滤非法字符, 防止路径拼接被注入
@@ -420,6 +426,50 @@ export class WorkFileService {
     } catch (e) {
       hilog.error(DOMAIN, TAG, 'deleteWorkspace failed: %{public}s', JSON.stringify(e));
     }
+  }
+
+  // 启动清扫: 删掉「磁盘上有目录、会话列表里却没有」的工作区(旧版本残留/删除过程中崩溃/运行中被删后又被写回)。
+  // liveConvIds 必须来自**成功读出的会话列表** —— 读失败时调用方不该调这个方法, 否则会把用户的工作区全删了。
+  // 返回清掉的目录数; 单个目录删除失败只记日志, 不影响其它目录, 也不阻塞启动。
+  static gcOrphanWorkspaces(context: common.UIAbilityContext, liveConvIds: string[]): number {
+    let root: string = context.filesDir + '/' + Constants.WORKSPACE_ROOT_DIR;
+    if (!fileIo.accessSync(root)) {
+      return 0;
+    }
+    let names: string[] = [];
+    let dirs: string[] = [];
+    try {
+      names = fileIo.listFileSync(root);
+    } catch (e) {
+      hilog.error(DOMAIN, TAG, 'gc list failed: %{public}s', JSON.stringify(e));
+      return 0;
+    }
+    for (let i: number = 0; i < names.length; i++) {
+      try {
+        if (fileIo.statSync(root + '/' + names[i]).isDirectory()) {
+          dirs.push(names[i]);
+        }
+      } catch (e) {
+        // stat 失败的条目跳过(可能在别处已被删)
+      }
+    }
+    let live: string[] = [];
+    for (let i: number = 0; i < liveConvIds.length; i++) {
+      live.push(WorkFileService.workspaceDirName(liveConvIds[i]));
+    }
+    let orphans: string[] = OrphanSweep.orphans(dirs, live);
+    let removed: number = 0;
+    for (let i: number = 0; i < orphans.length; i++) {
+      let abs: string = root + '/' + orphans[i];
+      try {
+        WorkFileService.deleteRecursive(abs);
+        FileObservation.forgetRoot(abs);
+        removed++;
+      } catch (e) {
+        hilog.error(DOMAIN, TAG, 'gc remove failed: %{public}s', JSON.stringify(e));
+      }
+    }
+    return removed;
   }
 
   // 删除工作区内指定相对路径(工作区面板使用); 非法路径或根目录返回 false

@@ -36,6 +36,7 @@ port('common/DiffUtil.ts', 'DiffUtil.ts', []);
 port('common/EditCore.ts', 'EditCore.ts', []);
 port('common/FileObservation.ts', 'FileObservation.ts', []);
 port('common/MentionQuery.ts', 'MentionQuery.ts', []);
+port('common/OrphanSweep.ts', 'OrphanSweep.ts', []);
 port('common/FileSearchCore.ts', 'FileSearchCore.ts', []);
 port('common/ToolExecutionGuard.ts', 'ToolExecutionGuard.ts', []);
 port('common/ToolSchemaValidator.ts', 'ToolSchemaValidator.ts', []);

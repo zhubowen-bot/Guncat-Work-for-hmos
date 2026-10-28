@@ -6,12 +6,13 @@ import { fileIo } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 import { Constants } from '../common/Constants';
+import { OrphanSweep } from '../common/OrphanSweep';
 
 export class SessionLogService {
   private static openFiles: Map<string, fileIo.File> = new Map();
 
   private static filePath(context: common.UIAbilityContext, convId: string): string {
-    let safe: string = convId.replace(/[^A-Za-z0-9_-]/g, '_');
+    let safe: string = SessionLogService.logName(convId);
     return context.filesDir + '/' + Constants.WORK_SESSIONS_DIR + '/' + safe + '.jsonl';
   }
 
@@ -106,5 +107,61 @@ export class SessionLogService {
         // ignore
       }
     }
+  }
+
+  // 会话 id 在磁盘上的文件名(不含 .jsonl); 启动清扫按同一口径换算存活会话
+  static logName(convId: string): string {
+    return convId.replace(/[^A-Za-z0-9_-]/g, '_');
+  }
+
+  // 启动清扫: 删掉没有对应会话的事件日志(与工作区同一口径, 见 WorkFileService.gcOrphanWorkspaces)。
+  // 返回删掉的份数; 单个失败只跳过。
+  static gcOrphans(context: common.UIAbilityContext, liveConvIds: string[]): number {
+    let dir: string = context.filesDir + '/' + Constants.WORK_SESSIONS_DIR;
+    if (!fileIo.accessSync(dir)) {
+      return 0;
+    }
+    let names: string[] = [];
+    try {
+      names = fileIo.listFileSync(dir);
+    } catch (e) {
+      return 0;
+    }
+    let ids: string[] = [];
+    for (let i: number = 0; i < names.length; i++) {
+      let name: string = names[i];
+      if (!name.endsWith('.jsonl')) {
+        continue;
+      }
+      ids.push(name.substring(0, name.length - '.jsonl'.length));
+    }
+    let live: string[] = [];
+    for (let i: number = 0; i < liveConvIds.length; i++) {
+      live.push(SessionLogService.logName(liveConvIds[i]));
+    }
+    let orphans: string[] = OrphanSweep.orphans(ids, live);
+    let removed: number = 0;
+    for (let i: number = 0; i < orphans.length; i++) {
+      let abs: string = dir + '/' + orphans[i] + '.jsonl';
+      // 先把可能还开着的句柄关掉(孤儿不该有, 但崩溃恢复后可能残留)
+      let file: fileIo.File | undefined = SessionLogService.openFiles.get(orphans[i]);
+      if (file !== undefined) {
+        try {
+          fileIo.closeSync(file);
+        } catch (e) {
+          // ignore
+        }
+        SessionLogService.openFiles.delete(orphans[i]);
+      }
+      try {
+        if (fileIo.accessSync(abs)) {
+          fileIo.unlinkSync(abs);
+          removed++;
+        }
+      } catch (e) {
+        // 单个失败不影响其它
+      }
+    }
+    return removed;
   }
 }

@@ -44,6 +44,7 @@ for (const [relSrc, relDst, replaces] of [
   ['common/EditCore.ts', 'EditCore.ts', []],
   ['common/FileObservation.ts', 'FileObservation.ts', []],
   ['common/MentionQuery.ts', 'MentionQuery.ts', []],
+  ['common/OrphanSweep.ts', 'OrphanSweep.ts', []],
   ['common/FileSearchCore.ts', 'FileSearchCore.ts', []],
   ['common/ToolExecutionGuard.ts', 'ToolExecutionGuard.ts', []],
   ['common/ToolSchemaValidator.ts', 'ToolSchemaValidator.ts', []],

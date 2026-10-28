@@ -40,6 +40,7 @@ import { AbortSignal } from './gen/Types.ts';
 import { SubagentIsolation } from './gen/SubagentIsolation.ts';
 import { FileObservation } from './gen/FileObservation.ts';
 import { MentionQueryParser } from './gen/MentionQuery.ts';
+import { OrphanSweep } from './gen/OrphanSweep.ts';
 import {
   GuncatUiLang,
   UiNode,
@@ -2407,6 +2408,27 @@ console.log('[组件库与提示词]');
   check('@候选: 空查询按层级排序', MentionQueryParser.rank(paths, '', 2)[0] === 'readme.md');
   check('@候选: limit 生效', MentionQueryParser.rank(paths, '', 1).length === 1);
   check('@候选: 大小写不敏感', MentionQueryParser.rank(paths, 'REPORT', 4).length === 3);
+}
+
+// ===== 孤儿清理（OrphanSweep）：磁盘上有、会话列表里没有 =====
+// 会话删除本该连目录一起删, 但"删除时任务还在跑""删除途中崩溃""旧版本根本没删"都会留下孤儿。
+// 启动清扫按会话列表对一遍 —— 判定必须是"存活集合之外的一切", 不能反过来猜名字。
+{
+  const live = ['conv_1_aaa', 'conv_2_bbb'];
+  const all = ['conv_1_aaa', 'conv_2_bbb', 'conv_9_zzz', 'tmp_x'];
+  const got = OrphanSweep.orphans(all, live);
+  check('孤儿: 只挑出不在存活集合里的', got.length === 2 && got.indexOf('conv_9_zzz') >= 0);
+  check('孤儿: 顺序稳定(字典序)', got[0] === 'conv_9_zzz' && got[1] === 'tmp_x');
+  check('孤儿: 全部存活时为空', OrphanSweep.orphans(['a', 'b'], ['a', 'b']).length === 0);
+  check('孤儿: 存活集合为空时全部是孤儿',
+    OrphanSweep.orphans(['a', 'b'], []).length === 2);
+  check('孤儿: 空名条目忽略', OrphanSweep.orphans(['', 'a'], ['a']).length === 0);
+  check('孤儿: 存活集合里的空串不会误伤',
+    OrphanSweep.orphans(['a'], ['']).length === 1);
+  check('孤儿: 同一名字重复出现只报一次',
+    OrphanSweep.orphans(['x', 'x'], []).length === 1);
+  check('孤儿: 大小写不同视为不同条目',
+    OrphanSweep.orphans(['Conv_1'], ['conv_1']).length === 1);
 }
 
 console.log('');

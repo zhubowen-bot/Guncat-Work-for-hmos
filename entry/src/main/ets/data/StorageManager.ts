@@ -23,6 +23,8 @@ async function getPreferences(context: Context): Promise<preferences.Preferences
 
 export class StorageManager {
   private static readonly CONVERSATIONS_FILE: string = 'guncat_conversations.json';
+  // 上一次会话存档是否读取成功(见 loadConversations / conversationsLoadOk)
+  private static loadOk: boolean = false;
 
   // ===== 对话历史: 文件存储(无 Preferences 体积上限) =====
 
@@ -51,6 +53,9 @@ export class StorageManager {
   }
 
   static async loadConversations(context: Context): Promise<Conversation[]> {
+    // 先置 false: 只有**确实读到并解析成功**才置 true。启动清扫(孤儿工作区/日志)靠它判断
+    // "会话列表可信" —— 读失败时列表为空, 若拿空列表去清扫就等于把用户所有工作区删掉。
+    StorageManager.loadOk = false;
     try {
       // 新存储优先读文件
       let jsonStr: string = StorageManager.readConversationsFile(context);
@@ -70,12 +75,20 @@ export class StorageManager {
           }
         }
       }
-      return StorageManager.parseConversations(jsonStr);
+      let convs: Conversation[] = StorageManager.parseConversations(jsonStr);
+      // 空串 = 没有存档(全新安装), 不算"读成功"; 有内容且解析没抛 = 可信
+      StorageManager.loadOk = jsonStr !== '';
+      return convs;
     } catch (error) {
       // 读取失败(如文件损坏)不阻塞启动, 按无历史处理
       console.error('loadConversations failed: ' + JSON.stringify(error));
       return [];
     }
+  }
+
+  // 上一次 loadConversations 是否真的读到了存档(供启动清扫判断能不能按列表删孤儿)
+  static conversationsLoadOk(): boolean {
+    return StorageManager.loadOk;
   }
 
   private static parseConversations(jsonStr: string): Conversation[] {

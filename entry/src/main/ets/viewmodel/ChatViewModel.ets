@@ -343,6 +343,8 @@ export class ChatViewModel {
         this.conversations[i].agentId = Constants.INTERACTIVE_AGENT_ID;
       }
     }
+    // 启动清扫: 清掉没有对应会话的工作区目录与会话事件日志(旧版本残留/删除过程中崩溃/运行中被删后又被写回)。
+    this.sweepOrphanData();
 
     // 启动落点: 固定进入交互模式(Intelligent UI), 不再恢复"上次使用的智能体"。
     // 打开应用的第一屏就是"能操作的界面"; 想用工作模式或某个聊天智能体, 走空态大标题处的
@@ -522,22 +524,74 @@ export class ChatViewModel {
       let emptyConv: Conversation = conv;
       this.conversations = this.conversations.filter((c: Conversation): boolean => c.id !== emptyConv.id);
       this.currentConversationId = '';
+      // 空对话通常连目录都没有(工作区目录是第一次写文件/取快照时才建的), deleteWorkspace 对不存在
+      // 的目录是空操作; 这里照样调一次, 是为了兜住"上传了文件又删掉、目录只剩空壳"的情形。
+      this.deleteConversationData(emptyConv.id);
       this.persistConversations();
+    }
+  }
+
+  // 删除会话在磁盘上的全部痕迹: 工作区目录 + 会话事件日志。
+  // 不区分会话模式: 聊天模式通常没有工作区(空操作), 而"模式"一旦被改过, 按模式判断就会漏删。
+  private deleteConversationData(convId: string): void {
+    if (this.context === null || convId === '') {
+      return;
+    }
+    WorkFileService.deleteWorkspace(this.context, convId);
+    SessionLogService.close(this.context, convId, true);
+  }
+
+  // 任务收尾时再确认一次: 运行期间会话被删了(用户点了垃圾桶), 循环随后可能又写入过工作区,
+  // 把刚删掉的目录重新建出来 —— 这里补删一次, 保证"会话没了, 目录也不会残留"。
+  private reapDeletedConversation(convId: string): void {
+    if (convId === '') {
+      return;
+    }
+    for (let i: number = 0; i < this.conversations.length; i++) {
+      if (this.conversations[i].id === convId) {
+        return;
+      }
+    }
+    this.deleteConversationData(convId);
+  }
+
+  // 启动清扫: 清掉没有对应会话的工作区目录与会话事件日志。
+  // **只在会话存档确实读出来时执行** —— 读失败时列表为空, 拿空列表去扫等于删光用户的工作区。
+  private sweepOrphanData(): void {
+    if (this.context === null) {
+      return;
+    }
+    if (!StorageManager.conversationsLoadOk()) {
+      return;
+    }
+    let live: string[] = [];
+    for (let i: number = 0; i < this.conversations.length; i++) {
+      live.push(this.conversations[i].id);
+    }
+    let ws: number = WorkFileService.gcOrphanWorkspaces(this.context, live);
+    let logs: number = SessionLogService.gcOrphans(this.context, live);
+    if (ws > 0 || logs > 0) {
+      console.info('orphan sweep: workspaces=' + ws.toString() + ', sessions=' + logs.toString());
     }
   }
 
   // 删除对话
   async deleteConversation(convId: string): Promise<void> {
-    // Agent Loop 会话(工作/交互模式)删除时同步清理沙箱工作区与会话事件日志, 避免孤儿数据堆积
-    for (let i: number = 0; i < this.conversations.length; i++) {
-      if (this.conversations[i].id === convId &&
-        (this.conversations[i].mode === Constants.MODE_WORK ||
-          this.conversations[i].mode === Constants.MODE_INTERACTIVE) && this.context !== null) {
-        WorkFileService.deleteWorkspace(this.context, convId);
-        SessionLogService.close(this.context, convId, true);
-        break;
+    // 正在跑的就是这个会话: 先停。否则删完目录, 循环还会把工具结果写回去,
+    // 工作区被"复活"成一个界面上再也看不到的孤儿目录。
+    if (this.isStreaming && this.runningConvId === convId) {
+      this.stopStreaming();
+    }
+    // 工作区里还有文件时问一句: 会话记录和工作区文件是一起删的, 而工作区里往往是用户要的交付物。
+    // 空工作区(聊天模式/刚建的空会话)不问, 保持"点一下就删干净"的轻快。
+    let fileCount: number = this.workspaceEntryCount(convId);
+    if (fileCount > 0 && this.context !== null) {
+      let confirmed: boolean = await this.confirmDeleteWithWorkspace(fileCount);
+      if (!confirmed) {
+        return;
       }
     }
+    this.deleteConversationData(convId);
     this.conversations = this.conversations.filter((c: Conversation): boolean => c.id !== convId);
     if (this.currentConversationId === convId) {
       this.currentConversationId = '';
@@ -879,6 +933,33 @@ export class ChatViewModel {
       return false;
     }
     return WorkFileService.listWorkspace(this.context, conv.id).length > 0;
+  }
+
+  // 工作区里的条目数(文件 + 目录), 删除会话时用来判断"要不要先问一句"
+  private workspaceEntryCount(convId: string): number {
+    if (this.context === null || convId === '') {
+      return 0;
+    }
+    return WorkFileService.listWorkspace(this.context, convId).length;
+  }
+
+  // 删除会话且工作区非空时的人工确认: 说清"会话记录与工作区文件一起删、不可恢复"。
+  // 弹窗不可用/用户取消一律按"不删"处理(fail-closed)。
+  private async confirmDeleteWithWorkspace(count: number): Promise<boolean> {
+    try {
+      let res: promptAction.ShowDialogSuccessResponse = await promptAction.showDialog({
+        title: '删除会话',
+        message: '该会话的工作区里还有 ' + count.toString() +
+          ' 个文件/目录。删除会话会一并删除这些文件，且不可恢复。确定继续吗？',
+        buttons: [
+          { text: '取消', color: '#6B7280' },
+          { text: '删除', color: '#E05252' }
+        ]
+      });
+      return res.index === 1;
+    } catch (e) {
+      return false;
+    }
   }
 
   // 文件名是否图片(工作区里新到的图片要在消息里点一句"用 view_image 看", 否则模型只看文件树容易忽略)
@@ -2548,6 +2629,8 @@ export class ChatViewModel {
       }
       this.persistConversations();
       this.notifyUIChange();
+      // 运行期间会话被删掉的话, 上面这些写盘动作可能已经把工作区目录重新建出来了 —— 补删一次
+      this.reapDeletedConversation(conv.id);
     }
   }
 
@@ -2794,6 +2877,8 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
       }
       this.persistConversations();
       this.notifyUIChange();
+      // 同旧路径: 收尾后再确认一次会话是否已被删除, 有就补删工作区/日志
+      this.reapDeletedConversation(conv.id);
     }
   }
 
