@@ -6,6 +6,7 @@ import { fileIo, picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { image } from '@kit.ImageKit';
 import { ZipWriter, ZipEntry } from '../export/ZipWriterTs';
 import { PickedFile } from './FileService';
 import { DiffUtil, FileDiff } from '../common/DiffUtil';
@@ -16,6 +17,7 @@ import { HarnessTools } from './HarnessTools';
 import { arrayBufferToBase64 } from '../common/Utils';
 import { ToolRegistry } from '../common/ToolRegistry';
 import { Constants } from '../common/Constants';
+import { FileObservation } from '../common/FileObservation';
 import { LocalWebSearch, LocalSearchOutcome, LOCAL_SEARCH_TOOL_DESC_WORK, LOCAL_SEARCH_TOOL_DESC_WORK_FALLBACK,
   LOCAL_SEARCH_QUERY_PROP_DESC, LOCAL_SEARCH_TOOL_NAME, LOCAL_SEARCH_LEGACY_TOOL_NAME,
   isLocalSearchToolName } from './LocalWebSearch';
@@ -76,6 +78,11 @@ export class WorkFileService {
     // 原生 Python 同理: 解释器默认 30s 上限, 护栏要留出结果整理余量; 不自动重试(脚本可能有副作用)
     ToolRegistry.setRuntimeConfig(Constants.WORK_PY_TOOL_NAME,
       Constants.WORK_PY_TOOL_TIMEOUT_MS, 0);
+    // 人工等待类工具: 护栏必须盖满「卡片等待 + 余量」。
+    // 全局默认 180s 比卡片的 300s 等待短 —— 第 3 分钟之后作答, 答案会落进一次已经结束的调用,
+    // 卡片还挂在界面上却没人接。见 Constants.WORK_ASK_* 的说明。
+    ToolRegistry.setRuntimeConfig('ask_user_question',
+      Constants.WORK_ASK_TOOL_GUARD_TIMEOUT_MS, 0);
     // 并行安全标注(核心工具, 独立于只读/变更分类): subagent 是独立上下文/独立 LLM 循环的
     // 嵌套代理, 可与其他 subagent 并发派发; 由 ToolScheduler 归入并行组。
     let parallelSafe: string[] = WorkFileService.workParallelSafeNames();
@@ -408,6 +415,8 @@ export class WorkFileService {
       if (fileIo.accessSync(root)) {
         WorkFileService.deleteRecursive(root);
       }
+      // 目录没了，登记也就没意义（同名文件重建后必须重新读过才能编辑）
+      FileObservation.forgetRoot(root);
     } catch (e) {
       hilog.error(DOMAIN, TAG, 'deleteWorkspace failed: %{public}s', JSON.stringify(e));
     }
@@ -422,6 +431,8 @@ export class WorkFileService {
         return false;
       }
       WorkFileService.deleteRecursive(abs);
+      FileObservation.forget(abs);
+      FileObservation.forgetRoot(abs);
       return true;
     } catch (e) {
       hilog.error(DOMAIN, TAG, 'removePath failed: %{public}s', JSON.stringify(e));
@@ -532,8 +543,20 @@ export class WorkFileService {
     if (args === null) {
       return WorkFileService.fail('参数不是合法的 JSON 对象: ' + WorkFileService.capChars(trimmed, 200));
     }
+    // 编辑前读取守卫: 只挂在工具分发这一个咽喉点上 —— 读/写成功后登记版本, edit 类动手前比对。
+    // 不放进各工具内部, 是为了让「绕过登记的外部改动」(shell/run_python/用户自己编辑)也能被发现。
+    let root: string = WorkFileService.workspaceRoot(context, convId);
+    let blocked: ToolExecResult | null = WorkFileService.guardBeforeTool(name, args, root);
+    if (blocked !== null) {
+      return blocked;
+    }
     try {
-      return await WorkFileService.dispatchTool(context, convId, name, args, argsJson, abortSignal);
+      let result: ToolExecResult = await WorkFileService.dispatchTool(
+        context, convId, name, args, argsJson, abortSignal);
+      if (result.ok) {
+        WorkFileService.recordAfterTool(name, args, root);
+      }
+      return result;
     } catch (e) {
       let msg: string = '';
       if (e instanceof Error) {
@@ -589,7 +612,7 @@ export class WorkFileService {
     }
     if (name === 'view_image') {
       let rel: string = WorkFileService.strArg(args, 'path', '');
-      return WorkFileService.toolViewImage(context, convId, rel);
+      return await WorkFileService.toolViewImage(context, convId, rel);
     }
     if (name === 'todo_write') {
       // 直接传原始参数 JSON: todos 可能是数组或内嵌 JSON 字符串, strArg 无法取数组
@@ -694,8 +717,8 @@ export class WorkFileService {
   }
 
   // view_image: 读取工作区图片并编码为 dataUrl(由循环注入下一条多模态消息)
-  private static toolViewImage(context: common.UIAbilityContext, convId: string,
-    rel: string): ToolExecResult {
+  private static async toolViewImage(context: common.UIAbilityContext, convId: string,
+    rel: string): Promise<ToolExecResult> {
     if (rel === '') {
       return WorkFileService.fail('缺少参数 path');
     }
@@ -726,16 +749,83 @@ export class WorkFileService {
       return WorkFileService.fail('view_image 仅支持图片文件(png/jpg/jpeg/webp/gif/bmp): ' + rel);
     }
     let stat: fileIo.Stat = fileIo.statSync(abs);
+    let buffer: ArrayBuffer;
+    let fallbackNote: string = '';
     if (stat.size > Constants.WORK_VIEW_IMAGE_MAX_BYTES) {
-      return WorkFileService.fail('图片超过 ' +
-        WorkFileService.formatSize(Constants.WORK_VIEW_IMAGE_MAX_BYTES) + ' 上限, 请先压缩');
+      // 兜底压缩: 平时一律原样送原图(压过的图小字会糊), 只有超过上限、不压就看不见时才压。
+      // 逐级降档, 三档都压不进上限就如实报错, 不做"压了也看不见"的假成功。
+      let original: ArrayBuffer = WorkFileService.readBytesPublic(abs, stat.size);
+      let packed: ArrayBuffer | null = await WorkFileService.compressForView(original);
+      if (packed === null) {
+        return WorkFileService.fail('图片 ' + WorkFileService.formatSize(stat.size) + ' 超过 ' +
+          WorkFileService.formatSize(Constants.WORK_VIEW_IMAGE_MAX_BYTES) +
+          ' 上限, 自动压缩也没能压到上限内。请先把它转成较小的图片(如 1600px 内的 JPEG)再读取, ' +
+          '或直接用 run_python/shell 生成缩略图后再 view_image。');
+      }
+      buffer = packed;
+      mime = 'image/jpeg';
+      fallbackNote = '（原图 ' + WorkFileService.formatSize(stat.size) + '，已自动压缩为 JPEG ' +
+        WorkFileService.formatSize(packed.byteLength) + ' 后送入视觉；工作区原图未改动）';
+    } else {
+      buffer = WorkFileService.readBytesPublic(abs, Constants.WORK_VIEW_IMAGE_MAX_BYTES);
     }
-    let buffer: ArrayBuffer = WorkFileService.readBytesPublic(abs, Constants.WORK_VIEW_IMAGE_MAX_BYTES);
     let r: ToolExecResult = new ToolExecResult();
     r.ok = true;
-    r.output = '图片已加载并作为下一条消息发送给你, 请结合当前任务分析图中内容。';
+    r.output = '图片已加载并作为下一条消息发送给你, 请结合当前任务分析图中内容。' + fallbackNote;
     r.imageDataUrl = 'data:' + mime + ';base64,' + arrayBufferToBase64(buffer);
     return r;
+  }
+
+  // view_image 的兜底压缩: 按 [边长, 质量] 逐级降档, 任一步落到上限内就返回;
+  // 平台解码/编码失败一律返回 null(调用方按原错误如实上报, 不静默成功)。
+  private static async compressForView(source: ArrayBuffer): Promise<ArrayBuffer | null> {
+    let src: image.ImageSource | null = null;
+    try {
+      src = image.createImageSource(source);
+      let info: image.ImageInfo = await src.getImageInfo();
+      let w0: number = info.size.width;
+      let h0: number = info.size.height;
+      if (w0 <= 0 || h0 <= 0) {
+        return null;
+      }
+      let edges: number[] = Constants.WORK_VIEW_IMAGE_FALLBACK_EDGES;
+      let qualities: number[] = Constants.WORK_VIEW_IMAGE_FALLBACK_QUALITIES;
+      for (let i: number = 0; i < edges.length; i++) {
+        let edge: number = edges[i];
+        let longest: number = w0 > h0 ? w0 : h0;
+        let scale: number = longest > edge ? edge / longest : 1;
+        let w: number = Math.max(1, Math.round(w0 * scale));
+        let h: number = Math.max(1, Math.round(h0 * scale));
+        let opts: image.DecodingOptions = { desiredSize: { width: w, height: h } };
+        let pm: image.PixelMap = await src.createPixelMap(opts);
+        let packer: image.ImagePacker = image.createImagePacker();
+        try {
+          let packOpts: image.PackingOption = {
+            format: 'image/jpeg',
+            quality: qualities[i]
+          };
+          let out: ArrayBuffer = await packer.packing(pm, packOpts);
+          if (out.byteLength <= Constants.WORK_VIEW_IMAGE_MAX_BYTES) {
+            return out;
+          }
+        } finally {
+          pm.release();
+          packer.release();
+        }
+      }
+      return null;
+    } catch (e) {
+      hilog.error(DOMAIN, TAG, 'compressForView failed: %{public}s', JSON.stringify(e));
+      return null;
+    } finally {
+      if (src !== null) {
+        try {
+          src.release();
+        } catch (e) {
+          // 释放失败不影响已产出的压缩结果
+        }
+      }
+    }
   }
 
   // todo_write: 校验并保存任务清单到工作区 .todo.json, 返回渲染后的清单文本
@@ -1499,7 +1589,9 @@ export class WorkFileService {
         'page_count', WorkFileService.strProp('本次渲染页数, 默认 10, 最大 50')),
       ['path']));
     defs.push(WorkFileService.makeTool('view_image',
-      '查看工作区中的图片, 图片会作为多模态消息发送给你的视觉能力。调用前明确你要从图中提取什么(全部文字/表格数据/布局/图表含义), 并说明输出格式。',
+      '查看工作区中的图片, 图片会作为多模态消息发送给你的视觉能力。调用前明确你要从图中提取什么(全部文字/表格数据/布局/图表含义), 并说明输出格式。' +
+      '一次调用只给一张图; 需要看多张就把多个 view_image 分别调用(不要指望一次看齐), 每张图的说明写清你要看什么。' +
+      '超过 8MB 的图片会被自动压缩(仅兜底, 平时原图送视觉), 压缩后的结果会在返回文本里注明。',
       WorkFileService.props1('path', WorkFileService.strProp('图片文件相对路径(png/jpg/jpeg/webp/gif/bmp)')),
       ['path']));
     defs.push(WorkFileService.makeTool('todo_write',
@@ -1658,6 +1750,103 @@ export class WorkFileService {
       fileIo.closeSync(file.fd);
     }
     return buffer;
+  }
+
+  // ===== 编辑前读取守卫（登记与比对见 common/FileObservation） =====
+  //
+  // 版本指纹 = 大小 : 修改秒数 : 开头若干字节的 FNV-1a。
+  // 只看 mtime+size 不够：同一秒内被改掉、而字节数恰好没变的编辑（用户在编辑器里改一个词、
+  // shell 原地重写）会完全看不出来，而那正是最需要拦的情形。
+  private static fsVersionOf(abs: string): string {
+    try {
+      let stat: fileIo.Stat = fileIo.statSync(abs);
+      if (stat.isDirectory()) {
+        return '';
+      }
+      let cap: number = Constants.WORK_FS_VERSION_HASH_BYTES;
+      let readLen: number = stat.size < cap ? stat.size : cap;
+      let digest: string = WorkFileService.fnv1a(WorkFileService.readBytes(abs, readLen))
+        .toString(16);
+      return stat.size.toString() + ':' + stat.mtime.toString() + ':' + digest;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  // 公共包装(@文件引用把整份正文交给模型之后, 也要按同一口径登记「已见过」)
+  static fsVersionOfPublic(abs: string): string {
+    return WorkFileService.fsVersionOf(abs);
+  }
+
+  // FNV-1a(32 位): 廉价指纹，只回答「这段字节变过没有」，不是完整性校验（那需要 sha + 全文件）。
+  // 乘质数改用移位相加(等价于 h * 0x01000193 的 32 位截断), 避免依赖 Math.imul。
+  private static fnv1a(bytes: Uint8Array): number {
+    let h: number = 0x811c9dc5;
+    for (let i: number = 0; i < bytes.length; i++) {
+      h = h ^ bytes[i];
+      h = (h + (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24)) >>> 0;
+    }
+    return h >>> 0;
+  }
+
+  // 返回 null 表示放行；否则是直接送回模型的拒绝结果（含「先 read_file」的下一步指令）
+  private static guardBeforeTool(name: string, args: Record<string, Object>,
+    root: string): ToolExecResult | null {
+    if (FileObservation.roleOf(name, WorkFileService.strArg(args, 'command', '')) !== 'edit') {
+      return null;
+    }
+    let rel: string = WorkFileService.strArg(args, 'path', '');
+    if (rel === '') {
+      return null;
+    }
+    let abs: string | null = WorkFileService.resolveSafe(root, rel);
+    if (abs === null) {
+      return null;  // 非法路径交给工具自己报「非法路径」，这里不抢更准的错误
+    }
+    let version: string = WorkFileService.fsVersionOf(abs);
+    if (version === '') {
+      return null;  // 文件不存在或是目录：由工具给出「文件不存在」这类更贴切的说明
+    }
+    let message: string = FileObservation.check(abs, rel, version);
+    return message === '' ? null : WorkFileService.fail(message);
+  }
+
+  // 调用成功后登记：read/write/edit 都记当前版本，delete/move 清登记
+  private static recordAfterTool(name: string, args: Record<string, Object>, root: string): void {
+    let role: string = FileObservation.roleOf(name, WorkFileService.strArg(args, 'command', ''));
+    if (role === '') {
+      return;
+    }
+    if (role === 'forget') {
+      let fromRel: string = name === 'move_file' ? WorkFileService.strArg(args, 'from', '') :
+        WorkFileService.strArg(args, 'path', '');
+      let fromAbs: string | null = fromRel === '' ? null : WorkFileService.resolveSafe(root, fromRel);
+      if (fromAbs !== null) {
+        // 条目可能是文件也可能是目录：forget 与 forgetRoot 各自只命中一种，两次都调用不必先判断类型
+        FileObservation.forget(fromAbs);
+        FileObservation.forgetRoot(fromAbs);
+      }
+      // 移动后的新路径要重新读过才能编辑：内容虽然没变，但模型看到的还是旧坐标
+      let toAbs: string | null = name === 'move_file' ?
+        WorkFileService.resolveSafe(root, WorkFileService.strArg(args, 'to', '')) : null;
+      if (toAbs !== null) {
+        FileObservation.forget(toAbs);
+      }
+      return;
+    }
+    let rel: string = WorkFileService.strArg(args, 'path', '');
+    if (rel === '') {
+      return;
+    }
+    let abs: string | null = WorkFileService.resolveSafe(root, rel);
+    if (abs !== null) {
+      FileObservation.observe(abs, WorkFileService.fsVersionOf(abs));
+    }
+  }
+
+  // 二进制判定(公开给 @文件引用: 二进制文件不附正文)
+  static looksBinaryPublic(bytes: Uint8Array): boolean {
+    return WorkFileService.looksBinary(bytes);
   }
 
   // 复制文件(edit_ppt 备份外来 pptx 用); 目标存在则覆盖

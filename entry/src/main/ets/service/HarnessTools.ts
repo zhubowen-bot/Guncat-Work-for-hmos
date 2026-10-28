@@ -484,8 +484,11 @@ export class HarnessTools {
     let options: string[] = HarnessTools.strListArg(args, 'options');
     let multiSelect: boolean = HarnessTools.boolArg(args, 'multi_select', false);
     let noteAllowed: boolean = HarnessTools.boolArg(args, 'allow_note', true);
-    // 5 分钟未回答按取消处理, 避免工具永久挂起
-    let answer: AskAnswer | null = await AskUserBridge.ask(question, options, multiSelect, 300000);
+    // 5 分钟未回答按取消处理, 避免工具永久挂起。
+    // 这个等待上限与外层护栏(WORK_ASK_TOOL_GUARD_TIMEOUT_MS)必须成对: 护栏比它短时,
+    // 用户在第 3~5 分钟作答会落进一次已经结束的调用 —— 卡片还在, 答案却被丢掉。
+    let answer: AskAnswer | null = await AskUserBridge.ask(question, options, multiSelect,
+      Constants.WORK_ASK_WAIT_TIMEOUT_MS);
     if (answer === null) {
       return HarnessTools.fail('用户未回答(已取消), 请基于合理假设继续, 并在总结中标注该假设');
     }

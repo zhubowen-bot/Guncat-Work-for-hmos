@@ -122,8 +122,21 @@ export class SearchEngineSettings {
     let cfg: SearchEngineSettings = new SearchEngineSettings();
     cfg.engine = (json['engine'] as string) ?? SEARCH_ENGINE_BING;
     let max: Object = json['maxResults'];
-    if (typeof max === 'number') {
-      cfg.maxResults = max as number;
+    if (typeof max === 'number' && !isNaN(max as number)) {
+      // 夹到 1~20: 0 条等于白搜一场, 200 条会把上下文一次性灌满 —— 历史配置里的脏值在这里收口
+      let n: number = Math.floor(max as number);
+      if (n < 1) {
+        n = 1;
+      }
+      if (n > 20) {
+        n = 20;
+      }
+      cfg.maxResults = n;
+    } else if (typeof max === 'string') {
+      let n: number = parseInt(max as string, 10);
+      if (!isNaN(n)) {
+        cfg.maxResults = n < 1 ? 1 : (n > 20 ? 20 : n);
+      }
     }
     cfg.braveApiKey = (json['braveApiKey'] as string) ?? '';
     cfg.tavilyApiKey = (json['tavilyApiKey'] as string) ?? '';

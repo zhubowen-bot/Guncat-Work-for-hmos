@@ -1,7 +1,7 @@
 export class Constants {
   // App info
   static readonly APP_NAME: string = 'Guncat Work';
-  static readonly APP_VERSION: string = '6.3.0';
+  static readonly APP_VERSION: string = '6.4.0';
 
   // LocalStorage keys (统一存放在 Preferences 中, key 名字符串)
   static readonly LS_KEY_CONVERSATIONS: string = 'guncat_conversations';
@@ -78,6 +78,11 @@ export class Constants {
   static readonly WORK_TODO_FILE: string = '.todo.json';
   // view_image 工具可读取的图片字节上限
   static readonly WORK_VIEW_IMAGE_MAX_BYTES: number = 8 * 1024 * 1024;
+  // view_image 的**兜底压缩**参数: 只在原图超过上面那个上限(否则根本没救了)时才启动,
+  // 平时一律原样送原图 —— 固定压缩会把小字/表格压糊, 用户明确要求不要那么干。
+  // 逐级降档: 先按 [边长, 质量] 试第一档, 仍超上限就继续降, 三档都不行才如实报错。
+  static readonly WORK_VIEW_IMAGE_FALLBACK_EDGES: number[] = [2048, 1600, 1280];
+  static readonly WORK_VIEW_IMAGE_FALLBACK_QUALITIES: number[] = [90, 82, 72];
   // 单次任务最多工具调用轮数(防失控保险: 防止工具调用死循环持续消耗, 正常长任务触不到)
   static readonly WORK_MAX_STEPS: number = 200;
   // read_file 单次读取上限(字节), 超出截断并提示
@@ -212,6 +217,25 @@ export class Constants {
   static readonly WORK_GLOB_MAX_FILES: number = 500;
   // edit 工具 diff 卡片上下文行数
   static readonly WORK_EDIT_CONTEXT_LINES: number = 3;
+  // ===== 编辑前读取守卫(见 common/FileObservation) =====
+  // 登记表容量上限(条数): 超出按最旧登记淘汰。被淘汰的代价只是那次编辑被拒后重新读一遍,
+  // 不会改坏文件, 所以宁可粗保护也不做复杂 LRU。
+  static readonly WORK_FS_OBSERVATION_MAX_ENTRIES: number = 2048;
+  // 版本指纹里参与哈希的字节数(只取开头这么多)。指纹只回答「这段字节变过没有」,
+  // 不承担完整性校验, 因此不必覆盖全文。
+  static readonly WORK_FS_VERSION_HASH_BYTES: number = 8192;
+  // ===== 用户消息里的 @文件引用(见 service/WorkspaceMentionService) =====
+  // 单轮最多附上几份文件: @ 十份大文件等于一次性把整个工作区塞进上下文,
+  // 超出预算的引用会在正文里写明「未附上」, 而不是静默少给。
+  static readonly WORK_MENTION_MAX_FILES: number = 8;
+  // 单个被引用文件的正文上限(字符)
+  static readonly WORK_MENTION_MAX_FILE_CHARS: number = 24000;
+  // 本轮所有引用正文的合计上限(字符)
+  static readonly WORK_MENTION_TOTAL_MAX_CHARS: number = 60000;
+  // ===== 工作区项目指令文件(AGENTS.md 一类) =====
+  // 这些文件不会被系统自动注入(手机端内存与上下文都紧), 而是在提示词里明确要求模型
+  // 开工前自己 read_file 读一遍; 用户说「以后都按这个来」时也写进第一项。
+  static readonly WORK_INSTRUCTION_FILES: string[] = ['AGENTS.md', 'CLAUDE.md', 'GUNCAT.md'];
   // web_fetch: 下载字节上限 / 送回模型字符上限
   static readonly WORK_WEBFETCH_MAX_BYTES: number = 2 * 1024 * 1024;
   static readonly WORK_WEBFETCH_MAX_CHARS: number = 24000;
@@ -291,6 +315,12 @@ export class Constants {
   // 单次工具调用的兜底超时(ms): 兜住个别工具自身无超时控制的同步重活(如大 Office/PDF 处理),
   // 超时后返回 ERROR 结果并继续循环, 不无限期占住 Agent Loop。网络类工具自身超时更短。
   static readonly WORK_TOOL_TIMEOUT_MS: number = 180000;
+  // 人工等待类工具(ask_user_question)的超时口径: **等的是人, 不是机器**。
+  // 卡片在界面上的等待上限是 5 分钟; 外层护栏(上面那个 180s 默认值)比它短的话,
+  // 第 3 分钟之后作答会落进一次已经结束的调用里 —— 卡片还挂着, 答案却被静默丢弃。
+  // 所以护栏必须盖满「等待上限 + 余量」, 见 WorkFileService.ensureToolRegistry 的 setRuntimeConfig。
+  static readonly WORK_ASK_WAIT_TIMEOUT_MS: number = 300000;
+  static readonly WORK_ASK_TOOL_GUARD_TIMEOUT_MS: number = 360000;  // 300000 等待 + 60000 余量
   // System Prompt 工具目录模式(Prompt A/B): 'static_plus_dynamic'=静态手写目录+动态补充(默认);
   // 'dynamic_only'=完全用 ToolRegistry 自动生成的目录(供 A/B 对比)
   static readonly WORK_PROMPT_TOOL_DIRECTORY_MODE: string = 'static_plus_dynamic';

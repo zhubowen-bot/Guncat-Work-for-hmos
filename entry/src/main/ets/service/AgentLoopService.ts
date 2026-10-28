@@ -128,8 +128,75 @@ export class LoopTurnCallbacks {
     (_attempt: number, _reason: string): void => {};
 }
 
+// 工具产出的图片附件(当前只有 view_image 会设置 imageDataUrl)。
+// 图片不能塞进 tool/function_call_output/tool_result: 那三种协议的工具结果都是纯文本,
+// 所以必须作为紧随其后的**独立 user 多模态消息**追加到历史里(见 appendToolImageMessages)。
+export class ToolImageAttachment {
+  toolName: string = '';
+  argsJson: string = '';
+  imageDataUrl: string = '';
+  // 工具输出的摘要(通常已含路径与尺寸), 拼进图片消息的说明文字
+  note: string = '';
+}
+
+// 从工具参数里取 path(只用于图片说明文字; 解析失败不影响图片送达)
+function parseToolArgPathStatic(argsJson: string): string {
+  if (argsJson === '') {
+    return '';
+  }
+  try {
+    let parsed: Object = JSON.parse(argsJson);
+    if (typeof parsed === 'object' && parsed !== null && !(parsed instanceof Array)) {
+      let rec: Record<string, Object> = parsed as Record<string, Object>;
+      let v: Object = rec['path'];
+      if (typeof v === 'string') {
+        return v as string;
+      }
+    }
+  } catch (e) {
+    // 参数解析失败不影响图片送达, 只是说明文字里少一个路径
+  }
+  return '';
+}
+
 // 流式工具调用累积器: 三种协议统一汇入(共享实现见 ToolCallStream.ts)
 export class AgentLoopService {
+  /**
+   * 把工具产出的图片接在工具结果之后, 作为 user 多模态消息追加进循环历史。
+   *
+   * 为什么必须逐张追加、而不是"记下最后一张": 一轮里模型可能并行/串行调用多次
+   * view_image(多张图一起看是常见诉求), 早先这里只有一个 `imageDataUrl` 变量,
+   * 后一次调用直接把前一次覆盖掉 —— 模型明明调了 3 次, 视觉通道只收到 1 张,
+   * 于是"看漏图"成了必然而不是偶发。
+   *
+   * 返回实际追加的消息数; 没有图片时不动历史(避免破坏前缀缓存)。
+   * toolName/argsJson 用于生成"这张图是从哪个文件读的"的说明, 让模型能对上号。
+   */
+  static appendToolImageMessages(messages: LoopMessage[],
+    attachments: ToolImageAttachment[]): number {
+    let count: number = 0;
+    for (let i: number = 0; i < attachments.length; i++) {
+      let a: ToolImageAttachment = attachments[i];
+      if (a.imageDataUrl === '' || a.imageDataUrl.indexOf(';base64,') < 0) {
+        continue;
+      }
+      let path: string = parseToolArgPathStatic(a.argsJson);
+      let caption: string = '【视觉输入】工具 ' + a.toolName +
+        (path !== '' ? ' 读取了工作区图片: ' + path : ' 返回了一张图片');
+      if (attachments.length > 1) {
+        caption += '(本轮第 ' + (count + 1).toString() + '/' + attachments.length.toString() + ' 张)';
+      }
+      caption += '。';
+      if (a.note !== '') {
+        caption += '\n' + a.note;
+      }
+      caption += '\n这是图片的真实像素内容(不是文字描述)。请直接分析图中元素、文字、布局与数据。';
+      messages.push(LoopMessage.userImage(caption, a.imageDataUrl));
+      count++;
+    }
+    return count;
+  }
+
   // 活跃请求注册表: 支持多实例并发请求(主循环 + 子代理/聊天模式可能同时存在),
   // abort() 统一中断所有活跃请求, 避免单一静态引用在并发时打错目标。
   private static activeRequests: http.HttpRequest[] = [];

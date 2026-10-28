@@ -59,6 +59,8 @@ export struct SettingsPanel {
   @State searchEngine: string = 'bing';
   @State searchApiKey: string = '';
   @State searchBaseUrl: string = '';
+  // 单次搜索返回条数(1~20): 条数越多上下文越挤, 手机上默认 8 条够用
+  @State searchMaxResults: string = '8';
   private searchDraft: SearchEngineSettings = new SearchEngineSettings();
   // 引擎固定顺序(与 Select 选项一致); struct 不支持 static, 用实例字段
   private searchEngineIds: string[] = [
@@ -114,6 +116,7 @@ export struct SettingsPanel {
     this.searchEngine = this.searchDraft.engine;
     this.searchApiKey = this.searchDraft.apiKeyForEngine(this.searchEngine);
     this.searchBaseUrl = SettingsPanel.draftBaseUrl(this.searchDraft, this.searchEngine);
+    this.searchMaxResults = this.searchDraft.maxResults.toString();
     this.mmBaseUrl = this.initMmBaseUrl;
     this.mmApiKey = this.initMmApiKey;
     this.mmModel = this.initMmModel;
@@ -753,6 +756,27 @@ export struct SettingsPanel {
             .width('100%')
             .lineHeight(18)
             .margin({ top: 4 })
+
+          this.buildSectionHeader('单次结果条数（1~20）')
+          TextInput({ placeholder: '8', text: this.searchMaxResults })
+            .type(InputType.Number)
+            .width('100%')
+            .height(44)
+            .borderRadius(16)
+            .backgroundColor($r('app.color.surface_secondary'))
+            .padding({ left: 12, right: 12 })
+            .fontSize(14)
+            .fontColor($r('app.color.text_primary'))
+            .placeholderColor($r('app.color.text_secondary'))
+            .onChange((v: string) => {
+              this.searchMaxResults = v;
+            })
+          Text('每次 local_web_search 取回几条结果。条数越多, 元素材越全, 但占用的上下文也越多; 手机上 5~8 条通常够用。')
+            .fontSize(11)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+            .lineHeight(18)
+            .margin({ top: 4 })
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
@@ -831,6 +855,18 @@ export struct SettingsPanel {
   private buildSearchConfig(): SearchEngineSettings {
     this.applySearchFieldsToDraft();
     this.searchDraft.engine = this.searchEngine;
+    // 条数是数字输入框: 空/非法/越界一律夹到 1~20, 不把 NaN 或 0 写进配置
+    let n: number = parseInt(this.searchMaxResults, 10);
+    if (isNaN(n)) {
+      n = 8;
+    }
+    if (n < 1) {
+      n = 1;
+    }
+    if (n > 20) {
+      n = 20;
+    }
+    this.searchDraft.maxResults = n;
     return this.searchDraft;
   }
 

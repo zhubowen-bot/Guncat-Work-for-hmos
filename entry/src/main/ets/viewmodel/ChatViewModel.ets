@@ -25,7 +25,8 @@ import { PluginHotLoader } from '../service/PluginHotLoader';
 import { ChatService, ChatStreamResult } from '../service/ChatService';
 import { LOCAL_SEARCH_TOOL_NAME, LOCAL_SEARCH_LEGACY_TOOL_NAME, isLocalSearchToolName, LocalWebSearch,
   SearchEngineSettings, LocalSearchOutcome } from '../service/LocalWebSearch';
-import { AgentLoopService, LoopError, LoopMessage, LoopTurnCallbacks, LoopTurnResult } from '../service/AgentLoopService';
+import { AgentLoopService, LoopError, LoopMessage, LoopTurnCallbacks, LoopTurnResult,
+  ToolImageAttachment } from '../service/AgentLoopService';
 import { WorkFileService, WorkspaceFileInfo, ToolExecResult } from '../service/WorkFileService';
 import { WorkToolRunner } from '../service/WorkToolRunner';
 import { WorkLoopDriverBridge } from '../service/WorkLoopDriverBridge';
@@ -36,6 +37,7 @@ import { ScheduleService } from '../service/ScheduleService';
 import { GoalService } from '../service/GoalService';
 import { SessionLogService } from '../service/SessionLogService';
 import { BackgroundTaskService } from '../service/BackgroundTaskService';
+import { WorkspaceMentionService, MentionRender } from '../service/WorkspaceMentionService';
 import { SubagentService } from '../service/SubagentService';
 import { ToolCallRecord } from '../model/ToolCallRecord';
 import { FileUploadService } from '../service/FileUploadService';
@@ -89,6 +91,9 @@ export class ChatViewModel {
   currentAgent: Agent | null = null;
   currentConversationId: string = '';
   isStreaming: boolean = false;
+  // 本次运行归属哪个会话。isStreaming 是全局的(同时只跑一个任务), 但"这个任务属于谁"必须记下来:
+  // 用户切到别的会话后, 那边既不能把消息当成插话塞进正在跑的任务(会串台), 也不该看到"插话/停止"按钮。
+  runningConvId: string = '';
   thinkingEnabled: boolean = false;
   // 工作模式的推理强度('max' / 'high' / 'low'), Agent Loop 每轮请求都带上。
   // 注意: 工作模式与交互模式都强制开启深度思考(工具行不显示开关), 档位在模型弹层里选。
@@ -1698,6 +1703,16 @@ export class ChatViewModel {
     }
   }
 
+  // 当前会话自己是否在跑任务(输入区据此决定"插话/停止"还是普通发送)。
+  // isStreaming 是全局的; 切到别的会话时这里返回 false —— 那边不该出现插话/停止按钮,
+  // 否则点了会作用到另一个会话的任务上。
+  get streamingHere(): boolean {
+    if (!this.isStreaming) {
+      return false;
+    }
+    return this.runningConvId === '' || this.runningConvId === this.currentConversationId;
+  }
+
   // 当前是否有可交互的界面(最后一条 assistant 消息含界面程序), 供 UI 判定置灰
   get pendingUiMessageId(): string {
     let conv: Conversation | null = this.currentConversation;
@@ -1715,6 +1730,20 @@ export class ChatViewModel {
 
   // ===== Guncat Work 6.1: steering / ask_user / schedule / title =====
 
+  // 用户消息里的 @文件引用: 把点名文件的正文附在本轮发送内容之后(界面与会话记录里仍是原话)。
+  // 解析、体积预算与越界拒绝都在 WorkspaceMentionService 内部收口; 这里只负责"有没有 @ 值不值得走一趟"。
+  private expandMentions(convId: string, text: string): string {
+    if (text.indexOf('@') < 0 || this.context === null) {
+      return text;
+    }
+    let root: string = WorkFileService.workspaceRoot(this.context, convId);
+    let render: MentionRender = WorkspaceMentionService.render(root, text);
+    if (render.section === '') {
+      return text;
+    }
+    return text + '\n\n' + render.section;
+  }
+
   // 任务执行中的用户插话(对齐 dsh 的 steer):
   //   - 立刻进会话历史(用户马上能看到自己说的话, 也保证切会话/重启后不丢);
   //   - 同时进插话队列, 等最近的**安全插话点**(本轮工具结果全部落地、本轮 assistant 收尾之后)
@@ -1725,11 +1754,18 @@ export class ChatViewModel {
       (conv.mode !== Constants.MODE_WORK && conv.mode !== Constants.MODE_INTERACTIVE)) {
       return;
     }
+    // 防御性二道闸: 插话队列是全局唯一的一份, 只有"正在跑的那个会话"才有资格往里写。
+    // (sendMessage 已经拦过一次, 这里再拦是为了让以后新增的调用点也绕不过去。)
+    if (this.runningConvId !== '' && this.runningConvId !== conv.id) {
+      return;
+    }
     let value: string = text.trim();
     if (value === '') {
       return;
     }
-    let accepted: boolean = this.workSteerQueue.push(value);
+    // @引用同样生效: 插话里点名 @a.md 就把正文带进这次注入(比如"按 @requirements.md 的口径重做")
+    let queued: string = this.expandMentions(conv.id, value);
+    let accepted: boolean = this.workSteerQueue.push(queued);
     if (!accepted) {
       return;
     }
@@ -1751,6 +1787,15 @@ export class ChatViewModel {
 
   // ChatPage 每秒同步一次待回答提问(工具挂起在等答案, 事件无法主动推送 UI)
   syncPendingAsk(): void {
+    // 提问卡只属于"正在跑的那个会话": 切到别的会话时不该看到它(看到了就会答给 A 的任务,
+    // 而 B 里那条回答没有任何去处)。切回去时下一拍会重新同步出来。
+    if (this.runningConvId !== '' && this.runningConvId !== this.currentConversationId) {
+      if (this.pendingAsk !== null) {
+        this.pendingAsk = null;
+        this.notifyUIChange();
+      }
+      return;
+    }
     let cur: PendingAsk | null = AskUserBridge.current();
     if (cur === null && this.pendingAsk === null) {
       return;
@@ -1796,7 +1841,11 @@ export class ChatViewModel {
       let userMsg: Message = Message.ofUser(generateMessageId(), text, text, []);
       curConv.messages.push(userMsg);
       if (this.isStreaming) {
-        this.workSteerQueue.push(text);
+        // 只有这个会话自己在跑时才走插话通道; 别的会话在跑时先留在历史里,
+        // 等用户下次在这个会话里发消息时一起带给模型(绝不能塞进另一个会话的任务)。
+        if (this.runningConvId === curConv.id) {
+          this.workSteerQueue.push(text);
+        }
       } else {
         this.executeWorkLoop(curConv);
       }
@@ -1831,6 +1880,13 @@ export class ChatViewModel {
       return;
     }
     if (this.isStreaming) {
+      // 正在跑的是**别的**会话: 这句话既不能当成插话塞进那个任务(它会写进 A 的历史,
+      // 而 B 里永远等不到回应), 也不能在这里直接开第二个循环(单实例循环 + 工作区绑定)。
+      // 诚实地告诉用户去等/去停, 而不是静默串台。
+      if (this.runningConvId !== '' && this.runningConvId !== this.currentConversationId) {
+        promptAction.showToast({ message: '另一个会话正在执行任务，请等它结束或先停止', duration: 2500 });
+        return;
+      }
       // 任务执行中: 工作/交互模式不打断, 转为插话(next-step steering);
       // 判定用 agentLoopMode 而不是 workMode —— 输入区的插话按钮对两种模式都开着,
       // 这里若只认工作模式, 交互模式点了发送就变成一句"请稍候"的空响应。
@@ -1909,6 +1965,8 @@ export class ChatViewModel {
         }
       }
       let workFullText: string = notes.length > 0 ? notes.join('\n\n') + '\n\n' + userText : userText;
+      // @文件引用: 只改写"发给模型的这一份", 会话记录与界面仍是用户原话
+      workFullText = this.expandMentions(conv.id, workFullText);
       // attachments 传空数组: 这两个模式的附件通道已关闭(见本分支开头的口径说明)
       let noAttachments: Attachment[] = [];
       let workUserMsg: Message = Message.ofUser(generateMessageId(), workFullText, userText, noAttachments);
@@ -1995,6 +2053,9 @@ export class ChatViewModel {
   }
 
   private async executeWorkLoop(conv: Conversation): Promise<void> {
+    // 先登记"这次运行属于哪个会话": 两套循环(驱动/旧路径)都从这里进,
+    // 插话与停止按钮据此判断归属, 避免 A 会话的任务吃掉 B 会话里发的消息。
+    this.runningConvId = conv.id;
     if (Constants.WORK_USE_DRIVER_LOOP) {
       await this.executeWorkLoopDriver(conv);
       return;
@@ -2230,8 +2291,7 @@ export class ChatViewModel {
         // subagent 为并行安全工具: 独立上下文/独立 LLM 循环, 多个子代理可并行派发。
         // fromTurn 携带思考文本与签名: Anthropic 思考模式下下一轮请求需回传 thinking 块
         let turnLoopMsg: LoopMessage = LoopMessage.fromTurn(turn);
-        let imageDataUrl: string = '';
-        let imagePath: string = '';
+        let imageAtts: ToolImageAttachment[] = [];
         let reminders: string[] = [];
         let parallelFlags: boolean[] = [];
         for (let f: number = 0; f < turn.toolCalls.length; f++) {
@@ -2279,8 +2339,12 @@ export class ChatViewModel {
                 }
                 traceSeq++;
                 if (exec.imageDataUrl !== '') {
-                  imageDataUrl = exec.imageDataUrl;
-                  imagePath = parseToolArgPath(cur.argsJson);
+                  let att: ToolImageAttachment = new ToolImageAttachment();
+                  att.toolName = cur.name;
+                  att.argsJson = cur.argsJson;
+                  att.imageDataUrl = exec.imageDataUrl;
+                  att.note = '';
+                  imageAtts.push(att);
                 }
                 if (ctx !== null) {
                   let toolEvent: Record<string, Object> = {
@@ -2369,8 +2433,12 @@ export class ChatViewModel {
             }
             traceSeq++;
             if (exec.imageDataUrl !== '') {
-              imageDataUrl = exec.imageDataUrl;
-              imagePath = parseToolArgPath(headCall.argsJson);
+              let att: ToolImageAttachment = new ToolImageAttachment();
+              att.toolName = headCall.name;
+              att.argsJson = headCall.argsJson;
+              att.imageDataUrl = exec.imageDataUrl;
+              att.note = '';
+              imageAtts.push(att);
             }
             if (WorkFileService.isMutatingTool(headCall.name) || headCall.name === 'subagent') {
               await this.refreshWorkspace();
@@ -2406,12 +2474,9 @@ export class ChatViewModel {
         this.finalizeWorkTurn(turnMsg, false, conv);
         // 本轮(assistant + 工具结果)进入下一轮请求历史
         messages.push(turnLoopMsg);
-        // view_image: 把图片作为下一条多模态用户消息注入, 供模型视觉分析
-        if (imageDataUrl !== '') {
-          messages.push(LoopMessage.userImage(
-            '【工作区图片】' + imagePath + '\n这是你刚才调用 view_image 读取的图片, 请结合当前任务分析图中内容。',
-            imageDataUrl));
-        }
+        // view_image: 每张图各作为一条多模态用户消息注入(逐张追加, 不覆盖),
+        // 图片不能塞进 tool_result —— 三种协议的工具结果通道都只能带文本。
+        AgentLoopService.appendToolImageMessages(messages, imageAtts);
         // 重复调用提醒在本轮结果之后追加, 时序上紧跟触发它的那轮工具调用
         for (let r: number = 0; r < reminders.length; r++) {
           messages.push(LoopMessage.user(reminders[r]));
@@ -2912,8 +2977,7 @@ if (this.abortSignal.aborted) {
         // subagent 为并行安全工具: 独立上下文/独立 LLM 循环, 多个子代理可并行派发。
         // fromTurn 携带思考文本与签名: Anthropic 思考模式下下一轮请求需回传 thinking 块
         let turnLoopMsg: LoopMessage = LoopMessage.fromTurn(turn);
-        let imageDataUrl: string = '';
-        let imagePath: string = '';
+        let imageAtts: ToolImageAttachment[] = [];
         let reminders: string[] = [];
         let parallelFlags: boolean[] = [];
         for (let f: number = 0; f < turn.toolCalls.length; f++) {
@@ -2961,8 +3025,12 @@ if (this.abortSignal.aborted) {
                 }
                 state.traceSeq++;
                 if (exec.imageDataUrl !== '') {
-                  imageDataUrl = exec.imageDataUrl;
-                  imagePath = parseToolArgPath(cur.argsJson);
+                  let att: ToolImageAttachment = new ToolImageAttachment();
+                  att.toolName = cur.name;
+                  att.argsJson = cur.argsJson;
+                  att.imageDataUrl = exec.imageDataUrl;
+                  att.note = '';
+                  imageAtts.push(att);
                 }
                 if (ctx !== null) {
                   let toolEvent: Record<string, Object> = {
@@ -3051,8 +3119,12 @@ if (this.abortSignal.aborted) {
             }
             state.traceSeq++;
             if (exec.imageDataUrl !== '') {
-              imageDataUrl = exec.imageDataUrl;
-              imagePath = parseToolArgPath(headCall.argsJson);
+              let att: ToolImageAttachment = new ToolImageAttachment();
+              att.toolName = headCall.name;
+              att.argsJson = headCall.argsJson;
+              att.imageDataUrl = exec.imageDataUrl;
+              att.note = '';
+              imageAtts.push(att);
             }
             if (WorkFileService.isMutatingTool(headCall.name) || headCall.name === 'subagent') {
               await this.refreshWorkspace();
@@ -3089,12 +3161,9 @@ if (this.abortSignal.aborted) {
         this.finalizeWorkTurn(turnMsg, false, conv);
         // 本轮(assistant + 工具结果)进入下一轮请求历史
         messages.push(turnLoopMsg);
-        // view_image: 把图片作为下一条多模态用户消息注入, 供模型视觉分析
-        if (imageDataUrl !== '') {
-          messages.push(LoopMessage.userImage(
-            '【工作区图片】' + imagePath + '\n这是你刚才调用 view_image 读取的图片, 请结合当前任务分析图中内容。',
-            imageDataUrl));
-        }
+        // view_image: 每张图各作为一条多模态用户消息注入(逐张追加, 不覆盖),
+        // 图片不能塞进 tool_result —— 三种协议的工具结果通道都只能带文本。
+        AgentLoopService.appendToolImageMessages(messages, imageAtts);
         // 重复调用提醒在本轮结果之后追加, 时序上紧跟触发它的那轮工具调用
         for (let r: number = 0; r < reminders.length; r++) {
           messages.push(LoopMessage.user(reminders[r]));
@@ -3378,6 +3447,8 @@ if (this.abortSignal.aborted) {
   // 不改写系统提示词与请求前缀(保护跨轮 KV 缓存)。
   private async runChatStream(conv: Conversation, assistantMsg: Message,
     history: Message[], userText: string): Promise<void> {
+    // 聊天流同样登记归属会话(与工作循环同一口径), 供"另一个会话在跑"的判定使用
+    this.runningConvId = conv.id;
     let round: number = 0;
     let currentUserText: string = userText;
     let currentHistory: Message[] = history;
@@ -3666,6 +3737,7 @@ if (this.abortSignal.aborted) {
   // 流式任务结束: 同步标记并释放后台保活(前台期间未申请时为空操作)
   private markStreamEnd(): void {
     this.isStreaming = false;
+    this.runningConvId = '';
     AppStorage.set<boolean>('chatStreamingActive', false);
     if (this.context !== null) {
       BackgroundTaskService.stop(this.context);
@@ -3880,23 +3952,6 @@ function stripMarkdown(md: string): string {
   text = text.replace(/\|/g, '');
   text = text.replace(/^-{3,}$/gm, '');
   return text.trim();
-}
-
-// 从工具参数 JSON 中提取 path 字段(view_image 图片注入用)
-function parseToolArgPath(argsJson: string): string {
-  try {
-    let parsed: Object = JSON.parse(argsJson);
-    if (typeof parsed === 'object' && parsed !== null && !(parsed instanceof Array)) {
-      let rec: Record<string, Object> = parsed as Record<string, Object>;
-      let v: Object = rec['path'];
-      if (typeof v === 'string') {
-        return v as string;
-      }
-    }
-  } catch (e) {
-    // ignore
-  }
-  return '';
 }
 
 // 整个循环历史消息数组的字符量(正文 + 工具参数与结果), 用于上下文预算

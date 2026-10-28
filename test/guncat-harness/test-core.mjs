@@ -38,6 +38,8 @@ import { LoopError } from './gen/LoopError.ts';
 import { ToolCallRecord } from './gen/ToolCallRecord.ts';
 import { AbortSignal } from './gen/Types.ts';
 import { SubagentIsolation } from './gen/SubagentIsolation.ts';
+import { FileObservation } from './gen/FileObservation.ts';
+import { MentionQueryParser } from './gen/MentionQuery.ts';
 import {
   GuncatUiLang,
   UiNode,
@@ -2304,6 +2306,107 @@ console.log('[组件库与提示词]');
   check('提示词对"未开启服务端搜索"也要给出正确口径',
     capabilityText.indexOf('本轮没有开启服务端联网搜索') > 0 &&
     toolDirText.indexOf('本轮没有开启服务端联网搜索') > 0);
+}
+
+// ===== 编辑前读取守卫（FileObservation）=====
+// 规则: read/write 登记版本, edit 先比对, delete/move 清登记; 没见过报 FS_NOT_OBSERVED,
+// 见过之后版本变了报 FS_STALE_VERSION —— 两种都必须拒绝落盘, 并给出可直接照抄的下一步。
+{
+  FileObservation.clear();
+  const abs = '/w/a.md';
+  check('守卫: read_file 的角色是 read', FileObservation.roleOf('read_file', '') === 'read');
+  check('守卫: write_file 的角色是 write', FileObservation.roleOf('write_file', '') === 'write');
+  check('守卫: edit 的角色是 edit', FileObservation.roleOf('edit', '') === 'edit');
+  check('守卫: delete_file 的角色是 forget', FileObservation.roleOf('delete_file', '') === 'forget');
+  check('守卫: move_file 的角色是 forget', FileObservation.roleOf('move_file', '') === 'forget');
+  check('守卫: str_replace_editor view 按 read 算',
+    FileObservation.roleOf('str_replace_editor', 'view') === 'read');
+  check('守卫: str_replace_editor create 按 write 算',
+    FileObservation.roleOf('str_replace_editor', 'create') === 'write');
+  check('守卫: str_replace_editor str_replace 按 edit 算',
+    FileObservation.roleOf('str_replace_editor', 'str_replace') === 'edit');
+  check('守卫: 其它工具不参与', FileObservation.roleOf('list_files', '') === '');
+
+  check('守卫: 没读过就编辑 → FS_NOT_OBSERVED',
+    FileObservation.check(abs, 'a.md', '1:2:abc').indexOf(FileObservation.CODE_NOT_OBSERVED) > 0);
+  check('守卫: 拒绝说明里给出可照抄的 read_file',
+    FileObservation.check(abs, 'a.md', '1:2:abc').indexOf('read_file("a.md")') > 0);
+
+  FileObservation.observe(abs, '1:2:abc');
+  check('守卫: 读过且版本一致 → 放行', FileObservation.check(abs, 'a.md', '1:2:abc') === '');
+  check('守卫: 版本变了 → FS_STALE_VERSION',
+    FileObservation.check(abs, 'a.md', '1:2:abd').indexOf(FileObservation.CODE_STALE_VERSION) > 0);
+
+  FileObservation.forget(abs);
+  check('守卫: forget 之后重新要求先读',
+    FileObservation.check(abs, 'a.md', '1:2:abc').indexOf(FileObservation.CODE_NOT_OBSERVED) > 0);
+
+  FileObservation.observe('/w/sub/x.md', 'v1');
+  FileObservation.observe('/w/sub/y.md', 'v1');
+  FileObservation.observe('/w/other.md', 'v1');
+  FileObservation.forgetRoot('/w/sub');
+  check('守卫: forgetRoot 只清该目录下的登记',
+    !FileObservation.observed('/w/sub/x.md') && !FileObservation.observed('/w/sub/y.md') &&
+    FileObservation.observed('/w/other.md'));
+  check('守卫: 目录前缀不误伤同名前缀(看 /w/sub 不清 /w/subway)',
+    (() => {
+      FileObservation.clear();
+      FileObservation.observe('/w/subway.md', 'v1');
+      FileObservation.forgetRoot('/w/sub');
+      return FileObservation.observed('/w/subway.md');
+    })());
+
+  FileObservation.clear();
+  for (let i = 0; i < Constants.WORK_FS_OBSERVATION_MAX_ENTRIES + 5; i++) {
+    FileObservation.observe('/w/f' + i + '.md', 'v1');
+  }
+  check('守卫: 登记表按上限淘汰最旧条目',
+    FileObservation.size() === Constants.WORK_FS_OBSERVATION_MAX_ENTRIES);
+  check('守卫: 最旧的几条确实被淘汰', !FileObservation.observed('/w/f0.md'));
+  check('守卫: 最新的仍在', FileObservation.observed('/w/f' + (Constants.WORK_FS_OBSERVATION_MAX_ENTRIES + 4) + '.md'));
+  FileObservation.clear();
+}
+
+// ===== @文件引用：文本解析（输入框与内核共用同一份规则）=====
+{
+  const toks = MentionQueryParser.extractTokens('改一下 @a.md 和 @data/b.csv。');
+  check('@: 抽出两个引用', toks.length === 2 && toks[0] === 'a.md');
+  check('@: 尾部句号不算文件名', toks[1] === 'data/b.csv');
+  check('@: 邮箱不触发', MentionQueryParser.extractTokens('发我 a@b.com 就行').length === 0);
+  check('@: URL 里的 @ 不触发',
+    MentionQueryParser.extractTokens('https://user@host/x').length === 0);
+  check('@: 中文紧挨 @ 允许', MentionQueryParser.extractTokens('把这个@清单.md 改一下')[0] === '清单.md');
+  check('@: 重复引用只算一次',
+    MentionQueryParser.extractTokens('@a.md 和 @a.md').length === 1);
+  check('@: 括号里的引用能取出',
+    MentionQueryParser.extractTokens('（@a.md）').length === 1);
+  check('@: 没有 @ 时返回空数组', MentionQueryParser.extractTokens('普通消息').length === 0);
+
+  check('@: ./ 前缀归一', MentionQueryParser.normalizeRel('./a/b.md') === 'a/b.md');
+  check('@: 单个 / 前缀归一', MentionQueryParser.normalizeRel('/a/b.md') === 'a/b.md');
+  check('@: 反斜杠归一', MentionQueryParser.normalizeRel('.\\a\\b.md') === 'a/b.md');
+  check('@: 尾部斜杠去掉', MentionQueryParser.normalizeRel('a/b/') === 'a/b');
+  check('@: 双斜杠保留(UNC 由 resolveSafe 拒绝)', MentionQueryParser.normalizeRel('//x') === '//x');
+
+  // 输入框侧的「正在输入」
+  const q = MentionQueryParser.detectAtEnd('看下 @dat');
+  check('@输入: 末尾 @ 触发', q !== null && q.query === 'dat' && q.start === 3);
+  check('@输入: 空查询也能触发(刚敲下 @)', MentionQueryParser.detectAtEnd('@') !== null);
+  check('@输入: 空格后不再触发', MentionQueryParser.detectAtEnd('@a.md 继续写') === null);
+  check('@输入: 邮箱不触发', MentionQueryParser.detectAtEnd('a@b') === null);
+
+  const picked = MentionQueryParser.applyPick('看下 @dat', q, 'data/a.csv');
+  check('@输入: 选中后替换成完整路径', picked === '看下 @data/a.csv ');
+
+  // 候选排序: 文件名前缀 > 文件名包含 > 路径包含; 空查询按层级浅优先
+  const paths = ['docs/report.xlsx', 'data/report.csv', 'data/deep/report.md', 'readme.md'];
+  const ranked = MentionQueryParser.rank(paths, 'report', 4);
+  check('@候选: 命中文件名前缀的排在最前',
+    MentionQueryParser.rank(['docs/summary.md', 'src/report.md'], 'report', 2)[0] === 'src/report.md');
+  check('@候选: 只保留命中项', ranked.length === 3 && ranked.indexOf('readme.md') < 0);
+  check('@候选: 空查询按层级排序', MentionQueryParser.rank(paths, '', 2)[0] === 'readme.md');
+  check('@候选: limit 生效', MentionQueryParser.rank(paths, '', 1).length === 1);
+  check('@候选: 大小写不敏感', MentionQueryParser.rank(paths, 'REPORT', 4).length === 3);
 }
 
 console.log('');

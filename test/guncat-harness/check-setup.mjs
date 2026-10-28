@@ -42,6 +42,8 @@ for (const [relSrc, relDst, replaces] of [
   ['common/PathMatcher.ts', 'PathMatcher.ts', []],
   ['common/DiffUtil.ts', 'DiffUtil.ts', []],
   ['common/EditCore.ts', 'EditCore.ts', []],
+  ['common/FileObservation.ts', 'FileObservation.ts', []],
+  ['common/MentionQuery.ts', 'MentionQuery.ts', []],
   ['common/FileSearchCore.ts', 'FileSearchCore.ts', []],
   ['common/ToolExecutionGuard.ts', 'ToolExecutionGuard.ts', []],
   ['common/ToolSchemaValidator.ts', 'ToolSchemaValidator.ts', []],
@@ -286,10 +288,21 @@ writeFileSync(join(stubsDir, '@kit.ImageKit.ts'),
   `  interface Size { width: number; height: number; }\n` +
   `  interface DecodingOptions { desiredSize?: Size; }\n` +
   `  interface PackingOption { format: string; quality: number; }\n` +
+  `  interface ImageInfo { size: Size; }\n` +
   `  class PixelMap { release(): Promise<void>; }\n` +
-  `  class ImageSource { createPixelMap(opts?: DecodingOptions): Promise<PixelMap>; release(): Promise<void>; }\n` +
-  `  class ImagePacker { packToData(pixelMap: PixelMap, opts: PackingOption): Promise<ArrayBuffer>; release(): Promise<void>; }\n` +
+  `  class ImageSource {\n` +
+  `    createPixelMap(opts?: DecodingOptions): Promise<PixelMap>;\n` +
+  `    getImageInfo(): Promise<ImageInfo>;\n` +
+  `    release(): Promise<void>;\n` +
+  `  }\n` +
+  `  class ImagePacker {\n` +
+  `    packToData(pixelMap: PixelMap, opts: PackingOption): Promise<ArrayBuffer>;\n` +
+  `    packing(source: PixelMap, option: PackingOption): Promise<ArrayBuffer>;\n` +
+  `    release(): Promise<void>;\n` +
+  `  }\n` +
   `  function createImageSource(fd: number): ImageSource;\n` +
+  `  function createImageSource(buf: ArrayBuffer): ImageSource;\n` +
+  `  function createImageSource(uri: string): ImageSource;\n` +
   `  function createImagePacker(): ImagePacker;\n}\n`);
 
 // ===== tsconfig =====

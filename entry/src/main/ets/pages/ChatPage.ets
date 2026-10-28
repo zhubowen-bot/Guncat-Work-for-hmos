@@ -539,10 +539,13 @@ struct ChatPage {
             // 输入行 + 按钮
             MessageInputView({
               inputText: $inputText,
-              isStreaming: this.vm.isStreaming,
+              // streamingHere: 只有"当前会话自己在跑"时才显示插话/停止按钮。
+              // 切到别的会话时那边应当是一个普通发送框(点了会提示另一个会话在跑, 不会串台)。
+              isStreaming: this.vm.streamingHere,
               isParsing: this.vm.isParsing,
               isListening: this.isListening,
               allowSteer: this.vm.agentLoopMode,
+              getMentionPaths: (): string[] => this.mentionCandidatePaths(),
               placeholder: this.vm.agentLoopMode ? this.vm.loopInputPlaceholder : '输入消息...',
               onSend: (text: string) => {
                 this.handleSend(text);
@@ -1685,12 +1688,28 @@ struct ChatPage {
     return null;
   }
 
+  // @文件引用的候选: 只在有工作区的形态给(@ 引用的是工作区里的文件);
+  // 聊天模式的素材入口是附件直传, 跟工作区不是一条路, 给了也选不中。
+  private mentionCandidatePaths(): string[] {
+    let out: string[] = [];
+    if (!this.vm.agentLoopMode) {
+      return out;
+    }
+    let files: WorkspaceFileInfo[] = this.vm.workspaceFiles;
+    for (let i: number = 0; i < files.length; i++) {
+      if (!files[i].isDir) {
+        out.push(files[i].path);
+      }
+    }
+    return out;
+  }
+
   private handleSend(text: string): void {
     // 执行中点击发送必须先落到"插话"上, 不能在这里被 isStreaming 直接吞掉:
     // 之前这里无条件 `if (isStreaming) return`, 而输入框在确认"已发送"后就把文本清空了,
     // 于是插话按钮点下去的实际效果是"字消失、任务无感"。
     // 路由判定收敛在 SendRoute(纯逻辑, 有断言守着): 空闲→发送; 执行中+Agent Loop→插话; 执行中+聊天→提示等待。
-    let route: string = SendRoute.decide(text, this.vm.isStreaming, this.vm.agentLoopMode);
+    let route: string = SendRoute.decide(text, this.vm.streamingHere, this.vm.agentLoopMode);
     if (route === SendRoute.IGNORE) {
       return;
     }
