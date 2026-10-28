@@ -4,16 +4,15 @@
 
 ## 7.0.0（手机上的完整 Linux · 原生 CPython · 三端对齐）
 
-> 7.0.0 是 `shell` 与原生 Python 落地后的第一个正式版本（上一个正式版本是 6.3.0）。
-> **6.4.0 从未发布**——原本记在它名下的内容（`shell`、原生 Python 的全部迭代）与所有
-> 「未发布」条目，一并归入本版。
+> 一句话：手机第一次真正拿到"能跑程序的电脑"那套能力——完整 Linux（`shell`）与原生
+> CPython（`run_python`）都在机内真跑，再叠上 Agent Loop 的工具体系与三端对齐的最后一批修复。
 
 本版重点：
 
 - **设备内真 Linux**：`shell` 跑的是 Alpine 3.22 + 内核 6.12（QEMU TCI，不需要 JIT 权限），
-  工作区经 virtio-9p 直连，`apk add` 可用 —— 详见「设备内真 Linux：`shell`（QEMU TCI）」。
+  工作区经 virtio-9p 直连，`apk add` 可用。
 - **原生 CPython 3.12**：`run_python` 编成 `.so` 在应用进程内直跑，numpy / pandas / scipy /
-  matplotlib 随包离线 —— 详见下面几条原生 Python 记录。
+  matplotlib 随包离线；VM 内的 `npy` 桥让 shell 管道共用同一个解释器。
 - **三端对齐**：@ 引用、编辑前读取守卫、项目指令、多图逐张送达，以及四处静默失败的修复。
 - **工作区治理**：删会话连带清理、执行中删除不复活、启动清扫孤儿目录。
 - **健壮性**：网络抖动自动重试、插话发送修复、工作模式不再误渲染交互卡片。
@@ -24,7 +23,7 @@
 > 而不是我另造一个"模拟 shell"。QEMU 以 **TCG 解释器（TCI）**构建，不生成机器码，
 > 因此**不需要 JIT / 可执行内存这类难以申请的受限权限**，手机与上架包都能用。
 
-#### 新增：`shell(command, cwd?, timeout_ms?, stdin?)` —— 第 46 个内置工具
+#### 新增：`shell(command, cwd?, timeout_ms?, stdin?)`
 
 - **真 Linux 用户态**：管道、重定向、通配符、`sed`/`awk`/`find`/`xargs`/`tar`/`gzip` 全部是真的；
   busybox 之外需要什么语言运行时可以自己装（`apk add python3` / `nodejs` / `jq` …），网络走 QEMU 内建
@@ -67,10 +66,112 @@
   直接做的不要用 shell**（每次调用有开销）；shell 用于批量重命名/批量转换、`sed`/`awk`/`find` 流水线、
   打包、跨文件统计这类"需要真程序"的活；并明确"目录与其它工具一致"这条口径，避免模型把 shell 里的文件
   当成另一个世界。
-- 工具面：工作模式 **45 → 46** 个工具；交互模式仍是 **27 个**（`shell` 属于重工具，故意不进白名单）。
-  （`run_python` 进来之后是 47 个，见下文「原生 Python 首版」。）
+- 工具面：工作模式 **45 → 47** 个工具（`shell` 与 `run_python` 先后加入）；交互模式仍是 **27 个**
+  （两者都属于重工具，故意不进白名单，也不进子代理工具面）。
 - 版本号：`6.3.0` → **`7.0.0`**（versionCode 见 `AppScope/app.json5`；versionCode 或
   `WORK_LINUX_IMAGE_REV` 变化都会触发镜像重新释放）。
+
+### 原生 CPython 3.12：`run_python`
+
+> 一句话：VM 里的 Python 慢是因为 **CPU 指令被逐条仿真**（实测比原生慢 2~3 个数量级），
+> 不是缺 CPython 的 JIT。既然 JIT 权限拿不到，就把解释器**编译成 HarmonyOS 原生 `.so`**，
+> 在应用进程内直接跑；VM 里再放一个 `npy` 桥，让 shell 管道也能用上这个原生解释器。
+
+#### 工具与能力边界
+
+- **新增 `run_python(code, cwd?, timeout_ms?)`**：原生 CPython 3.12
+  （`libpython3.12.so` 5.8MB + 标准库 9.6MB + 随包 C 扩展），应用进程内执行、无仿真；
+  工作目录就是会话工作区（与 `read_file`/`shell` 同一份文件），默认 30s、上限 180s，
+  输出超 20000 字符落 `.spill/`。
+- **能力边界（以最终形态为准）**：没有 pip（运行期装不了包，缺库会给替代方案）；`subprocess`
+  只能直接 exec 单个 toybox 程序（没有 `sh`，管道用 `Popen` 自己接）；`multiprocessing` 只有
+  fork 上下文可用（真多进程走 `guncat_mp.map`）；网络可用（`requests` + 随包 CA）；标准库与
+  三方库目录只读，产物写工作区。
+- **新增跨域桥 `npy`**（VM 内 `/usr/local/bin/npy`）：`npy -c '...'` / `npy script.py args`
+  把 Python 转发给宿主原生解释器执行，复用 shell 的 9p 命令通道 + 嵌套服务；
+  实测单次往返 ≈ 134ms（VM 内 `python3 -c pass` 为 3.1s），管道里可以直接 `npy gen.py | jq ...`。
+- **配套**：`tooling/python/build-cpython-ohos.sh`（交叉编译 + 打包）、
+  `tooling/linux-vm/npy-test.sh`（11 项端到端断言）、`bench.sh` 增加循环/管道/IO 负载；
+  `run_python` 与 `shell` 一样不进交互模式白名单、不进子代理工具面。
+- **实测依据**：同机 TCI/JIT 对照显示 CPU 密集负载慢 12–23×，说明换语言无效、JIT 也不够
+  （即便批下来 Python 仍比原生慢 1~1.5 个数量级），只有原生解释器能回到可用区间。
+
+#### 超时、依赖库与纪律
+
+> 依据一次完整的实机自检（117 个模块矩阵 + 并发/超时/边界逐项实测），修掉最危险的一条并补齐四个缺失库。
+
+- **超时方案推倒重来（上一版的信号中断被实机证伪）**：7 次对照实验里，`pthread_kill(SIGINT)` 5 次被丢弃、
+  2 次直接把进程杀掉（闪退）——鸿蒙应用进程的 SIGINT 处置不受我们控制。现改为两层：
+  ① `ast` 给 `while True` 这类常量真循环注入截止检查，到点抛 `TimeoutError`（纯 Python 层，不可能伤进程）；
+  ② 宿主等 `timeout_ms + 1.5s` 仍未结束则"放弃等待"，并在任务真正结束前拒绝本会话的新调用
+  （不排队；结束即自动恢复，见下文"运行环境体检修复"）。信号路径已彻底移除。
+- **随包 IANA 时区数据**：`zoneinfo` 从 0 个可用时区变为完整可用（tzdata 打进标准库 zip）。
+- **补齐 OpenSSL / SQLite / bzip2 / xz**：`ssl`（含 118 张 CA 证书，随包 `cacert.pem`）、
+  `hashlib.pbkdf2_hmac`、`scrypt`、`sqlite3`、`bz2`、`lzma` 全部可用；依赖库随包放
+  `entry/libs/arm64-v8a/`（`libssl.so.3` / `libcrypto.so.3` / `libsqlite3.so` / `libbz2.so` / `liblzma.so.5`）。
+  新增 `tooling/python/build-native-deps.sh`（OpenSSL 3.0.15 / SQLite 3.45.3 / bzip2 1.0.8 / xz 5.4.6）。
+- **纪律纠偏（根据实测）**：`subprocess` 其实可用（直接 exec 单个 toybox 程序，无 shell 语法）；
+  纯 Python 计算不要用线程/线程池（实测慢 7~8 倍，GIL 争用）；但 `hashlib`/`zlib`/`bz2`/`lzma`/`sqlite3` 等释放 GIL 的 C 运算多线程是真并行（sha256 8 线程 2.7 倍，分块需 ≥64KB）；`multiprocessing` 只有 fork 上下文可用（spawn/forkserver 会明确报错），真多进程走 `guncat_mp.map`；int→str 上限放宽到 10 万位。
+- 扩展总数 51 → **56**。
+
+#### 运行环境体检修复
+
+> 依据一次实机体检报告（进程常驻 + 解释器复用带来的系统性缺陷），逐条在源码里复核后修掉
+> 确认存在的 6 类问题；同时补了一个桌面侧的启动器回归测试（`tooling/python/launcher-test.py`）。
+
+- **修复：两次正常超时就把整个会话的 Python 锁死**。回收计数按 `timedOut` 记账，而硬超时
+  （AST 截止抛 `TimeoutError`）其实是**干净回收**的，也被算了进去；阈值只有 2，且计数只增不减，
+  于是"写个死循环 → 超时 → 再写个死循环"之后，后续所有 Python 调用都被拒绝，只能重启应用。
+  现在只统计**软超时**（宿主放弃等待、线程还卡在调用里），并且任务真正结束时把计数减回去 ——
+  自愈，不需要重启。顺带删掉了"连续 10 次软超时永久停用"这条与实现口径对不上的封禁状态。
+- **修复：超时任务未结束时新调用会覆盖队列槽位**。原生侧现在先看 `g_busy`，忙就**直接拒绝**
+  （与"不排队"的承诺一致），避免 `g_pending` 被覆盖导致调用永久等待。
+- **修复：6 类进程级状态跨调用泄漏**。解释器常驻，但 `os.environ` / `sys.path` / `logging`
+  根级别 / `warnings.filters` / `random` 种子 / numpy 打印选项与 `seterr` 全是进程级状态，
+  一次调用改了下一轮还在（实机复现：`random.seed(12345)` 后下一轮首个 `random()` 就是该种子的首值、
+  `warnings.simplefilter("ignore")` 之后警告一直被吞）。现在每次调用前后做快照/回滚，
+  `sys.modules` 的 import 缓存仍保留（那是常驻解释器的性能来源）。
+- **修复：`sys.stdout` 是裸 `StringIO`**。没有 `.buffer`、`fileno()` 抛 `UnsupportedOperation`，
+  而 `os.write(1, …)` 直接绕过捕获漏到宿主 stdout（既不进结果也不报错）。改成把 fd 1/2
+  `dup2` 到 scratch 里的真实文件 + 包着 fd 的 `TextIOWrapper`：`print` / `buffer.write` /
+  `fileno()` / `os.write` 四条路径都落进同一份输出（`dup` 失败时回退 StringIO）。
+- **修复：解释器安装树可写（跨会话代码注入）**。`sys.prefix` 下的文件是此后每次调用、
+  每个会话都会 import 的代码，往里写文件在实机上是成功的。现在用审计钩子
+  （`sys.addaudithook`）拦住 `open(..., "w")` / `os.mkdir` / `os.remove` / `os.chmod` 等写操作，
+  抛带解释的 `PermissionError`；读与工作区写入不受影响。
+- **修复：`multiprocessing` 的 spawn 静默失败**。嵌入式解释器没有可重新 exec 的 Python
+  可执行体，spawn/forkserver 的子进程会以 `exitcode=255` 结束而且 `start()`/`join()` 不抛异常
+  （最危险的静默错误）。现在在 `multiprocessing` 首次 import 后把 `spawn.get_executable`
+  换掉，直接抛一条说明"改用 fork / `guncat_mp` / threading"的 `RuntimeError`。
+- **其它**：`for` 循环的超时采样从每 8192 轮改为**每 256 轮**（掩码是常量，每轮开销不变；
+  循环体慢时 8192 轮要等几十秒才看表，等于没有超时）；诊断里的 `sys.path` 改用**启动快照**，
+  并把运行期被改出来的条目单独标成 `path(runtime-added)=`；`/tmp` 不存在时给出
+  `tempfile.gettempdir()` 的提示；pyarrow/parquet 缺库提示。
+- **测试**：新增 `tooling/python/launcher-test.py` —— 从 `guncat_py.cpp` 里抽出启动器模板，
+  在桌面 CPython 上按"同一个 `__main__` globals 反复 exec"的语义跑 38 项回归（捕获、状态隔离、
+  超时、只读守卫、spawn 守卫、诊断），`node test/guncat-harness/test-core.mjs` 里也加了源码级守卫。
+
+#### 内存与 matplotlib 缓存
+
+> 依据一轮实机复测：一次无法复现的闪退（高置信度归因于内存压力）+ 每次 import matplotlib 都在
+> 临时目录重建字体缓存。前者做了可观测与释放，后者按警告建议修掉。
+
+- **修复：上一次调用的大对象一直挂着**。`exec` 用的 dict 挂在 `__main__._globals` 上，要等**下一次**
+  调用才被替换——上一次脚本里 400 MB 的数组会一直占着 RSS（本地实测对象确实还活着）。这正好解释了
+  "单独跑没事、连着跑就崩"。现在调用结束就 `_globals.clear()`，并且只在本次 RSS > 400 MB 时才
+  `gc.collect()`（空调用不白付这几毫秒）。
+- **修复：`MPLCONFIGDIR` 未设置**。matplotlib 的字体缓存默认落在不可写目录，于是每次 import 都在
+  临时目录重建（真机实测首次 import 5 秒）。现在把 `MPLCONFIGDIR` 指到应用 cache 目录，缓存只建一次。
+  没有改 `sitecustomize.py`——它在 `extras.zip` 里，改了要重打运行库才生效；放启动器里下次打包就生效，
+  `npy` 桥也一起受益。
+- **新增：内存提醒（只提醒，不拒绝）**。调用前后读 `/proc/self/status` + `/proc/meminfo`（不 import
+  psutil）；系统可用 < 2 GB、本进程 RSS > 1.5 GB、或本次调用把 `VmHWM` 顶高 > 512 MB 时，结果最前面
+  多一行提醒（独立字段，不混进 stderr/error），同时写 hilog；失败诊断里附 `mem rss= peak= avail=`。设备侧 OOM 是 SIGKILL，
+  Python 里捕获不到，所以只能做到"撞线前给信号"。
+- **没有做硬配额**：`setrlimit` 是进程级的，会一起约束 ArkTS 线程，值给错就换一种崩法；真正能挡住
+  SIGKILL 的只有把解释器放进子进程，那是重写执行架构。
+- **测试**：`launcher-test.py` 增至 **42 项**（新增：用户命名空间释放、MPLCONFIGDIR 生效、正常调用
+  不产生内存警告、诊断带内存数字）。
 
 ### 工作区生命周期：删除会话时的连带清理与孤儿回收
 
@@ -210,65 +311,6 @@
   驱动续跑 / 模拟器等价 / builder / mapper 断言）；`tsc -p check/tsconfig.json` exit 0；
   `assembleHap` **BUILD SUCCESSFUL**。
 
-### run_python：内存与 matplotlib 缓存
-
-> 依据一轮实机复测：一次无法复现的闪退（高置信度归因于内存压力）+ 每次 import matplotlib 都在
-> 临时目录重建字体缓存。前者做了可观测与释放，后者按警告建议修掉。
-
-- **修复：上一次调用的大对象一直挂着**。`exec` 用的 dict 挂在 `__main__._globals` 上，要等**下一次**
-  调用才被替换——上一次脚本里 400 MB 的数组会一直占着 RSS（本地实测对象确实还活着）。这正好解释了
-  "单独跑没事、连着跑就崩"。现在调用结束就 `_globals.clear()`，并且只在本次 RSS > 400 MB 时才
-  `gc.collect()`（空调用不白付这几毫秒）。
-- **修复：`MPLCONFIGDIR` 未设置**。matplotlib 的字体缓存默认落在不可写目录，于是每次 import 都在
-  临时目录重建（真机实测首次 import 5 秒）。现在把 `MPLCONFIGDIR` 指到应用 cache 目录，缓存只建一次。
-  没有改 `sitecustomize.py`——它在 `extras.zip` 里，改了要重打运行库才生效；放启动器里下次打包就生效，
-  `npy` 桥也一起受益。
-- **新增：内存提醒（只提醒，不拒绝）**。调用前后读 `/proc/self/status` + `/proc/meminfo`（不 import
-  psutil）；系统可用 < 2 GB、本进程 RSS > 1.5 GB、或本次调用把 `VmHWM` 顶高 > 512 MB 时，结果最前面
-  多一行提醒（独立字段，不混进 stderr/error），同时写 hilog；失败诊断里附 `mem rss= peak= avail=`。设备侧 OOM 是 SIGKILL，
-  Python 里捕获不到，所以只能做到"撞线前给信号"。
-- **没有做硬配额**：`setrlimit` 是进程级的，会一起约束 ArkTS 线程，值给错就换一种崩法；真正能挡住
-  SIGKILL 的只有把解释器放进子进程，那是重写执行架构。
-- **测试**：`launcher-test.py` 增至 **42 项**（新增：用户命名空间释放、MPLCONFIGDIR 生效、正常调用
-  不产生内存警告、诊断带内存数字）。
-
-### run_python：运行环境体检修复
-
-> 依据一次实机体检报告（进程常驻 + 解释器复用带来的系统性缺陷），逐条在源码里复核后修掉
-> 确认存在的 6 类问题；同时补了一个桌面侧的启动器回归测试（`tooling/python/launcher-test.py`）。
-
-- **修复：两次正常超时就把整个会话的 Python 锁死**。回收计数按 `timedOut` 记账，而硬超时
-  （AST 截止抛 `TimeoutError`）其实是**干净回收**的，也被算了进去；阈值只有 2，且计数只增不减，
-  于是"写个死循环 → 超时 → 再写个死循环"之后，后续所有 Python 调用都被拒绝，只能重启应用。
-  现在只统计**软超时**（宿主放弃等待、线程还卡在调用里），并且任务真正结束时把计数减回去 ——
-  自愈，不需要重启。顺带删掉了"连续 10 次软超时永久停用"这条与实现口径对不上的封禁状态。
-- **修复：超时任务未结束时新调用会覆盖队列槽位**。原生侧现在先看 `g_busy`，忙就**直接拒绝**
-  （与"不排队"的承诺一致），避免 `g_pending` 被覆盖导致调用永久等待。
-- **修复：6 类进程级状态跨调用泄漏**。解释器常驻，但 `os.environ` / `sys.path` / `logging`
-  根级别 / `warnings.filters` / `random` 种子 / numpy 打印选项与 `seterr` 全是进程级状态，
-  一次调用改了下一轮还在（实机复现：`random.seed(12345)` 后下一轮首个 `random()` 就是该种子的首值、
-  `warnings.simplefilter("ignore")` 之后警告一直被吞）。现在每次调用前后做快照/回滚，
-  `sys.modules` 的 import 缓存仍保留（那是常驻解释器的性能来源）。
-- **修复：`sys.stdout` 是裸 `StringIO`**。没有 `.buffer`、`fileno()` 抛 `UnsupportedOperation`，
-  而 `os.write(1, …)` 直接绕过捕获漏到宿主 stdout（既不进结果也不报错）。改成把 fd 1/2
-  `dup2` 到 scratch 里的真实文件 + 包着 fd 的 `TextIOWrapper`：`print` / `buffer.write` /
-  `fileno()` / `os.write` 四条路径都落进同一份输出（`dup` 失败时回退 StringIO）。
-- **修复：解释器安装树可写（跨会话代码注入）**。`sys.prefix` 下的文件是此后每次调用、
-  每个会话都会 import 的代码，往里写文件在实机上是成功的。现在用审计钩子
-  （`sys.addaudithook`）拦住 `open(..., "w")` / `os.mkdir` / `os.remove` / `os.chmod` 等写操作，
-  抛带解释的 `PermissionError`；读与工作区写入不受影响。
-- **修复：`multiprocessing` 的 spawn 静默失败**。嵌入式解释器没有可重新 exec 的 Python
-  可执行体，spawn/forkserver 的子进程会以 `exitcode=255` 结束而且 `start()`/`join()` 不抛异常
-  （最危险的静默错误）。现在在 `multiprocessing` 首次 import 后把 `spawn.get_executable`
-  换掉，直接抛一条说明"改用 fork / `guncat_mp` / threading"的 `RuntimeError`。
-- **其它**：`for` 循环的超时采样从每 8192 轮改为**每 256 轮**（掩码是常量，每轮开销不变；
-  循环体慢时 8192 轮要等几十秒才看表，等于没有超时）；诊断里的 `sys.path` 改用**启动快照**，
-  并把运行期被改出来的条目单独标成 `path(runtime-added)=`；`/tmp` 不存在时给出
-  `tempfile.gettempdir()` 的提示；pyarrow/parquet 缺库提示。
-- **测试**：新增 `tooling/python/launcher-test.py` —— 从 `guncat_py.cpp` 里抽出启动器模板，
-  在桌面 CPython 上按"同一个 `__main__` globals 反复 exec"的语义跑 38 项回归（捕获、状态隔离、
-  超时、只读守卫、spawn 守卫、诊断），`node test/guncat-harness/test-core.mjs` 里也加了源码级守卫。
-
 ### 工作模式误渲染交互卡片
 
 - **修复：交互模式一张卡片都不显示（回归）**。上一版把 `isUiFence` 收紧成"只有显式语言才算
@@ -282,42 +324,6 @@
   250ms 采样定时器）。交互模式的行为**完全没有改**：空 info 围栏、`guncat-ui` 围栏、
   整条消息即程序，三种形态照旧渲染成卡片（原则是"宁可当卡片，也不要退化成别的东西"）。
   补了工作模式与空 info 围栏的回归用例。
-
-### 原生 Python 增强：超时 / 依赖库 / 纪律纠偏
-
-> 依据一次完整的实机自检（117 个模块矩阵 + 并发/超时/边界逐项实测），修掉最危险的一条并补齐四个缺失库。
-
-- **超时方案推倒重来（上一版的信号中断被实机证伪）**：7 次对照实验里，`pthread_kill(SIGINT)` 5 次被丢弃、
-  2 次直接把进程杀掉（闪退）——鸿蒙应用进程的 SIGINT 处置不受我们控制。现改为两层：
-  ① `ast` 给 `while True` 这类常量真循环注入截止检查，到点抛 `TimeoutError`（纯 Python 层，不可能伤进程）；
-  ② 宿主等 `timeout_ms + 1.5s` 仍未结束则"放弃等待"并**熔断**本会话后续调用。信号路径已彻底移除。
-- **随包 IANA 时区数据**：`zoneinfo` 从 0 个可用时区变为完整可用（tzdata 打进标准库 zip）。
-- **补齐 OpenSSL / SQLite / bzip2 / xz**：`ssl`（含 118 张 CA 证书，随包 `cacert.pem`）、
-  `hashlib.pbkdf2_hmac`、`scrypt`、`sqlite3`、`bz2`、`lzma` 全部可用；依赖库随包放
-  `entry/libs/arm64-v8a/`（`libssl.so.3` / `libcrypto.so.3` / `libsqlite3.so` / `libbz2.so` / `liblzma.so.5`）。
-  新增 `tooling/python/build-native-deps.sh`（OpenSSL 3.0.15 / SQLite 3.45.3 / bzip2 1.0.8 / xz 5.4.6）。
-- **纪律纠偏（根据实测）**：`subprocess` 其实可用（直接 exec 单个 toybox 程序，无 shell 语法）；
-  纯 Python 计算不要用线程/线程池（实测慢 7~8 倍，GIL 争用）；但 `hashlib`/`zlib`/`bz2`/`lzma`/`sqlite3` 等释放 GIL 的 C 运算多线程是真并行（sha256 8 线程 2.7 倍，分块需 ≥64KB）；`multiprocessing` 仍不可用；int→str 上限放宽到 10 万位。
-- 扩展总数 51 → **56**。
-
-### 原生 Python 首版
-
-> 一句话：VM 里的 Python 慢是因为 **CPU 指令被逐条仿真**（实测比原生慢 2~3 个数量级），
-> 不是缺 CPython 的 JIT。既然 JIT 权限拿不到，就把解释器**编译成 HarmonyOS 原生 `.so`**，
-> 在应用进程内直接跑；VM 里再放一个 `npy` 桥，让 shell 管道也能用上这个原生解释器。
-
-- **新增 `run_python(code, cwd?, timeout_ms?)`** —— 第 47 个内置工具：原生 CPython 3.12
-  （`libpython3.12.so` 5.8MB + 标准库 9.6MB + 51 个 C 扩展），应用进程内执行、无仿真；
-  工作目录就是会话工作区（与 `read_file`/`shell` 同一份文件），默认 30s、上限 180s，
-  输出超 20000 字符落 `.spill/`；无 subprocess/pip/网络（要 Unix 工具或装包用 `shell`）。
-- **新增跨域桥 `npy`**（VM 内 `/usr/local/bin/npy`）：`npy -c '...'` / `npy script.py args`
-  把 Python 转发给宿主原生解释器执行，复用 shell 的 9p 命令通道 + 嵌套服务；
-  实测单次往返 ≈ 134ms（VM 内 `python3 -c pass` 为 3.1s），管道里可以直接 `npy gen.py | jq ...`。
-- **配套**：`tooling/python/build-cpython-ohos.sh`（交叉编译 + 打包）、
-  `tooling/linux-vm/npy-test.sh`（11 项端到端断言）、`bench.sh` 增加循环/管道/IO 负载；
-  `run_python` 与 `shell` 一样不进交互模式白名单、不进子代理工具面。
-- **实测依据**：同机 TCI/JIT 对照显示 CPU 密集负载慢 12–23×，说明换语言无效、JIT 也不够
-  （即便批下来 Python 仍比原生慢 1~1.5 个数量级），只有原生解释器能回到可用区间。
 
 ## 6.3.0 更新（交互模式 · Intelligent UI）
 
