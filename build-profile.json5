@@ -5,13 +5,13 @@
         "name": "default",
         "type": "HarmonyOS",
         "material": {
-          "certpath": "C:\\Users\\a1519\\.ohos\\config\\default_Guncat-Work-for-hmos_80z6WuF6FeKF_cT36SFINBTntF-8o4Jml1A8D_xDZ0U=.cer",
-          "keyAlias": "debugKey",
-          "keyPassword": "0000001B12665EF608DABCC99E18644F78A900C8EB4ECB8E298F341674419AA659291A6EC0CC11C7C2AB43",
-          "profile": "C:\\Users\\a1519\\.ohos\\config\\default_Guncat-Work-for-hmos_80z6WuF6FeKF_cT36SFINBTntF-8o4Jml1A8D_xDZ0U=.p7b",
+          "storeFile": "C:/Users/a1519/Desktop/AI文本转换/aitransformer.p12",
+          "storePassword": "00000019598D338AAF7A97E7A239EC820D4F59EE241CB12F9EA0EC78FC0C4E2635B9C1C57FBE2A9E99",
+          "keyAlias": "aitransformer",
+          "keyPassword": "00000019FECDC5E13329F7AB1E9E4E704DC391A107857983D91CDC4C42EB1D1FD417FE9AFCF084EF2E",
           "signAlg": "SHA256withECDSA",
-          "storeFile": "C:\\Users\\a1519\\.ohos\\config\\default_Guncat-Work-for-hmos_80z6WuF6FeKF_cT36SFINBTntF-8o4Jml1A8D_xDZ0U=.p12",
-          "storePassword": "0000001B9188133E8B0F5107685112535A9141D1DE002C2BBCA8A31710E279BEAA977921F13B4EC7817118"
+          "profile": "C:/Users/a1519/Desktop/AI文本转换/guncataiRelease.p7b",
+          "certpath": "C:/Users/a1519/Desktop/AI文本转换/aitransformer.cer"
         }
       }
     ],

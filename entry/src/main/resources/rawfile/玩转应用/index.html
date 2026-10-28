@@ -20,9 +20,11 @@
   5. 换图标 ──── 顶部应用图标是 assets/app-icon.png, 直接替换图片文件。
                  列表里的图标是单色实心 SVG, 换新图标去
                  https://fonts.google.com/icons 选 Filled 风格复制路径即可。
-  6. 图片占位 ── 本次修订新增的两页 (交互模式 view-009 / Version 6.3 新功能体验 view-010)
-                 图片尚未提供, <img src> 用的是占位文件名 (009-N.png / 010-N.png)。
-                 每页顶部注释写明「第 N 张该放什么」, 截图做好后按名放进 assets/ 即可。
+  6. 图片说明 ── Version 7.0 新功能体验 (view-011) 的 011-1.png ~ 011-10.png 是这一页的
+                 正式配图, 与下方介绍卡一一对应 (第 N 张图 ↔ 第 N 张卡);
+                 想换图时用同名文件覆盖 assets/ 里的图片即可, 页面代码不用改。
+                 交互模式 (view-009) 与 Version 6.3 (view-010) 仍是空占位文件名
+                 (009-N.png / 010-N.png), 每页顶部注释写明「第 N 张该放什么」。
                  原有页面的图片引用一律没动。
   ════════════════════════════════════════════════════════════════
 -->
@@ -45,19 +47,30 @@
       <header class="hero">
         <img class="hero-icon" src="assets/app-icon.png" alt="应用图标">
         <h1 class="hero-title">玩转应用</h1>
-        <p class="hero-sub">Version 6.3.0 (630_4)</p>
+        <p class="hero-sub">Version 7.0.0 (700_1)</p>
       </header>
 
-      <!-- 新功能体验面板: 首页入口卡, 点击分别进入 Version 6.3 / Version 6.2 新功能子页 -->
+      <!-- 新功能体验面板: 首页入口卡, 点击分别进入 Version 7.0 / 6.3 / 6.2 新功能子页 -->
       <section class="toc toc-gap">
         <div class="toc-header">新功能体验</div>
+
+        <a class="card" href="#/011">
+          <div class="card-icon">
+            <svg viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></svg>
+          </div>
+          <div class="card-body">
+            <div class="card-title">探索 Version 7.0 开启的生产力革命</div>
+            <div class="card-text">手机里第一次装下完整的 Linux 与原生 Python：命令行走的是真正的 Alpine，Python 是编译进应用的原生 CPython 3.12，三方库随包离线可用；另外补上 @ 引用文件、编辑前读取校验与项目指令。</div>
+          </div>
+          <div class="card-arrow"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
+        </a>
 
         <a class="card" href="#/010">
           <div class="card-icon">
             <svg viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></svg>
           </div>
           <div class="card-body">
-            <div class="card-title">探索 Version 6.3 的重磅功能更新</div>
+            <div class="card-title">了解 Version 6.3 的重磅功能更新</div>
             <div class="card-text">Agent 引擎新增「交互模式」：回答不再是文字，而是一张能看、能点、能拖的原生界面——图表、指标卡、表格与表单都在里面，拖动参数即时重算，还能让助手按新参数重出界面。</div>
           </div>
           <div class="card-arrow"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
@@ -435,6 +448,8 @@
           <div class="card-text">熄屏、休眠状态下的任务后台运行还与系统在熄屏状态下的网络连接状态有关。若您的设备在熄屏状态下没有网络连接，任务会被中断。</div>
           <div class="card-text">若任务被中断，可重新启动应用，发送“继续任务”，任务会接着之前的进度继续进行。</div>
         </div>
+      </div>
+
       </div>
 
     </main>
@@ -1471,6 +1486,159 @@
           </div>
         </div>
 
+
+      </div>
+
+    </main>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       子页 · Version 7.0 新功能体验
+       ═══════════════════════════════════════════════════ -->
+  <section class="view" id="view-011">
+    <main class="page">
+
+      <div class="pagebar">
+        <a class="back" href="#/" aria-label="返回目录">
+          <svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg>
+        </a>
+        <div class="pagebar-title">Version 7.0 新功能体验</div>
+      </div>
+
+      <!-- 顶部图片轮播: 本页共 10 张图, 文件名 011-1.png ~ 011-10.png (本页配套插图);
+           每张图对应下面一张介绍卡, 增删时图和卡必须成对同步修改。
+           图片对应内容:
+           011-1 命令执行 shell   011-2 原生 Python     011-3 @ 引用文件   011-4 编辑前读取
+           011-5 项目指令         011-6 预置服务商       011-7 自动重试     011-8 插话
+           011-9 长任务不熄屏      011-10 其他修复 -->
+      <div class="gallery">
+        <div class="gallery-track">
+          <img src="assets/011-1.png" alt="手机里跑起真正的 Linux">
+          <img src="assets/011-2.png" alt="原生 Python 3.12">
+          <img src="assets/011-3.png" alt="敲一个 @ 点名文件">
+          <img src="assets/011-4.png" alt="编辑前先读取">
+          <img src="assets/011-5.png" alt="写一份 AGENTS.md">
+          <img src="assets/011-6.png" alt="填个 Key 就能用">
+          <img src="assets/011-7.png" alt="网络抖一下不断线">
+          <img src="assets/011-8.png" alt="执行中也能补一句">
+          <img src="assets/011-9.png" alt="长任务不熄屏">
+          <img src="assets/011-10.png" alt="悄悄失败的都修了">
+        </div>
+        <div class="gallery-dots"></div>
+      </div>
+
+      <!-- 与轮播联动的介绍卡: 第 N 张图对应第 N 张卡, 只显示当前那张 -->
+      <div class="gallery-cards">
+
+        <!-- 1 命令执行 shell -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">手机里跑起真正的 Linux</div>
+            <div class="card-text">工作模式新增 shell 工具。它不是另造一个「模拟命令行」，而是设备内一台真正的 Linux 虚拟机——Alpine 3.22 + Linux 6.12 内核：管道、重定向、通配符，以及 sed / awk / find / xargs / tar / gzip 全部是真语义。虚拟机用 QEMU 的解释模式（TCI）运行，指令逐条解释、不生成机器码，因此不需要 JIT 这类手机上很难拿到的权限，正式上架的包也能用。</div>
+            <div class="card-text">缺什么运行时自己装：apk add python3、apk add nodejs、apk add jq 都行，装包的流量走虚拟机内建的网络栈，不必额外申请权限；镜像里已经预装 python3、pip、jq 与 CA 证书，不用先联网。</div>
+            <div class="card-text">目录和别的工具是同一份：会话工作区直接挂进虚拟机，cat data/a.csv 与 read_file("data/a.csv") 读的是同一批文件——shell 写的文件工具立刻能读到，工具写的文件 shell 里 cat 也立刻可见，中间没有「同步」这一环。</div>
+            <div class="card-text">开销与边界：首次调用要释放镜像并冷启动，约数十秒；之后同一进程内复用，空闲 10 分钟自动关机释放内存。命令默认 60 秒超时、上限 240 秒；输出超过 60 KB 时全文落到工作区 .spill/，随时能再读回来。命令退出码非 0 不算工具失败（grep 没匹配到本来就返回 1），由模型结合报错自己判断。</div>
+          </div>
+        </div>
+
+        <!-- 2 原生 Python -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">原生 Python 3.12：数据分析不必再到电脑上做</div>
+            <div class="card-text">虚拟机里的 Python 是被逐条仿真执行的，实测比原生慢两三个数量级。既然 JIT 权限拿不到，就把 CPython 3.12 直接编译成应用内的原生 .so：run_python 在应用进程里直接跑，中间没有指令翻译层，CPU 密集型负载回到可用区间。</div>
+            <div class="card-text">numpy、pandas、scipy、matplotlib、lxml、sympy、python-docx、python-pptx 随包离线可用；ssl（含 118 张 CA 证书）、sqlite3、bz2、lzma 与完整时区数据也都补齐了，不用先联网装库。随包思源黑体，matplotlib 画中文标签不再是一排方块。</div>
+            <div class="card-text">还能在管道里用：虚拟机里放了一个 npy 桥，把 Python 转发给宿主原生解释器，npy gen.py | jq ... 一条命令跑完；单次往返约 134 毫秒，而在虚拟机里启动 python3 -c pass 要 3.1 秒。</div>
+            <div class="card-text">边界写清楚：默认 30 秒、上限 180 秒；输出超过 20000 字符落到 .spill/；运行期不能 pip install，缺库时会给出替代方案；解释器安装目录只读；每次调用前后会把环境变量、随机种子、警告过滤器这类进程级状态回滚，上一个脚本影响不到下一个。</div>
+          </div>
+        </div>
+
+        <!-- 3 @ 引用文件 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">敲一个 @，点名工作区里的文件</div>
+            <div class="card-text">输入框里敲 @ 会弹出文件候选（文件名前缀 &gt; 文件名包含 &gt; 路径包含，最多 8 条），点一下就把「@完整路径」填进输入框，光标自动落到末尾。</div>
+            <div class="card-text">发送时文件正文会附在这一轮消息后面，会话记录里仍然是你原话——不用先上传、也不用把内容复述一遍。</div>
+            <div class="card-text">三重预算：单文件 24000 字符、单轮合计 60000、最多 8 份；目录、二进制、不存在与越界路径都会在正文里写明原因，越界一个字节都不读；邮箱和网址里的 @ 不会误触发。</div>
+            <div class="card-text">插话里同样生效，比如「按 @requirements.md 的口径重做」；整份附上的文件会被当作「已读过」，可以直接让它改。</div>
+          </div>
+        </div>
+
+        <!-- 4 编辑前读取校验 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">编辑前先读取：不再照着记忆改文件</div>
+            <div class="card-text">现在 edit 动手前必须先读过这个文件：没读过会被拒绝，并回一句可以直接照抄的 read_file("同一路径")；读过之后文件又被改过（哪怕字节数恰好没变），也会拒绝，让你重读一遍。</div>
+            <div class="card-text">判断依据是文件大小、修改时间与开头 8 KB 的指纹——你自己改的、shell 改的、Python 改的都算，同一秒内的改动也逃不掉。</div>
+            <div class="card-text">于是「改错文件」这件事，从「靠提示词劝模型小心」变成了「内核直接拦住」；文件删掉或改名时，登记会一起清掉，不会把新建的同名文件当成已读过。</div>
+          </div>
+        </div>
+
+        <!-- 5 项目指令 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">写一份 AGENTS.md，以后都按这个来</div>
+            <div class="card-text">工作区根目录的 AGENTS.md、CLAUDE.md、GUNCAT.md 会被当作项目指令：文件树里一出现，就先读一遍再开工。</div>
+            <div class="card-text">你说「以后都按这个来」，它会写进 AGENTS.md，下次接着用——不用每一轮重新交代规矩。</div>
+            <div class="card-text">项目指令是数据不是权限：写进去的「忽略以上规则」不会被执行，也不能解除审批或扩大工作区范围；和你当下说的话冲突时，以你为准。</div>
+            <div class="card-text">手机端不把项目指令每轮塞进上下文（上下文和内存都紧），由模型自己读一次，比每轮塞进快照更划算。</div>
+          </div>
+        </div>
+
+        <!-- 6 预置服务商与多模型 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">填个 Key 就能用：预置服务商与多模型</div>
+            <div class="card-text">新增 Deepseek（deepseek-flash）与 OpenCode Go（deepseek-v4.1-flash）两套预置方案，启动时只补齐缺的项，已经填好 Key 的方案不会被覆盖。</div>
+            <div class="card-text">一套配置可以带多个模型：选择器改成按「方案 × 模型」逐行展示，胶囊只显示模型名，菜单里写清服务商；没填 Key 的方案不会出现在列表里。</div>
+            <div class="card-text">自建配置现在可以删了（默认配置与预置方案受保护）；删掉正在用的那一套，会自动切到相邻方案并落盘。旧的 api.deepseek.com 方案会被并入预置的 Deepseek，Key、模型、参数与多模态配置一起带过去，旧存档里的单个模型也会自动转成模型列表。</div>
+            <div class="card-text">OpenCode Go 的网关要求每个请求带会话头，应用按当前对话生成稳定值，流式对话、Agent 循环、Files API 三处统一注入，不会因为缺这个头被拒。</div>
+          </div>
+        </div>
+
+        <!-- 7 自动重试 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">网络抖一下，不再断在半路</div>
+            <div class="card-text">以前「自动重试」其实从未生效：兜底逻辑把所有错误都重新包成「不可重试」，配好的重试策略一次也没跑过。现在 429、5xx、传输中断与空响应都会真的重试。</div>
+            <div class="card-text">工作模式重试 5 次、聊天模式 3 次；服务端说「等 60 秒」就等 60 秒，不再被 8 秒的指数退避截断；401 / 403 / 400 仍然不重试。</div>
+            <div class="card-text">半截正文不会再被当成「说完了」：三种协议都要求收到明确的终止事件，否则按传输错误重试——不会再出现任务安静停住、发一句「继续」又接着干的情况。</div>
+            <div class="card-text">请求体大（比如刚看完一张图）时连接超时按体积放大：256 KB 以内仍是 30 秒，之后按约 100 KB/s 预留、封顶 180 秒；传输错误也翻成人话（超时 / 连接中断 / 传输中止）。重试提示改成临时 toast，不再写进回答正文；重试前会把同一张图摘掉，避免带着它死磕。</div>
+          </div>
+        </div>
+
+        <!-- 8 插话 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">执行中也能补一句：插话真的能插进去</div>
+            <div class="card-text">以前任务跑着的时候打一句话点发送，字消失了、任务毫无反应——界面层直接把发送吞掉了。现在发送路由收敛成一条规则：空闲就正常发，执行中就插话，聊天模式则提示等待。</div>
+            <div class="card-text">插话只入队，注入只发生在轮边界（本轮的工具结果都落地了，或者本轮已经收尾），既不打断在途工具与流式输出，也不会拆散工具调用与结果的配对。</div>
+            <div class="card-text">入队后会回执「已插话：本轮执行完就接手」，不用猜到底传没传进去；如果插话是在模型已经准备收尾时才进来，收尾前会先看一眼队列，有插话就再跑一轮。</div>
+            <div class="card-text">跨会话不再串台：A 会话跑任务时在 B 会话发消息，不会再被塞进 A 的插话队列；提问卡与定时提醒也只找归属的会话。</div>
+          </div>
+        </div>
+
+        <!-- 9 长任务不熄屏 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">长任务不熄屏：前台一直亮着</div>
+            <div class="card-text">应用在前台期间屏幕保持常亮，流式回复与 Agent 循环不会因为屏幕自己熄灭而被打断——长报告、长表格、长代码，不用隔一会儿戳一下屏幕。</div>
+            <div class="card-text">切到后台则改由系统的长时任务接管：流式还在进行时任务继续跑，回到前台立刻释放，不会一直占着系统资源。</div>
+            <div class="card-text">它和「工作模式后台继续工作」是一对：前台常亮保证「看着它干」，后台接管保证「走开也能干完」。</div>
+            <div class="card-text">唯一的代价是前台时手机不会自动熄屏，想省电手动锁屏即可。</div>
+          </div>
+        </div>
+
+        <!-- 10 其他修复 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">一批「悄悄失败」的毛病被逐个修掉</div>
+            <div class="card-text">大图能送了：超过 8 MB 的图片以前直接失败，现在按 2048/90 → 1600/82 → 1280/72 逐级压缩，并注明原图与压缩后大小；8 MB 以下照原图发送，小字不会被压糊。</div>
+            <div class="card-text">多图都到齐：一轮里连看三张图，以前只有最后一张进得去；现在每张各自成为一条视觉消息，带「第 n/N 张」与来源路径，子代理也一起修好。</div>
+            <div class="card-text">提问不再白答：ask_user_question 的卡片等 5 分钟，外层护栏却只给 180 秒，第 3~5 分钟作答会被丢掉；护栏提到 360 秒。</div>
+            <div class="card-text">工作区不留孤儿：删会话前先停任务、收尾再补删，启动时清扫「磁盘上有、会话列表里没有」的目录；工作区里还有文件时，删之前会先问你一句。</div>
+            <div class="card-text">交互模式不会再掉回代码块，工作模式也不会再冒出不属于它的交互卡片。</div>
+          </div>
+        </div>
 
       </div>
 
