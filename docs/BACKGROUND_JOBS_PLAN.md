@@ -1,6 +1,7 @@
 # 后台任务（run_in_background / job_*）在鸿蒙版的可行性与方案
 
-> 状态：**暂缓实施**，本文供评估。审计背景见 `docs/ALIGNMENT_GAP_AUDIT.md` 3.4。
+> 状态：**当前决定不做**，本文留作技术评估与将来重估的依据。
+> 三端对照见 `docs/ALIGNMENT_STATUS.md` 第八节；不做的理由见本文第二节。
 
 ## 一、现状
 

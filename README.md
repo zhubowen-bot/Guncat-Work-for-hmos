@@ -155,6 +155,9 @@ cp $HOME/hish-tci-build/deps/output/libqemu-system-aarch64-tci.so \
 | [常见问题](docs/guides/faq.md) | 排障与已知行为 |
 | [内置智能体](docs/reference/builtin-agents.md) | 智能体清单与差异 |
 | [持久化与主题系统](docs/reference/persistence-and-theme.md) | 本地存储与主题实现 |
+| [工作区与会话数据的生命周期](docs/architecture/workspace-lifecycle.md) | 磁盘布局、删除会话时的连带清理、启动清扫与四类残留对策 |
+| [三端实现对照与对齐现状](docs/ALIGNMENT_STATUS.md) | 电脑版 / 安卓版 / 鸿蒙版逐项对照：外壳、命令执行、JS/Python、PDF、工作区、语音、后台，以及刻意的差异 |
+| [后台任务方案](docs/BACKGROUND_JOBS_PLAN.md) | `run_in_background` / `job_*` 在手机端的可行性评估（暂缓） |
 | [更新记录](CHANGELOG.md) | 4.2.0 → 6.4.0 全部版本变更 |
 | [openui-lang 规范](docs/reference/openui-lang-spec.md) | `guncat-ui lang` 所对齐的上游语言实现级规范 |
 | [open-intelligent-ui 规格](docs/reference/open-intelligent-ui-spec.md) | 交互模式所对齐的上游 Generated-Answer UI 规格 |
