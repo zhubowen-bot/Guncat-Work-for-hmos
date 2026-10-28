@@ -2,7 +2,7 @@
 
 > 中文 | [English](README_EN.md)
 
-**鸿蒙手机上的原生 AI 工作台** —— 用 ArkTS / ArkUI 从零构建。它不是"把请求转给云端"的客户端：**完整 Linux `shell`**（内核 6.12 + Alpine 3.22，QEMU 解释执行、不需要 JIT 权限，`apk add` 可用）与**原生 CPython 3.12**（编成 HarmonyOS `.so` 在进程内直跑，numpy / pandas / scipy / matplotlib 全离线）都在机内真跑，**47 个工具 + 32 个技能**的 Codex 式 Agent Loop 端侧闭环，**Intelligent UI**（一句话直出可操作界面）与 **Harness**（多轮工具循环 + 沙箱工作区）两种当红形态真机跑通，PPT / Word / Excel / 绘图端侧直出。**鸿蒙手机可用，不止鸿蒙电脑。**
+**鸿蒙手机上的原生 AI 工作台** —— 用 ArkTS / ArkUI 从零构建，非套壳。**鸿蒙手机可用，不止鸿蒙电脑。**：**完整 Linux `shell`**（内核 6.12 + Alpine 3.22，`apk add` 可用）与**原生 CPython 3.12**（编成 HarmonyOS `.so` 在进程内直跑，numpy / pandas / scipy / matplotlib 全离线）都在机内真跑，**47 个工具 + 32 个技能**的 Agent Loop 端侧闭环，**Intelligent UI**（一句话直出可操作界面）与 **Harness**（多轮工具循环 + 沙箱工作区）两种当红形态真机跑通，PPT / Word / Excel / 绘图端侧直出。
 
 <!-- 演示位（可选升级）：真机录屏 30–60 秒 —— 进工作模式 → 一句话生成 PPT → 产物卡片展开 → 切到交互模式拖滑块重算。动态 GIF 比静态截图更有说服力。 -->
 
@@ -35,9 +35,9 @@
 
 ## 两个当红形态，都在端侧真机跑通
 
-| 形态 | 对标 | 在 Guncat Work 里的样子 |
-| --- | --- | --- |
-| ✦ **交互模式** | GPT 的 **Intelligent UI** | 一句话进来，一张**能拖、能点、能改参数并即时重算**的原生界面出去：图表 / 表格 / 指标卡 / 选项卡 / 表单控件全部原生渲染，默认零工具调用、一轮直出 |
+| 形态          | 对标                                           | 在 Guncat Work 里的样子                                                                 |
+| ----------- | -------------------------------------------- | ---------------------------------------------------------------------------------- |
+| ✦ **交互模式**  | GPT 的 **Intelligent UI**                     | 一句话进来，一张**能拖、能点、能改参数并即时重算**的原生界面出去：图表 / 表格 / 指标卡 / 选项卡 / 表单控件全部原生渲染，默认零工具调用、一轮直出   |
 | 🛠 **工作模式** | **DeepSeek Harness**（dsh，Codex 式 Agent Loop） | 多轮工具循环 + 每会话独立沙箱工作区 + 47 个内置工具，长程任务自主执行，端侧直出 PPT / Word / Excel / SVG，产物卡片附行级 diff |
 
 两个形态**共用同一套 Agent Loop 与沙箱工作区**，差别在行为纪律与**下发的工具面**——工作模式是「47 个内置工具全量 + 多轮工具循环 + 长程交付」，交互模式只下发 **27 个**（读素材 / 算真实数字 / 核实外部事实 / 出文件），长程工具（`todo_write` / `goal_*` / `schedule_*` / `subagent` …）根本不出现在它的请求里，所以是「快车道、一轮直出界面」。应用启动默认落在交互模式，空态大标题处的「交互模式 / 工作模式」胶囊可一键换挡。
@@ -158,24 +158,24 @@ cp $HOME/hish-tci-build/deps/output/libqemu-system-aarch64-tci.so \
 
 ## 文档
 
-| 文档 | 内容 |
-| --- | --- |
-| [主要功能](docs/features.md) | 全部客户端功能与工程约定 |
-| [工作模式架构与维护指南](docs/architecture/work-mode.md) | Agent Loop、47 个工具、PPT / Word 生成链路、技能系统、`run_js` 沙箱、ArkTS 落地约束 |
-| [Shell 工具：设备内真 Linux](docs/architecture/linux-shell.md) | QEMU TCI（无 JIT）嵌入、virtio-9p 工作区一致性、文件式命令协议、生命周期与排障、镜像构建链 |
-| [原生 Python 与跨域桥](docs/architecture/native-python.md) | CPython 交叉编译、`run_python` 执行模型、`npy` 桥协议与性能数据、能力边界 |
-| [交互模式架构（Intelligent UI）](docs/architecture/interactive-mode.md) | 提示词分叉、`guncat-ui lang` 契约、流式成形、交互闭环、扩展入口 |
-| [项目结构](docs/architecture/project-structure.md) | 目录布局、数据流、核心组件 |
-| [使用指南](docs/guides/usage.md) | 分场景操作步骤 |
-| [常见问题](docs/guides/faq.md) | 排障与已知行为 |
-| [内置智能体](docs/reference/builtin-agents.md) | 智能体清单与差异 |
-| [持久化与主题系统](docs/reference/persistence-and-theme.md) | 本地存储与主题实现 |
-| [工作区与会话数据的生命周期](docs/architecture/workspace-lifecycle.md) | 磁盘布局、删除会话时的连带清理、启动清扫与四类残留对策 |
-| [三端实现对照与对齐现状](docs/ALIGNMENT_STATUS.md) | 电脑版 / 安卓版 / 鸿蒙版逐项对照：外壳、命令执行、JS/Python、PDF、工作区、语音、后台，以及刻意的差异 |
-| [后台任务方案](docs/BACKGROUND_JOBS_PLAN.md) | `run_in_background` / `job_*` 在手机端的可行性评估（暂缓） |
-| [更新记录](CHANGELOG.md) | 4.2.0 → 6.4.0 全部版本变更 |
-| [openui-lang 规范](docs/reference/openui-lang-spec.md) | `guncat-ui lang` 所对齐的上游语言实现级规范 |
-| [open-intelligent-ui 规格](docs/reference/open-intelligent-ui-spec.md) | 交互模式所对齐的上游 Generated-Answer UI 规格 |
+| 文档                                                                   | 内容                                                            |
+| -------------------------------------------------------------------- | ------------------------------------------------------------- |
+| [主要功能](docs/features.md)                                             | 全部客户端功能与工程约定                                                  |
+| [工作模式架构与维护指南](docs/architecture/work-mode.md)                        | Agent Loop、47 个工具、PPT / Word 生成链路、技能系统、`run_js` 沙箱、ArkTS 落地约束 |
+| [Shell 工具：设备内真 Linux](docs/architecture/linux-shell.md)              | QEMU TCI（无 JIT）嵌入、virtio-9p 工作区一致性、文件式命令协议、生命周期与排障、镜像构建链      |
+| [原生 Python 与跨域桥](docs/architecture/native-python.md)                 | CPython 交叉编译、`run_python` 执行模型、`npy` 桥协议与性能数据、能力边界            |
+| [交互模式架构（Intelligent UI）](docs/architecture/interactive-mode.md)      | 提示词分叉、`guncat-ui lang` 契约、流式成形、交互闭环、扩展入口                      |
+| [项目结构](docs/architecture/project-structure.md)                       | 目录布局、数据流、核心组件                                                 |
+| [使用指南](docs/guides/usage.md)                                         | 分场景操作步骤                                                       |
+| [常见问题](docs/guides/faq.md)                                           | 排障与已知行为                                                       |
+| [内置智能体](docs/reference/builtin-agents.md)                            | 智能体清单与差异                                                      |
+| [持久化与主题系统](docs/reference/persistence-and-theme.md)                  | 本地存储与主题实现                                                     |
+| [工作区与会话数据的生命周期](docs/architecture/workspace-lifecycle.md)            | 磁盘布局、删除会话时的连带清理、启动清扫与四类残留对策                                   |
+| [三端实现对照与对齐现状](docs/ALIGNMENT_STATUS.md)                              | 电脑版 / 安卓版 / 鸿蒙版逐项对照：外壳、命令执行、JS/Python、PDF、工作区、语音、后台，以及刻意的差异   |
+| [后台任务方案](docs/BACKGROUND_JOBS_PLAN.md)                               | `run_in_background` / `job_*` 在手机端的可行性评估（暂缓）                  |
+| [更新记录](CHANGELOG.md)                                                 | 4.2.0 → 6.4.0 全部版本变更                                          |
+| [openui-lang 规范](docs/reference/openui-lang-spec.md)                 | `guncat-ui lang` 所对齐的上游语言实现级规范                                |
+| [open-intelligent-ui 规格](docs/reference/open-intelligent-ui-spec.md) | 交互模式所对齐的上游 Generated-Answer UI 规格                             |
 
 ## 权限与系统能力
 
