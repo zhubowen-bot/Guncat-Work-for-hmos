@@ -11,7 +11,7 @@
 <!-- 演示位（可选升级）：真机录屏 30–60 秒 —— 进工作模式 → 一句话生成 PPT → 产物卡片展开 → 切到交互模式拖滑块重算。动态 GIF 比静态截图更有说服力。 -->
 
 ![HarmonyOS](https://img.shields.io/badge/HarmonyOS-API%2024%20(6.1.1)-blue)
-![version](https://img.shields.io/badge/version-6.4.0-blue)
+![version](https://img.shields.io/badge/version-7.0.0-blue)
 ![forms](https://img.shields.io/badge/Agent%20Forms-Intelligent%20UI%20%2B%20Harness-blueviolet)
 ![linux](https://img.shields.io/badge/Linux-QEMU%20TCI%20%C2%B7%20no%20JIT-orange)
 ![python](https://img.shields.io/badge/CPython-3.12%20native-3776AB)
@@ -62,7 +62,7 @@ Guncat Work 是**鸿蒙手机上的原生 AI 工作台**：它不只负责对话
 
 界面在手机与桌面之间自适应：宽屏（≥700vp）展开「左侧栏 / 会话列 / 工作区详情列」三栏布局，窄屏回退单列加抽屉。工作区文件可原地预览、一键分享，生成与改动附行级 diff，对话历史、配置与朗读偏好均本地持久化。工程上采用 MVVM 分层，三协议 SSE 统一进协议适配层，每个文档生成器都配有针对性的离线验证环境（Node 构建 + Python 结构校验 + tsc 类型检查）。
 
-当前应用版本：`6.4.0` · 完整变更见 [更新记录](CHANGELOG.md)
+当前应用版本：`7.0.0` · 完整变更见 [更新记录](CHANGELOG.md)
 
 ## 能力概览
 
@@ -177,7 +177,7 @@ cp $HOME/hish-tci-build/deps/output/libqemu-system-aarch64-tci.so \
 | [工作区与会话数据的生命周期](docs/architecture/workspace-lifecycle.md)            | 磁盘布局、删除会话时的连带清理、启动清扫与四类残留对策                                   |
 | [三端实现对照与对齐现状](docs/ALIGNMENT_STATUS.md)                              | 电脑版 / 安卓版 / 鸿蒙版逐项对照：外壳、命令执行、JS/Python、PDF、工作区、语音、后台，以及刻意的差异   |
 | [后台任务方案](docs/BACKGROUND_JOBS_PLAN.md)                               | `run_in_background` / `job_*` 在手机端的可行性评估（暂缓）                  |
-| [更新记录](CHANGELOG.md)                                                 | 4.2.0 → 6.4.0 全部版本变更                                          |
+| [更新记录](CHANGELOG.md)                                                 | 4.2.0 → 7.0.0 全部版本变更                                          |
 | [openui-lang 规范](docs/reference/openui-lang-spec.md)                 | `guncat-ui lang` 所对齐的上游语言实现级规范                                |
 | [open-intelligent-ui 规格](docs/reference/open-intelligent-ui-spec.md) | 交互模式所对齐的上游 Generated-Answer UI 规格                             |
 

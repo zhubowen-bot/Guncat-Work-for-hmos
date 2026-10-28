@@ -1,7 +1,7 @@
 # 三端实现对照与对齐现状
 
 > 日期：2026-10-28 ｜ 对照：`Guncat-Work-for-pc`(0.2.1)、`Guncat-Work-for-android`(0.2.1)、
-> `Guncat-Work-for-hmos`(6.4.0)
+> `Guncat-Work-for-hmos`(7.0.0)
 > 方法：静态读代码与文档（工具定义、常量表、提示词、服务清单、`git log`、`CHANGELOG`），
 > 加 `tsc` / `assembleHap` 编译校验；**未逐条真机复跑**。
 > 本文只陈述事实与取舍，不含待办。

@@ -2,7 +2,77 @@
 
 > [← 返回 README](README.md)
 
-## 未发布（工作区生命周期：删除会话时的连带清理与孤儿回收）
+## 7.0.0（手机上的完整 Linux · 原生 CPython · 三端对齐）
+
+> 7.0.0 是 `shell` 与原生 Python 落地后的第一个正式版本（上一个正式版本是 6.3.0）。
+> **6.4.0 从未发布**——原本记在它名下的内容（`shell`、原生 Python 的全部迭代）与所有
+> 「未发布」条目，一并归入本版。
+
+本版重点：
+
+- **设备内真 Linux**：`shell` 跑的是 Alpine 3.22 + 内核 6.12（QEMU TCI，不需要 JIT 权限），
+  工作区经 virtio-9p 直连，`apk add` 可用 —— 详见「设备内真 Linux：`shell`（QEMU TCI）」。
+- **原生 CPython 3.12**：`run_python` 编成 `.so` 在应用进程内直跑，numpy / pandas / scipy /
+  matplotlib 随包离线 —— 详见下面几条原生 Python 记录。
+- **三端对齐**：@ 引用、编辑前读取守卫、项目指令、多图逐张送达，以及四处静默失败的修复。
+- **工作区治理**：删会话连带清理、执行中删除不复活、启动清扫孤儿目录。
+- **健壮性**：网络抖动自动重试、插话发送修复、工作模式不再误渲染交互卡片。
+
+### 设备内真 Linux：`shell`（QEMU TCI）
+
+> 一句话：模型现在能调 `shell`，跑的是**真的 Linux**（Alpine 3.22 + Linux 6.12 内核），
+> 而不是我另造一个"模拟 shell"。QEMU 以 **TCG 解释器（TCI）**构建，不生成机器码，
+> 因此**不需要 JIT / 可执行内存这类难以申请的受限权限**，手机与上架包都能用。
+
+#### 新增：`shell(command, cwd?, timeout_ms?, stdin?)` —— 第 46 个内置工具
+
+- **真 Linux 用户态**：管道、重定向、通配符、`sed`/`awk`/`find`/`xargs`/`tar`/`gzip` 全部是真的；
+  busybox 之外需要什么语言运行时可以自己装（`apk add python3` / `nodejs` / `jq` …），网络走 QEMU 内建
+  slirp 用户态栈，不需要新增权限。
+- **与其它工具同一目录（硬要求）**：宿主把 `filesDir/workspaces` 整棵目录用 virtio-9p 注入客人，
+  客人在执行每条命令前 `mount --bind /mnt/workspaces/<会话>` 到 `/workspace`。于是
+  `cat data/a.csv` 与 `read_file("data/a.csv")` 读的是**同一批 inode**，不是副本：
+  shell 写的文件立刻能被 `read_file` 读到，`write_file` 写的文件 shell 里 `cat` 也立刻可见。
+- **命令通道也是 9p**：任务写在 `filesDir/linux/ipc/<会话>/in/<id>/`，客人守护进程执行后把
+  `stdout`/`stderr`/`code`/`done` 写回 `out/<id>/`。**不用串口做 RPC** —— 没有终端回显、ANSI 转义与
+  二进制分界这类脆弱解析；串口只留作内核日志排障（native 侧存 64KB 环形缓冲，失败时附在错误里）。
+- **生命周期**：首次调用释放镜像（压缩 qcow2 约 37MB，已含 Python 3 / pip / jq；按 `versionCode` +
+  `WORK_LINUX_IMAGE_REV` 缓存）并冷启动 VM（TCI 解释执行，数十秒）；
+  之后同进程复用；空闲 10 分钟下发 `poweroff` 释放 2GB 内存；进程退出即随进程销毁。
+- **预装 Python 3 / pip / jq**：镜像自带 `python3`(3.12)、`py3-pip`、`jq`、`ca-certificates`，
+  模型可以直接 `python3 -c "..."`、`pip install requests`、`cat data.json | jq '.items[]'`，
+  不必先联网装包；要加更多包改 `tooling/linux-vm/provision-packages.sh` 的 `PACKAGES` 重跑
+  （镜像自己 `apk add` 后回写 qcow2，依赖解析与 post-install 都由 apk 完成）。
+- **内存 512MB → 2GB**：手机普遍 12GB+，`apk add` / `pip install` / 解大压缩包不再容易 OOM；
+  空闲 10 分钟仍会自动关机释放。
+- **失败语义**：命令退出码非 0 **不算工具失败**（`grep` 无匹配返回 1 是正常语义），由模型按退出码与
+  stderr 判断；只有 VM 不可用/引导失败才是 `ok=false`，且错误里带串口日志尾部。输出超 60KB 截断，
+  全文落到工作区 `.spill/shell-*.log` 供 `read_file` 读回。
+
+#### 新增：原生模块 `libguncatvm.so` + 构建链 `tooling/linux-vm/`
+
+- `entry/src/main/cpp/vm/guncat_vm.cpp`：`dlopen` QEMU 动态库（优先 `libqemu-system-aarch64-tci.so`，
+  回退 JIT 版），在独立线程里跑 `qemu_system_entry()`，串口线程把内核日志写进环形缓冲；
+  导出 `startVM` / `status` / `serialTail` / `onData` / `onExit` / `sendInput` / `isAvailable`。
+- `tooling/linux-vm/`：可复现的构建链（`fetch-assets.sh` → `build-libqemu-tci.sh` → `build-rootfs.sh`），
+  含 TCI 版 QEMU 的交叉编译配方（改编自 HiSH 的 MIT 配方）、定制 Alpine 镜像的 sysinit 与任务代理、
+  以及**受限网络适配**（github.com 直链换 `codeload.github.com`、glib 的 `proxy-libintl` 子项目改为
+  直接解包，否则 meson 会尝试 `git clone` 而失败）。
+- 客人镜像刻意**不启动 OpenRC**：TCI 下每个服务脚本都是纯开销，只保留伪文件系统挂载、DHCP、
+  两个 9p 挂载、任务代理与串口控制台。
+
+#### 提示词与工具面
+
+- 系统提示词新增 `shell` 的定位说明：**能用 read_file/write_file/search_files/glob/grep/transform_file
+  直接做的不要用 shell**（每次调用有开销）；shell 用于批量重命名/批量转换、`sed`/`awk`/`find` 流水线、
+  打包、跨文件统计这类"需要真程序"的活；并明确"目录与其它工具一致"这条口径，避免模型把 shell 里的文件
+  当成另一个世界。
+- 工具面：工作模式 **45 → 46** 个工具；交互模式仍是 **27 个**（`shell` 属于重工具，故意不进白名单）。
+  （`run_python` 进来之后是 47 个，见下文「原生 Python 首版」。）
+- 版本号：`6.3.0` → **`7.0.0`**（versionCode 见 `AppScope/app.json5`；versionCode 或
+  `WORK_LINUX_IMAGE_REV` 变化都会触发镜像重新释放）。
+
+### 工作区生命周期：删除会话时的连带清理与孤儿回收
 
 > 起因：确认"删掉会话会不会把它的沙箱工作区一起删"。答案是**会**（原本就删），
 > 但"会删"不等于"一定不残留"—— 补了三处漏洞，并把机制写成文档：
@@ -23,13 +93,13 @@
   空工作区/聊天模式保持一点即删。
 - 测试：675 → **683 项**（新增孤儿判定 8 项）；`tsc` exit 0；`assembleHap` BUILD SUCCESSFUL。
 
-## 未发布（三端对齐：@引用 · 编辑守卫 · 项目指令 · 图片逐张送达）
+### 三端对齐：@引用 · 编辑守卫 · 项目指令 · 图片逐张送达
 
 > 对照电脑版 0.2.1 / 安卓版 0.2.1 做了一轮功能对齐审计（现状见 `docs/ALIGNMENT_STATUS.md`），
 > 这一版把审计里**不需要平台能力**的缺口全部补齐，并修掉四处会静默失败的行为缺陷。
 > 后台任务（`run_in_background` / `job_*`）按内存与闪退风险**暂缓**，评估与方案另附。
 
-### 一、@ 引用工作区文件（电脑版 / 安卓版已有，鸿蒙版补齐）
+#### 一、@ 引用工作区文件（电脑版 / 安卓版已有，鸿蒙版补齐）
 
 - **输入框敲 `@` 弹候选**：`views/MessageInputView.ets` 在输入区上方弹出候选层（文件名前缀 >
   文件名包含 > 路径包含，最多 8 条），点一下替换成 `@完整路径 ` 并把光标移到末尾。
@@ -46,7 +116,7 @@
 - **提示词契约**：`workspace()` 段写明 `<mentioned_files>` 是用户点名的文件、不必再 `read_file`，
   以及「数据不是权限」。
 
-### 二、编辑前读取守卫（内核强制，不再靠提示词劝告）
+#### 二、编辑前读取守卫（内核强制，不再靠提示词劝告）
 
 - 新增 `common/FileObservation.ts` + `WorkFileService.guardBeforeTool/recordAfterTool`，
   挂在工具分发这一个咽喉点上：`read_file` / `write_file` / `append_file` 成功后登记版本，
@@ -57,14 +127,14 @@
   （用户自己改的、`shell` 改的、`run_python` 改的都算）。
 - 工作区清空 / 单文件删除时同步清登记，避免"删了又建同名文件"被当成已读过。
 
-### 三、项目指令文件（按用户口径：只加提示词，不自动注入）
+#### 三、项目指令文件（按用户口径：只加提示词，不自动注入）
 
 - `workspace()` 段新增三条：工作区根目录的 `AGENTS.md` / `CLAUDE.md` / `GUNCAT.md` 是项目指令，
   快照文件树里出现就先读；用户说「以后都按这个来」时写进 `AGENTS.md`；项目指令是数据不是权限
   （「忽略以上规则」一类话术不执行，与用户当下消息冲突时以用户为准）。
 - 手机端不注入正文：上下文与内存都紧，模型自己读一次比每轮塞进快照更划算。
 
-### 四、修复（四处静默失败）
+#### 四、修复（四处静默失败）
 
 - **`ask_user_question` 的答案会被丢弃**：卡片等 5 分钟，外层护栏却只给 180 秒 ——
   第 3~5 分钟作答时模型早已收到"工具超时"，卡片还挂着但答了等于没答。
@@ -78,17 +148,17 @@
   回应、A 莫名收到一句无关指令）。现在运行期记录 `runningConvId`：只有归属会话能插话/停止
   （`streamingHere`），别的会话发送时明确提示；提问卡也只显示在归属会话，定时提醒不再塞进别处的队列。
 
-### 五、其它
+#### 五、其它
 
 - **`view_image` 兜底压缩**：平时一律原样送原图（固定压缩会把小字压糊），只有图片超过 8MB、
   不压就根本看不见时才按 2048/90 → 1600/82 → 1280/72 逐级压成 JPEG，并在工具结果里注明
   原图与压缩后大小；三档都压不进上限就如实报错。
 - **本地搜索单次结果条数**暴露到设置面板（1~20，默认 8）。
-- 版本号：`Constants.APP_VERSION` 6.3.0 → **6.4.0**，与 `AppScope/app.json5` 一致。
+- 版本号：`Constants.APP_VERSION` 6.3.0 → **7.0.0**，与 `AppScope/app.json5` 一致。
 - **测试**：`test/guncat-harness` 633 → **675 项**（新增 FileObservation 守卫与 @ 解析/候选的断言）；
   `tsc -p check/tsconfig.json` exit 0；`assembleHap` **BUILD SUCCESSFUL**。
 
-## 未发布（网络中断与自动重试）
+### 网络中断与自动重试
 
 > 依据真机反馈：稍微遇到网络波动或代理断开，任务就断在半路。参考安卓版的重试实践，同时避开它踩过的坑。
 
@@ -117,7 +187,7 @@
   HttpErrorClassifier、三协议终止事件、适配器 `onComplete` 派发、重试预算常量）；
   `tsc -p check/tsconfig.json` exit 0；`assembleHap` **BUILD SUCCESSFUL**。
 
-## 未发布（插话：执行中点发送没反应）
+### 插话：执行中点发送没反应
 
 > 依据真机反馈：任务执行中在输入框输入一句话点发送，输入框里的字消失了，但任务毫无反应。
 
@@ -140,7 +210,7 @@
   驱动续跑 / 模拟器等价 / builder / mapper 断言）；`tsc -p check/tsconfig.json` exit 0；
   `assembleHap` **BUILD SUCCESSFUL**。
 
-## 未发布（run_python 内存与 matplotlib 缓存）
+### run_python：内存与 matplotlib 缓存
 
 > 依据一轮实机复测：一次无法复现的闪退（高置信度归因于内存压力）+ 每次 import matplotlib 都在
 > 临时目录重建字体缓存。前者做了可观测与释放，后者按警告建议修掉。
@@ -162,7 +232,7 @@
 - **测试**：`launcher-test.py` 增至 **42 项**（新增：用户命名空间释放、MPLCONFIGDIR 生效、正常调用
   不产生内存警告、诊断带内存数字）。
 
-## 未发布（run_python 运行环境体检修复）
+### run_python：运行环境体检修复
 
 > 依据一次实机体检报告（进程常驻 + 解释器复用带来的系统性缺陷），逐条在源码里复核后修掉
 > 确认存在的 6 类问题；同时补了一个桌面侧的启动器回归测试（`tooling/python/launcher-test.py`）。
@@ -199,7 +269,7 @@
   在桌面 CPython 上按"同一个 `__main__` globals 反复 exec"的语义跑 38 项回归（捕获、状态隔离、
   超时、只读守卫、spawn 守卫、诊断），`node test/guncat-harness/test-core.mjs` 里也加了源码级守卫。
 
-## 未发布（工作模式误渲染交互卡片）
+### 工作模式误渲染交互卡片
 
 - **修复：交互模式一张卡片都不显示（回归）**。上一版把 `isUiFence` 收紧成"只有显式语言才算
   界面围栏"是错的：交互模式的原则是"宁可当卡片，也不要退化成别的东西"。现在恢复空 info 也算
@@ -213,7 +283,7 @@
   整条消息即程序，三种形态照旧渲染成卡片（原则是"宁可当卡片，也不要退化成别的东西"）。
   补了工作模式与空 info 围栏的回归用例。
 
-## 未发布（原生 Python 增强：超时 / 依赖库 / 纪律纠偏）
+### 原生 Python 增强：超时 / 依赖库 / 纪律纠偏
 
 > 依据一次完整的实机自检（117 个模块矩阵 + 并发/超时/边界逐项实测），修掉最危险的一条并补齐四个缺失库。
 
@@ -230,7 +300,7 @@
   纯 Python 计算不要用线程/线程池（实测慢 7~8 倍，GIL 争用）；但 `hashlib`/`zlib`/`bz2`/`lzma`/`sqlite3` 等释放 GIL 的 C 运算多线程是真并行（sha256 8 线程 2.7 倍，分块需 ≥64KB）；`multiprocessing` 仍不可用；int→str 上限放宽到 10 万位。
 - 扩展总数 51 → **56**。
 
-## 未发布（原生 Python）
+### 原生 Python 首版
 
 > 一句话：VM 里的 Python 慢是因为 **CPU 指令被逐条仿真**（实测比原生慢 2~3 个数量级），
 > 不是缺 CPython 的 JIT。既然 JIT 权限拿不到，就把解释器**编译成 HarmonyOS 原生 `.so`**，
@@ -249,62 +319,9 @@
 - **实测依据**：同机 TCI/JIT 对照显示 CPU 密集负载慢 12–23×，说明换语言无效、JIT 也不够
   （即便批下来 Python 仍比原生慢 1~1.5 个数量级），只有原生解释器能回到可用区间。
 
-## 6.4.0 更新（Shell 工具 · 设备内真 Linux）
-
-> 一句话：模型现在能调 `shell`，跑的是**真的 Linux**（Alpine 3.22 + Linux 6.12 内核），
-> 而不是我另造一个"模拟 shell"。QEMU 以 **TCG 解释器（TCI）**构建，不生成机器码，
-> 因此**不需要 JIT / 可执行内存这类难以申请的受限权限**，手机与上架包都能用。
-
-### 新增：`shell(command, cwd?, timeout_ms?, stdin?)` —— 第 46 个内置工具
-
-- **真 Linux 用户态**：管道、重定向、通配符、`sed`/`awk`/`find`/`xargs`/`tar`/`gzip` 全部是真的；
-  busybox 之外需要什么语言运行时可以自己装（`apk add python3` / `nodejs` / `jq` …），网络走 QEMU 内建
-  slirp 用户态栈，不需要新增权限。
-- **与其它工具同一目录（硬要求）**：宿主把 `filesDir/workspaces` 整棵目录用 virtio-9p 注入客人，
-  客人在执行每条命令前 `mount --bind /mnt/workspaces/<会话>` 到 `/workspace`。于是
-  `cat data/a.csv` 与 `read_file("data/a.csv")` 读的是**同一批 inode**，不是副本：
-  shell 写的文件立刻能被 `read_file` 读到，`write_file` 写的文件 shell 里 `cat` 也立刻可见。
-- **命令通道也是 9p**：任务写在 `filesDir/linux/ipc/<会话>/in/<id>/`，客人守护进程执行后把
-  `stdout`/`stderr`/`code`/`done` 写回 `out/<id>/`。**不用串口做 RPC** —— 没有终端回显、ANSI 转义与
-  二进制分界这类脆弱解析；串口只留作内核日志排障（native 侧存 64KB 环形缓冲，失败时附在错误里）。
-- **生命周期**：首次调用释放镜像（压缩 qcow2 约 37MB，已含 Python 3 / pip / jq；按 `versionCode` +
-  `WORK_LINUX_IMAGE_REV` 缓存）并冷启动 VM（TCI 解释执行，数十秒）；
-  之后同进程复用；空闲 10 分钟下发 `poweroff` 释放 2GB 内存；进程退出即随进程销毁。
-- **预装 Python 3 / pip / jq**：镜像自带 `python3`(3.12)、`py3-pip`、`jq`、`ca-certificates`，
-  模型可以直接 `python3 -c "..."`、`pip install requests`、`cat data.json | jq '.items[]'`，
-  不必先联网装包；要加更多包改 `tooling/linux-vm/provision-packages.sh` 的 `PACKAGES` 重跑
-  （镜像自己 `apk add` 后回写 qcow2，依赖解析与 post-install 都由 apk 完成）。
-- **内存 512MB → 2GB**：手机普遍 12GB+，`apk add` / `pip install` / 解大压缩包不再容易 OOM；
-  空闲 10 分钟仍会自动关机释放。
-- **失败语义**：命令退出码非 0 **不算工具失败**（`grep` 无匹配返回 1 是正常语义），由模型按退出码与
-  stderr 判断；只有 VM 不可用/引导失败才是 `ok=false`，且错误里带串口日志尾部。输出超 60KB 截断，
-  全文落到工作区 `.spill/shell-*.log` 供 `read_file` 读回。
-
-### 新增：原生模块 `libguncatvm.so` + 构建链 `tooling/linux-vm/`
-
-- `entry/src/main/cpp/vm/guncat_vm.cpp`：`dlopen` QEMU 动态库（优先 `libqemu-system-aarch64-tci.so`，
-  回退 JIT 版），在独立线程里跑 `qemu_system_entry()`，串口线程把内核日志写进环形缓冲；
-  导出 `startVM` / `status` / `serialTail` / `onData` / `onExit` / `sendInput` / `isAvailable`。
-- `tooling/linux-vm/`：可复现的构建链（`fetch-assets.sh` → `build-libqemu-tci.sh` → `build-rootfs.sh`），
-  含 TCI 版 QEMU 的交叉编译配方（改编自 HiSH 的 MIT 配方）、定制 Alpine 镜像的 sysinit 与任务代理、
-  以及**受限网络适配**（github.com 直链换 `codeload.github.com`、glib 的 `proxy-libintl` 子项目改为
-  直接解包，否则 meson 会尝试 `git clone` 而失败）。
-- 客人镜像刻意**不启动 OpenRC**：TCI 下每个服务脚本都是纯开销，只保留伪文件系统挂载、DHCP、
-  两个 9p 挂载、任务代理与串口控制台。
-
-### 提示词与工具面
-
-- 系统提示词新增 `shell` 的定位说明：**能用 read_file/write_file/search_files/glob/grep/transform_file
-  直接做的不要用 shell**（每次调用有开销）；shell 用于批量重命名/批量转换、`sed`/`awk`/`find` 流水线、
-  打包、跨文件统计这类"需要真程序"的活；并明确"目录与其它工具一致"这条口径，避免模型把 shell 里的文件
-  当成另一个世界。
-- 工具面：工作模式 **45 → 46** 个工具；交互模式仍是 **27 个**（`shell` 属于重工具，故意不进白名单）。
-- 版本号：`6.3.0` / 630 → **`6.4.0`**（versionCode 见 `AppScope/app.json5`；versionCode 或
-  `WORK_LINUX_IMAGE_REV` 变化都会触发镜像重新释放）。
-
 ## 6.3.0 更新（交互模式 · Intelligent UI）
 
-> 6.3.0 期间交互模式做了**两轮**大改：先上线初版（严格 JSON DSL），随后**全面重写**为声明式界面语言 `guncat-ui lang`。两轮都属于 6.3.0（**不单列 6.4.0**，应用版本号保持 `6.3.0` / versionCode 720），下面按"由新到旧"合并记录。
+> 6.3.0 期间交互模式做了**两轮**大改：先上线初版（严格 JSON DSL），随后**全面重写**为声明式界面语言 `guncat-ui lang`。两轮都属于 6.3.0（**不单列版本**，应用版本号保持 `6.3.0`），下面按"由新到旧"合并记录。
 
 ### 修复：交互模式拍照掉进附件区、系统分享"概率性不同步到工作区"
 
