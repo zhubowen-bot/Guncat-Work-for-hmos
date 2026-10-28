@@ -2,13 +2,15 @@
 
 > [中文](README.md) | English
 
-**Codex in your pocket, on HarmonyOS** — a native HarmonyOS AI client built from scratch in ArkTS / ArkUI. **Both of today's hottest agent forms run on real devices, fully on-device**: **Intelligent UI** (one sentence in, a fully operable interface out — modelled on GPT's Intelligent UI) and **Harness** (a Codex-style multi-turn Agent Loop with a sandboxed workspace, a port of DeepSeek Harness to the device). Modular kernel + three-protocol streaming + 47 built-in tools + 32 skills, producing PPT / Word / Excel / SVG right on the device.
+**A native AI workbench on your HarmonyOS phone** — built from scratch in ArkTS / ArkUI, not a client that forwards requests to a cloud runner. **A complete Linux `shell`** (kernel 6.12 + Alpine 3.22, QEMU interpreter execution, no JIT permission needed, `apk add` works) and **native CPython 3.12** (compiled as a HarmonyOS `.so` and run in-process — numpy / pandas / scipy / matplotlib all offline) really run on the device; a Codex-style Agent Loop with **47 tools + 32 skills** closes the loop on-device; both headline forms — **Intelligent UI** (one sentence in, an operable interface out) and **Harness** (multi-turn tool loop + sandboxed workspace) — run on real hardware, producing PPT / Word / Excel / drawings on-device. **Available on HarmonyOS phones, not just HarmonyOS PCs.**
 
 <!-- Demo slot (optional upgrade): a 30–60s real-device screen recording — enter work mode → generate a PPT from one sentence → expand the artifact card → switch to interactive mode and drag a slider to recompute. A moving GIF beats static screenshots. -->
 
 ![HarmonyOS](https://img.shields.io/badge/HarmonyOS-API%2024%20(6.1.1)-blue)
 ![version](https://img.shields.io/badge/version-6.4.0-blue)
 ![forms](https://img.shields.io/badge/Agent%20Forms-Intelligent%20UI%20%2B%20Harness-blueviolet)
+![linux](https://img.shields.io/badge/Linux-QEMU%20TCI%20%C2%B7%20no%20JIT-orange)
+![python](https://img.shields.io/badge/CPython-3.12%20native-3776AB)
 ![tools](https://img.shields.io/badge/built--in%20tools-47-informational)
 ![skills](https://img.shields.io/badge/skills-32-informational)
 [![license](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
@@ -23,6 +25,14 @@
 
 <p align="center"><sub>Interactive Mode home · an interface delivered by Interactive Mode · a long-horizon task delivered by Work Mode · the <code>run_js</code> on-device JS sandbox　(click any image to enlarge)</sub></p>
 
+## What actually runs on the phone
+
+- 🐧 **A real Linux, not a simulated shell**: `shell` runs a full userland (kernel 6.12 + Alpine 3.22) under QEMU's TCG interpreter (TCI) — no machine code, **no JIT permission required**. Pipes, redirections, globbing, `sed`, `awk`, `find`, `tar` and `apk add` are genuine. The working directory is bound straight to the conversation workspace over virtio-9p: `cat data/a.csv` and `read_file("data/a.csv")` are the same file, not a copy.
+- 🐍 **Native CPython 3.12, not emulation**: the interpreter is compiled as a HarmonyOS `.so` and runs inside the app process (no instruction translation — 2–3 orders of magnitude faster than `python3` inside the VM). numpy / pandas / **scipy** / matplotlib / python-docx / python-pptx / reportlab / sympy ship offline, and CJK charts work out of the box.
+- 🧠 **On-device Agent Loop**: 47 built-in tools + 32 skills, multi-turn tool loop, parallel subagents, schedules / goals / session-log search, three-stage context compaction — long-horizon tasks finish on the phone and land in the sandboxed workspace.
+- 📊 **On-device deliverables**: PPT / Word / Excel / SVG come from local generators on a JSON intermediate layer (losslessly readable, operator-style editable); PDFs and Office files are parsed entirely locally, **consuming no multimodal quota**.
+- ✦ **Intelligent UI**: one sentence in, a draggable / clickable / instantly recomputing native interface out — charts, tables, metric cards, tab sets and form controls all rendered natively.
+
 ## Two headline agent forms, both running on-device
 
 | Form | Modelled on | What it looks like in Guncat Work |
@@ -32,15 +42,19 @@
 
 The two forms **share the same Agent Loop, the same sandboxed workspace and all 47 tools**. They differ only in behavioural discipline — Work Mode is "multi-turn tool loop + long-horizon delivery", Interactive Mode is "fast lane, interface in one turn". The app starts in Interactive Mode by default; the "Interactive Mode / Work Mode" pill in the empty state switches between them.
 
+Underneath both sits **one on-device execution environment**: a complete Linux `shell` when a real terminal is needed, native CPython when data has to be computed, local Office generators when files have to be delivered — all on the phone, with no remote execution service involved.
+
 Interactive Mode reproduces how GPT's Intelligent UI delivers an answer: the reply is no longer plain text but an **interface program** that the app renders into a native, operable interface — bar / line / area / horizontal bar / donut / radial / radar / stacked bar charts, tables, metric cards, image walls, tab sets / accordions / step bars / card blocks, plus a full set of form controls (slider / toggle / radio / multi-select / dropdown / tag picker / tab picker / text input / text area). Control values can even be sent back to the model to trigger a recomputation. Work Mode ports the core Agent Loop of DeepSeek Harness (dsh) to the device.
 
 The research material on the upstream specs is in the repo too: [open-intelligent-ui spec](docs/reference/open-intelligent-ui-spec.md) · [openui-lang spec](docs/reference/openui-lang-spec.md).
 
 ## What this is
 
-Guncat Work ships a full client feature set: chat mode bundles general-purpose, paper-conversion, legal / research / sift-retrieval and LLM-evaluation agents; it supports the three mainstream protocols (Chat / Responses / Anthropic), native Markdown (including LaTeX formulas and Mermaid diagrams), direct image and document attachment upload, CoreSpeechKit read-aloud and native voice input.
+Guncat Work is **a native AI workbench on your HarmonyOS phone**: it does not stop at conversation — it moves what "getting work done" needs onto the device, namely a real Linux, a native Python, a tool layer that can read and write the workspace, and a pipeline that delivers the result straight as a file.
 
-Work Mode brings a sandboxed workspace and tool-calling capability with 47 built-in tools, covering file create/read/update/delete plus pattern-matched search, task lists, image viewing, web downloads, PDF parsing, Office generation and read/write editing (PPT / Word / Excel each built on a JSON intermediate layer, losslessly readable and operator-style editable), data-pipeline cleaning, transformation and format conversion, a JS execution sandbox `run_js` built on JSVM-API, and a **real in-device Linux `shell`** — QEMU runs as a TCG interpreter (TCI), never generating machine code and therefore needing no restricted JIT permission, with an Alpine userland bound to the very same conversation workspace through virtio-9p (`cat data/a.csv` and `read_file("data/a.csv")` read the same file). 32 built-in skills (5 top-level Skill routes + 7 format branches) load domain knowledge on demand — PPT design rules, Doc JSON syntax, data-cleaning recipes. Office documents and PDFs are parsed entirely locally, consuming no multimodal quota.
+Chat mode bundles general-purpose, paper-conversion, legal / research / sift-retrieval and LLM-evaluation agents; it supports the three mainstream protocols (Chat / Responses / Anthropic), native Markdown (including LaTeX formulas and Mermaid diagrams), direct image and document attachment upload, CoreSpeechKit read-aloud and native voice input.
+
+Work Mode brings a sandboxed workspace and tool-calling capability with 47 built-in tools, covering file create/read/update/delete plus pattern-matched search, task lists, image viewing, web downloads, PDF parsing, Office generation and read/write editing (PPT / Word / Excel each built on a JSON intermediate layer, losslessly readable and operator-style editable), data-pipeline cleaning, transformation and format conversion, a JS execution sandbox `run_js` built on JSVM-API, and a **real in-device Linux `shell`** — QEMU runs as a TCG interpreter (TCI), never generating machine code and therefore needing no restricted JIT permission, with an Alpine userland bound to the very same conversation workspace through virtio-9p. It also ships **native CPython `run_python`** — the interpreter is compiled as a HarmonyOS `.so` and runs in-process (no emulation, 2–3 orders of magnitude faster than `python3` inside the VM), with an `npy` bridge in the VM so shell pipelines reach the same interpreter. 32 built-in skills (5 top-level Skill routes + 7 format branches) load domain knowledge on demand — PPT design rules, Doc JSON syntax, data-cleaning recipes. Office documents and PDFs are parsed entirely locally, consuming no multimodal quota.
 
 The UI adapts between phone and desktop: wide screens (≥700vp) expand into a three-column layout (sidebar / conversation column / workspace detail column), narrow screens fall back to a single column plus a drawer. Workspace files can be previewed in place and shared in one tap; generations and edits carry line-level diffs; conversation history, configuration and read-aloud preferences all persist locally. Architecturally the project is layered MVVM, all three protocols' SSE streams converge into one protocol-adapter layer, and every document generator has a dedicated offline verification environment (Node build + Python structural validation + tsc type checking).
 
@@ -49,12 +63,12 @@ Current app version: `6.4.0` · full change history in the [changelog](CHANGELOG
 ## Capabilities
 
 - **Two headline agent forms**: **Interactive Mode** is modelled on GPT's Intelligent UI — one sentence in, an operable interface out, zero tool calls by default, delivered in one turn, with sliders, toggles and dropdowns recomputing instantly; **Work Mode** is a device-side port of DeepSeek Harness — multi-turn tool loop + sandboxed workspace + long-horizon delivery (artifact cards with line-level diffs).
+- **A complete Linux on the phone**: `shell` runs a full userland (kernel 6.12 + Alpine 3.22) under QEMU's TCG interpreter — **no JIT permission required** — so pipes, redirections, globbing, `sed`, `awk`, `find`, `tar` and `apk add` are genuine, with Python 3 / pip / jq preinstalled; the working directory is bound straight to the conversation workspace over virtio-9p (`cat data/a.csv` and `read_file("data/a.csv")` are the same file). First call pays a cold boot of a few tens of seconds, later calls reuse the same in-process VM, and it powers itself off after 10 idle minutes to free memory.
+- **Native CPython, no emulation**: `run_python` runs a real CPython 3.12 compiled as a HarmonyOS `.so` inside the app process (2–3 orders of magnitude faster than `python3` inside the VM); numpy / pandas / scipy / matplotlib / Pillow / lxml / sympy / python-docx / python-pptx / reportlab all ship offline, and CJK charts work out of the box; the VM also ships an `npy` bridge so shell pipelines can call the same interpreter.
+- **On-device Office output**: PPT / Word / Excel / SVG are produced by local generators on a JSON intermediate layer, and documents can be read back losslessly and edited operator-style; PDFs and Office files are parsed entirely locally, consuming no multimodal quota.
+- **47 built-in tools**: file create/read/update/delete plus pattern-matched search, task lists, image viewing, web downloads, PDF parsing, Office read/write, data-pipeline cleaning / transformation / format conversion, the JSVM-API `run_js` code sandbox (no network, no filesystem access, runs on a background thread with a timeout guard), plus the `shell` / `run_python` execution layer described above.
 - **Three protocols**: OpenAI Completions (`/chat/completions`), OpenAI Responses (`/responses`) and Anthropic Messages (`/messages`), all supporting direct image upload; extended thinking and web search are controlled explicitly per protocol.
 - **Built-in local web search**: shipped inside the app with no manual toggle; available in both Work Mode and chat mode, so search is not at the mercy of a server-side switch.
-- **On-device Office output**: PPT / Word / Excel / SVG are produced by local generators on a JSON intermediate layer, and documents can be read back losslessly and edited operator-style; PDFs and Office files are parsed entirely locally, consuming no multimodal quota.
-- **47 built-in tools**: file create/read/update/delete plus pattern-matched search, task lists, image viewing, web downloads, PDF parsing, Office read/write, data-pipeline cleaning / transformation / format conversion, the JSVM-API `run_js` code sandbox (no network, no filesystem access, runs on a background thread with a timeout guard), and a **real in-device Linux `shell`** (QEMU TCG interpreter — no JIT permission required; Alpine + busybox, `apk add` available, working directory wired straight to the conversation workspace over virtio-9p).
-- **Native CPython, no emulation**: `run_python` runs a real CPython 3.12 compiled as a HarmonyOS `.so` inside the app process (no instruction emulation, so it is 100× faster than `python3` inside the VM); the VM also ships an `npy` bridge so shell pipelines can call the same interpreter.
-- **Real Linux, not a simulated API**: `shell` runs a complete Linux userland (kernel 6.12 + Alpine 3.22), so pipes, redirections, globbing, `sed`, `awk`, `find` and `tar` are all genuine; the first call pays a cold boot of a few tens of seconds, later calls reuse the same in-process VM, and it powers itself off after 10 idle minutes to free memory.
 - **32 skills**: 5 top-level Skill routes + 7 format branches, loaded on demand when triggered; the PPT / Word / Excel skills use a "gate" discipline and generate a checkable self-report before delivery.
 - **Native Markdown**: CommonMark and common GFM syntax, code highlighting, tables, task lists, inline and block LaTeX formulas, Mermaid diagrams, with automatic light/dark theming.
 - **Attachments and sharing**: direct or pre-parsed image / document upload, 256px thumbnails, quick camera capture, export a Markdown answer to Word (including LaTeX → native OMML formulas), and receiving HarmonyOS system shares.
@@ -69,7 +83,7 @@ The complete feature inventory and implementation details are in [Features](docs
 
 - DevEco Studio 6.0.1 or a compatible version
 - HarmonyOS SDK API 24 (`6.1.1`)
-- A physical HarmonyOS phone
+- A physical HarmonyOS phone (tablets and 2-in-1 devices work too — wide screens expand into the three-column layout)
 
 ### Build
 
