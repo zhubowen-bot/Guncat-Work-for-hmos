@@ -208,6 +208,17 @@ export class IecRuntime {
     if (IecRuntime.hasSo('libzipcmd.so')) {
       add('zip', 'libzipcmd.so', 'iec_zip_main');
     }
+    // 自己编的补充命令：nc / hexdump / diff（diff 后端是随包的 git）。
+    if (IecRuntime.hasSo('libnc.so')) {
+      add('nc', 'libnc.so', 'iec_nc_main');
+    }
+    if (IecRuntime.hasSo('libhexdump.so')) {
+      add('hexdump', 'libhexdump.so', 'iec_hexdump_main');
+      add('hd', 'libhexdump.so', 'iec_hexdump_main');
+    }
+    if (IecRuntime.hasSo('libdiff.so')) {
+      add('diff', 'libdiff.so', 'iec_diff_main');
+    }
     if (IecRuntime.hasSo('libnode.so')) {
       add('node', 'libnode.so', 'iec_node_main');
       add('nodejs', 'libnode.so', 'iec_node_main');
