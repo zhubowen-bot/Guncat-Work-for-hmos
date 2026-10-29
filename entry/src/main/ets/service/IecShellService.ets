@@ -1,9 +1,9 @@
 // IecShellService: shell 工具的原生后端（IEC exec 会话）。
 //
-// 与 LinuxShellService 的区别只有执行方式：那条路把命令送进 QEMU 里的 Alpine
-// （TCI 解释执行），这条路由 IEC 直接 fork + 原生执行，不需要虚拟机、不需要 JIT
-// 权限。**对模型暴露的工具协议完全不变**（command / cwd / stdin / timeout_ms），
-// 所以 HarnessTools 里只是换一个实现类。
+// 与早期虚拟机后端（已删除）的区别只有执行方式：那条路把命令
+// 送进应用进程内的 Linux 虚拟机，这条路由 IEC 直接 fork + 原生执行，不需要虚拟机、
+// 不需要 JIT 权限。**对模型暴露的工具协议完全不变**（command / cwd / stdin /
+// timeout_ms），所以 HarnessTools 里只是换一个实现类。
 //
 // 工作区语义保持不变：cwd 是工作区内的相对路径，绝对路径由 workspaceRoot 拼出来；
 // 输出超过上限仍落 .spill/ 供 read_file 读回。
@@ -21,6 +21,8 @@ const TAG: string = 'IecShell';
 
 export class IecShellService {
   static readonly TOOL_NAME: string = Constants.WORK_SHELL_TOOL_NAME;
+  // .spill 文件名里的进程内序号，避免同毫秒并发落盘互相覆盖。
+  private static spillSeq: number = 0;
 
   static async run(context: common.UIAbilityContext, convId: string,
     args: Record<string, Object>): Promise<ToolExecResult> {
@@ -115,7 +117,9 @@ export class IecShellService {
     const elapsed: number = Date.now() - startedAt;
 
     if (run.out === '' && run.err !== '' && run.code < 0) {
-      return IecShellService.fail(run.err);
+      const failed: ToolExecResult = IecShellService.fail(run.err);
+      failed.timeout = run.timedOut;
+      return failed;
     }
 
     const spillOut: string = IecShellService.spill(context, convId, run.out, 'stdout');
@@ -123,6 +127,8 @@ export class IecShellService {
 
     let result: ToolExecResult = new ToolExecResult();
     result.ok = true;
+    // 超时是可观测标记（审计日志统计超时率用），不是只写在正文里的一句话。
+    result.timeout = run.timedOut;
     result.output = IecShellService.format(run, elapsed, cwdRel === '' ? '.' : cwdRel,
       spillOut, spillErr);
     return result;
@@ -178,7 +184,11 @@ export class IecShellService {
     try {
       const root: string = WorkFileService.workspaceRoot(context, convId);
       const relDir: string = Constants.WORK_SPILL_DIR;
-      const name: string = 'iec-' + Date.now().toString() + '-' + kind + '.log';
+      // 同一毫秒里两条并发命令（上限 8）各自落盘时，只用 Date.now() 会撞名：
+      // 后者 TRUNC 覆盖前者，两条工具结果指向同一份内容。序号是进程内单调的。
+      IecShellService.spillSeq++;
+      const name: string = 'iec-' + Date.now().toString() + '-' +
+        IecShellService.spillSeq.toString() + '-' + kind + '.log';
       const absDir: string = root + '/' + relDir;
       WorkFileService.ensureDir(absDir);
       const abs: string = absDir + '/' + name;

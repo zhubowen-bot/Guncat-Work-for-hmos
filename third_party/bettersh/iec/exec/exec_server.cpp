@@ -120,7 +120,12 @@ LaunchKind ResolveKind(const std::string& path) {
     const HostCapabilities& caps = Caps();
 
     if (caps.fork == 1 && ReadShebang(path))  return LaunchKind::kShebang;
-    if (caps.fork == 1 && IsSoLauncher(path)) return LaunchKind::kSo;
+    // A launcher is not an executable image: it is a text file naming a .so and an
+    // entry point. Recognising it therefore must not depend on fork -- the native
+    // child process route loads the same launcher (SpawnNcp handles kSo too), so
+    // gating this on fork made every command on a no-fork device resolve to
+    // kUnexecutable while an NCP route was available.
+    if (IsSoLauncher(path)) return LaunchKind::kSo;
 
     const uint16_t machine = ElfMachine(path);
     const bool host_arch = machine == HOST_ARCH;
@@ -405,7 +410,11 @@ void ApplyRequestEnvironment(const SpawnRequest& req) {
  * The probe only proves the API is present; an application can still be told
  * "not allowed" (a code like 16010004) on every attempt. Remembering that turns
  * a per-command delay and a per-command warning into one line at startup, and it
- * is what makes the fork fallback cheap rather than merely correct. */
+ * is what makes the fork fallback cheap rather than merely correct.
+ *
+ * It is latched only for failures that say something about the device. A request
+ * the NCP route cannot carry (a non-.so launch kind, a malformed launcher) must
+ * not be remembered, or the next perfectly startable command pays for it. */
 static std::atomic<bool> g_ncp_refused{false};
 
 static pid_t StartChild(SpawnRequest* req, LaunchKind kind, std::string* why) {
@@ -431,7 +440,24 @@ static pid_t StartChild(SpawnRequest* req, LaunchKind kind, std::string* why) {
         }
         Logger::GetInstance()->LogW("[exec] native child process refused: %s",
                                     ncp_error.c_str());
-        g_ncp_refused.store(true);
+        // Only a refusal by the platform itself is worth remembering. A message
+        // such as "only so file for now!" or "bad launcher ..." describes *this
+        // request* rather than the device, and latching on it would disable a
+        // working NCP route for every later launcher -- on a device without fork,
+        // for every command after the first non-.so one.
+        static const char* kPlatformWide[] = {
+            "start native child failed",
+            "cannot register the exit callback",
+            "the platform has no native child process API",
+        };
+        bool platform_refused = false;
+        for (const char* prefix : kPlatformWide) {
+            if (ncp_error.compare(0, std::strlen(prefix), prefix) == 0) {
+                platform_refused = true;
+                break;
+            }
+        }
+        if (platform_refused) g_ncp_refused.store(true);
         // A launcher that asked for "auto" must not lose the route that works:
         // the probe only proves the library exports the entry point, not that this
         // application is allowed to start a child with it. Fall through to fork --
@@ -839,8 +865,13 @@ bool ExecServer::onExecute(const Packet& req, Reply& reply) {
     // is collecting. Refusing turns that into an error the caller can see.
     if (!sr.cwd.empty()) {
         struct stat st {};
-        if (stat(sr.cwd.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) {
-            Logger::GetInstance()->LogW("[exec] cwd %s is not a directory: %s",
+        // Existing is not the same as enterable: chdir() also needs search
+        // permission, and the launch routes treat a failed chdir() as "stay in the
+        // server's directory", which is exactly the silent wrong-cwd this refusal
+        // exists to prevent.
+        if (stat(sr.cwd.c_str(), &st) != 0 || !S_ISDIR(st.st_mode) ||
+            access(sr.cwd.c_str(), X_OK) != 0) {
+            Logger::GetInstance()->LogW("[exec] cwd %s is not an enterable directory: %s",
                                         sr.cwd.c_str(), strerror(errno));
             put32(reply.body, 0);
             put32(reply.body, static_cast<uint32_t>(ENOENT));
