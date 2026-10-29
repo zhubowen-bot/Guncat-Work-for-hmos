@@ -223,6 +223,11 @@ export class IecRuntime {
     if (IecRuntime.hasSo('libjqcmd.so')) {
       add('jq', 'libjqcmd.so', 'iec_jq_main');
     }
+    // curl 8.22.0 + 静态 OpenSSL/zlib：命令行下载。CA 走 IecShellService 注入的
+    // CURL_CA_BUNDLE / SSL_CERT_FILE。
+    if (IecRuntime.hasSo('libcurlcmd.so')) {
+      add('curl', 'libcurlcmd.so', 'iec_curl_main');
+    }
     if (IecRuntime.hasSo('libnode.so')) {
       add('node', 'libnode.so', 'iec_node_main');
       add('nodejs', 'libnode.so', 'iec_node_main');
