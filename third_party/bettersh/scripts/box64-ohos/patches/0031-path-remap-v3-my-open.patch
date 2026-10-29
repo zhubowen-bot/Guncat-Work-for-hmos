@@ -1,0 +1,14 @@
+diff --git a/src/wrapped/wrappedlibc.c b/src/wrapped/wrappedlibc.c
+index 72ae87607..dfda40afe 100644
+--- a/src/wrapped/wrappedlibc.c
++++ b/src/wrapped/wrappedlibc.c
+@@ -2335,6 +2335,9 @@ static int shm_unlink(const char *name) {
+ #define TMP_CPUCACHE_SIZE "box64_cpucachesize"
+ EXPORT int32_t my_open(x64emu_t* emu, void* pathname, int32_t flags, uint32_t mode)
+ {
++    /* OHOS_PATCH_PATH_REMAP_V3 */
++    char _remap_buf_open[PATH_MAX];
++    pathname = (void*)box64_remap_path((const char*)pathname, _remap_buf_open, sizeof(_remap_buf_open));
+     if(isProcSelf((const char*) pathname, "cmdline")) {
+         // special case for self command line...
+         #if 0

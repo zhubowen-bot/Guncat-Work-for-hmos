@@ -1,0 +1,13 @@
+diff --git a/src/box64context.c b/src/box64context.c
+index e6ad8f0be..c6af45ab8 100644
+--- a/src/box64context.c
++++ b/src/box64context.c
+@@ -216,7 +216,7 @@ box64context_t *NewBox64Context(int argc)
+     context->exit_bridge = AddBridge(context->system, NULL, NULL, 0, NULL);
+     // get handle to box64 itself
+     #ifndef STATICBUILD
+-    context->box64lib = dlopen(NULL, RTLD_NOW|RTLD_GLOBAL);
++    /* OHOS_PATCH_SKIP_BOX64LIB */ context->box64lib = NULL;
+     #endif
+     context->dlprivate = NewDLPrivate();
+ 

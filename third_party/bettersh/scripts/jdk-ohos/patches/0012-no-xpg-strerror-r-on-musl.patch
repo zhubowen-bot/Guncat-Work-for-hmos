@@ -1,0 +1,37 @@
+musl 目标下不要用 glibc 的 __xpg_strerror_r，但宿主（buildjdk）仍要用。
+
+症状  libjava.so 带一个未定义符号 __xpg_strerror_r，dlopen 时报
+      "Error relocating ...: symbol not found"。
+
+根因  这段的重定向条件只看 LINUX + _GNU_SOURCE：
+        - 目标侧：JDK 对 linux target 无条件加 -D_GNU_SOURCE，于是 musl
+          目标也走这条分支，而 musl 没有 __xpg_strerror_r。
+        - 宿主侧：buildjdk 的 libjava 也会被编译（用的是宿主 glibc），
+          在 _GNU_SOURCE 下 glibc 的 strerror_r 是返回 char* 的 GNU 变体，
+          而下面的 getErrorString() 按 XPG 语义（返回 int）用它 ——
+          所以宿主**确实需要**这个重定向。
+      也就是说判据不能是"有没有 _GNU_SOURCE"，只能是"当前 libc 是不是 glibc"。
+
+修法  条件加 defined(__GLIBC__)：musl 目标不重定向（POSIX 版正是想要的），
+      宿主 glibc 行为不变。
+
+--- a/src/java.base/unix/native/libjava/jni_util_md.c
++++ b/src/java.base/unix/native/libjava/jni_util_md.c
+@@ -31,7 +31,16 @@
+ #include "jni_util.h"
+ #include "dlfcn.h"
+ 
+-#if defined(LINUX) && (defined(_GNU_SOURCE) || \
++// BetterSH/OHOS: __xpg_strerror_r 是 glibc 专有的 XPG 变体，musl 没有。
++// 这段原本只看 LINUX + _GNU_SOURCE，而 JDK 对 linux target 无条件加
++// -D_GNU_SOURCE、并且把 OS_CFLAGS 也带进了 buildjdk 的编译。musl 目标下
++// strerror_r 本来就是 POSIX 版（返回 int），被重定向到 __xpg_strerror_r 后
++// libjava.so 会带一个未定义符号，dlopen 直接失败；
++// 反过来，buildjdk（宿主 glibc）又确实需要这个重定向 —— 宿主在 _GNU_SOURCE
++// 下 glibc 把 strerror_r 声明成返回 char* 的 GNU 变体，而下面的
++// getErrorString() 按 XPG 语义（返回 int）用它。
++// 所以判据应该是"当前 libc 是不是 glibc"，而不是有没有 _GNU_SOURCE。
++#if defined(LINUX) && defined(__GLIBC__) && (defined(_GNU_SOURCE) || \
+          (defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE < 200112L \
+              && defined(_XOPEN_SOURCE) && _XOPEN_SOURCE < 600))
+ extern int __xpg_strerror_r(int, char *, size_t);

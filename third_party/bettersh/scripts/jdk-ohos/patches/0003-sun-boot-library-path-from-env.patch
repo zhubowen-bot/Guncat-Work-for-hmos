@@ -1,0 +1,33 @@
+`os::init_system_properties_values()`：优先用 SUN_BOOT_LIBRARY_PATH。
+
+症状  沙箱里 sun.boot.library.path 指向一个不存在的目录 → libjava.so /
+      libnet.so / libnio.so 全找不到。
+根因  这里是靠 `os::jvm_path()` 反推 libjvm.so 的位置再逐级截断得到
+      dll_dir 的；OHOS 上 libjvm.so 由应用自己的 ELF loader 加载，
+      推导结果不可信。
+修法  优先采信 launcher 显式导出的 SUN_BOOT_LIBRARY_PATH；没设就退回原
+      推断值，非 OHOS 场景行为不变。
+
+--- a/src/hotspot/os/linux/os_linux.cpp
++++ b/src/hotspot/os/linux/os_linux.cpp
+@@ -527,7 +521,20 @@
+     if (pslash != nullptr) {
+       *pslash = '\0';            // Get rid of /{client|server|hotspot}.
+     }
++#ifdef MUSL_LIBC
++    // BetterSH/OHOS: 路径推断在沙箱里不可靠（libjvm.so 是应用自己的 ELF loader
++    // 加载的），dll_dir 决定 sun.boot.library.path —— 即 libjava.so / libnet.so
++    // 等的搜索目录。让 launcher 用 SUN_BOOT_LIBRARY_PATH 显式指定；
++    // 没设就退回推断值，行为不变。
++    const char* dll_dir_env = ::getenv("SUN_BOOT_LIBRARY_PATH");
++    if (dll_dir_env != nullptr && dll_dir_env[0] != '\0') {
++      Arguments::set_dll_dir(dll_dir_env);
++    } else {
++      Arguments::set_dll_dir(buf);
++    }
++#else
+     Arguments::set_dll_dir(buf);
++#endif
+ 
+     if (pslash != nullptr) {
+       pslash = strrchr(buf, '/');

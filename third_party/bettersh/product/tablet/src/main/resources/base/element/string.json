@@ -1,0 +1,20 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "module description"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "description"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "BetterSH"
+    },
+    {
+      "name": "reason_read_pasteboard",
+      "value": "终端里的右键粘贴需要读取剪贴板内容"
+    }
+  ]
+}

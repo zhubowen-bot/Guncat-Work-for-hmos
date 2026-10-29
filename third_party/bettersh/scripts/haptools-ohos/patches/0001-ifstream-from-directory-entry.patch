@@ -1,0 +1,37 @@
+# 0001-ifstream-from-directory-entry.patch
+#
+# 症状：用 aarch64-linux-musl-g++（libstdc++ 11.2）编 packing_tool/frameworks 时，
+#       src/utils.cpp / src/multiapp_packager.cpp 两处
+#           std::ifstream f(entry, std::ios::binary);   // entry 是 std::filesystem::directory_entry
+#       报 "no matching function for call to basic_ifstream(directory_entry&, openmode)"。
+# 根因：OHOS 侧用 clang + libc++，它的 basic_ifstream 有直接吃 filesystem::path 的重载；
+#       libstdc++ 11 的 basic_ifstream 只有 const std::string& / const char* 两个重载，
+#       而 directory_entry → path → string 是**两次**用户定义转换，语言上不允许隐式完成。
+#       这与 hapsigntool_cpp/build 里"OHOS 的 include 图恰好补上了标准库包含"是同一类
+#       工程漂移，但这条用 -include 前缀头补不上（是重载决议，不是缺声明），只能改调用点。
+# 修法：显式取 `entry.path().string()`（消掉中间那次隐式转换）。语义完全不变 ——
+#       libc++ 那条重载也是拿同一份 path 去打开文件。
+# 归属：本补丁由 scripts/build_haptools.sh 在**构建目录里的源码副本**上应用
+#       （build/haptools/packing_tool/src），thirdparty/ 里 clone 出来的上游保持干净。
+--- a/src/multiapp_packager.cpp
++++ b/src/multiapp_packager.cpp
+@@ -440,7 +440,7 @@
+             selectedHapsInApp.push_back(filePath.filename());
+         }
+         std::ofstream outputStream(filePath, std::ofstream::binary);
+-        std::ifstream inputStream(entry, std::ofstream::binary);
++        std::ifstream inputStream(entry.path().string(), std::ofstream::binary);
+         std::vector<char> buf(Constants::BUFFER_SIZE);
+         while (inputStream.read(buf.data(), Constants::BUFFER_SIZE) || inputStream.gcount() != 0) {
+             outputStream.write(buf.data(), inputStream.gcount());
+--- a/src/utils.cpp
++++ b/src/utils.cpp
+@@ -232,7 +232,7 @@
+     SHA256_Init(&ctx);
+     for (const auto& entry : fs::recursive_directory_iterator(filePath)) {
+         if (fs::is_regular_file(entry)) {
+-            std::ifstream file(entry, std::ios::binary);
++            std::ifstream file(entry.path().string(), std::ios::binary);
+             if (!file.is_open()) {
+                 LOGE("%s", PackingToolErrMsg::FILE_IO_EXCEPTION.toStringWithArgs(
+                     ("file open failed! filePath=" + entry.path().string()).c_str()).c_str());

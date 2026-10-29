@@ -1,0 +1,68 @@
+--- a/src/internal/dynlink.h
++++ b/src/internal/dynlink.h
+@@ -93,7 +93,7 @@
+ #endif
+ 
+ #define AUX_CNT 32
+-#define DYN_CNT 32
++#define DYN_CNT 40   /* 必须大于最大用到的 DT_*(含 DT_RELRENT=0x25) */
+ 
+ typedef void (*stage2_func)(unsigned char *, size_t *);
+ 
+--- a/ldso/dynlink.c
++++ b/ldso/dynlink.c
+@@ -31,6 +31,19 @@
+ 
+ static void error(const char *, ...);
+ 
++/* DT_RELR:紧凑相对重定位(musl 1.2.4 起支持)。OHOS 的系统库(如 /system/lib64 的
++ * libz.so)是用新工具链编的,相对重定位只放在 RELR 表里 —— 老 loader 直接看不见,
++ * 于是 .init_array 里的构造函数指针停在链接期残值,一调用就跳进野地址。 */
++#ifndef DT_RELRSZ
++#define DT_RELRSZ 35
++#endif
++#ifndef DT_RELR
++#define DT_RELR 36
++#endif
++#ifndef DT_RELRENT
++#define DT_RELRENT 37
++#endif
++
+ #define MAXP2(a,b) (-(-(a)&-(b)))
+ #define ALIGN(x,y) ((x)+(y)-1 & -(y))
+ 
+@@ -1441,6 +1454,34 @@
+ 		do_relocs(p, laddr(p, dyn[DT_REL]), dyn[DT_RELSZ], 2);
+ 		do_relocs(p, laddr(p, dyn[DT_RELA]), dyn[DT_RELASZ], 3);
+ 
++		/* DT_RELR:位图编码的相对重定位。语义(见 ELF 扩展说明):
++		 *   偶数项 E:重定位 base+E 处的字,下一个地址 = E+8;
++		 *   奇数项 B:bit0 是标记,bit k(1..63)表示 (当前地址 + (k-1)*8) 处要重定位,
++		 *             之后当前地址前进 63 个字。
++		 * 每个被重定位的字都做 "*p += base"。 */
++		/* 必须 1UL —— DT_RELR=36,而 `1` 是 32 位 int:`1<<36` 是 UB,GCC 直接折成 0,
++		 * 整个 RELR 分支会被当死代码删掉(踩过:症状=分支里的打印一句都没有)。 */
++		if (dyn[0] & (1UL << DT_RELR)) {
++			size_t *relr = (size_t *)laddr(p, dyn[DT_RELR]);
++			size_t *relrend = (size_t *)((char *)relr + dyn[DT_RELRSZ]);
++			size_t where = 0;
++			for (; relr < relrend; relr++) {
++				size_t e = *relr;
++				if (!(e & 1)) {
++					where = e;
++					*(size_t *)laddr(p, where) += (size_t)p->base;
++					where += sizeof(size_t);
++					continue;
++				}
++				e >>= 1;
++				for (int k = 0; e; k++, e >>= 1)
++					if (e & 1)
++						*(size_t *)laddr(p, where + (size_t)k * sizeof(size_t))
++							+= (size_t)p->base;
++				where += (8 * sizeof(size_t) - 1) * sizeof(size_t);
++			}
++		}
++
+ 		if (head != &ldso && p->relro_start != p->relro_end &&
+ 		    mprotect(laddr(p, p->relro_start), p->relro_end-p->relro_start, PROT_READ)
+ 		    && errno != ENOSYS) {

@@ -1,0 +1,83 @@
+diff --git a/src/custommem.c b/src/custommem.c
+index 643cf2ad0..34a4061a6 100644
+--- a/src/custommem.c
++++ b/src/custommem.c
+@@ -3331,6 +3331,17 @@ void getLockAddressRange(uintptr_t start, size_t size, uintptr_t addrs[])
+ #endif
+ EXPORT void* box_mmap(void *addr, size_t length, int prot, int flags, int fd, ssize_t offset)
+ {
++    /* OHOS_PATCH_BOX32_MMAP_HARD_SEARCH_HOOK */
++    {
++        extern void* box_mmap32_hard_search_ohos(size_t, int, int, int, ssize_t);
++        if((flags & MAP_32BIT) && !(flags & MAP_FIXED) && !addr) {
++            void* hs = box_mmap32_hard_search_ohos(length, prot, flags,
++                                                    fd, offset);
++            if(hs != MAP_FAILED) return hs;
++            /* fall through to original logic if hard search exhausted */
++        }
++    }
++
+     if(prot&PROT_WRITE)
+         prot|=PROT_READ;    // PROT_READ is implicit with PROT_WRITE on i386
+     int new_flags = flags;
+@@ -3388,3 +3399,60 @@ EXPORT int box_munmap(void* addr, size_t length)
+     int ret = InternalMunmap(addr, length);
+     return ret;
+ }
++
++/* ============================================================
++ * OHOS_PATCH_BOX32_MMAP_HARD_SEARCH (patch 36)
++ *
++ * 完全旁路 box64 自带 find31bitBlockNearHint + mapallmem 路径.
++ * 用 MAP_FIXED_NOREPLACE 让内核直接告诉我们某个地址能不能用.
++ * 范围 [0x40000000, 0xff000000). 64KB 步长. 静态游标.
++ * ============================================================ */
++#ifndef MAP_FIXED_NOREPLACE
++#define MAP_FIXED_NOREPLACE 0x100000
++#endif
++
++void* box_mmap32_hard_search_ohos(size_t length, int prot, int flags,
++                                  int fd, ssize_t offset)
++{
++    static uintptr_t cursor = 0x40000000UL;
++    static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
++    static const uintptr_t LO = 0x40000000UL;
++    static const uintptr_t HI = 0xff000000UL;
++
++    int base_flags = flags & ~MAP_32BIT;
++    base_flags &= ~MAP_FIXED;
++
++    /* 64KB align */
++    size_t len = (length + 0xffffUL) & ~(size_t)0xffffUL;
++    if (len == 0) len = 0x10000;
++
++    pthread_mutex_lock(&mu);
++
++    /* 两轮: 第一轮从 cursor 到 HI; 第二轮 wrap 回 LO 到 cursor */
++    for (int round = 0; round < 2; round++) {
++        uintptr_t cur = (round == 0) ? cursor : LO;
++        uintptr_t end = (round == 0) ? HI    : cursor;
++
++        while (cur + len <= end) {
++            void* ret = InternalMmap((void*)cur, len, prot,
++                                     base_flags | MAP_FIXED_NOREPLACE,
++                                     fd, offset);
++            if (ret != MAP_FAILED) {
++                if ((uintptr_t)ret == cur &&
++                    (uintptr_t)ret + len <= 0x100000000UL) {
++                    cursor = cur + len;
++                    if (cursor + 0x10000 > HI) cursor = LO;
++                    pthread_mutex_unlock(&mu);
++                    return ret;
++                }
++                /* kernel didn't honor NOREPLACE, undo */
++                InternalMunmap(ret, len);
++            }
++            cur += 0x10000;
++        }
++    }
++
++    pthread_mutex_unlock(&mu);
++    return MAP_FAILED;
++}
++/* OHOS_PATCH_BOX32_MMAP_HARD_SEARCH END */

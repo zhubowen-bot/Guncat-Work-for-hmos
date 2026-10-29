@@ -1,0 +1,39 @@
+diff --git a/src/libtools/threads.c b/src/libtools/threads.c
+index 0e72b8c3f..b2d2f31e1 100644
+--- a/src/libtools/threads.c
++++ b/src/libtools/threads.c
+@@ -1332,20 +1332,20 @@ void init_pthread_helper()
+ 	if(box64_is32bits)
+ 		init_pthread_helper_32();
+ 	#endif
+-	real_pthread_cleanup_push_defer = (vFppp_t)dlsym(NULL, "_pthread_cleanup_push_defer");
+-	real_pthread_cleanup_pop_restore = (vFpi_t)dlsym(NULL, "_pthread_cleanup_pop_restore");
+-	real_pthread_cond_clockwait = (iFppip_t)dlsym(NULL, "pthread_cond_clockwait");
+-
+-	// search for older symbol for pthread_kill
+-	{
+-		char buff[50];
+-		for(int i=0; i<34 && !real_phtread_kill_old; ++i) {
+-			snprintf(buff, 50, "GLIBC_2.%d", i);
+-			real_phtread_kill_old = (iFli_t)dlvsym(NULL, "pthread_kill", buff);
+-		}
+-	}
+-	if(!real_phtread_kill_old)
+-		real_phtread_kill_old = (iFli_t)dlvsym(NULL, "pthread_kill", "GLIBC_2.2.5");
++	/* OHOS_PATCH_SKIP_PTHREAD_DLSYM */ real_pthread_cleanup_push_defer = NULL;
++	/* OHOS_PATCH_SKIP_PTHREAD_DLSYM */ real_pthread_cleanup_pop_restore = NULL;
++	/* OHOS_PATCH_SKIP_PTHREAD_DLSYM */ real_pthread_cond_clockwait = NULL;
++
++/* 	// search for older symbol for pthread_kill */
++/* 	{ */
++/* 		char buff[50]; */
++/* 		for(int i=0; i<34 && !real_phtread_kill_old; ++i) { */
++/* 			snprintf(buff, 50, "GLIBC_2.%d", i); */
++/* 			real_phtread_kill_old = (iFli_t)dlvsym(NULL, "pthread_kill", buff); */
++/* 		} */
++/* 	} */
++/* 	if(!real_phtread_kill_old) */
++/* 		real_phtread_kill_old = (iFli_t)dlvsym(NULL, "pthread_kill", "GLIBC_2.2.5"); */
+ 	if(!real_phtread_kill_old) {
+ 		printf_log(LOG_INFO, "Warning, older then 2.34 pthread_kill not found, using current one\n");
+ 		real_phtread_kill_old = (iFli_t)pthread_kill;

@@ -1,0 +1,101 @@
+--- a/src/wrapped/wrappedlibc.c
++++ b/src/wrapped/wrappedlibc.c
+@@ -1829,6 +1829,15 @@
+ extern int bsh_tty_tcgetattr(int fd, struct termios* t);
+ extern int bsh_tty_tcsetattr(int fd, int when, const struct termios* t);
+ extern int bsh_tty_maybe_open(const char* path);   /* >=0 我处理了；-2 不归我管 */
++/* OHOS_PATCH_SHIM_PTY —— 假 pts（socketpair）那部分，见 shim/pty_shim.c。
++ * 沙箱打不开真 /dev/ptmx，这是唯一能拿到 pty 的路，与 elfloader 的 guest shim 同源。 */
++extern int   bsh_pty_grantpt(int fd);
++extern int   bsh_pty_unlockpt(int fd);
++extern char* bsh_pty_ptsname(int fd);
++extern int   bsh_pty_ptsname_r(int fd, char* buf, size_t n);
++extern int   bsh_pty_close(int fd);
++extern char* bsh_tty_ttyname(int fd);
++extern int   bsh_tty_ttyname_r(int fd, char* buf, size_t n);
+ 
+ EXPORT int my_stat(x64emu_t *emu, void* filename, void* buf)
+ {
+@@ -5289,6 +5298,31 @@
+     return bsh_tty_ioctl(fd, (int)req, arg);
+ }
+ #endif
++
++/* ── OHOS_PATCH_SHIM_PTY ────────────────────────────────────────────────────
++ * 沙箱三层都打不开真 /dev/ptmx（EACCES），所以"能拿到 pty"只有用户态假 pts 一条路
++ * （socketpair 当 master/slave + 一张 fd→pts 表）。elfloader 的 guest shim 一直这么干，
++ * 这里让 box64 guest 走同一份实现（-DBSH_SHIM_PREFIX=bsh_pty_ 编进来）。
++ *
++ * 上面这几个入口的接线在前两轮就铺好了：open(/dev/ptmx)、open(/dev/pts/N)、
++ * isatty/tcgetattr/ioctl(TIOCSCTTY) 都已经经 tty shim 转到 pty 模块；这里补的是
++ * 剩下那几个"名字就是 API"的：grantpt/unlockpt/ptsname(_r)/ttyname(_r)/close。
++ * 表项从 GO/GOW 改成 GOM，否则它们直通宿主，对假 master 只会报 ENOTTY。 */
++EXPORT int my_grantpt(x64emu_t* emu, int fd)          { (void)emu; return bsh_pty_grantpt(fd); }
++EXPORT int my_unlockpt(x64emu_t* emu, int fd)         { (void)emu; return bsh_pty_unlockpt(fd); }
++EXPORT char* my_ptsname(x64emu_t* emu, int fd)        { (void)emu; return bsh_pty_ptsname(fd); }
++EXPORT int my_ptsname_r(x64emu_t* emu, int fd, char* buf, size_t n)
++{ (void)emu; return bsh_pty_ptsname_r(fd, buf, n); }
++EXPORT char* my_ttyname(x64emu_t* emu, int fd)        { (void)emu; return bsh_tty_ttyname(fd); }
++EXPORT int my_ttyname_r(x64emu_t* emu, int fd, char* buf, size_t n)
++{ (void)emu; return bsh_tty_ttyname_r(fd, buf, n); }
++EXPORT int my_close(x64emu_t* emu, int fd)
++{
++    (void)emu;
++    /* 关掉假 pts 的 master 时要顺带回收它攥着的 slave 端（shim 的 close 干这个），
++     * 否则对端读不到 EOF。不是假 pts 的 fd 原样落宿主 close。 */
++    return bsh_pty_close(fd);
++}
+ /* OHOS_PATCH_PATH_REMAP_V2 END */
+ 
+ /* OHOS_PATCH_LOG_GATE — log gate helper (appended at EOF, used by my_mmap64) */
+--- a/src/wrapped/wrappedlibc_private.h
++++ b/src/wrapped/wrappedlibc_private.h
+@@ -167,7 +167,7 @@
+ //GO(__clone, 
+ GOWM(clone, iFEppipppp)
+ GO(__close, iFi)
+-GOW(close, iFi)
++GOM(close, iFEi)
+ GOW(closedir, iFp)
+ GO(closelog, vFv)
+ //GO(__close_nocancel, 
+@@ -766,7 +766,7 @@
+ GOW(gnu_dev_minor, uFU)
+ GOW(gnu_get_libc_release, pFv)
+ GOW(gnu_get_libc_version, pFv)
+-GO(grantpt, iFi)
++GOM(grantpt, iFEi)
+ GOW(group_member, iFu)
+ GOW(gsignal, iFi)
+ //GO(gtty, 
+@@ -1580,8 +1580,8 @@
+ #endif
+ 
+ GOM(ptrace, lFEuipp)
+-GO(ptsname, pFi)
+-GOW(ptsname_r, iFipL)
++GOM(ptsname, pFEi)
++GOM(ptsname_r, iFEipL)
+ //GO(__ptsname_r_chk, 
+ GOW(putc, iFiS)
+ GO(putchar, iFi)
+@@ -2283,8 +2283,8 @@
+ GO(truncate64, iFpI)
+ //GO(__tsearch, 
+ GOWM(tsearch, pFEppp)
+-GO(ttyname, pFi)
+-GO(ttyname_r, iFipL)
++GOM(ttyname, pFEi)
++GOM(ttyname_r, iFEipL)
+ //GO(__ttyname_r_chk, 
+ GO(ttyslot, iFv)
+ //GO(__twalk, 
+@@ -2310,7 +2310,7 @@
+ GO(ungetwc, uFuS)
+ GOM(unlink, iFEp)
+ GO(unlinkat, iFipi)
+-GO(unlockpt, iFi)
++GOM(unlockpt, iFEi)
+ GOW(unsetenv, iFp)
+ GO(unshare, iFi)
+ GOW(updwtmp, vFpp)

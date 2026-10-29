@@ -1,0 +1,36 @@
+关掉 config.guess 的 WSL 改写。
+
+症状  configure 一开始就把 build 平台判成 windows-x86_64：
+        checking build system type... x86_64-pc-wsl
+        checking openjdk-build os-cpu... windows-x86_64
+      然后尝试调用 Windows 侧工具并失败：
+        generated-configure.sh: line 13281: import: command not found
+        configure: error: The path of TOPDIR, which resolves as
+        ".../jdk21u-jdk-21.0.5-ga", could not be imported.
+
+根因  本机是 WSL2（`uname -r` = 6.18.33.2-microsoft-standard-WSL2）。
+      OpenJDK 的 config.guess 看到内核串里有 microsoft 且三元组是
+      *-linux-gnu，就把三元组改写成 *-pc-wsl；platform.m4 再把 *-wsl
+      映射成 OPENJDK_BUILD_OS=windows。
+      但我们是**在 WSL 里做原生 Linux 构建**，不需要它那套
+      "调用 cmd.exe 做路径转换" 的 Windows 分支。
+
+修法  把这段改写去掉（保留 if/else 结构，用 `:` 占位），让 build 平台
+      老老实实是 x86_64-pc-linux-gnu。
+
+--- a/make/autoconf/build-aux/config.guess
++++ b/make/autoconf/build-aux/config.guess
+@@ -70,8 +70,9 @@
+ # Test and fix wsl
+ echo $OUT | grep '\(unknown\|pc\)-linux-gnu' > /dev/null 2> /dev/null
+ if test $? = 0; then
+-  uname -r | grep -i microsoft > /dev/null 2> /dev/null
+-  if test $? = 0; then
+-    OUT=`echo $OUT | sed -e 's/\(unknown\|pc\)-linux-gnu/pc-wsl/'`
+-  fi
++  # BetterSH: 我们在 WSL2 里做原生 Linux 构建，不要上游那套
++  # "把 WSL 当成 windows build" 的改写 —— 改写后 platform.m4 会把
++  # OPENJDK_BUILD_OS 定成 windows，configure 随后去调 cmd.exe /
++  # import / verify 这些 Windows 工具并直接失败。
++  :
+ fi

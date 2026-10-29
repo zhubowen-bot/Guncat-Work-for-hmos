@@ -1,0 +1,44 @@
+--- a/src/emu/x64syscall.c
++++ b/src/emu/x64syscall.c
+@@ -63,6 +63,11 @@
+ int my_lstat(x64emu_t *emu, void* filename, void* buf);
+ int my_fstat(x64emu_t *emu, int fd, void* buf);
+ int my_fstatat(x64emu_t *emu, int fd, const char* path, void* buf, int flags);
++/* OHOS_PATCH_SHIM_FS —— 静态 guest 的裸 syscall 绕过了 wrapped-libc 层，这几个得在这里挂。
++ * 实现在 shim/fs_shim.c（以 -DBSH_SHIM_BOX64 编进 libbox64.so）。见 README §11。 */
++extern int bsh_fs_symlink(const char* target, const char* linkpath);
++extern int bsh_fs_unlink(const char* path);
++int my_openat(x64emu_t* emu, int dirfd, void* path, int flags, mode_t mode);
+ 
+ int my_sigaction(x64emu_t* emu, int signum, const x64_sigaction_t *act, x64_sigaction_t *oldact);
+ int my_sigaltstack(x64emu_t* emu, const x64_stack_t* ss, x64_stack_t* oss);
+@@ -810,14 +815,16 @@
+         #endif
+         #ifndef __NR_unlink
+         case 87: //sys_unlink
+-            S_RAX = unlink((void*)R_RDI);
++            /* OHOS_PATCH_SHIM_FS：删的可能是用户态软链（标记文件） */
++            S_RAX = bsh_fs_unlink((void*)R_RDI);
+             if(S_RAX==-1)
+                 S_RAX = -errno;
+             break;
+         #endif
+         #ifndef __NR_symlink
+         case 88: //sys_symlink
+-            S_RAX = symlink((void*)R_RDI, (void*)R_RSI);
++            /* OHOS_PATCH_SHIM_FS：静态 guest 走这里（不走 my_symlink），同样给用户态软链 */
++            S_RAX = bsh_fs_symlink((void*)R_RDI, (void*)R_RSI);
+             if(S_RAX==-1)
+                 S_RAX = -errno;
+             break;
+@@ -905,7 +912,9 @@
+         #ifndef NOALIGN
+         case 257:
+             if (log) snprintf(buff2, 127, "[sys_openat %d, \"%s\", 0x%x]", S_EDI, (char*)R_RSI, of_convert(R_EDX));
+-            S_RAX = syscall(__NR_openat, S_EDI, (void*)R_RSI, of_convert(S_EDX), R_R10d);
++            /* OHOS_PATCH_SHIM_FS：原来直接发宿主 syscall，绕过了 path remap 与用户态软链展开；
++             * 改走 my_openat（它做 remap + shim 展开），静态 guest 才能"打开软链=打开目标" */
++            S_RAX = my_openat(emu, S_EDI, (void*)R_RSI, of_convert(S_EDX), (mode_t)R_R10d);
+             if(S_RAX==-1)
+                 S_RAX = -errno;
+             break;

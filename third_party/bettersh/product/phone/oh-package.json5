@@ -1,0 +1,11 @@
+{
+  "name": "phone",
+  "version": "1.0.0",
+  "description": "BetterSH 手机入口（无 JIT 权限）",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {
+    "bsh_main": "file:../../feature/bsh_main"
+  }
+}

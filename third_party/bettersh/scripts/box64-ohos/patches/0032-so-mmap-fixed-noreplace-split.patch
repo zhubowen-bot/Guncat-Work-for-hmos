@@ -1,0 +1,73 @@
+diff --git a/src/wrapped/wrappedlibc.c b/src/wrapped/wrappedlibc.c
+index dfda40afe..d63cd2ca2 100644
+--- a/src/wrapped/wrappedlibc.c
++++ b/src/wrapped/wrappedlibc.c
+@@ -3655,30 +3655,51 @@ EXPORT void* my_mmap64(x64emu_t* emu, void *addr, size_t length, int prot, int f
+ {
+     (void)emu;
+     if(BOX64ENV(dynarec_log)>=LOG_DEBUG) {printf_log(LOG_NONE, "mmap64(%p, 0x%zx, 0x%x, 0x%x, %d, %zd) ", addr, length, prot, flags, fd, offset);}
+-    /* OHOS_PATCH_MMAP_NOREPLACE_FALLBACK START
+-     * HAP seccomp denies mmap with MAP_FIXED_NOREPLACE via
+-     * SECCOMP_RET_ERRNO(ENOSYS). Retry without the flag and
+-     * simulate NOREPLACE semantics by checking returned address.
+-     * Without this, wine/ntdll fails VA probing and exits. */
++    /* OHOS_PATCH_MMAP_NOREPLACE_V2 START
++ * 替代 patch 62. HAP seccomp 拒 MAP_FIXED_NOREPLACE 用 ENOSYS, 退化策略
++ * 按 prot 分场景:
++ *   - prot == 0 (探测): 用 hint mmap, ret != addr 时 munmap + EEXIST.
++ *     wine 用这种调用试地址边界, 我们告诉它"占了"它会换.
++ *   - prot != 0 (真分配): 直接用 MAP_FIXED 强制 addr.
++ *     wine 此时要确定地址 (KUSER_SHARED_DATA/TEB), hint 不可靠.
++ */
+ #ifndef BOX64_OHOS_MAP_FIXED_NOREPLACE
+ #define BOX64_OHOS_MAP_FIXED_NOREPLACE 0x100000
+ #endif
+-    void* ret = box_mmap(addr, length, prot, flags, fd, offset);
+-    int e = errno;
+-    if (ret == MAP_FAILED && (e == ENOSYS || e == EINVAL)
+-        && (flags & BOX64_OHOS_MAP_FIXED_NOREPLACE)
+-        && !(flags & MAP_FIXED) && addr) {
+-        int fb_flags = flags & ~BOX64_OHOS_MAP_FIXED_NOREPLACE;
+-        ret = box_mmap(addr, length, prot, fb_flags, fd, offset);
+-        e = errno;
+-        if (ret != MAP_FAILED && (uintptr_t)ret != (uintptr_t)addr) {
+-            /* hint not honored -> caller asked NOREPLACE, fail with EEXIST */
+-            box_munmap(ret, length);
++void* ret = box_mmap(addr, length, prot, flags, fd, offset);
++int e = errno;
++if (ret == MAP_FAILED && (e == ENOSYS || e == EINVAL)
++    && (flags & BOX64_OHOS_MAP_FIXED_NOREPLACE)
++    && !(flags & MAP_FIXED) && addr) {
++    int probe = (prot == 0);
++    int fb_flags = flags & ~BOX64_OHOS_MAP_FIXED_NOREPLACE;
++    if (!probe) fb_flags |= MAP_FIXED;
++    void* fb_ret = box_mmap(addr, length, prot, fb_flags, fd, offset);
++    int fb_e = errno;
++    fprintf(stderr,
++        "[mmap-noreplace] addr=%p len=0x%lx prot=0x%x flags=0x%x "
++        "%s -> %p errno=%d\n",
++        addr, (unsigned long)length, prot, flags,
++        probe ? "probe(HINT)" : "real(FIXED)",
++        fb_ret, fb_ret == MAP_FAILED ? fb_e : 0);
++    if (probe) {
++        if (fb_ret != MAP_FAILED && (uintptr_t)fb_ret != (uintptr_t)addr) {
++            /* 探测模式: kernel 不给 hint -> 模拟 NOREPLACE 失败 */
++            box_munmap(fb_ret, length);
+             ret = MAP_FAILED;
+             e = EEXIST;
++        } else {
++            ret = fb_ret;
++            e = (fb_ret == MAP_FAILED) ? fb_e : 0;
+         }
++    } else {
++        /* 真分配: MAP_FIXED 要么成功拿到 addr 要么真失败, 不再判 conflict */
++        ret = fb_ret;
++        e = (fb_ret == MAP_FAILED) ? fb_e : 0;
+     }
+-    /* OHOS_PATCH_MMAP_NOREPLACE_FALLBACK END */
++    errno = e;
++}
++/* OHOS_PATCH_MMAP_NOREPLACE_V2 END */
+     if(emu && box64_is32bits && ret!=MAP_FAILED && ((ret>(void*)0xc0000000) || (ret+length>(void*)0xc0000000))) {
+         // do not allow allocating memory that high for 32bits process
+         box_munmap(ret, length);

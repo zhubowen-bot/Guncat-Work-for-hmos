@@ -1,0 +1,71 @@
+IPv6 能力探测：/proc 读不到时改用 getifaddrs() 真探测。
+
+症状  Net.isIPv6Available() 恒为 false；NIO 只建 IPv4-only channel；
+      连接 Inet6Address 时在 Net.checkAddress 抛一个 message 为 null 的
+      UnsupportedAddressTypeException。
+根因  IPv6_supported() 的第三条判据是 `fopen("/proc/net/if_inet6")` 能否
+      打开。OHOS 应用沙箱的 procfs 精简视图对普通应用返回 EACCES，
+      于是判据恒假。但"读不到"不等于"没有"。
+修法  EACCES/EPERM 时去问内核要真实网卡地址表（getifaddrs），出现任一
+      AF_INET6 即认为有 IPv6。刻意只在 EACCES/EPERM 回落：ENOENT 说明
+      内核真没开 IPv6，那正是上游判据成立的场合。回落同时仍要求
+      dlsym(RTLD_DEFAULT, "inet_pton") 非空，与上游那条路径的判据对齐。
+
+--- a/src/java.base/unix/native/libnet/net_util_md.c
++++ b/src/java.base/unix/native/libnet/net_util_md.c
+@@ -108,6 +108,36 @@
+ 
+ #else /* !DONT_ENABLE_IPV6 */
+ 
++#ifdef MUSL_LIBC
++#include <ifaddrs.h>
++
++/*
++ * BetterSH/OHOS: /proc/net/if_inet6 读不到时的替代观测 —— 直接问内核要网卡
++ * 地址表，只要出现一个 AF_INET6 就认为"有 IPv6"。
++ * 有意把 loopback(::1) 也算数：上游那条判据是"能不能读到文件第一行"，
++ * 而正常 Linux 主机上第一行正是 loopback 条目 —— 这样回落给出的答案
++ * 与"文件可读时上游会给的答案"一致。
++ */
++static jint bsh_ipv6_address_present(void)
++{
++    struct ifaddrs *ifa = NULL;
++    struct ifaddrs *p;
++    jint found = JNI_FALSE;
++
++    if (getifaddrs(&ifa) != 0) {
++        return JNI_FALSE;
++    }
++    for (p = ifa; p != NULL; p = p->ifa_next) {
++        if (p->ifa_addr != NULL && p->ifa_addr->sa_family == AF_INET6) {
++            found = JNI_TRUE;
++            break;
++        }
++    }
++    freeifaddrs(ifa);
++    return found;
++}
++#endif /* MUSL_LIBC */
++
+ jint  IPv6_supported()
+ {
+     int fd;
+@@ -136,6 +166,18 @@
+         char *bufP;
+ 
+         if (fP == NULL) {
++#ifdef MUSL_LIBC
++            // BetterSH/OHOS: 应用沙箱会让 /proc/net/if_inet6 返回 EACCES，
++            // 但内核其实有 IPv6、本进程也真的持有 IPv6 地址。此时"文件不可读"
++            // 是缺一次观测，不是"没有 IPv6"；当成否定会把整个 VM 的 IPv6 关掉。
++            // 只对 EACCES/EPERM 回落（ENOENT 说明内核真没开 IPv6，那正是上游
++            // 判据成立的场合），且仍要求 inet_pton 可用，与上游判据对齐。
++            if ((errno == EACCES || errno == EPERM)
++                && bsh_ipv6_address_present() == JNI_TRUE
++                && JVM_FindLibraryEntry(RTLD_DEFAULT, "inet_pton") != NULL) {
++                return JNI_TRUE;
++            }
++#endif
+             return JNI_FALSE;
+         }
+         bufP = fgets(buf, sizeof(buf), fP);

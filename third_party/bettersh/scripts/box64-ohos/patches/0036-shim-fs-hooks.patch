@@ -1,0 +1,116 @@
+--- a/src/wrapped/wrappedlibc.c
++++ b/src/wrapped/wrappedlibc.c
+@@ -1792,6 +1792,19 @@
+ }
+ EXPORT int my___fxstatat64(x64emu_t* emu, int v, int d, void* path, void* buf, int flags) __attribute__((alias("my___fxstatat")));
+ 
++/* OHOS_PATCH_SHIM_FS —— 实现在 shim/fs_shim.c（同一份源码以 -DBSH_SHIM_BOX64 编进
++ * libbox64.so，入口前缀 bsh_fs_）。为什么不用 -Wl,--wrap=：wrap 只改写 box64 **自己**
++ * 对这些符号的引用，够不着 guest 那一侧（动态 guest 走本文件的 my_*，静态 guest 走
++ * src/emu/x64syscall.c）。详见 scripts/box64-ohos/README.md。 */
++extern const char* bsh_fs_resolve_path(const char* path, char* out, size_t outsz);
++extern int     bsh_fs_lstat(const char* path, struct stat* buf);
++extern int     bsh_fs_stat(const char* path, struct stat* buf);
++extern int     bsh_fs_fstatat(int dirfd, const char* path, struct stat* buf, int flags);
++extern ssize_t bsh_fs_readlink(const char* path, char* buf, size_t bufsiz);
++extern ssize_t bsh_fs_readlinkat(int dirfd, const char* path, char* buf, size_t bufsiz);
++extern int     bsh_fs_symlink(const char* target, const char* linkpath);
++extern int     bsh_fs_symlinkat(const char* target, int dirfd, const char* linkpath);
++
+ EXPORT int my_stat(x64emu_t *emu, void* filename, void* buf)
+ {
+     (void)emu;
+@@ -1799,7 +1812,7 @@
+     char _remap_buf_stat[PATH_MAX];
+     filename = (void*)box64_remap_path((const char*)filename, _remap_buf_stat, sizeof(_remap_buf_stat));
+     struct stat st;
+-    int r = stat(filename, &st);
++    int r = bsh_fs_stat((const char*)filename, &st);
+     if(!r)
+         UnalignStat64(&st, buf);
+     return r;
+@@ -1813,7 +1826,7 @@
+     char _remap_buf[PATH_MAX];
+     filename = (void*)box64_remap_path((const char*)filename, _remap_buf, sizeof(_remap_buf));
+     struct stat st;
+-    int r = lstat(filename, &st);
++    int r = bsh_fs_lstat((const char*)filename, &st);
+     if(!r)
+         UnalignStat64(&st, buf);
+     return r;
+@@ -1838,7 +1851,7 @@
+     path = box64_remap_path(path, _remap_buf_fstatat, sizeof(_remap_buf_fstatat));
+     (void)emu;
+     struct stat st;
+-    int r = fstatat(fd, path, &st, flags);
++    int r = bsh_fs_fstatat(fd, path, &st, flags);
+     if(!r)
+         UnalignStat64(&st, buf);
+     return r;
+@@ -2167,7 +2180,7 @@
+         // special case for self...
+         return strlen(strncpy((char*)buf, emu->context->fullpath, sz));
+     }
+-    ssize_t ret = readlink((const char*)path, (char*)buf, sz);
++    ssize_t ret = bsh_fs_readlink((const char*)path, (char*)buf, sz);
+     int pid = (ret>0)?isProcAny(path, "exe"):0;
+     if(ret>0 && (pid!=-1) && (strstr(buf, my_context->box64path)==buf)) {
+         int ok = !strcmp(buf, my_context->box64path);
+@@ -2345,8 +2358,10 @@
+ EXPORT int32_t my_open(x64emu_t* emu, void* pathname, int32_t flags, uint32_t mode)
+ {
+     /* OHOS_PATCH_PATH_REMAP_V3 */
+-    char _remap_buf_open[PATH_MAX];
++    char _remap_buf_open[PATH_MAX], _shim_buf_open[PATH_MAX];
+     pathname = (void*)box64_remap_path((const char*)pathname, _remap_buf_open, sizeof(_remap_buf_open));
++    /* OHOS_PATCH_SHIM_FS：把用户态软链（x.BSH_SYMLINK）逐段展开 */
++    pathname = (void*)bsh_fs_resolve_path((const char*)pathname, _shim_buf_open, sizeof(_shim_buf_open));
+     if(isProcSelf((const char*) pathname, "cmdline")) {
+         // special case for self command line...
+         #if 0
+@@ -2491,8 +2506,10 @@
+ EXPORT int32_t my_open64(x64emu_t* emu, void* pathname, int32_t flags, uint32_t mode)
+ {
+     /* OHOS_PATCH_PATH_REMAP */
+-    char _remap_buf[PATH_MAX];
++    char _remap_buf[PATH_MAX], _shim_buf[PATH_MAX];
+     pathname = (void*)box64_remap_path((const char*)pathname, _remap_buf, sizeof(_remap_buf));
++    /* OHOS_PATCH_SHIM_FS：把用户态软链（x.BSH_SYMLINK）逐段展开 */
++    pathname = (void*)bsh_fs_resolve_path((const char*)pathname, _shim_buf, sizeof(_shim_buf));
+     if(isProcSelf((const char*)pathname, "cmdline")) {
+         // special case for self command line...
+         #if 0
+@@ -3644,7 +3661,7 @@
+         size_t l = strlen(my_context->fullpath);
+         return (l>bufsize)?bufsize:(l+1);
+     }
+-    return readlinkat(fd, path, buf, bufsize);
++    return bsh_fs_readlinkat(fd, path, buf, bufsize);
+ }
+ 
+ EXPORT ssize_t my___readlinkat_chk(x64emu_t* emu, int dirfd, void* path, void* buf, size_t sz, size_t buflen)
+@@ -5183,19 +5200,16 @@
+ EXPORT int my_symlink(x64emu_t* emu, void* target, void* linkpath)
+ {
+     (void)emu;
+-    fprintf(stderr, "[box64-remap] symlink('%s', '%s') -> faked OK (HAP)\n",
+-            target   ? (const char*)target   : "(null)",
+-            linkpath ? (const char*)linkpath : "(null)");
+-    return 0;
++    /* OHOS_PATCH_SHIM_FS —— 原先是"假成功、不落盘"（patch 0030），结果是 lstat/readlink
++     * 全部查不到链接（testprogs 的 3 条 FAIL）。现在交给真实现：建一个内容为目标串的
++     * 标记文件 <linkpath>.BSH_SYMLINK（用户态软链，见 shim/fs_shim.c）。 */
++    return bsh_fs_symlink((const char*)target, (const char*)linkpath);
+ }
+ 
+ EXPORT int my_symlinkat(x64emu_t* emu, void* target, int newdirfd, void* linkpath)
+ {
+     (void)emu;
+-    fprintf(stderr, "[box64-remap] symlinkat('%s', %d, '%s') -> faked OK\n",
+-            target   ? (const char*)target   : "(null)", newdirfd,
+-            linkpath ? (const char*)linkpath : "(null)");
+-    return 0;
++    return bsh_fs_symlinkat((const char*)target, newdirfd, (const char*)linkpath);
+ }
+ /* OHOS_PATCH_PATH_REMAP_V2 END */
+ 

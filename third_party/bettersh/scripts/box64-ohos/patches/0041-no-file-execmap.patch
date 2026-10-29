@@ -1,0 +1,24 @@
+--- a/src/elfs/elfloader.c
++++ b/src/elfs/elfloader.c
+@@ -316,6 +316,21 @@
+                 try_mmap = 0;
+             if(e->p_align<box64_pagesize)
+                 try_mmap = 0;
++            /* OHOS_PATCH_NO_FILE_EXECMAP ───────────────────────────────────────────
++             * 上面这段"对齐没问题就从文件 mmap 这一段"的快路径，对本沙箱是**致命的**：
++             * 段里带 PF_X 时它要求把**文件页**映射成可执行，而 OHOS 对这个动作有一道
++             * seccomp 用户确认闸（弹「是否运行 <这个文件>」；不允许/超时 = EACCES）。
++             * 症状就是"guest 还能跑，但每次加载都弹一次窗、还要干等 30 秒"——因为
++             * 下面 340 行起的兜底路径（匿名映射 + fread）会接着把活干完。
++             *
++             * 兜底路径与文件路径语义完全等价（同一份字节、同样的段权限、同样走
++             * setProtection_elf），代价只是一次内存拷贝；我们的 elfloader 与自编 glibc/musl
++             * 都是一开始就这么做的（见 scripts/glibc-ohos/README.md §8、README.md「那道闸」）。
++             *
++             * 所以这里直接把文件快路径禁掉：既没有弹窗，也不怕 guest 落在 noexec 挂载上
++             * （我们的 guest 正好都在应用数据目录里）。主镜像、解释器、guest 的 .so 都走
++             * 这一个函数，改一处全覆盖。 */
++            try_mmap = 0;
+             if(try_mmap) {
+                 printf_dump(log_level, "Mmaping 0x%lx(0x%lx) bytes @%p with prot %x for Elf \"%s\"\n", head->multiblocks[n].size, head->multiblocks[n].asize, (void*)head->multiblocks[n].paddr, prot, head->name);
+                 void* p = InternalMmap(

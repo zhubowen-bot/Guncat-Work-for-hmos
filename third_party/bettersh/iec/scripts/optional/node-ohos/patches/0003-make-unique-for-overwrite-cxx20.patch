@@ -1,0 +1,21 @@
+--- a/deps/v8/src/base/vector.h
++++ b/deps/v8/src/base/vector.h
+@@ -293,7 +293,18 @@
+   // Elements in the new vector are default-initialized.
+   static OwnedVector<T> NewForOverwrite(size_t size) {
+     if (size == 0) return {};
++#if defined(__OHOS__)
++    // ── IEC OHOS port (see scripts/optional/node-ohos/patches/) ───────────
++    // std::make_unique_for_overwrite is C++23 (P1973), and the libc++ shipped
++    // with the OHOS SDK (15.0.4) does not have it. Building V8 13.6 reports
++    //   error: no member named 'make_unique_for_overwrite' in namespace 'std'
++    // and because this is a header, the whole v8_libbase target fails.
++    // Equivalent replacement: new T[n] also default-initializes each element,
++    // which is what make_unique_for_overwrite does.
++    return OwnedVector<T>(std::unique_ptr<T[]>(new T[size]), size);
++#else
+     return OwnedVector<T>(std::make_unique_for_overwrite<T[]>(size), size);
++#endif
+   }
+ 
+   // Allocates a new vector containing the specified collection of values.

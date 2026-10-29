@@ -1,0 +1,12 @@
+{
+  "name": "bsh_main",
+  "version": "1.0.0",
+  "description": "BetterSH 共享实现：ArkTS 界面 + native(libentry.so) + 资源(rawfile)",
+  "main": "Index.ets",
+  "author": "",
+  "license": "",
+  "dependencies": {
+    "libentry.so": "file:./src/main/cpp/types/libentry",
+    "iec": "file:../../iec/platform/ohos/har"
+  }
+}

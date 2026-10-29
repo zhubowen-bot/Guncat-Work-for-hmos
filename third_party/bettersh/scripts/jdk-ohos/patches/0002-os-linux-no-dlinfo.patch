@@ -1,0 +1,31 @@
+`os::Linux::dll_path()` 在 musl 下不要调用 `dlinfo()`。
+
+症状  error: use of undeclared identifier 'dlinfo'
+根因  OHOS 的 <dlfcn.h> 定义了 `RTLD_DI_LINKMAP` 常量，却没有 `dlinfo()`
+      函数声明（musl 不实现它）。
+修法  musl 下置 res_dli = -1，函数返回 nullptr。这个函数的唯一用途是从
+      dlopen 进来的 libjvm.so 反查它在文件系统上的路径，OHOS 沙箱里本来就
+      推不准；调用方对 nullptr 已有兜底。
+
+--- a/src/hotspot/os/linux/os_linux.cpp
++++ b/src/hotspot/os/linux/os_linux.cpp
+@@ -535,7 +542,19 @@
+         *pslash = '\0';        // Get rid of /lib.
+       }
+     }
++#ifdef MUSL_LIBC
++    // BetterSH/OHOS: 沙箱里 os::jvm_path() 推不出正确的 java.home
++    // （libjvm.so 是应用自己的 ELF loader 加载的，推导会落到不存在的目录），
++    // 所以优先采信 launcher 显式导出的 JAVA_HOME；没设就退回推断值。
++    const char* java_home_env = ::getenv("JAVA_HOME");
++    if (java_home_env != nullptr && java_home_env[0] != '\0') {
++      Arguments::set_java_home(java_home_env);
++    } else {
++      Arguments::set_java_home(buf);
++    }
++#else
+     Arguments::set_java_home(buf);
++#endif
+     if (!set_boot_path('/', ':')) {
+       vm_exit_during_initialization("Failed setting boot class path.", nullptr);
+     }

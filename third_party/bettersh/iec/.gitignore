@@ -1,0 +1,70 @@
+# ---- Build outputs ----
+# Intermediate objects, plus the generated protocols/ and config.h written by
+# scripts/build_client.sh
+/build/
+# CMake's out-of-source test build (see CMakeLists.txt)
+/build-cmake/
+# Final artifacts: libiec.so, libiec_preload.so, weston-terminal-wrap, iec_server
+/dist/
+
+# ---- Prebuilt client binary ----
+# Host-built weston-terminal, the target that gets intercepted. Reproduce with:
+#   scripts/build_client.sh -o weston-terminal
+# Delete this line if you would rather commit the binary.
+/weston-terminal
+
+# ---- Compiled objects and libraries ----
+*.o
+*.a
+*.so
+*.so.*
+
+# ---- Runtime leftovers ----
+# A UDS socket created inside the tree (the default path is /tmp/tty_service.sock)
+*.sock
+
+# ---- Editor / IDE ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+tags
+compile_commands.json
+.cache/
+.clangd/
+
+# ---- OS cruft ----
+.DS_Store
+Thumbs.db
+
+# ---- Core dumps ----
+core
+core.*
+vgcore.*
+
+# ---- Command sources ----
+# Cloned by ../scripts/build_iec_commands.sh --fetch (upstream scripts do not
+# download anything). Kept out of the submodule.
+/thirdparty/mksh/
+/thirdparty/toybox/
+/thirdparty/git/
+/thirdparty/dropbear/
+/thirdparty/pcre2/
+/thirdparty/zlib-*/
+/thirdparty/libarchive-*/
+/thirdparty/openssl-*/
+/thirdparty/curl-*/
+/thirdparty/node-*/
+/thirdparty/ncurses/
+/thirdparty/libffi/
+/thirdparty/Python-*/
+/thirdparty/*.tar.gz
+/thirdparty/*.tar.xz
+/thirdparty/*.tar.bz2
+
+# ---- Generated runtime resources ----
+/platform/ohos/har/src/main/resources/rawfile/tools/*.tar
+
+# ---- Local environment ----
+/scripts/env.sh

@@ -1,0 +1,6 @@
+{
+  "name": "libiec_server.so",
+  "types": "./Index.d.ts",
+  "version": "1.0.0",
+  "description": "ArkTS declarations for the IEC runtime HAR"
+}

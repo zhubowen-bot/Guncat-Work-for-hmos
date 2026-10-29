@@ -1,0 +1,86 @@
+diff --git a/rebuild_wrappers_32.py b/rebuild_wrappers_32.py
+index 6b4610584..dc4eee496 100755
+--- a/rebuild_wrappers_32.py
++++ b/rebuild_wrappers_32.py
+@@ -1,3 +1,4 @@
++# OHOS_PATCH_BOX32_IOMAP
+ #!/usr/bin/env python3
+ 
+ import os
+@@ -1249,30 +1250,16 @@ def generate_files(root: str, files: Iterable[str], ver: str, gbls: SortedGlobal
+ 		extern void* my__IO_2_1_stdout_;
+ 		
+ 		static void* io_convert32(void* v)
+-		{lbr}
+-			if(!v)
+-				return v;
+-			if(v==my__IO_2_1_stderr_)
+-				return stderr;
+-			if(v==my__IO_2_1_stdin_)
+-				return stdin;
+-			if(v==my__IO_2_1_stdout_)
+-				return stdout;
+-			return v;
+-		{rbr}
++            {lbr}
++                    extern void* box32_io_to_host(void*);
++                    return box32_io_to_host(v);
++            {rbr}
+ 
+ 		static void* io_convert_from(void* v)
+-		{lbr}
+-			if(!v)
+-				return v;
+-			if(v==stderr)
+-				return my__IO_2_1_stderr_;
+-			if(v==stdin)
+-				return my__IO_2_1_stdin_;
+-			if(v==stdout)
+-				return my__IO_2_1_stdout_;
+-			return v;
+-		{rbr}
++            {lbr}
++                    extern void* box32_io_from_host(void*);
++                    return box32_io_from_host(v);
++            {rbr}
+ 		
+ 		typedef struct my_GValue_s
+ 		{lbr}
+diff --git a/src/wrapped32/wrappedlibc.c b/src/wrapped32/wrappedlibc.c
+index 0f859c934..61e70cfe2 100755
+--- a/src/wrapped32/wrappedlibc.c
++++ b/src/wrapped32/wrappedlibc.c
+@@ -3872,3 +3872,15 @@ EXPORT size_t my32_malloc_usable_size(void* p)
+     return box32_malloc_usable_size(p);
+ }
+ /* OHOS_PATCH_BOX32_ALLOC_LOW4GB END */
++
++/* OHOS_PATCH_BOX32_IOMAP fclose proxy */
++extern void* box32_io_unregister(void*);
++EXPORT int my32_fclose(void* guest_fp)
++{
++    void* host = box32_io_unregister(guest_fp);
++    if (!host) return 0;
++    /* 三个全局 FILE* 不真关 */
++    if (host == stdin || host == stdout || host == stderr) return 0;
++    return fclose((FILE*)host);
++}
++/* OHOS_PATCH_BOX32_IOMAP fclose END */
+diff --git a/src/wrapped32/wrappedlibc_private.h b/src/wrapped32/wrappedlibc_private.h
+index ee22b4fa8..7513fa084 100755
+--- a/src/wrapped32/wrappedlibc_private.h
++++ b/src/wrapped32/wrappedlibc_private.h
+@@ -1,3 +1,4 @@
++/* OHOS_PATCH_BOX32_IOMAP */
+ /* OHOS_PATCH_BOX32_ALLOC_LOW4GB */
+ #if !(defined(GO) && defined(GOM) && defined(GO2) && defined(DATA) && defined(GOS))
+ #error Meh...
+@@ -313,7 +314,7 @@ GOW(fchmod, iEiu)
+ GO(fchmodat, iEipui)
+ GOW(fchown, iEiuu)
+ //GO(fchownat, iEipuii)
+-GO(fclose, iES)
++GOM(fclose, iES)  //%%,noE
+ GOW(fcloseall, iEv)
+ GOM(fcntl, iEEiiN)   //%% this also use a vararg for 3rd argument
+ GOM(__fcntl, iEEiiN) //%%

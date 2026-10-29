@@ -1,0 +1,54 @@
+// Public ArkTS entry of the HAR: re-export the capability probes, the service
+// lifecycle, the bootstrap helpers used by the application's ability, and the
+// programmatic execution API (see exec_napi.cpp / exec/exec_session.cpp).
+import {
+  hello,
+  setCaps,
+  probeCaps,
+  startIecServer,
+  stopIecServer,
+  installCaBundle,
+  initIecResourceManager,
+  checkRawfileVersionMarker,
+  writeRawfileVersionMarker,
+  ensureDir,
+  writeSoLauncher,
+  unpackResource,
+  writeTxtFile,
+  execStart,
+  execPoll,
+  execWait,
+  execWrite,
+  execCloseStdin,
+  execTerminate,
+  execSignal,
+  execRelease,
+  execList,
+  execCount
+} from 'libiec_server.so';
+
+export {
+  hello,
+  setCaps,
+  probeCaps,
+  startIecServer,
+  stopIecServer,
+  installCaBundle,
+  initIecResourceManager,
+  checkRawfileVersionMarker,
+  writeRawfileVersionMarker,
+  ensureDir,
+  writeSoLauncher,
+  unpackResource,
+  writeTxtFile,
+  execStart,
+  execPoll,
+  execWait,
+  execWrite,
+  execCloseStdin,
+  execTerminate,
+  execSignal,
+  execRelease,
+  execList,
+  execCount
+};

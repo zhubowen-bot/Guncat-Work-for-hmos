@@ -1,0 +1,27 @@
+safepoint polling page：用 MEM_PROT_READ 而不是 MEM_PROT_NONE。
+
+症状  同 0007，且崩溃有时以 SIGBUS 形式出现。
+根因  上游把 bad page 设成完全不可访问，隐式依赖"访问它一定报 SIGSEGV"。
+      OHOS 上同一次访问也可能被报成 SIGBUS，而 SIGBUS 在 aarch64 handler
+      里对应的是"读被截断的 MappedByteBuffer"那条分支，会被当成真错误。
+修法  good page 本来就是 MEM_PROT_READ，bad page 也改成 MEM_PROT_READ，
+      polling 完全交给 0007 的 fault → disarm → 重试 路径，不再依赖信号种类。
+
+--- a/src/hotspot/share/runtime/safepointMechanism.cpp
++++ b/src/hotspot/share/runtime/safepointMechanism.cpp
+@@ -65,7 +65,15 @@
+     char* bad_page  = polling_page;
+     char* good_page = polling_page + page_size;
+ 
++#ifdef MUSL_LIBC
++    // BetterSH/OHOS: 配合 pd_hotspot_signal_handler 的 SEGV 兜底。
++    // 只设成不可读会依赖"访问它一定报 SIGSEGV"，而 OHOS 上同一次访问也可能
++    // 被报成 SIGBUS（会被 aarch64 handler 当成真错误）。两边都用 MEM_PROT_READ，
++    // polling 交给 fault → disarm → 重试 那条路径。
++    os::protect_memory(bad_page,  page_size, os::MEM_PROT_READ);
++#else
+     os::protect_memory(bad_page,  page_size, os::MEM_PROT_NONE);
++#endif
+     os::protect_memory(good_page, page_size, os::MEM_PROT_READ);
+ 
+     log_info(os)("SafePoint Polling address, bad (protected) page:" INTPTR_FORMAT ", good (unprotected) page:" INTPTR_FORMAT, p2i(bad_page), p2i(good_page));

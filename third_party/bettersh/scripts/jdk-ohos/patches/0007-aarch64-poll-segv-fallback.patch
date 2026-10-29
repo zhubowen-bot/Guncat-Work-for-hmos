@@ -1,0 +1,35 @@
+aarch64：safepoint polling 的 SEGV 兜底（代码不在 CodeCache 里时）。
+
+症状  JVM 跑到 polling 点时 SIGSEGV 崩溃，栈里看不出任何 Java 帧。
+根因  JVM 用 polling page 做 safepoint：线程读一个"不可读"的页 → SIGSEGV
+      → handler 认出 is_poll_address 后把 PC 改到 poll stub。但正常分支
+      要求 `CodeCache::find_blob(pc)` 能认出这段机器码 —— 我们自己 ELF
+      loader 加载的代码不在 CodeCache 里，于是 stub 为 nullptr，
+      一路 return false，被当成真崩溃。
+修法  stub 找不到但 fault 地址确实在 polling page 上时：直接把 polling
+      page 改回可读（disarm），返回 true 让 CPU 重试那条读指令。
+      重试时读到的是"已 disarm"的值，安全继续。
+
+--- a/src/hotspot/os_cpu/linux_aarch64/os_linux_aarch64.cpp
++++ b/src/hotspot/os_cpu/linux_aarch64/os_linux_aarch64.cpp
+@@ -305,6 +305,20 @@
+     }
+   }
+ 
++#ifdef MUSL_LIBC
++  // BetterSH/OHOS: polling page 的 SEGV 兜底。
++  // 正常路径靠 CodeCache 找到 poll stub；但我们自己的 ELF loader 加载的代码
++  // 不在 CodeCache 里，认不出来时会一路 return false 被当成真崩溃。
++  // 这里直接 disarm polling page，让 CPU 重试那条读指令 ——
++  // 重试时读到"已 disarm"的值，安全继续。
++  if (stub == nullptr && sig == SIGSEGV && info != nullptr &&
++      SafepointMechanism::is_poll_address((address)info->si_addr)) {
++    os::protect_memory((char*)SafepointMechanism::get_polling_page(),
++                       os::vm_page_size(), os::MEM_PROT_READ);
++    return true;
++  }
++#endif
++
+   if (stub != nullptr) {
+     // save all thread context in case we need to restore it
+     if (thread != nullptr) thread->set_saved_exception_pc(pc);

@@ -1,0 +1,26 @@
+`os::init_system_properties_values()`：优先用 JAVA_HOME。
+
+症状  java.home 错 → lib/modules 与类库全部定位失败。
+根因  同一段推导里的 `<java_home>` 不可信（见 0003）。
+修法  优先采信 launcher 显式导出的 JAVA_HOME；没设则退回推断值。
+      和 dll_dir 是同一段代码里的两个变量、会在不同的地方炸，
+      所以拆成两条补丁，方便单独回退。
+
+--- a/src/hotspot/os/linux/os_linux.cpp
++++ b/src/hotspot/os/linux/os_linux.cpp
+@@ -1858,7 +1877,15 @@
+   const char* l_path = nullptr;
+   assert(lib != nullptr, "dll_path parameter must not be null");
+ 
++#ifdef MUSL_LIBC
++  // BetterSH/OHOS: musl 不提供 dlinfo()，OHOS 的 <dlfcn.h> 只留了
++  // RTLD_DI_LINKMAP 常量。这个函数的唯一用途是反查 libjvm.so 在文件系统上的
++  // 路径，在沙箱里本来也推不准；拿不到就退化成 nullptr，调用方会自己兜底。
++  int res_dli = -1;
++  (void)lmap;
++#else
+   int res_dli = ::dlinfo(lib, RTLD_DI_LINKMAP, &lmap);
++#endif
+   if (res_dli == 0) {
+     l_path = lmap->l_name;
+   }

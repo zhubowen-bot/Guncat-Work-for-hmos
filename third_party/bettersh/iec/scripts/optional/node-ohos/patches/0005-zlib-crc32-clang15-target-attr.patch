@@ -1,0 +1,23 @@
+--- a/deps/zlib/crc32_simd.c
++++ b/deps/zlib/crc32_simd.c
+@@ -387,7 +387,20 @@
+ #endif
+ 
+ #if defined(__aarch64__)
++#if defined(__clang__) && __clang_major__ < 16
++/* ── IEC OHOS port (see scripts/optional/node-ohos/patches/) ───────────
++ * Newer zlib uses target("arch=armv8-a+aes+crc"), but the OHOS SDK's clang 15
++ * only accepts the older spelling and reports
++ *     warning: unknown architecture 'armv8-a+aes+crc' in the 'target'
++ *              attribute string; 'target' attribute ignored
++ * With the attribute ignored, the __builtin_arm_crc32b family has no crc
++ * feature and the backend fails with
++ *     fatal error: error in backend: Cannot select: intrinsic %llvm.aarch64.crc32b
++ * The feature set is the same (aes+crc); only the spelling clang 15 knows. */
++#define TARGET_ARMV8_WITH_CRC __attribute__((target("aes,crc")))
++#else
+ #define TARGET_ARMV8_WITH_CRC __attribute__((target("arch=armv8-a+aes+crc")))
++#endif  // __clang__ && __clang_major__ < 16
+ #else  // !defined(__aarch64__)
+ #define TARGET_ARMV8_WITH_CRC __attribute__((target("crc")))
+ #endif  // defined(__aarch64__)

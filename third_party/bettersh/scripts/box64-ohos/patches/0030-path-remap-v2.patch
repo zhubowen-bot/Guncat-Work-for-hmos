@@ -1,0 +1,205 @@
+diff --git a/src/wrapped/wrappedlibc.c b/src/wrapped/wrappedlibc.c
+index 645825a2a..72ae87607 100644
+--- a/src/wrapped/wrappedlibc.c
++++ b/src/wrapped/wrappedlibc.c
+@@ -1,3 +1,5 @@
++/* OHOS_PATCH_PATH_REMAP_V2 */
++extern void box64_remap_maybe_add_wineprefix_rule(void);
+ /* OHOS_PATCH_PATH_REMAP */
+ #include <limits.h>
+ extern const char* box64_remap_path(const char* path, char* buf, unsigned long buflen);
+@@ -1784,6 +1786,9 @@ EXPORT int my___fxstatat64(x64emu_t* emu, int v, int d, void* path, void* buf, i
+ EXPORT int my_stat(x64emu_t *emu, void* filename, void* buf)
+ {
+     (void)emu;
++    /* OHOS_PATCH_PATH_REMAP_V2 */
++    char _remap_buf_stat[PATH_MAX];
++    filename = (void*)box64_remap_path((const char*)filename, _remap_buf_stat, sizeof(_remap_buf_stat));
+     struct stat st;
+     int r = stat(filename, &st);
+     if(!r)
+@@ -1819,6 +1824,9 @@ EXPORT int my_fstat64(x64emu_t* emu, int fd, void* buf) __attribute__((alias("my
+ 
+ EXPORT int my_fstatat(x64emu_t *emu, int fd, const char* path, void* buf, int flags)
+ {
++    /* OHOS_PATCH_PATH_REMAP_V2 */
++    char _remap_buf_fstatat[PATH_MAX];
++    path = box64_remap_path(path, _remap_buf_fstatat, sizeof(_remap_buf_fstatat));
+     (void)emu;
+     struct stat st;
+     int r = fstatat(fd, path, &st, flags);
+@@ -2143,6 +2151,9 @@ static long isProcMem(const char* path)
+ 
+ EXPORT ssize_t my_readlink(x64emu_t* emu, void* path, void* buf, size_t sz)
+ {
++    /* OHOS_PATCH_PATH_REMAP_V2 */
++    char _remap_buf_rl[PATH_MAX];
++    path = (void*)box64_remap_path((const char*)path, _remap_buf_rl, sizeof(_remap_buf_rl));
+     if(isProcSelf((const char*)path, "exe")) {
+         // special case for self...
+         return strlen(strncpy((char*)buf, emu->context->fullpath, sz));
+@@ -3605,6 +3616,9 @@ EXPORT void my___explicit_bzero_chk(x64emu_t* emu, void* dst, uint32_t len, uint
+ 
+ EXPORT void* my_realpath(x64emu_t* emu, void* path, void* resolved_path)
+ {
++    /* OHOS_PATCH_PATH_REMAP_V2 */
++    char _remap_buf_rp[PATH_MAX];
++    path = (void*)box64_remap_path((const char*)path, _remap_buf_rp, sizeof(_remap_buf_rp));
+     if(path && isProcSelf(path, "exe")) {
+         return realpath(emu->context->fullpath, resolved_path);
+     }
+@@ -5069,3 +5083,80 @@ EXPORT int my_connect(x64emu_t* emu, int sockfd, void* addr, uint32_t addrlen)
+     return connect(sockfd, (struct sockaddr*)addr, (socklen_t)addrlen);
+ }
+ /* OHOS_PATCH_PATH_REMAP END */
++
++/* OHOS_PATCH_PATH_REMAP_V2 — new wrappers (path remap second wave). */
++#include <dirent.h>
++
++EXPORT void* my_opendir(x64emu_t* emu, void* path)
++{
++    (void)emu;
++    char buf[PATH_MAX];
++    path = (void*)box64_remap_path((const char*)path, buf, sizeof(buf));
++    return opendir((const char*)path);
++}
++
++EXPORT int my_access(x64emu_t* emu, void* path, int mode)
++{
++    (void)emu;
++    char buf[PATH_MAX];
++    path = (void*)box64_remap_path((const char*)path, buf, sizeof(buf));
++    return access((const char*)path, mode);
++}
++
++EXPORT int my_faccessat(x64emu_t* emu, int dirfd, void* path, int mode, int flags)
++{
++    (void)emu;
++    char buf[PATH_MAX];
++    path = (void*)box64_remap_path((const char*)path, buf, sizeof(buf));
++    return faccessat(dirfd, (const char*)path, mode, flags);
++}
++
++EXPORT int my_unlink(x64emu_t* emu, void* path)
++{
++    (void)emu;
++    char buf[PATH_MAX];
++    path = (void*)box64_remap_path((const char*)path, buf, sizeof(buf));
++    return unlink((const char*)path);
++}
++
++EXPORT int my_rmdir(x64emu_t* emu, void* path)
++{
++    (void)emu;
++    char buf[PATH_MAX];
++    path = (void*)box64_remap_path((const char*)path, buf, sizeof(buf));
++    return rmdir((const char*)path);
++}
++
++EXPORT int my_rename(x64emu_t* emu, void* oldpath, void* newpath)
++{
++    (void)emu;
++    char buf1[PATH_MAX], buf2[PATH_MAX];
++    oldpath = (void*)box64_remap_path((const char*)oldpath, buf1, sizeof(buf1));
++    newpath = (void*)box64_remap_path((const char*)newpath, buf2, sizeof(buf2));
++    return rename((const char*)oldpath, (const char*)newpath);
++}
++
++/* HAP 沙箱禁 symlink syscall. fake 返回 0:
++ *   - 配合 path remap, 后续 stat/open 命中真实目录 -> 透明
++ *   - 副作用: lstat 这个 link 会拿到 ENOENT, 真依赖此行为的代码会跑偏
++ *   - 当前 wineboot 路径 (dosdevices/c:) 完全靠 path remap 解决, 不依赖
++ *     真 symlink 存在
++ */
++EXPORT int my_symlink(x64emu_t* emu, void* target, void* linkpath)
++{
++    (void)emu;
++    fprintf(stderr, "[box64-remap] symlink('%s', '%s') -> faked OK (HAP)\n",
++            target   ? (const char*)target   : "(null)",
++            linkpath ? (const char*)linkpath : "(null)");
++    return 0;
++}
++
++EXPORT int my_symlinkat(x64emu_t* emu, void* target, int newdirfd, void* linkpath)
++{
++    (void)emu;
++    fprintf(stderr, "[box64-remap] symlinkat('%s', %d, '%s') -> faked OK\n",
++            target   ? (const char*)target   : "(null)", newdirfd,
++            linkpath ? (const char*)linkpath : "(null)");
++    return 0;
++}
++/* OHOS_PATCH_PATH_REMAP_V2 END */
+diff --git a/src/wrapped/wrappedlibc_private.h b/src/wrapped/wrappedlibc_private.h
+index 480b110bf..e99940020 100644
+--- a/src/wrapped/wrappedlibc_private.h
++++ b/src/wrapped/wrappedlibc_private.h
+@@ -1,3 +1,4 @@
++/* OHOS_PATCH_PATH_REMAP_V2 */
+ /* OHOS_PATCH_PATH_REMAP */
+ #if !(defined(GO) && defined(GOM) && defined(GO2) && defined(DATA))
+ #error Meh...
+@@ -9,7 +10,7 @@ GO(abort, vFv)
+ GO(abs, iFi)
+ GO(accept, iFipp)
+ GO(accept4, iFippi)
+-GOW(access, iFpi)
++GOM(access, iFEpi)
+ GO(acct, iFp)
+ GOW(addmntent, iFSp)
+ GOW(addseverity, iFip)
+@@ -356,7 +357,7 @@ GOM(exit, vFEi)
+ GOW(_Exit, vFi)
+ GO(explicit_bzero, vFpL)
+ GO(__explicit_bzero_chk, vFpLL)
+-GO(faccessat, iFipii)
++GOM(faccessat, iFEipii)
+ GOW(fallocate, iFiill)
+ GO(fallocate64, iFiiII)
+ GO(fanotify_init, iFuu)
+@@ -1455,7 +1456,7 @@ GO(__openat64_2, iFipO)
+ GO(open_by_handle_at, iFipi)
+ GOW(open_tree, iFipu)
+ //GO(__open_catalog, 
+-GOW(opendir, pFp)
++GOM(opendir, pFEp)
+ GO(openlog, vFpii)
+ GOW(open_memstream, SFpp)
+ //GO(__open_nocancel, 
+@@ -1680,7 +1681,7 @@ GOW(re_match_2, iFppipiipi)
+ GO(remove, iFp)
+ GO(removexattr, iFpp)
+ GO(remque, vFp)
+-GO(rename, iFpp)
++GOM(rename, iFEpp)
+ GOW(renameat, iFipip)
+ GOW(renameat2, iFipipu)
+ //DATAB(_res, 
+@@ -1713,7 +1714,7 @@ GO(rexec, iFpipppp)
+ GO(rexec_af, iFpippppW)
+ //DATAB(rexecoptions, 
+ GO(rindex, pFpi)
+-GOW(rmdir, iFp)
++GOM(rmdir, iFEp)
+ #ifdef STATICBUILD
+ //DATAB(rpc_createerr, 
+ //GO(_rpc_dtablesize, iFv)
+@@ -2173,8 +2174,8 @@ GOW(swapon, iFpi)
+ GOM(swprintf, iFEpLpV)
+ GOM(__swprintf_chk, iFEpLiLpV)
+ GOM(swscanf, iFEppV)
+-GOW(symlink, iFpp)
+-GO(symlinkat, iFpip)
++GOM(symlink, iFEpp)
++GOM(symlinkat, iFEpip)
+ GO(sync, vFv)
+ GO(sync_file_range, iFiIIu)
+ GO(syncfs, iFi)
+@@ -2307,7 +2308,7 @@ GOWM(uname, iFp)
+ GO(__underflow, iFp)
+ GOW(ungetc, iFiS)
+ GO(ungetwc, uFuS)
+-GOW(unlink, iFp)
++GOM(unlink, iFEp)
+ GO(unlinkat, iFipi)
+ GO(unlockpt, iFi)
+ GOW(unsetenv, iFp)

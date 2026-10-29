@@ -1,0 +1,156 @@
+--- a/ldso/dynlink.c
++++ b/ldso/dynlink.c
+@@ -575,6 +575,103 @@
+ 	return n;
+ }
+ 
++/* ── BetterSH / HarmonyOS:库段不再用文件 mmap 加载 ───────────────────────────
++
++   目标平台的沙箱把"把非系统文件当可执行体"(execve,以及 file-backed 的可执行
++   mmap,包括先 mmap 再 mprotect(RW→RX))交给 seccomp 用户态通知:用户看到
++   "是否运行 xxx"确认框,拒绝就是 EACCES/EPERM —— 落到加载器上就是
++   "Error loading shared library ...: Permission denied / Operation not permitted"。
++   而且 $HOME 这类挂载点是 noexec,从那里做可执行的文件映射本来就该失败。
++
++   所以每个 PT_LOAD 段改成三步(与 entry/src/main/cpp/elfloader 装 guest 的做法一致):
++     1. 整块地址区间先用匿名 PROT_NONE 预留(map_library 里的第一次 mmap);
++     2. 逐段 mprotect(PROT_READ|PROT_WRITE) 后用 pread 把文件内容读进来;
++     3. mprotect 成该段最终权限(代码段到这一步才变 r-x)。
++   地址空间里从此只有匿名页,不再有 file-backed 的可执行映射 —— 这正是"不弹确认框"
++   的判据(可用 /proc/self/maps 复核:库名不再出现在里面)。
++
++   dlopen() 与 DT_NEEDED 两条路都是 load_library() → map_library(),改这一个函数就
++   同时覆盖两条路。ldso 自己(以及主程序)是外面的装载器/内核映射进来的,在 __dls2
++   里由 kernel_mapped_dso() 登记,不经过这里,所以自映射不受影响。  */
++
++/* 段内容是 pread 写进去的,可能还停在 D-cache 里;当代码执行前必须先清到 PoU 再
++   无效化 I-cache(否则 CPU 可能取到旧指令)。等价于 __builtin___clear_cache,但
++   ldso 里不便引入对 libgcc __clear_cache 的依赖,所以内联这一串。  */
++#ifdef __aarch64__
++static void flush_icache(void *p, size_t n)
++{
++	unsigned long a = (unsigned long)p & -64UL, e = (unsigned long)p + n, b = a;
++	for (; a < e; a += 64)
++		__asm__ __volatile__("dc cvau, %0" :: "r"(a) : "memory");
++	__asm__ __volatile__("dsb ish" ::: "memory");
++	for (; b < e; b += 64)
++		__asm__ __volatile__("ic ivau, %0" :: "r"(b) : "memory");
++	__asm__ __volatile__("dsb ish" ::: "memory");
++	__asm__ __volatile__("isb" ::: "memory");
++}
++#else
++static void flush_icache(void *p, size_t n) { (void)p; (void)n; }
++#endif
++
++/* 给一段页设最终权限。HarmonyOS 的 W^X 只允许在 prctl('jit', 0, 0) 打开之后把
++   **匿名页**设成可执行(0x6a6974 就是 ASCII 的 'jit',elfloader 的 jit_toggle()
++   用的是同一个),所以带 PROT_EXEC 的 mprotect 失败时先开开关再试一次。原生 Linux
++   上那个 prctl 返回 EINVAL,重试自然还是失败,行为与上游一致。
++
++   ⚠ 开关值是 **0=开、1=关**(与 elfloader 一致)。这里写反过一次(拿 1 当"开门"),
++   后果是**等于从没开过门**:musl 侧任何"运行期加载的 .so"——LD_PRELOAD、dlopen、
++   DT_NEEDED——都在这里 mprotect 失败,报
++       Error loading shared library …: Invalid argument
++   而 musl 的 load_preload() 对预载失败是**静默跳过**(不看返回值、不打印),
++   于是一个"明明设了 LD_PRELOAD 却完全没生效"的哑巴故障就是这么来的(实测:
++   /proc/self/exe 的替身在 glibc guest 里全过、在 musl guest 里一条不生效)。  */
++static int set_prot(void *p, size_t n, int prot)
++{
++	if (!mprotect(p, n, prot)) return 0;
++	if (!(prot & PROT_EXEC)) return -1;
++	int rc;
++#ifdef SYS_prctl
++	__syscall(SYS_prctl, 0x6a6974L, 0, 0, 0, 0);   /* 开门 */
++#endif
++	rc = mprotect(p, n, prot);
++#ifdef SYS_prctl
++	__syscall(SYS_prctl, 0x6a6974L, 0, 1, 0, 0);   /* 关门(与开门对称) */
++#endif
++	return rc;
++}
++
++/* 把一个段从文件读进已经预留好的匿名区间 [p, p+n),最后设成该段权限 prot。
++   全程没有带 fd 的 mmap:只有 mprotect + pread。读到文件尾就停,余下的字节留在
++   匿名页上,本来就是 0(与内核在文件映射上"超出 EOF 的页读作 0"一致)。  */
++static int map_segment(void *p, size_t n, int prot, int fd, off_t off)
++{
++	char *d = p;
++	size_t done = 0;
++
++	if (!n) return 0;
++	if (mprotect(p, n, PROT_READ|PROT_WRITE)) {
++		/* 这段地址不是我们预留的匿名页(固定地址的对象,或该地址已被别的映射
++		   占了),就地补一块匿名页 —— 等价于上游"就在这个地址上做 MAP_FIXED
++		   文件映射"的语义。  */
++		if (mmap(p, n, PROT_READ|PROT_WRITE,
++			MAP_PRIVATE|MAP_FIXED|MAP_ANONYMOUS, -1, 0) == MAP_FAILED)
++			return -1;
++	}
++	while (done < n) {
++		ssize_t r = pread(fd, d+done, n-done, off+done);
++		if (r < 0) {
++			if (errno == EINTR) continue;
++			return -1;
++		}
++		if (!r) break;
++		done += r;
++	}
++	flush_icache(p, n);
++	return set_prot(p, n, prot);
++}
++
++/* 上游的 mmap_fixed() 现在只剩匿名那一条用途(段尾 bss),带 fd 的分支不再有人走;
++   保留原样,免得 NOMMU 之外的行为漂移。  */
+ static void *mmap_fixed(void *p, size_t n, int prot, int flags, int fd, off_t off)
+ {
+ 	static int no_map_fixed;
+@@ -689,6 +786,8 @@
+ 		}
+ 	}
+ 	if (!dyn) goto noexec;
++	/* BetterSH:aarch64 上 DL_FDPIC 恒为 0,这条 FDPIC 分支是死代码,没有改成
++	   "匿名 + pread"(改了也测不到);真要支持 FDPIC 目标时得照下面那段的做法改。  */
+ 	if (DL_FDPIC && !(eh->e_flags & FDPIC_CONSTDISP_FLAG)) {
+ 		dso->loadmap = calloc(1, sizeof *dso->loadmap
+ 			+ nsegs * sizeof *dso->loadmap->segs);
+@@ -738,11 +837,11 @@
+ 	 * the length of the file. This is okay because we will not
+ 	 * use the invalid part; we just need to reserve the right
+ 	 * amount of virtual address space to map over later. */
+-	map = DL_NOMMU_SUPPORT
+-		? mmap((void *)addr_min, map_len, PROT_READ|PROT_WRITE|PROT_EXEC,
+-			MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
+-		: mmap((void *)addr_min, map_len, prot,
+-			MAP_PRIVATE, fd, off_start);
++	/* BetterSH:这里以前是"把整个文件镜像从 off_start 映射 map_len 字节",
++	   现在只**预留地址**(匿名 PROT_NONE),内容由下面循环逐段 pread 填。
++	   预留范围比实际用到的大没关系:多出来的尾部本来就没人用。  */
++	map = mmap((void *)addr_min, map_len, PROT_NONE,
++		MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+ 	if (map==MAP_FAILED) goto error;
+ 	dso->map = map;
+ 	dso->map_len = map_len;
+@@ -772,10 +871,10 @@
+ 		prot = (((ph->p_flags&PF_R) ? PROT_READ : 0) |
+ 			((ph->p_flags&PF_W) ? PROT_WRITE: 0) |
+ 			((ph->p_flags&PF_X) ? PROT_EXEC : 0));
+-		/* Reuse the existing mapping for the lowest-address LOAD */
+-		if ((ph->p_vaddr & -PAGE_SIZE) != addr_min || DL_NOMMU_SUPPORT)
+-			if (mmap_fixed(base+this_min, this_max-this_min, prot, MAP_PRIVATE|MAP_FIXED, fd, off_start) == MAP_FAILED)
+-				goto error;
++		/* BetterSH:每个段都自己从文件读进匿名页 —— 上游"最低地址那个段由最初的
++		   文件映射顺带映射"的便宜这里没有了,所以不再有"跳过最低段"的分支。  */
++		if (map_segment(base+this_min, this_max-this_min, prot, fd, off_start))
++			goto error;
+ 		if (ph->p_memsz > ph->p_filesz && (ph->p_flags&PF_W)) {
+ 			size_t brk = (size_t)base+ph->p_vaddr+ph->p_filesz;
+ 			size_t pgbrk = brk+PAGE_SIZE-1 & -PAGE_SIZE;
+@@ -786,7 +885,7 @@
+ 	}
+ 	for (i=0; ((size_t *)(base+dyn))[i]; i+=2)
+ 		if (((size_t *)(base+dyn))[i]==DT_TEXTREL) {
+-			if (mprotect(map, map_len, PROT_READ|PROT_WRITE|PROT_EXEC)
++			if (set_prot(map, map_len, PROT_READ|PROT_WRITE|PROT_EXEC)
+ 			    && errno != ENOSYS)
+ 				goto error;
+ 			break;

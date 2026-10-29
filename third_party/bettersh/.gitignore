@@ -1,0 +1,129 @@
+/node_modules
+/oh_modules
+/local.properties
+/.idea
+**/build
+/versions
+/.hvigor
+.cxx
+/.clangd
+/.clang-format
+/.clang-tidy
+**/.test
+/.appanalyzer
+# hvigor 给每个模块生成的构建期常量(ArkTS 用)，不是源码
+**/BuildProfile.ets
+
+/build-profile.json5
+# 两个 entry 的模块配置按发行变体不同(权限集合)，由 scripts/switch_version.sh 从
+# versions/<名>/module.json5(tablet) / versions/<名>/phone.module.json5(phone) 里**只取
+# requestPermissions 那一段**替换(模块名/abilities/设备类型仍以本仓库为准)；
+# 本地基线见 product/<名>/src/main/module.json5.example
+/product/tablet/src/main/module.json5
+/product/phone/src/main/module.json5
+/scripts/env.sh
+
+/feature/bsh_main/libs
+
+# llvm 脚本生成的 clang 资源归档(由 build_llvm.sh 产出)
+/feature/bsh_main/src/main/resources/rawfile/tools/clang-res.tar
+# vim 脚本生成的运行时归档(由 build_vim.sh 产出)
+/feature/bsh_main/src/main/resources/rawfile/tools/vim-runtime.tar
+# musl sysroot 归档(由 build_sysroot.sh 产出)
+/feature/bsh_main/src/main/resources/rawfile/tools/sysroot.tar
+# weston-terminal 的三个包（本体 / xkb / weston-data）**不再随 HAP**，产出在 dist/pkgs/
+# （dist/ 整目录已忽略），由人工上传到包服务器 https://bsh.y1yan.com/；设备侧用 pkg 装。
+/feature/bsh_main/src/main/resources/rawfile/tools/fonts.tar
+# CPython stdlib 归档(由 build_python.sh 产出)
+/feature/bsh_main/src/main/resources/rawfile/tools/python-stdlib.tar
+# PyQt6 归档(由 scripts/build_pyqt.sh 产出)
+/feature/bsh_main/src/main/resources/rawfile/tools/pyqt6.tar
+# numpy 归档(由 scripts/build_numpy.sh 产出;C 扩展平铺在 entry/libs)
+/feature/bsh_main/src/main/resources/rawfile/tools/numpy.tar
+# matplotlib 纯 Python 依赖归档(由 scripts/build_pypure.sh 产出)
+/feature/bsh_main/src/main/resources/rawfile/tools/pypure.tar
+# kiwisolver 归档(由 scripts/build_kiwisolver.sh 产出;扩展平铺在 entry/libs)
+/feature/bsh_main/src/main/resources/rawfile/tools/kiwisolver.tar
+# contourpy / pillow 归档(由 scripts/build_contourpy.sh / build_pillow.sh 产出)
+/feature/bsh_main/src/main/resources/rawfile/tools/contourpy.tar
+/feature/bsh_main/src/main/resources/rawfile/tools/pillow.tar
+# matplotlib 归档(由 scripts/build_matplotlib.sh 产出;扩展平铺在 entry/libs)
+/feature/bsh_main/src/main/resources/rawfile/tools/matplotlib.tar
+# 组合验收程序归档(由 scripts/build_testprogs.sh 产出;6 个 elf)
+/feature/bsh_main/src/main/resources/rawfile/tools/testprogs.tar
+# GTK3 探针归档(由 scripts/build_gtk.sh 的 pack 阶段产出;探针 + 21 个 .so 的闭包 34MB)
+/feature/bsh_main/src/main/resources/rawfile/tools/gtkprobe.tar
+# 无人值守自检脚本(本地临时件,按需手写/调整;历史完整版已入库为 autorun-all.sh)
+/feature/bsh_main/src/main/resources/rawfile/tools/autorun.sh
+# 沙箱里 hdc 的身份密钥(initResource 每次会话补到 $HOME/.harmony;见 shell.cpp 那段)
+# **私钥,不入库**:备份在 build/hdc-keys-backup/,换机器时带过去即可
+/feature/bsh_main/src/main/resources/rawfile/tools/hdckey
+/feature/bsh_main/src/main/resources/rawfile/tools/hdckey.pub
+# JDK 的设备侧数据归档(由 scripts/build_jdk.sh 的 pack 阶段产出)
+# 当前**不随包**(开发期靠它的缺失让 initResource 每次都全量重解,见 shell.cpp 里 jdk 那条)
+/feature/bsh_main/src/main/resources/rawfile/tools/jdk21-ohos.tar
+# npm 的纯 JS 树归档(由 scripts/build_node.sh 第 5 步产出)
+/feature/bsh_main/src/main/resources/rawfile/tools/npm.tar
+# 设备内自举流水线要用的三份设备侧输入,都是**纯产物**(自举脚本本身还没入库,先按产物忽略):
+#   bettershdev-src.tar  BetterSHDev 源码树 + signing/(含私钥 p12,**绝不入库**)
+#   bshsign-tools.tar    签名/安装/打开要用的小工具 + glibc stub 库
+#   hvigor-cache.tar     hvigor 引擎与 pnpm 的离线缓存(沙箱没网)
+/feature/bsh_main/src/main/resources/rawfile/tools/bettershdev-src.tar
+/feature/bsh_main/src/main/resources/rawfile/tools/bshsign-tools.tar
+/feature/bsh_main/src/main/resources/rawfile/tools/hvigor-cache.tar
+# Qt 应用目录归档(qtwl-demo + Qt 依赖 so 闭包 + 8 个顶掉 OHOS 同名库的桩库;
+# strip 后约 100MB 的纯产物,随 HAP 打包、不入库)
+/feature/bsh_main/src/main/resources/rawfile/tools/qtapp.tar
+# wayland 生成的头/协议(由 scripts/build_wayland.sh 产出)
+/feature/bsh_main/src/main/cpp/wayland/include/
+/feature/bsh_main/src/main/cpp/wayland/protocol/
+/dist
+
+# non-git source code
+/thirdparty/ohos-extra
+/thirdparty/qt-src
+/thirdparty/pyqt6-src
+/thirdparty/numpy-src
+/thirdparty/pysrc
+# box64 源码(build_box64.sh 里 git clone;钉死 commit,不是子模块)
+/thirdparty/box64
+# x86_64 musl 交叉工具链(build_testprogs.sh 按需从 musl.cc 下载)
+/thirdparty/x86_64-linux-musl-cross
+/thirdparty/x86_64-linux-musl-cross.tgz
+# Node.js 源码包(build_node.sh 按需下载;源码解到 build/node/ 下构建)
+/thirdparty/node-v*.tar.gz
+# OpenJDK 源码包(build_jdk.sh 按需下载;源码解到 build/jdk/ 下构建)
+/thirdparty/jdk21u-*.tar.gz
+# Info-ZIP 源码包(build_zip.sh 按需下载;源码解到 build/zip/ 下构建)
+/thirdparty/zip_*.orig.tar.gz
+/thirdparty/unzip_*.orig.tar.gz
+# glibc 源码包(build_glibc.sh 按需下载;源码解到 build/glibc/ 下构建)
+/thirdparty/glibc-*.tar.gz
+# musl 源码包(build_musl.sh 按需下载;源码解到 build/musl/ 下构建)
+/thirdparty/musl-*.tar.gz
+# OpenSSL（scripts/build_openssl.sh 的源码与下载缓存；解压后 ~250MB，纯产物）
+/thirdparty/openssl-*.tar.gz
+/thirdparty/openssl-*/
+# pip wheel 缓存（scripts/build_pip.sh 从 PyPI 取的，纯产物）
+/thirdparty/pip-src
+# GNU make / ninja 源码（scripts/build_devtools.sh 按需下载，纯产物；和 openssl/musl 一个待遇）
+/thirdparty/make-*.tar.gz
+/thirdparty/make-*/
+/thirdparty/ninja-*.tar.gz
+/thirdparty/ninja-*/
+# git 与 libcurl 源码包（scripts/build_git.sh 按需下载；解到 build/git-src、build/curl-src 下构建）
+/thirdparty/git-*.tar.xz
+# libarchive 源码包（iec/scripts/build_libarchive.sh 按需下载，解压到同一目录）
+/thirdparty/libarchive-*.tar.xz
+/thirdparty/libarchive-*/
+/thirdparty/curl-*.tar.gz
+# glibc-ohos 的探针 tar(build_glibc.sh 的 pack 阶段按需产出;**不随包**,要重跑验收自己推)
+/feature/bsh_main/src/main/resources/rawfile/tools/glibc-ohos.tar
+
+# OHOS 签名/打包工具的 C++ 源码（scripts/build_haptools.sh 的 src 阶段 git clone；
+# 上游只读，补丁与编译都在 build/haptools/ 的源码副本上做）
+/thirdparty/developtools_hapsigner
+/thirdparty/developtools_packing_tool
+
+# 本地排障笔记：git HTTPS 克隆的问题、定位过程与修法（只留在本机，不入库）
+/git-https-debug.md

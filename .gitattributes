@@ -8,3 +8,6 @@
 tooling/linux-vm/**  text eol=lf
 # guest 渚ц剼鏈細瑁呰繘 Linux 鎵ц, CRLF 浼氳 shebang 澶辨晥
 entry/src/main/resources/rawfile/vm/guest/** text eol=lf
+
+# vendored 的 BetterSH/IEC: 源码、脚本、CMake 都按 LF 保存(Windows 上容器/脚本里执行)
+third_party/bettersh/** text eol=lf

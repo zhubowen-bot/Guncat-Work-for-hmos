@@ -1,0 +1,22 @@
+diff --git a/src/libtools/signal32.c b/src/libtools/signal32.c
+index 311cb72c8..fab2ab55b 100644
+--- a/src/libtools/signal32.c
++++ b/src/libtools/signal32.c
+@@ -1,3 +1,17 @@
++/* OHOS_PATCH_SIGNAL32_GLIBC */
++#ifndef BOX64_OHOS_SIGNAL32_GUARD
++#define BOX64_OHOS_SIGNAL32_GUARD 1
++#include <sys/types.h>
++#include <signal.h>
++typedef pid_t __pid_t;
++typedef uid_t __uid_t;
++typedef gid_t __gid_t;
++#ifndef __SI_SIGFAULT_ADDL
++#define __SI_SIGFAULT_ADDL  /* glibc-only extension fields, drop on musl */
++#endif
++/* musl: siginfo_t::_sifields  ->  __si_fields */
++#define _sifields __si_fields
++#endif
+ #define _GNU_SOURCE
+ #include <stdlib.h>
+ #include <stdio.h>

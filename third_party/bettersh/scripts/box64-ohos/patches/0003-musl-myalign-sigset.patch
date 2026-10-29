@@ -1,0 +1,18 @@
+diff --git a/src/include/myalign.h b/src/include/myalign.h
+index d87b6c779..2025cdd54 100644
+--- a/src/include/myalign.h
++++ b/src/include/myalign.h
+@@ -1,3 +1,4 @@
++/* OHOS_PATCH_SIGSET_T */
+ #ifndef __MY_ALIGN__H_
+ #define __MY_ALIGN__H_
+ #include <stdint.h>
+@@ -247,7 +248,7 @@ typedef struct __jmp_buf_tag_s {
+       sigset64_t         __saved_mask64;
+     };
+     #else
+-    __sigset_t       __saved_mask;
++    sigset_t       __saved_mask;
+     #endif
+ } __jmp_buf_tag_t;
+ 
