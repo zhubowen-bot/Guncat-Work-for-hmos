@@ -14,7 +14,10 @@
   5. 用 blob 内容比较"源码 -> 产物"的新鲜度：产物那次提交里的源码哈希与工作区
      不同即失败（能抓到"改了源码还没重编"，不会被只改文件模式的提交误报）；
      node 构建耗时大，只警告；
-  6. 若本机有已打包的签名 HAP，检查 libs/arm64-v8a 下是否缺 .so。
+  6. 若本机有已打包的签名 HAP，检查 libs/arm64-v8a 下是否缺 .so；
+  7. HAR 的 CMakeLists 是否把 exec/*.cpp 全部编进 libiec_server（caps.cpp 由
+     iec_caps 静态库负责，属例外）。漏一个是链接期 undefined symbol，只有
+     hvigor 构建才会暴露，所以在这里提前拦。
 
 只依赖 Python 3 标准库与 git；不连设备、不需要 HarmonyOS SDK。
 退出码：0 = 通过，1 = 有失败（--strict 时 SKIP 也算失败）。
@@ -928,6 +931,44 @@ def check_hap(required_sos, reporter):
 
 
 # ---------------------------------------------------------------------------
+# 7. HAR 原生源码清单
+# ---------------------------------------------------------------------------
+
+HAR_CMAKE_REL = ("third_party/bettersh/iec/platform/ohos/har/"
+                 "src/main/cpp/CMakeLists.txt")
+EXEC_DIR_REL = "third_party/bettersh/iec/exec"
+# caps.cpp 由根 CMake 的 iec_caps 静态库编译，HAR 不直接列。
+HAR_SOURCE_EXCEPTIONS = {"caps.cpp"}
+
+
+def check_har_sources(reporter):
+    cmake_path = REPO_ROOT / HAR_CMAKE_REL
+    if not cmake_path.is_file():
+        reporter.fail("找不到 HAR 的 CMakeLists：%s" % HAR_CMAKE_REL)
+        return ""
+    text = cmake_path.read_text(encoding="utf-8", errors="replace")
+    listed = set()
+    for match in re.finditer(
+            r"\$\{IEC_ROOT\}/exec/([A-Za-z0-9_.-]+\.cpp)", text):
+        listed.add(match.group(1))
+    exec_dir = REPO_ROOT / EXEC_DIR_REL
+    if not exec_dir.is_dir():
+        reporter.fail("找不到 exec 源码目录：%s" % EXEC_DIR_REL)
+        return ""
+    actual = {p.name for p in exec_dir.glob("*.cpp")}
+    missing = sorted(actual - listed - HAR_SOURCE_EXCEPTIONS)
+    extra = sorted(listed - actual)
+    if missing:
+        reporter.fail("HAR 的 CMakeLists 少了 exec 源文件：%s"
+                      "（libiec_server 会 undefined symbol，HAP 构建直接失败）"
+                      % "、".join(missing))
+    if extra:
+        reporter.fail("HAR 的 CMakeLists 列了不存在的 exec 源文件：%s"
+                      % "、".join(extra))
+    return "%d 个 exec 源文件" % len(actual - HAR_SOURCE_EXCEPTIONS)
+
+
+# ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
 
@@ -944,7 +985,7 @@ def main():
     args = parser.parse_args()
 
     reporter = Reporter(strict=args.strict)
-    reporter.set_total(6)
+    reporter.set_total(7)
     print("IEC 随包库一致性检查")
     print("仓库根: %s" % REPO_ROOT)
     print()
@@ -985,6 +1026,10 @@ def main():
         "HAP 随包内容",
         lambda: check_hap(required_sos, reporter),
         not_applicable=_hap_not_applicable(),
+    )
+    reporter.section(
+        "HAR 原生源码清单",
+        lambda: check_har_sources(reporter),
     )
 
     reporter.summary()
