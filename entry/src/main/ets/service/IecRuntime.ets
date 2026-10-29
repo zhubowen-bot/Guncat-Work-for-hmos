@@ -26,21 +26,20 @@ import {
 const DOMAIN: number = 0x0000;
 const TAG: string = 'IecRuntime';
 
-// 与 IEC 的 constant.h 保持一致：资源根是应用级的 el2 files，命令 so 在
-// bundle libs 的 arm64 目录（hvigor 把 entry/libs/<abi> 打成 libs/<abi>）。
+// 启动器/资源根布局。命令 so 在 bundle libs 的 arm64 目录
+// （hvigor 把 entry/libs/<abi> 与 HAR 的 libs/<abi> 都打成 libs/<abi>）。
 const SYSROOT: string = '/data/storage/el2/base/files';
 const BIN_DIR: string = SYSROOT + '/bin/';
 const BUNDLE_LIBS: string = '/data/storage/el1/bundle/libs/arm64/';
-
-// 启动器格式或清单变化时递增；放在资源根里，重装应用自然失效。
-const LAUNCHER_VERSION: string = 'guncat-iec-1';
-const LAUNCHER_MARKER: string = SYSROOT + '/.guncat-iec-launchers';
 
 export interface IecRunOptions {
   cwd: string;
   stdin: string;
   timeoutMs: number;
   maxOutputBytes: number;
+  // 子进程环境（覆盖项）。必须显式给 PATH：不然命令继承的是应用进程的环境，
+  // 连 <sysroot>/bin 下的 launcher 都找不到，`sh -c 'ls'` 会直接 command not found。
+  env: Record<string, string>;
 }
 
 export interface IecRunResult {
@@ -96,10 +95,14 @@ export class IecRuntime {
   private static writeLaunchers(): void {
     ensureDir(BIN_DIR);
     ensureDir(SYSROOT + '/home');
+    ensureDir(SYSROOT + '/tmp');
+    ensureDir(SYSROOT + '/usr/bin');
 
     let fails: number = 0;
     const add = (name: string, so: string, entry: string): void => {
-      fails += writeSoLauncher(BIN_DIR + name, BUNDLE_LIBS + so, entry, 2, 1);
+      // primary=0 交给 IEC 按设备能力选 fork / native child process；写死 fork 会在
+      // 没有 fork 的渠道上整片失效。
+      fails += writeSoLauncher(BIN_DIR + name, BUNDLE_LIBS + so, entry, 2, 0);
     };
 
     const toybox: string[] = [
@@ -164,6 +167,7 @@ export class IecRuntime {
         cmd: 'sh',
         args: ['-c', command],
         cwd: options.cwd,
+        env: options.env,
         stdin: options.stdin,
         timeoutMs: options.timeoutMs,
         maxOutputBytes: options.maxOutputBytes
@@ -219,14 +223,23 @@ export class IecRuntime {
     return result;
   }
 
+  // 资源根 / 命令目录：给需要拼 PATH 的调用方（IecShellService）用。
+  static sysroot(): string {
+    return SYSROOT;
+  }
+
+  static binDir(): string {
+    return BIN_DIR;
+  }
+
   // execStart 抛出来的错误在 ArkTS 里是 Error；缺命令 so 时的原始信息是
   // "cannot start /data/.../bin/sh"，对使用者没有指导意义，这里翻译一下。
   private static describeFailure(e: Object): string {
     let text: string = e instanceof Error ? (e as Error).message : JSON.stringify(e);
     if (text.indexOf('cannot start') !== -1) {
-      return '运行核缺少命令 so：' + text + '\n' +
-        '先在 third_party/bettersh 下跑 scripts/build_mksh.sh（以及 build_toybox.sh 等），' +
-        '把产物拷到 entry/libs/arm64-v8a/ 再重装。';
+      return '运行核无法启动命令：' + text + '\n' +
+        'libmksh.so / libtoybox.so 应随 HAR 打进 libs/arm64-v8a/；' +
+        '若缺，按 docs/architecture/iec-runtime.md 重新构建。';
     }
     return '命令启动失败: ' + text;
   }

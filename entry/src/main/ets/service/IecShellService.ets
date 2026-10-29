@@ -13,6 +13,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { util } from '@kit.ArkTS';
 import { Constants } from '../common/Constants';
 import { IecRuntime, IecRunResult } from './IecRuntime';
+import { PythonService } from './PythonService';
 import { ToolExecResult, WorkFileService } from './WorkFileService';
 
 const DOMAIN: number = 0x0000;
@@ -67,12 +68,38 @@ export class IecShellService {
     }
 
     const startedAt: number = Date.now();
+
+    // 子进程环境。PATH 必须显式给：IEC 起进程时不会替我们拼 PATH，而应用进程
+    // 自己的环境里没有 <sysroot>/bin（launcher 都在那儿），不给就是 command not found。
+    let env: Record<string, string> = {
+      'PATH': IecRuntime.binDir() + ':' + IecRuntime.sysroot() + '/usr/bin:/usr/bin:/bin',
+      'HOME': IecRuntime.sysroot() + '/home',
+      'TMPDIR': IecRuntime.sysroot() + '/tmp'
+    };
+
+    // shell 里的 python3 用的是 Guncat 自带的 libpython3.12.so（launcher 已指向它）。
+    // 它要 PYTHONHOME/PYTHONPATH 才能找到标准库；C 扩展平铺在 bundle libs 里，
+    // 也要进 PYTHONPATH 才 import 得到。解释器自己保持常驻，这里只是把路径传进去。
+    try {
+      const pyErr: string = await PythonService.ensureRuntime(context);
+      if (pyErr === '') {
+        env['PYTHONHOME'] = PythonService.pythonHome(context);
+        env['PYTHONPATH'] = PythonService.pythonPath(context) +
+          ':/data/storage/el1/bundle/libs/arm64';
+      } else {
+        hilog.warn(DOMAIN, TAG, 'python runtime unavailable: %{public}s', pyErr);
+      }
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'python env skipped: %{public}s', JSON.stringify(e));
+    }
+
     const run = await IecRuntime.run(context, command, {
       cwd: cwd,
       stdin: stdin,
       timeoutMs: timeoutMs,
       // 留够余量：超过 60KB 的部分要落 .spill，被引擎的 cap 丢掉就写不回去了。
-      maxOutputBytes: Math.max(8 * 1024 * 1024, Constants.WORK_SHELL_MAX_OUTPUT_BYTES * 4)
+      maxOutputBytes: Math.max(8 * 1024 * 1024, Constants.WORK_SHELL_MAX_OUTPUT_BYTES * 4),
+      env: env
     });
     const elapsed: number = Date.now() - startedAt;
 

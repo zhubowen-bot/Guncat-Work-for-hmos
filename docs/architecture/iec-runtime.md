@@ -64,6 +64,13 @@ so 不在时只是那条命令失败，不影响其它命令。
 
 * `sh -c "<command>"` 执行；管道/重定向/通配符都是 mksh 的真语义。
 * `cwd` 是工作区内的相对路径，服务端会拒绝不存在的目录（不会静默回退）。
+* 环境：`IecShellService` 显式给 `PATH=<sysroot>/bin:<sysroot>/usr/bin:/usr/bin:/bin`、
+  `HOME=<sysroot>/home`、`TMPDIR=<sysroot>/tmp`。**PATH 必须给**——IEC 起进程不会替
+  我们拼 PATH，而应用进程自己的环境里没有 launcher 目录，不给就是 `command not found`。
+* Python：launcher `python3`/`python` 指向 Guncat 的 `libpython3.12.so`（`Py_BytesMain`），
+  并在每次调用前把 `PYTHONHOME`/`PYTHONPATH`（stdlib zip + site-packages + extras +
+  bundle libs）传进去，所以 shell 里的 `python3 script.py` 与 `run_python` 是同一份解释器、
+  同一份标准库。首次调用会等 `PythonService.ensureRuntime()` 把 stdlib 解出来。
 * 超时由引擎线程强制（先 TERM 后 KILL），不依赖 ArkTS 轮询；`timeout_ms`
   上限沿用 `Constants.WORK_SHELL_MAX_TIMEOUT_MS`。
 * 输出超过 `WORK_SHELL_MAX_OUTPUT_BYTES` 时整段落 `.spill/`，返回里给相对路径。

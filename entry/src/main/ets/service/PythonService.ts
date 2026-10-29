@@ -58,11 +58,13 @@ export class PythonService {
     return context.filesDir + '/' + PY_RUNTIME_DIR;
   }
 
-  private static pythonHome(context: common.UIAbilityContext): string {
+  /** 解释器的 PYTHONHOME（shell 里起同一个解释器时要用，见 IecShellService） */
+  static pythonHome(context: common.UIAbilityContext): string {
     return PythonService.runtimeDir(context);
   }
 
-  private static pythonPath(context: common.UIAbilityContext): string {
+  /** 解释器的 PYTHONPATH（标准库 zip + 三方纯 Python 包 + extras） */
+  static pythonPath(context: common.UIAbilityContext): string {
     // 只给标准库 zip; C 扩展模块在应用的 lib 目录里(native 侧用 dladdr 自动并进 PYTHONPATH),
     // 因为设备上只有 lib 目录下的 .so 允许 dlopen。
     let stdlib: string = PythonService.runtimeDir(context) + '/' + PY_STDLIB_SUBDIR;
