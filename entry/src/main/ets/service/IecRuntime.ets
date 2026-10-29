@@ -232,6 +232,10 @@ export class IecRuntime {
     if (IecRuntime.hasSo('libbccmd.so')) {
       add('bc', 'libbccmd.so', 'iec_bc_main');
     }
+    // OpenSSH 9.9p2 的 sftp 客户端（静态 OpenSSL/zlib）。
+    if (IecRuntime.hasSo('libsftpcmd.so')) {
+      add('sftp', 'libsftpcmd.so', 'iec_sftp_main');
+    }
     if (IecRuntime.hasSo('libnode.so')) {
       add('node', 'libnode.so', 'iec_node_main');
       add('nodejs', 'libnode.so', 'iec_node_main');
