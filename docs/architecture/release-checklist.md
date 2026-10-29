@@ -62,5 +62,5 @@ libs 里的 `.py`，所以 `.py` 必须在 extras 或 zip 里）。
 ## 5. 提交前
 
 ```bash
-cd test/guncat-harness && node setup.mjs && node test-core.mjs   # 应全绿(现 683 项)
+cd test/guncat-harness && node setup.mjs && node test-core.mjs   # 应全绿(现 730 项)
 ```

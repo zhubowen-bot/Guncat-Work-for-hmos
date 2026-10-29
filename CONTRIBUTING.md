@@ -25,10 +25,10 @@
 ```bash
 cd test/guncat-harness
 node setup.mjs        # 把 entry/src/main/ets 下的纯逻辑模块移植为 Node 可运行的 .ts
-node test-core.mjs    # 当前 683 项
+node test-core.mjs    # 当前 730 项
 ```
 
-覆盖 `PathMatcher` / `DiffUtil` / `EditCore` / `FileSearchCore` / `ToolRegistry` / `PromptBuilder` / `LoopDecisions` / `SSEProtocolAdapter` / `GuncatUiLang` 等纯逻辑，以及**大量提示词断言**。
+覆盖 `PathMatcher` / `DiffUtil` / `EditCore` / `FileSearchCore` / `ToolRegistry` / `PromptBuilder` / `LoopDecisions` / `SSEProtocolAdapter` / `GuncatUiLang` 等纯逻辑，以及**大量提示词断言**；shell 工具结果正文拼装（`ShellResultFormat`：状态行/超时/信号/dropped/二进制/截断）也在这一层逐字回归。
 
 ### 第 2 层 · 服务层类型检查
 
@@ -58,7 +58,7 @@ bash scripts/check-all.sh --fast   # 跳过 soname / py_runner / IEC 命令集
 bash scripts/check-all.sh --list   # 只看检查项清单
 ```
 
-按顺序执行 10 项：纯逻辑单测（683 项）、服务层 `tsc`、界面文案可复制护栏、
+按顺序执行 10 项：纯逻辑单测（730 项）、服务层 `tsc`、界面文案可复制护栏、
 Markdown 相对链接、随包许可、共享库 soname、`py_runner` 宿主协议、
 IEC 命令集宿主测试、IEC 原生代码宿主回归，以及存在时才跑的 `tools/check-iec-libs.py`。
 

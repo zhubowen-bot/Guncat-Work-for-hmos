@@ -72,7 +72,7 @@ ITEM_IDS=(
     iec-libs
 )
 ITEM_NAMES=(
-    "纯逻辑单测（setup.mjs + test-core.mjs，683 项）"
+    "纯逻辑单测（setup.mjs + test-core.mjs，730 项）"
     "服务层类型检查（check-setup.mjs + tsc）"
     "界面文案可复制护栏（check-ui-copy.mjs）"
     "Markdown 相对链接（docs-check.py --strict）"

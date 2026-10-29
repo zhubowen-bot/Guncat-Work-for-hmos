@@ -308,7 +308,7 @@ B. 回传助手（发一条消息, 触发新一轮回答）
 | 想改"快"的纪律 | 只改 `PromptBuilder.interactivePrime()`（它固定在第 0 段）；**不要**把纪律再抄进底座或职责段 —— 顺序与唯一性都有断言钉住（见 2.3） |
 
 > **回归护栏（三层，缺一不可）**
-> 1. 纯逻辑单测：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`（683 项，含 guncat-ui lang 的词法/语法/前向引用/流式补齐/绑定重算/`@Each`/内置函数/`Action`/片段切分/状态序列化/图表几何/组件库与提示词，以及交互模式提示词的**段序**（快在最前）、快车道纪律、思考纪律、单一家规则与工具面 47→27 的裁剪断言）。
+> 1. 纯逻辑单测：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`（730 项，含 guncat-ui lang 的词法/语法/前向引用/流式补齐/绑定重算/`@Each`/内置函数/`Action`/片段切分/状态序列化/图表几何/组件库与提示词，以及交互模式提示词的**段序**（快在最前）、快车道纪律、思考纪律、单一家规则与工具面 47→27 的裁剪断言）。
 > 2. 服务层类型检查：`node check-setup.mjs && npx tsc -p check/tsconfig.json`。
 > 3. **真实 ArkTS 编译**：`powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`（调用 DevEco 自带的 hvigor）。
 > 第 3 层不能省：ArkUI 有一批**只有编译器才知道**的规则——`@Builder` 方法体内不允许声明局部变量、自定义组件属性名不能与内置属性同名（`size` / `scale`）、`@Prop` 的 null 需要显式联合类型。这些在 node 侧 harness 里全都测不出来（harness 只覆盖 `common/**` 与 `service/**` 的纯 TS，不解析 `.ets`）。
