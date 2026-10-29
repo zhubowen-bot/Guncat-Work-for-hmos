@@ -392,6 +392,13 @@ void WatchLoop(std::shared_ptr<Session> s, int timeout_ms) {
     std::unique_lock<std::mutex> lock(s->mu);
     s->cv.wait_for(lock, std::chrono::milliseconds(kWatchdogHardWaitMs),
                    [&] { return s->done || s->stop.load(); });
+    // The deadline can fire in the few milliseconds between the child exiting and
+    // WaitLoop reaping it. SIGKILL cannot yield "exit 0, no signal", so a clean
+    // exit here means the deadline did not end the program; leaving timed_out set
+    // would surface as "exit 0 · 超时终止" and mislead the caller.
+    if (s->done && s->timed_out && s->signal == 0 && s->exit_code == 0) {
+        s->timed_out = false;
+    }
 }
 
 /* ------------------------------------------------------------------ */

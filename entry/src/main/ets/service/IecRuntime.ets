@@ -654,6 +654,11 @@ export class IecRuntime {
           code = poll.code;
           signal = poll.signal;
           timedOut = poll.timedOut;
+          // 引擎 watchdog 可能在“子进程已正常退出、WaitLoop 还没 Finish”的窗口里
+          // 误标超时。exit 0 且无信号说明命令是自己结束的，不能显示“超时终止”。
+          if (code === 0 && signal === 0) {
+            timedOut = false;
+          }
           graceful = true;
           break;
         }
