@@ -77,6 +77,22 @@ int64_t NowMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
 }
 
+// A write into a pipe whose reader is gone raises SIGPIPE, whose default action
+// kills this process. That is never the right answer here: the caller gets a
+// session id back and has no way to guard a thread it does not own, and a command
+// that exits before its stdin is written (or closes stdin on purpose) must be an
+// ordinary EPIPE for the feeder, not the death of the application. Ignoring it
+// once, before the first pipe write, is what makes write(2) return EPIPE so
+// FeedLoop can close stdin and Write() can answer -1.
+//
+// The disposition is process-wide because SIGPIPE is; py_runner.cpp ignores it for
+// the same reason. It is set on the first Start(), so a process that never uses a
+// session is not affected.
+void IgnoreSigPipe() {
+    static std::once_flag once;
+    std::call_once(once, [] { signal(SIGPIPE, SIG_IGN); });
+}
+
 void Append32(std::vector<uint8_t>& out, uint32_t value) {
     out.push_back(static_cast<uint8_t>(value >> 24));
     out.push_back(static_cast<uint8_t>(value >> 16));
@@ -323,23 +339,32 @@ void FeedLoop(std::shared_ptr<Session> s, std::string data, bool keep_open) {
     size_t off = 0;
 
     while (off < data.size() && !s->stop.load()) {
-        int fd = -1;
+        ssize_t n = -1;
+
+        // The descriptor is written while its owner's lock is held. Finish() and
+        // Release() close in_w under the same lock and set it to -1; reading it
+        // under the lock and then writing outside it would let those two close the
+        // fd in between, and the number can be reused by a later session's pipe by
+        // the time write() runs. Holding the lock across a write is safe because
+        // Start() makes in_w non-blocking: this can copy at most what the pipe has
+        // room for, not wait for a reader.
         {
             std::lock_guard<std::mutex> lock(s->mu);
-            fd = s->in_w;
+            if (s->in_w < 0) break;   // the child closed its end, or Finish/Release did
+            n = write(s->in_w, data.data() + off, data.size() - off);
         }
-        if (fd < 0) break;   // the child closed its end, or Release/Finish did
 
-        const ssize_t n = write(fd, data.data() + off, data.size() - off);
         if (n > 0) { off += static_cast<size_t>(n); continue; }
-        if (n < 0 && (errno == EINTR || errno == EAGAIN)) {
-            struct pollfd pfd {};
-            pfd.fd = fd;
-            pfd.events = POLLOUT;
-            poll(&pfd, 1, 100);
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0 && errno == EAGAIN) {
+            // The pipe is full; wait for the child to read some of it. No poll()
+            // here: the fd may be closed by Finish while this sleeps, and the next
+            // iteration re-checks it under the lock. 10 ms is the same slice
+            // WaitLoop uses for the same reason.
+            usleep(10 * 1000);
             continue;
         }
-        break;
+        break;   // EPIPE or another error: the reader is gone
     }
 
     if (!keep_open) CloseStdin(s->id);
@@ -455,6 +480,9 @@ std::string Strerror(int err) {
 /* ------------------------------------------------------------------ */
 
 int Start(const ExecOptions& options, ExecState* state, std::string* error) {
+    // Before any pipe can be written: see IgnoreSigPipe.
+    IgnoreSigPipe();
+
     if (options.cmd.empty()) {
         if (error) *error = "cmd is empty";
         return -1;

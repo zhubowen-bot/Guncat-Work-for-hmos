@@ -5,7 +5,7 @@
 # 表示存在失败。供本地提交前预检与 CI 复用。
 #
 #   bash scripts/check-all.sh            # 全量
-#   bash scripts/check-all.sh --fast     # 跳过 soname / py_runner / IEC 命令集
+#   bash scripts/check-all.sh --fast     # 跳过 soname / py_runner / IEC 命令集 / exec 压测
 #   bash scripts/check-all.sh --list     # 只列出检查项
 #   bash scripts/check-all.sh --help
 #
@@ -39,7 +39,8 @@ usage() {
 用法: bash scripts/check-all.sh [选项]
 
 选项:
-  --fast    跳过需要额外环境或较慢的项（soname 检查、py_runner、IEC 命令集），
+  --fast    跳过需要额外环境或较慢的项（soname 检查、py_runner、IEC 命令集、
+            IEC exec 会话压测），
             被跳过的项计入 SUMMARY 的 SKIP
   --list    列出所有检查项后退出
   -h, --help
@@ -67,6 +68,7 @@ ITEM_IDS=(
     py-runner
     cmd-tools
     iec-native-host
+    iec-exec-stress
     iec-libs
 )
 ITEM_NAMES=(
@@ -79,9 +81,10 @@ ITEM_NAMES=(
     "py_runner 宿主协议测试"
     "IEC 命令集宿主测试（nc / hexdump / diff）"
     "IEC 原生代码宿主回归（exec 路由 / cwd / NCP / fs shim）"
+    "IEC exec 会话并发/生命周期压测（8 路 / 终止 / fd / 超时）"
     "IEC 随包库检查（tools/check-iec-libs.py）"
 )
-ITEM_FAST_SKIP=(0 0 0 0 0 1 1 1 0 0)
+ITEM_FAST_SKIP=(0 0 0 0 0 1 1 1 0 1 0)
 
 print_list() {
     local i
@@ -317,6 +320,23 @@ check_iec_native_host() {
     local script="$ROOT/third_party/bettersh/iec/scripts/test_iec_native_host.sh"
     if [[ ! -f "$script" ]]; then
         skip_msg "third_party/bettersh/iec/scripts/test_iec_native_host.sh 不存在（该检查尚未合入）"
+        return 77
+    fi
+    command -v bash >/dev/null 2>&1 || { skip_msg "找不到 bash"; return 77; }
+    command -v cmake >/dev/null 2>&1 || { skip_msg "找不到 cmake"; return 77; }
+    command -v cc >/dev/null 2>&1 || { skip_msg "找不到 cc"; return 77; }
+    command -v c++ >/dev/null 2>&1 || { skip_msg "找不到 c++"; return 77; }
+
+    bash "$script"
+}
+
+# IEC exec 会话的并发/生命周期压测：整条流上限、8 路并发、中途终止、fd 与 RSS
+# 不随轮次增长、200 次短会话、0/1/50ms 超时边界。宿主上编跑，不需要设备或 SDK；
+# 比原生回归慢（50 轮 + 200 次起停），所以放在 --fast 之外。
+check_iec_exec_stress() {
+    local script="$ROOT/third_party/bettersh/iec/scripts/stress_exec_session.sh"
+    if [[ ! -f "$script" ]]; then
+        skip_msg "third_party/bettersh/iec/scripts/stress_exec_session.sh 不存在（该检查尚未合入）"
         return 77
     fi
     command -v bash >/dev/null 2>&1 || { skip_msg "找不到 bash"; return 77; }
