@@ -66,7 +66,11 @@ fi
 [ -s bc/libmath.h ] || iec_err "bc libmath.h was not generated"
 
 # 3) bc 本体
-make -C bc CFLAGS="-O2 -fPIC" > "$WORK/bc.log" 2>&1 \
+# `-o libmath.h`：上面已用宿主 bc 生成好 libmath.h，但 Makefile 把 libmath.h 的
+# 依赖写成 $(fbcOBJ)（目标文件），目标文件在本次构建里比 libmath.h 新，make 会
+# 再次触发 “编 aarch64 fbc 并在本机运行” 的规则而失败（干净树上必现）。用 -o
+# 把 libmath.h 标记为旧文件，禁止该规则，直接用它编译/链接 bc。
+make -C bc -o libmath.h CFLAGS="-O2 -fPIC" > "$WORK/bc.log" 2>&1 \
 	|| { tail -30 "$WORK/bc.log" >&2; iec_err "bc build failed"; }
 
 # 4) 链接成命令 so
