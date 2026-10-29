@@ -106,6 +106,12 @@ struct Session {
 
     std::string out;
     std::string err;
+    // Bytes ever admitted against the cap. Poll() consuming the buffer must not
+    // free room again: the cap is a budget for the whole stream, not a high-water
+    // mark on the buffer -- a caller that polls while the program runs would
+    // otherwise receive unlimited output.
+    size_t      out_admitted = 0;
+    size_t      err_admitted = 0;
     size_t      out_dropped = 0;
     size_t      err_dropped = 0;
     bool        out_eof = false;
@@ -206,9 +212,17 @@ void AppendOutput(const std::shared_ptr<Session>& s, bool is_err,
     std::lock_guard<std::mutex> lock(s->mu);
 
     std::string& dst = is_err ? s->err : s->out;
-    const size_t room = dst.size() < s->cap ? s->cap - dst.size() : 0;
+    size_t& admitted = is_err ? s->err_admitted : s->out_admitted;
+    // Count what has already been handed to the caller as used: draining the
+    // buffer with Poll() is not a reason to accept more output. Without this,
+    // max_output_bytes only bounds the backlog and a fast poller can collect an
+    // arbitrary amount of output.
+    const size_t room = admitted < s->cap ? s->cap - admitted : 0;
     const size_t take = std::min(room, size);
-    if (take > 0) dst.append(data, take);
+    if (take > 0) {
+        dst.append(data, take);
+        admitted += take;
+    }
     if (take < size) {
         (is_err ? s->err_dropped : s->out_dropped) += size - take;
     }

@@ -73,9 +73,12 @@ execRelease(handle.id);
   command that outlives its deadline is terminated and `timedOut` is set — even
   if the app stopped polling, which is exactly the case the caller cannot cover.
 * **output cap.** `maxOutputBytes` (default 4 MiB, clamped to 64 KiB..64 MiB) is
-  kept per stream. Beyond it the bytes are still read and dropped — a pipe that
-  is not drained would block the program — and `outDropped`/`errDropped` say how
-  much was lost. For larger output, redirect to a file and read it.
+  the total the caller may receive per stream over the session's life. Beyond it
+  the bytes are still read and dropped — a pipe that is not drained would block
+  the program — and `outDropped`/`errDropped` say how much was lost. Draining the
+  buffer early with `execPoll` does not restore the budget: a command that keeps
+  writing still stops at the cap. For larger output, redirect to a file and read
+  it.
 * **exit status.** `code` is 0..255, or 128 + signal with `signal` set. `-1`
   means the status was lost (the service went away), which is distinct from every
   status a program can produce.
