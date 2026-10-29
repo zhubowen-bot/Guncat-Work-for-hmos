@@ -2,7 +2,7 @@
 
 > 中文 | [English](README_EN.md)
 
-**鸿蒙手机上的原生 AI 工作台** —— 用 ArkTS / ArkUI 从零构建，非套壳。**鸿蒙手机可用，不止鸿蒙电脑**：**完整 Linux `shell`**（内核 6.12 + Alpine 3.22，`apk add` 可用）与**原生 CPython 3.12**（编成 HarmonyOS `.so` 在进程内直跑，numpy / pandas / scipy / matplotlib 全离线）都在机内真跑，**47 个工具 + 32 个技能**的 Agent Loop 端侧闭环，**Intelligent UI**（一句话直出可操作界面）与 **Harness**（多轮工具循环 + 沙箱工作区）两种当红形态真机跑通，PPT / Word / Excel / 绘图端侧直出。
+**鸿蒙手机上的原生 AI 工作台** —— 用 ArkTS / ArkUI 从零构建，非套壳。**鸿蒙手机可用，不止鸿蒙电脑**：**原生 `shell`**（mksh + toybox/libarchive/git/ssh/node，命令是 HarmonyOS `.so`，不经虚拟机）与**原生 CPython 3.12**（编成 HarmonyOS `.so` 在进程内直跑，numpy / pandas / scipy / matplotlib 全离线）都在机内真跑，**47 个工具 + 32 个技能**的 Agent Loop 端侧闭环，**Intelligent UI**（一句话直出可操作界面）与 **Harness**（多轮工具循环 + 沙箱工作区）两种当红形态真机跑通，PPT / Word / Excel / 绘图端侧直出。
 
 电脑版见 [Guncat Work（电脑版）](https://github.com/zhubowen-bot/Guncat-Work-for-pc)（Electron 38）。
 
@@ -13,7 +13,7 @@
 ![HarmonyOS](https://img.shields.io/badge/HarmonyOS-API%2024%20(6.1.1)-blue)
 ![version](https://img.shields.io/badge/version-7.0.0-blue)
 ![forms](https://img.shields.io/badge/Agent%20Forms-Intelligent%20UI%20%2B%20Harness-blueviolet)
-![linux](https://img.shields.io/badge/Linux-QEMU%20TCI%20%C2%B7%20no%20JIT-orange)
+![shell](https://img.shields.io/badge/shell-IEC%20native%20%C2%B7%20no%20VM-orange)
 ![python](https://img.shields.io/badge/CPython-3.12%20native-3776AB)
 ![tools](https://img.shields.io/badge/%E5%86%85%E7%BD%AE%E5%B7%A5%E5%85%B7-47-informational)
 ![skills](https://img.shields.io/badge/%E6%8A%80%E8%83%BD-32-informational)
@@ -31,7 +31,7 @@
 
 ## 手机上真的能跑什么
 
-- 🐧 **完整 Linux，不是"模拟一个 shell"**：`shell` 工具跑的是内核 6.12 + Alpine 3.22 的完整用户态——QEMU 以 TCG 解释器（TCI）执行，不生成机器码、**不需要 JIT 权限**；管道 / 重定向 / 通配符 / `sed` / `awk` / `find` / `tar` / `apk add` 全是真的。工作目录经 virtio-9p **直连本会话工作区**：`cat data/a.csv` 与 `read_file("data/a.csv")` 是同一份文件，不是副本。
+- ⚡ **原生 shell，不是"模拟一个 shell"**：`shell` 工具的命令都是 HarmonyOS 原生 `.so`（mksh、toybox、libarchive、git、dropbear、node），由 IEC 执行核 fork 后直接跑——**没有虚拟机、没有指令翻译、不需要 JIT 权限**；管道 / 重定向 / 通配符 / `sed` / `awk` / `find` / `tar` / `git` / `ssh` 全是真的，单条命令 0.2~1.5 秒。工作目录与本会话工作区是**同一份文件系统**：`cat data/a.csv` 与 `read_file("data/a.csv")` 读的是同一份内容，不是副本。
 - 🐍 **原生 CPython 3.12，不是仿真**：解释器编成 HarmonyOS 原生 `.so`，在应用进程内直接跑（不经指令翻译，比 VM 里的 `python3` 快 2~3 个数量级）；numpy / pandas / **scipy** / matplotlib / python-docx / python-pptx / reportlab / sympy 等随包离线可用，中文开箱能画。
 - 🧠 **端侧 AgentLoop**：47 个内置工具 + 32 个技能，多轮工具循环、子代理并行派发、定时提醒 / 自主目标 / 会话事件检索、上下文三级压缩——长程任务在手机上自己跑完，产物落在沙箱工作区。
 - 📊 **端侧直出交付物**：PPT / Word / Excel / SVG 由本地生成器产出（JSON 中间层，可无损读回、算子式编辑）；PDF 与 Office 全部本地解析，**不消耗多模态配额**。
@@ -58,7 +58,7 @@ Guncat Work 是**鸿蒙手机上的原生 AI 工作台**：它不只负责对话
 
 聊天模式内置通用、论文转换、法律 / 研究 / 筛滤检索与 LLM 评测等智能体；支持 Chat / Responses / Anthropic 三种主流协议接入、原生 Markdown（含 LaTeX 公式与 Mermaid 图表）、图片文档直传、CoreSpeechKit 朗读和原生语音输入等扩展 C 端功能。
 
-工作模式带沙箱工作区与工具调用能力，包含 47 个内置工具，覆盖文件增删改查与模式匹配搜索、任务清单、图片查看、网络下载、PDF 解析、Office 生成与读写编辑（PPT / Word / Excel 各自基于 JSON 中间层，可无损读回、算子式编辑）、数据管道清洗转换与格式互转、基于 JSVM-API 的 JS 执行沙箱 `run_js`，**设备内真 Linux 的 `shell`** —— QEMU 以 TCG 解释器（TCI）方式运行，不生成机器码、不需要 JIT 受限权限，Alpine 用户态经 virtio-9p 直连本会话工作区；以及**原生 CPython 的 `run_python`** —— 解释器编成 HarmonyOS 原生 `.so` 在应用进程内直接跑（不经仿真，比 VM 里的 `python3` 快 2~3 个数量级），VM 里还带一个 `npy` 跨域桥让 shell 管道也能用上同一个解释器。内置 32 个技能（5 个主 Skill 路由 + 7 个格式分支）把 PPT 设计规范、Doc JSON 语法、数据清洗配方等领域知识按需加载给模型。Office 文档与 PDF 全部本地解析，不消耗多模态配额。
+工作模式带沙箱工作区与工具调用能力，包含 47 个内置工具，覆盖文件增删改查与模式匹配搜索、任务清单、图片查看、网络下载、PDF 解析、Office 生成与读写编辑（PPT / Word / Excel 各自基于 JSON 中间层，可无损读回、算子式编辑）、数据管道清洗转换与格式互转、基于 JSVM-API 的 JS 执行沙箱 `run_js`，**设备内原生执行的 `shell`** —— 命令都是 HarmonyOS 原生 `.so`（mksh、toybox、libarchive、git、dropbear、node），由 IEC 执行核 fork 后直接跑，没有虚拟机、没有指令翻译、不需要 JIT 权限，工作目录与本会话工作区是同一份文件系统；以及**原生 CPython 的 `run_python`** —— 解释器编成 HarmonyOS 原生 `.so` 在应用进程内直接跑（shell 里的 `python3` 也指向同一个解释器）。内置 32 个技能（5 个主 Skill 路由 + 7 个格式分支）把 PPT 设计规范、Doc JSON 语法、数据清洗配方等领域知识按需加载给模型。Office 文档与 PDF 全部本地解析，不消耗多模态配额。
 
 界面在手机与桌面之间自适应：宽屏（≥700vp）展开「左侧栏 / 会话列 / 工作区详情列」三栏布局，窄屏回退单列加抽屉。工作区文件可原地预览、一键分享，生成与改动附行级 diff，对话历史、配置与朗读偏好均本地持久化。工程上采用 MVVM 分层，三协议 SSE 统一进协议适配层，每个文档生成器都配有针对性的离线验证环境（Node 构建 + Python 结构校验 + tsc 类型检查）。
 
@@ -67,8 +67,8 @@ Guncat Work 是**鸿蒙手机上的原生 AI 工作台**：它不只负责对话
 ## 能力概览
 
 - **两种当红 Agent 形态**：**交互模式**对标 GPT 的 Intelligent UI —— 一句话进来，一张能操作的界面出去，默认零工具调用、一轮直出，界面里的滑块、开关、下拉即时重算；**工作模式**是 DeepSeek Harness 的端侧移植 —— 多轮工具循环 + 沙箱工作区 + 长程交付（产物卡片附行级 diff）。
-- **手机上跑完整 Linux**：`shell` 工具里是内核 6.12 + Alpine 3.22 的完整用户态（QEMU TCG 解释执行、**不需要 JIT 权限**），管道 / 重定向 / 通配符 / `sed` / `awk` / `find` / `tar` / `apk add` 全部是真的，**预装 Python 3 / pip / jq**；工作目录经 virtio-9p 与本会话工作区直连（`cat data/a.csv` 与 `read_file("data/a.csv")` 是同一份文件）。首启引导数十秒，之后同进程复用，空闲 10 分钟自动关机释放内存（2GB）。
-- **原生 CPython，不是仿真**：`run_python` 把 CPython 3.12 编成 HarmonyOS 原生 `.so`，在应用进程内直接跑（比 VM 里的 `python3` 快 2~3 个数量级）；numpy / pandas / scipy / matplotlib / Pillow / lxml / sympy / python-docx / python-pptx / reportlab 等随包离线可用，中文开箱能画；VM 内另带 `npy` 桥，让 shell 管道也能调同一个解释器。
+- **原生 shell（无虚拟机）**：`shell` 工具里的命令都是 HarmonyOS 原生 `.so`（mksh、toybox、libarchive 的 tar/unzip/zip/cpio、git、ssh/scp、node），由 IEC 执行核 fork 后直接跑，管道 / 重定向 / 通配符 / `sed` / `awk` / `find` / `tar` / `git` 全部是真的；工作目录与本会话工作区是同一份文件系统（`cat data/a.csv` 与 `read_file("data/a.csv")` 是同一份文件）。无冷启动，单条命令 0.2~1.5 秒。
+- **原生 CPython，不是仿真**：`run_python` 把 CPython 3.12 编成 HarmonyOS 原生 `.so`，在应用进程内直接跑；numpy / pandas / scipy / matplotlib / Pillow / lxml / sympy / python-docx / python-pptx / reportlab 等随包离线可用，中文开箱能画；shell 里的 `python3` 也指向同一个解释器（新进程，`PYTHONHOME` 已接好）。
 - **端侧直出 Office**：PPT / Word / Excel / SVG 由本地生成器产出，基于 JSON 中间层，文档可无损读回、算子式编辑；PDF 与 Office 全部本地解析，不消耗多模态配额。
 - **47 个内置工具**：文件增删改查与模式匹配搜索、任务清单、图片查看、网络下载、PDF 解析、Office 读写、数据管道清洗转换与格式互转、JSVM-API 的 `run_js` 代码沙箱（不联网、不读写文件系统，后台线程执行并带超时保护），以及上面那套 `shell` / `run_python` 执行能力。
 - **三协议接入**：OpenAI Completions（`/chat/completions`）、OpenAI Responses（`/responses`）、Anthropic Messages（`/messages`），均支持图片直传；深度思考与联网搜索按各协议显式控制。
@@ -106,28 +106,32 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 5. 连接 HarmonyOS 真机。
 6. 运行 `entry` 模块，或使用上述命令构建 HAP。
 
-### Shell 工具（设备内 Linux）的额外产物
+### Shell 工具（IEC 原生执行核）的额外产物
 
-`shell` 工具依赖下面这几样二进制（**已随仓库提供**，git 压缩后合计约 21MB；换工具链或改镜像时按脚本重建）：
+`shell` 工具依赖随包的 HarmonyOS 原生 `.so`（已入库，随 HAP 的 `libs/arm64-v8a/` 分发）：
 
-- `entry/libs/arm64-v8a/libqemu-system-aarch64-tci.so`（TCG **解释执行**版 QEMU，不需要 JIT 权限，约 42MB）
-- `entry/libs/arm64-v8a/libslirp.so.0`（QEMU 用户态网络，约 2MB）
-- `entry/src/main/resources/rawfile/vm/rootfs_guncat.qcow2`（Alpine 根文件系统，压缩 qcow2 约 37MB，已预装 Python 3 / pip / jq）
-- `entry/src/main/resources/rawfile/vm/kernel_aarch64`（Linux 6.12 内核，约 12MB）
+- `libiec_server.so`（IEC 执行核：exec/tty 服务、loader、shim）
+- `libmksh.so`（sh/mksh）
+- `libtoybox.so`（70+ 常用命令）
+- `libarchive` 系列：`libbsdtar.so` / `libbsdunzip.so` / `libbsdcpio.so` / `libzipcmd.so`
+- `libgit.so` / `libgit-remote-http.so`（git，含 https）
+- `libdropbear.so`（ssh / scp / key 工具）
+- `libnode.so`（node / npm / npx）
+- `libpython3.12.so`（shell 里的 `python3` 与 `run_python` 共用）
 
-在 WSL2 + HarmonyOS Command Line Tools 下依次执行（细节见 [Linux VM 构建链](tooling/linux-vm/README.md)）：
+在 WSL2 + Linux 版 HarmonyOS SDK 下重建（脚本会按需拉取源码、交叉编译并直接放进 HAR 的 `libs/`）：
 
 ```bash
-bash tooling/linux-vm/fetch-assets.sh                      # 取内核与 Alpine 底座
-bash tooling/linux-vm/build-libqemu-tci.sh                 # 编 TCI 版 libqemu(.so)
-bash tooling/linux-vm/build-rootfs.sh                      # 生成定制 rootfs_guncat.qcow2
-bash tooling/linux-vm/smoke-test.sh                        # 离线自检: 引导镜像 + 跑协议断言
-cp $HOME/hish-tci-build/deps/output/libqemu-system-aarch64-tci.so \
-   $HOME/hish-tci-build/deps/output/libslirp.so.0 entry/libs/arm64-v8a/
+export OHOS_SDK=/opt/ohos-cmdline/command-line-tools/sdk/default/openharmony
+tools/build-iec-runtime.sh          # zlib → openssl → pcre2 → curl → libarchive → git → dropbear
+tools/build-iec-runtime.sh node     # V8，最久（约 85MB 源码）
 ```
 
-打好包的 HAP 约 185MB（含 QEMU、两套镜像与原生 CPython）。缺这些产物时应用照常构建与运行，只是调用 `shell`
-会返回明确的"运行库不可用"说明。
+GitHub 直连在 WSL 里通常不通（codeload 可用）：`pcre2` / `git` / `dropbear` 的源码需先在
+Windows 侧 `git clone` 到 `third_party/bettersh/iec/thirdparty/` 下。
+
+HAP 约 100MB（原生命令集 + CPython + 运行库）。某个 `.so` 缺失时，对应的 launcher 不会注册，
+命令会干净地报 `command not found`，不影响其它命令。
 
 ### 首次配置
 
@@ -166,7 +170,7 @@ cp $HOME/hish-tci-build/deps/output/libqemu-system-aarch64-tci.so \
 | -------------------------------------------------------------------- | ------------------------------------------------------------- |
 | [主要功能](docs/features.md)                                             | 全部客户端功能与工程约定                                                  |
 | [工作模式架构与维护指南](docs/architecture/work-mode.md)                        | Agent Loop、47 个工具、PPT / Word 生成链路、技能系统、`run_js` 沙箱、ArkTS 落地约束 |
-| [Shell 工具：设备内真 Linux](docs/architecture/linux-shell.md)              | QEMU TCI（无 JIT）嵌入、virtio-9p 工作区一致性、文件式命令协议、生命周期与排障、镜像构建链      |
+| [Shell 工具：IEC 原生执行核](docs/architecture/iec-runtime.md)              | 命令 so 的 fork 执行、exec 会话 API、工作区一致性、并发与生命周期、构建链      |
 | [原生 Python 与跨域桥](docs/architecture/native-python.md)                 | CPython 交叉编译、`run_python` 执行模型、`npy` 桥协议与性能数据、能力边界            |
 | [交互模式架构（Intelligent UI）](docs/architecture/interactive-mode.md)      | 提示词分叉、`guncat-ui lang` 契约、流式成形、交互闭环、扩展入口                      |
 | [项目结构](docs/architecture/project-structure.md)                       | 目录布局、数据流、核心组件                                                 |
@@ -187,7 +191,7 @@ cp $HOME/hish-tci-build/deps/output/libqemu-system-aarch64-tci.so \
 - `ohos.permission.MICROPHONE`：语音输入。
 - `ohos.permission.KEEP_BACKGROUND_RUNNING`：朗读后台音频长时任务。
 - 工作模式：文件读写全部在应用沙箱（`filesDir/workspaces/`）内完成，文件选择/保存走系统安全组件（DocumentViewPicker），**未新增任何权限**。
-- Shell 工具（设备内真 Linux）：QEMU 以**解释执行（TCI）**方式在同进程运行，**不需要 JIT/可执行内存等受限权限**；虚拟机没有对外监听端口，网络是 QEMU 内建的用户态网络（复用应用已有的 `INTERNET`）；客人只能看到本会话工作区（virtio-9p 挂载 + bind mount）。
+- Shell 工具（IEC 原生执行核）：命令是随包的 HarmonyOS 原生 `.so`，由 exec 服务 fork 后直接跑，**不需要 JIT/可执行内存等受限权限**；没有虚拟机、没有对外监听端口，网络走应用已有的 `INTERNET`；命令只能看到本会话工作区，看不到手机其它目录。
 - Share Kit：接收其他应用分享的图片和文件。
 - CoreSpeechKit：文本朗读与语音识别。
 - AVSession Kit：后台媒体会话。
@@ -221,6 +225,5 @@ cp $HOME/hish-tci-build/deps/output/libqemu-system-aarch64-tci.so \
 
 本项目基于 [Apache License 2.0](LICENSE) 开源。
 
-**第三方组件声明**：`shell` 工具内含 QEMU（GPL-2.0，以独立 `.so` 分发）、Linux 内核与 Alpine 用户态（GPL-2.0 / 各自许可），
-构建配方与底座镜像改编自 [HiSH](https://github.com/harmoninux/HiSH)（MIT, Copyright (c) 2025 hackeris）。
+**第三方组件声明**：`shell` 工具内含 IEC 执行核（MIT，[BetterSH](https://github.com/panedioic/iec) 的 `iec`）、mksh（MirOS）、toybox（0BSD）、libarchive（BSD-2-Clause）、git（GPL-2.0）、dropbear（MIT）、Node.js（MIT）等，均以独立 `.so` 分发；
 逐项清单、源码获取方式与完整许可原文见 **[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)** 与 [`LICENSES/`](LICENSES/)（同一份声明也打进 HAP 的 `rawfile/licenses/`）。

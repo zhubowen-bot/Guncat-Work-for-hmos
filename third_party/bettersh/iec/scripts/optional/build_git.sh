@@ -97,7 +97,7 @@ make -C "$GIT_SRC" -j"$JOBS" \
 	template_dir=/usr/share/git-core/templates \
 	CC="$CC_TARGET -fuse-ld=lld" \
 	AR="$AR" RANLIB="$RANLIB" \
-	CFLAGS="-O2 -fPIC -I$DEPS_INC $NO_FORTIFY" \
+	CFLAGS="-O2 -fPIC -I$GIT_SRC -I$DEPS_INC $NO_FORTIFY" \
 	LDFLAGS="-fuse-ld=lld $TRIPLE_FLAGS -L$DEPS_LIB -L$OPENSSL/lib -L$CURL_PREFIX/lib $LD_MUSL" \
 	LDFLAGS_APPEND="$BUILD/pthread_cancel_stub.o" \
 	NO_GETTEXT=YesPlease NO_ICONV=YesPlease NO_PERL=YesPlease NO_PYTHON=YesPlease \

@@ -123,6 +123,10 @@ export class IecShellService {
     const parts: string[] = [];
     parts.push('[exit ' + run.code.toString() + ' · ' + seconds + 's · cwd ' + cwdLabel +
       (run.timedOut ? ' · 超时终止' : '') + ']');
+    if (run.binary) {
+      parts.push('[...输出含非 UTF-8 字节，文本视图会显示 �；二进制请重定向到文件' +
+        '（如 `cmd > out.bin`）再用 download_file 取，或用 `base64` 转成文本]');
+    }
     parts.push(IecShellService.body(run.out, spillOut));
 
     if (run.err.trim() !== '') {
@@ -223,8 +227,13 @@ export class IecShellService {
   // 真机自检：`aa start ... --ps iecSelfTest 1` 时由 EntryAbility 调一次，结果进 hilog。
   // 只用于验收/排障，正常使用不会走到这里。
   static async selfTest(context: common.UIAbilityContext): Promise<string> {
-    const command: string = 'echo IEC_OK; echo "--- uname"; uname -a; ' +
-      'echo "--- ls"; ls /; echo "--- python"; python3 -c "import sys; print(sys.version.split()[0])"';
+    const command: string = 'echo IEC_OK; uname -s; pwd; ' +
+      'echo "--- seq"; seq 1 3; ' +
+      'echo "--- tar"; echo hi > t.txt && tar -cf t.tar t.txt && ls -l t.tar; rm -f t.txt t.tar; ' +
+      'echo "--- git"; git --version 2>&1 | head -1; ' +
+      'echo "--- ssh"; ssh -V 2>&1 | head -1; ' +
+      'echo "--- node"; node -v 2>&1 | head -1; ' +
+      'echo "--- python"; python3 -c "import os,sys; print(sys.version.split()[0], os.getcwd())"';
     let args: Record<string, Object> = { 'command': command };
     const result: ToolExecResult = await IecShellService.run(context, '__iec_selftest', args);
     return result.output;

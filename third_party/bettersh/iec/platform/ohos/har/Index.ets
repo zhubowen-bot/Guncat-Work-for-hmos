@@ -24,7 +24,8 @@ import {
   execSignal,
   execRelease,
   execList,
-  execCount
+  execCount,
+  execKillStale
 } from 'libiec_server.so';
 
 export {
@@ -50,5 +51,6 @@ export {
   execSignal,
   execRelease,
   execList,
-  execCount
+  execCount,
+  execKillStale
 };

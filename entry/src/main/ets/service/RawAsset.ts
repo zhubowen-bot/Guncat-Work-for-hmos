@@ -1,6 +1,5 @@
-// RawAsset: 把 rawfile 里的大资源(镜像、解释器运行时)分块释放到沙箱。
-// 与 LinuxShellService 早先的实现同源, 抽出来避免两处各写一遍(镜像 ≈37MB、python312.zip ≈10MB,
-// 整个读进内存会顶出峰值)。
+// RawAsset: 把 rawfile 里的大资源(python312.zip、extras 等)分块释放到沙箱。
+// 整个读进内存会顶出峰值, 所以流式拷贝。
 import { common } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { resourceManager } from '@kit.LocalizationKit';

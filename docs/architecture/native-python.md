@@ -1,5 +1,9 @@
 # 原生 Python（run_python）与跨域桥（npy）
 
+> **历史文档**：本文记录 7.0.0 时期"QEMU VM + 原生 Python"的测量与设计。7.0.1 起 shell
+> 已改为 IEC 原生执行核（无虚拟机），`npy` 跨域桥随 VM 一并移除；shell 里的 `python3`
+> 直接指向同一个 `libpython3.12.so`。当前架构见 [iec-runtime.md](iec-runtime.md)。
+
 > 起因：实机测量发现，VM（QEMU TCI 解释执行）里的 Python / awk / sh 比原生慢 **2~3 个数量级**。
 > 同一台机器上的对照实验（[`bench.sh`](../../tooling/linux-vm/bench.sh)）显示 TCI 比 JIT 慢 5–23×，
 > 说明惩罚在**指令仿真层**，与语言无关。既然 JIT 权限拿不到，就换一条路：**把解释器编译成

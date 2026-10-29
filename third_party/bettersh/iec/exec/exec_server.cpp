@@ -18,6 +18,7 @@
 #include <cstring>
 #include <ctime>
 #include <functional>
+#include <atomic>
 #include <thread>
 #include <unordered_map>
 
@@ -399,7 +400,15 @@ void ApplyRequestEnvironment(const SpawnRequest& req) {
     }
 }
 
-static pid_t StartChild(SpawnRequest* req, LaunchKind kind) {
+/* Set once the platform has refused a native child process on this device.
+ *
+ * The probe only proves the API is present; an application can still be told
+ * "not allowed" (a code like 16010004) on every attempt. Remembering that turns
+ * a per-command delay and a per-command warning into one line at startup, and it
+ * is what makes the fork fallback cheap rather than merely correct. */
+static std::atomic<bool> g_ncp_refused{false};
+
+static pid_t StartChild(SpawnRequest* req, LaunchKind kind, std::string* why) {
     // The launcher may name the relationship it needs; 0 leaves the choice here.
     if (kind == LaunchKind::kSo) {
         SoLauncher launcher;
@@ -410,17 +419,28 @@ static pid_t StartChild(SpawnRequest* req, LaunchKind kind) {
     const PrimaryLaunchKind requested = req->prikind;
     
     if (requested == PrimaryLaunchKind::kNcp ||
-        (requested == PrimaryLaunchKind::kAuto && Caps().ncp == 1)) {
+        (requested == PrimaryLaunchKind::kAuto && Caps().ncp == 1 &&
+         !g_ncp_refused.load())) {
         req->prikind = PrimaryLaunchKind::kNcp;
-        std::string why;
-        const pid_t pid = SpawnNcp(*req, kind, &why);
+        std::string ncp_error;
+        const pid_t pid = SpawnNcp(*req, kind, &ncp_error);
         if (pid > 0) {
             Logger::GetInstance()->LogI("[exec] started pid %d as a native child process",
                                         (int)pid);
             return pid;
         }
-        Logger::GetInstance()->LogW("[exec] native child process refused: %s", why.c_str());
-        return -1;
+        Logger::GetInstance()->LogW("[exec] native child process refused: %s",
+                                    ncp_error.c_str());
+        g_ncp_refused.store(true);
+        // A launcher that asked for "auto" must not lose the route that works:
+        // the probe only proves the library exports the entry point, not that this
+        // application is allowed to start a child with it. Fall through to fork --
+        // which is what auto would have chosen had the probe answered 0. An
+        // explicit kNcp still fails, because that is what it asked for.
+        if (requested == PrimaryLaunchKind::kNcp) {
+            if (why) *why = "native child process refused: " + ncp_error;
+            return -1;
+        }
     }
 
     if (requested == PrimaryLaunchKind::kFork ||
@@ -429,7 +449,9 @@ static pid_t StartChild(SpawnRequest* req, LaunchKind kind) {
 
         pid_t pid = fork();
         if (pid < 0) {
-            Logger::GetInstance()->LogE("[exec] fork failed: %s", strerror(errno));
+            const int err = errno;
+            Logger::GetInstance()->LogE("[exec] fork failed: %s", strerror(err));
+            if (why) *why = "fork failed: " + std::string(strerror(err));
             return -1;
         }
         if (pid != 0) return pid;
@@ -450,10 +472,15 @@ static pid_t StartChild(SpawnRequest* req, LaunchKind kind) {
 
     if (requested == PrimaryLaunchKind::kInProc) {
         // Running a program in this process is not implemented.
+        if (why) *why = "in-process launch is not implemented";
         return -1;
     }
 
     req->prikind = PrimaryLaunchKind::kInProc;
+    if (why) {
+        *why = "no launch route (fork=" + std::to_string(Caps().fork) +
+               ", ncp=" + std::to_string(Caps().ncp) + ")";
+    }
     return -1;
 }
 
@@ -465,9 +492,10 @@ SpawnResult Spawn(SpawnRequest req) {
     // fork so that both sides agree on what is being started.
     res.kind = req.kind_hint == LaunchKind::kAuto ? ResolveKind(req.path) : req.kind_hint;
 
-    const pid_t pid = StartChild(&req, res.kind);
+    std::string start_error;
+    const pid_t pid = StartChild(&req, res.kind, &start_error);
     if (pid < 0) {
-        res.error = "cannot start " + req.path;
+        res.error = start_error.empty() ? ("cannot start " + req.path) : start_error;
         return res;
     }
 
@@ -726,12 +754,30 @@ bool ExecServer::onExecute(const Packet& req, Reply& reply) {
     // cannot be tested for liveness later.
     sr.caller_pid = static_cast<pid_t>(req.caller);
     if (sr.caller_pid <= 0) {
-        Logger::GetInstance()->LogE("[exec] invalid caller pid %d", (int)sr.caller_pid);
-        return false;
+        // SO_PEERCRED is how the server learns who asked, and not every platform
+        // build answers it for AF_UNIX. Refusing on the missing answer would turn
+        // a diagnostic gap into a dead service -- every request would come back as
+        // "handler failed" -- while the child would still be this server's. File
+        // it under the server and say so, rather than refuse the command.
+        Logger::GetInstance()->LogW(
+            "[exec] SO_PEERCRED unavailable (caller %u); filing under the server",
+            req.caller);
+        sr.caller_pid = getpid();
     }
     argc = get32(b + 8);
     envc = get32(b + 12);
     fd_count = get32(b + 16);
+
+    // The refusal shape the client understands: [0][errno][text NUL]. Saying why
+    // is the difference between a field report that can be acted on and one that
+    // only says "handler failed".
+    auto refuse = [&](const std::string& why) -> bool {
+        put32(reply.body, 0);
+        put32(reply.body, static_cast<uint32_t>(EINVAL));
+        reply.body.insert(reply.body.end(), why.begin(), why.end());
+        reply.body.push_back('\0');
+        return true;
+    };
 
     // One target word per fd that arrived with the request, in the order the
     // framework received them, so the two lists have to be the same length. A
@@ -741,11 +787,11 @@ bool ExecServer::onExecute(const Packet& req, Reply& reply) {
     if (fd_count != req.fds.size()) {
         Logger::GetInstance()->LogE(
             "[exec] fd_count %u does not match %zu attached fds", fd_count, req.fds.size());
-        return false;
+        return refuse("fd_count does not match the attached descriptors");
     }
     if (n < 20 + (size_t)fd_count * 4) {
         Logger::GetInstance()->LogE("[exec] request too short for %u fd targets", fd_count);
-        return false;
+        return refuse("request too short for its descriptor targets");
     }
 
     // The strings start after the header and the target list, so every offset
@@ -760,7 +806,7 @@ bool ExecServer::onExecute(const Packet& req, Reply& reply) {
         if (target > STDERR_FILENO) {
             Logger::GetInstance()->LogE(
                 "[exec] fd target %u is not a standard descriptor", target);
-            return false;
+            return refuse("descriptor target is not one of 0/1/2");
         }
         sr.stdio_fds.push_back(InheritedFd{req.fds[i], static_cast<int>(target)});
     }
@@ -889,7 +935,17 @@ bool ExecServer::onExecute(const Packet& req, Reply& reply) {
         Logger::GetInstance()->LogE(
             "[exec] spawn failed: %s",
             res.error.empty() ? "unknown error" : res.error.c_str());
-        return false;
+        // Tell the client why, not just "handler failed": at the far end this is
+        // the difference between "your shell is broken" and "the native child
+        // process API refused and fork is unavailable too". Shape:
+        // [0][errno][message NUL]: the first two words are the refusal shape the
+        // client already understands, the text is what it can show a human.
+        put32(reply.body, 0);
+        put32(reply.body, static_cast<uint32_t>(ENOENT));
+        const std::string why = res.error.empty() ? "cannot start" : res.error;
+        reply.body.insert(reply.body.end(), why.begin(), why.end());
+        reply.body.push_back('\0');
+        return true;
     }
     Logger::GetInstance()->LogI("[exec] spawned pid %d", (int)res.pid);
     put32(reply.body, static_cast<uint32_t>(res.pid));

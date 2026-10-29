@@ -18,7 +18,6 @@ import { GoalService, GoalItem } from './GoalService';
 import { WebFetchService } from './WebFetchService';
 import { SessionLogService } from './SessionLogService';
 import { JsCodeService } from './JsCodeService';
-import { LinuxShellService } from './LinuxShellService';
 import { PythonService } from './PythonService';
 import { ToolExecResult, WorkFileService } from './WorkFileService';
 import { Constants } from '../common/Constants';
@@ -100,7 +99,7 @@ export class HarnessTools {
     return name === 'edit' || name === 'str_replace_editor' ||
       name === 'goal_create' || name === 'goal_update' ||
       name === 'schedule_create' || name === 'schedule_delete' ||
-      name === 'run_js' || name === LinuxShellService.TOOL_NAME ||
+      name === 'run_js' || name === Constants.WORK_SHELL_TOOL_NAME ||
       name === PythonService.TOOL_NAME;
   }
 
@@ -191,12 +190,13 @@ export class HarnessTools {
     if (name === JsCodeService.TOOL_NAME) {
       return await JsCodeService.run(root, args);
     }
-    if (name === LinuxShellService.TOOL_NAME) {
+    if (name === Constants.WORK_SHELL_TOOL_NAME) {
       const backend = HarnessTools.shellBackendHook;
-      if (backend !== null) {
-        return await backend(context, convId, args);
+      if (backend === null) {
+        // 没有 QEMU 回退：后端没接上就是配置错误，直接报出来，不要静默降级。
+        return HarnessTools.fail('shell 后端未初始化（IEC 运行核没有接上）');
       }
-      return await LinuxShellService.run(context, convId, args);
+      return await backend(context, convId, args);
     }
     if (name === PythonService.TOOL_NAME) {
       return await PythonService.run(context, convId, args);
@@ -672,10 +672,10 @@ export class HarnessTools {
         'files', HarnessTools.strProp('可选: 要预载为只读输入的工作区文件相对路径(如 "data/in.csv"), 多个用逗号或 JSON 数组分隔(最多 6 个, 单个 ≤512KB); 不传则脚本里没有可读输入, 需要文件内容时必须传'),
         'timeout_ms', HarnessTools.strProp('可选: 执行超时毫秒数, 默认 10000, 范围 1000~30000')),
       ['code']));
-    defs.push(HarnessTools.makeTool(LinuxShellService.TOOL_NAME,
+    defs.push(HarnessTools.makeTool(Constants.WORK_SHELL_TOOL_NAME,
       '在设备上**原生执行**一条 shell 命令(IEC 运行核: 命令以 HarmonyOS `.so` 形式 fork 后直接跑, 不经虚拟机、不需要 JIT 权限), 返回退出码与 stdout/stderr。' +
       '**目录与其它工具完全一致**: 命令的工作目录就是本会话工作区 —— 与 read_file/write_file/edit/glob 看到的是同一个目录(同一个文件系统, 不是副本), 所以 `cat data/a.csv` 与 read_file("data/a.csv") 读的是同一份内容, 用 shell 改过的文件立刻能被 read_file 读到。' +
-      '适用: 批量重命名/批量转换、sed/awk/grep/find/xargs 流水线、tar/gzip 打包、跨文件统计与比对、需要真程序的活(toybox 工具集; git/python/node 等以随包的运行库为准)。' +
+      '适用: 批量重命名/批量转换、sed/awk/grep/find/xargs 流水线、tar/zip/gzip 打包、git 版本管理、ssh/scp、跨文件统计与比对、需要真程序的活(随包命令: mksh、toybox 工具集、tar/unzip/zip/cpio、git、ssh/scp、node)。' +
       '**不要**用它做 read_file/write_file/search_files/glob/grep/transform_file 已经能做好的事(每次调用都有开销); 也不要逐条 `ls`/`cat` 摸索目录 —— 用 list_files/glob 更快。' +
       '语法: 标准 sh(管道、重定向、通配符、变量、&&/||、for/while、函数)。相对路径以工作区根为基准, cwd 可切到子目录。' +
       '开销: 不需要引导虚拟机; 每条命令的进程创建是毫秒级, CPU 密集任务接近原生速度。' +

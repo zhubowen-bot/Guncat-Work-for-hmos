@@ -10,9 +10,11 @@
 // 生命周期：进程内只启动一次；launcher 只在版本戳变化时重写。
 import { common } from '@kit.AbilityKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
+import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import {
   ensureDir,
+  execKillStale,
   execPoll,
   execRelease,
   execStart,
@@ -47,6 +49,9 @@ export interface IecRunResult {
   out: string;
   err: string;
   timedOut: boolean;
+  // 输出里出现了非法 UTF-8（解码成 U+FFFD）。二进制内容应重定向到文件，
+  // 不要当文本用。
+  binary: boolean;
   outDropped: number;
   errDropped: number;
   elapsedMs: number;
@@ -55,6 +60,31 @@ export interface IecRunResult {
 export class IecRuntime {
   private static started: boolean = false;
   private static startError: string = '';
+
+  // 并发上限。每次运行占 4 个读/写线程与最多 8MB 缓冲；没有上限时，模型并行
+  // 发十几条命令就能把内存和线程数推上去。超出的排队，不丢请求。
+  private static readonly MAX_RUNS: number = 8;
+  private static activeRuns: number = 0;
+  private static waiters: Array<() => void> = [];
+
+  private static async acquireSlot(): Promise<void> {
+    if (IecRuntime.activeRuns < IecRuntime.MAX_RUNS) {
+      IecRuntime.activeRuns++;
+      return;
+    }
+    await new Promise<void>((resolve: () => void): void => {
+      IecRuntime.waiters.push(resolve);
+    });
+    IecRuntime.activeRuns++;
+  }
+
+  private static releaseSlot(): void {
+    IecRuntime.activeRuns--;
+    const next: (() => void) | undefined = IecRuntime.waiters.shift();
+    if (next !== undefined) {
+      next();
+    }
+  }
 
   // 启动 exec/tty 服务并铺好 launcher。返回空串表示可用，否则是原因。
   static ensure(context: common.UIAbilityContext): string {
@@ -80,6 +110,16 @@ export class IecRuntime {
         IecRuntime.startError = 'IEC 服务启动失败（socket 建不出来）';
         return IecRuntime.startError;
       }
+      // 上一次运行（崩溃/被强停）留下的命令进程会被 init 收养，继续占内存。
+      // 每个命令都带 IEC_JOB，启动时按这个标记清一遍。
+      try {
+        const killed = execKillStale();
+        if (killed > 0) {
+          hilog.warn(DOMAIN, TAG, 'killed %{public}d stale command processes', killed);
+        }
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, 'stale sweep failed: %{public}s', JSON.stringify(e));
+      }
       IecRuntime.started = true;
       hilog.info(DOMAIN, TAG, 'IEC runtime ready');
       return '';
@@ -98,6 +138,11 @@ export class IecRuntime {
     ensureDir(SYSROOT + '/tmp');
     ensureDir(SYSROOT + '/usr/bin');
 
+    // 先清空再重建。launcher 是**持久文件**：上一次安装写下的 tar→libbsdtar 不会
+    // 因为这次不写而消失，结果就是"命令在、库不在"的假故障。这个目录只放我们的
+    // launcher，清掉是安全的。
+    IecRuntime.clearLaunchers();
+
     let fails: number = 0;
     const add = (name: string, so: string, entry: string): void => {
       // primary=0 交给 IEC 按设备能力选 fork / native child process；写死 fork 会在
@@ -113,7 +158,12 @@ export class IecRuntime {
       'uname', 'id', 'whoami', 'ps', 'kill', 'free', 'df', 'du', 'clear',
       'reset', 'stty', 'readlink', 'dirname', 'basename', 'realpath', 'printf',
       'timeout', 'mount', 'umount', 'gzip', 'gunzip', 'zcat', 'wget', 'ping',
-      'netstat', 'ifconfig', 'toybox'
+      'netstat', 'ifconfig', 'toybox',
+      // tar 先按 toybox 注册：没有 libbsdtar 时它仍然能打包（见下面的覆盖）。
+      'tar',
+      // seq/stat/cmp/diff 都在玩具箱里；不注册它们就是 "not found"，
+      // 而不是"这个环境不提供"。
+      'seq', 'stat', 'cmp', 'diff', 'split', 'sha256sum', 'base64', 'xxd'
     ];
     for (const name of toybox) {
       add(name, 'libtoybox.so', 'bsh_toybox_main');
@@ -123,27 +173,86 @@ export class IecRuntime {
     add('sh', 'libmksh.so', 'main');
     add('mksh', 'libmksh.so', 'main');
 
-    for (const name of ['ssh', 'dbclient', 'scp', 'ssh-keygen', 'dropbearkey',
-      'dropbearconvert', 'dropbear']) {
-      add(name, 'libdropbear.so', 'iec_dropbear_main');
+    // 可选命令按 **实际随包的 so** 注册。指向一个没打进来的 so，报错会是
+    // "dlopen /libbsdtar.so: No such file"，看起来像工具坏了；不注册则是干净的
+    // "command not found"。
+    if (IecRuntime.hasSo('libdropbear.so')) {
+      for (const name of ['ssh', 'dbclient', 'scp', 'ssh-keygen', 'dropbearkey',
+        'dropbearconvert', 'dropbear']) {
+        add(name, 'libdropbear.so', 'iec_dropbear_main');
+      }
     }
-    for (const name of ['git', 'git-upload-pack', 'git-receive-pack', 'git-upload-archive']) {
-      add(name, 'libgit.so', 'iec_git_main');
+    if (IecRuntime.hasSo('libgit.so')) {
+      for (const name of ['git', 'git-upload-pack', 'git-receive-pack', 'git-upload-archive']) {
+        add(name, 'libgit.so', 'iec_git_main');
+      }
     }
-    add('tar', 'libbsdtar.so', 'iec_bsdtar_main');
-    add('bsdtar', 'libbsdtar.so', 'iec_bsdtar_main');
-    add('unzip', 'libbsdunzip.so', 'iec_bsdunzip_main');
-    add('zip', 'libzipcmd.so', 'iec_zip_main');
-    add('node', 'libnode.so', 'iec_node_main');
-    add('npm', 'libnode.so', 'iec_npm_main');
+    // git 的 https 传输是第二个程序（remote-curl），单独一个 so。
+    if (IecRuntime.hasSo('libgit-remote-http.so')) {
+      add('git-remote-http', 'libgit-remote-http.so', 'iec_git_remote_http_main');
+      add('git-remote-https', 'libgit-remote-http.so', 'iec_git_remote_http_main');
+    }
+    // tar 优先 libarchive（能读 zip/更多压缩），没有就保留上面 toybox 的 tar。
+    if (IecRuntime.hasSo('libbsdtar.so')) {
+      add('tar', 'libbsdtar.so', 'iec_bsdtar_main');
+      add('bsdtar', 'libbsdtar.so', 'iec_bsdtar_main');
+    }
+    if (IecRuntime.hasSo('libbsdunzip.so')) {
+      add('unzip', 'libbsdunzip.so', 'iec_bsdunzip_main');
+    }
+    if (IecRuntime.hasSo('libbsdcpio.so')) {
+      add('cpio', 'libbsdcpio.so', 'iec_bsdcpio_main');
+      add('bsdcpio', 'libbsdcpio.so', 'iec_bsdcpio_main');
+    }
+    if (IecRuntime.hasSo('libzipcmd.so')) {
+      add('zip', 'libzipcmd.so', 'iec_zip_main');
+    }
+    if (IecRuntime.hasSo('libnode.so')) {
+      add('node', 'libnode.so', 'iec_node_main');
+      add('nodejs', 'libnode.so', 'iec_node_main');
+      add('npm', 'libnode.so', 'iec_npm_main');
+      add('npx', 'libnode.so', 'iec_npx_main');
+    }
 
     // Guncat 自带原生 CPython（libpython3.12.so，导出 Py_BytesMain）。把它接进
     // IEC 后，shell 里也能起同一个解释器 —— 这是"shell 与 Python 不再是两个世界"
     // 的落点。缺失时只是一条失败的命令，不影响其它 launcher。
-    add('python3', 'libpython3.12.so', 'Py_BytesMain');
-    add('python', 'libpython3.12.so', 'Py_BytesMain');
+    // shell 里的 python3 走 libpycmd.so 而不是直接指向 libpython3.12.so：命令是
+    // fork 出来的，子进程会继承应用进程里已经初始化过的 CPython（run_python 的），
+    // 直接再调 Py_BytesMain 会在 pyinit_core_reconfigure 崩溃。libpycmd 会先在
+    // 子进程里 PyOS_AfterFork_Child + Py_FinalizeEx 把运行时归零，再正常初始化。
+    if (IecRuntime.hasSo('libpycmd.so')) {
+      add('python3', 'libpycmd.so', 'iec_python_main');
+      add('python', 'libpycmd.so', 'iec_python_main');
+    }
 
     hilog.info(DOMAIN, TAG, 'launchers written, failures=%{public}d', fails);
+  }
+
+  // 清空 launcher 目录。只删文件，不递归；这里的每一项都是 writeSoLauncher 写的。
+  private static clearLaunchers(): void {
+    try {
+      const names: string[] = fileIo.listFileSync(BIN_DIR);
+      for (const name of names) {
+        try {
+          fileIo.unlinkSync(BIN_DIR + name);
+        } catch (e) {
+          hilog.warn(DOMAIN, TAG, 'cannot remove launcher %{public}s', name);
+        }
+      }
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'cannot list launchers: %{public}s', JSON.stringify(e));
+    }
+  }
+
+  // bundle libs 里有没有这个 so。launcher 只在存在时写，避免"命令在、库不在"
+  // 这种最误导人的失败形态。
+  private static hasSo(name: string): boolean {
+    try {
+      return fileIo.accessSync(BUNDLE_LIBS + name);
+    } catch (e) {
+      return false;
+    }
   }
 
   // 跑一条命令。返回的 out/err 是原始字节（UTF-8 解码由调用方决定）。
@@ -151,7 +260,7 @@ export class IecRuntime {
     options: IecRunOptions): Promise<IecRunResult> {
     const startedAt: number = Date.now();
     let result: IecRunResult = {
-      code: -1, out: '', err: '', timedOut: false,
+      code: -1, out: '', err: '', timedOut: false, binary: false,
       outDropped: 0, errDropped: 0, elapsedMs: 0
     };
 
@@ -161,6 +270,7 @@ export class IecRuntime {
       return result;
     }
 
+    await IecRuntime.acquireSlot();
     let handleId: number = -1;
     try {
       const handle = execStart({
@@ -195,8 +305,23 @@ export class IecRuntime {
           // "服务还活着但命令卡在不可中断的调用里"。
           execTerminate(id, 200);
           result.timedOut = true;
-          exited = true;
           result.code = -1;
+          // 必须等它真的退出再 release：Release 对运行中的会话会拒绝，
+          // 那一次拒绝就是一条泄漏的会话（4 个线程 + 输出缓冲）。
+          const until: number = Date.now() + 3000;
+          while (Date.now() < until) {
+            const p = execPoll(id, 64 * 1024, 64 * 1024);
+            result.out += p.out;
+            result.err += p.err;
+            if (p.exited) {
+              result.code = p.code;
+              break;
+            }
+            await new Promise<void>((resolve: () => void): void => {
+              setTimeout(resolve, 20);
+            });
+          }
+          exited = true;
           break;
         }
         await new Promise<void>((resolve: () => void): void => {
@@ -213,12 +338,24 @@ export class IecRuntime {
         result.out += tail.out;
         result.err += tail.err;
       }
-      execRelease(id);
     } catch (e) {
       result.err = IecRuntime.describeFailure(e);
       hilog.error(DOMAIN, TAG, 'exec failed: %{public}s', result.err);
+    } finally {
+      if (handleId >= 0) {
+        try {
+          execRelease(handleId);
+        } catch (e) {
+          hilog.warn(DOMAIN, TAG, 'release %{public}d failed: %{public}s',
+            handleId, JSON.stringify(e));
+        }
+      }
+      IecRuntime.releaseSlot();
     }
 
+    // 非 UTF-8 字节在解码时变成 U+FFFD。这里把"输出已损坏"变成显式标记，
+    // 而不是让调用方把乱码当内容用（二进制请重定向到文件，或用 base64）。
+    result.binary = result.out.indexOf('\uFFFD') !== -1 || result.err.indexOf('\uFFFD') !== -1;
     result.elapsedMs = Date.now() - startedAt;
     return result;
   }

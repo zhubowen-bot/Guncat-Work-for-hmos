@@ -149,3 +149,10 @@ export const execList: () => string;
 
 /** Live sessions known to this process. */
 export const execCount: () => number;
+
+/**
+ * 清掉上一次运行遗留的命令进程（按 IEC_JOB 环境变量识别，同 uid、非本进程）。
+ * 应用崩溃/被强停后子进程会被 init 收养，这个函数在启动时把它们杀掉。
+ * 返回杀掉的进程数。
+ */
+export const execKillStale: () => number;

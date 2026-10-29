@@ -556,9 +556,19 @@ int Start(const ExecOptions& options, ExecState* state, std::string* error) {
 
     int pid = -1;
     int err_no = 0;
+    std::string refused_text;
     if (reply.len >= 8) {
         // The refusal shape: no pid, then the errno the call should fail with.
         err_no = static_cast<int>(iec_get32(reply.body + 4));
+        // A server that knows why appends the reason after the two words; older
+        // servers send exactly eight bytes. The text is what a human can act on,
+        // so it is preferred over the errno when it is there.
+        if (reply.len > 8) {
+            const char* text = reinterpret_cast<const char*>(reply.body + 8);
+            size_t n = reply.len - 8;
+            if (n > 0 && text[n - 1] == '\0') n--;
+            refused_text.assign(text, n);
+        }
     } else if (reply.len >= 4) {
         pid = static_cast<int>(iec_get32(reply.body));
     }
@@ -567,7 +577,11 @@ int Start(const ExecOptions& options, ExecState* state, std::string* error) {
 
     if (pid <= 0) {
         std::string why = "the program could not be started";
-        if (err_no > 0) why += ": " + Strerror(err_no);
+        if (!refused_text.empty()) {
+            why += ": " + refused_text;
+        } else if (err_no > 0) {
+            why += ": " + Strerror(err_no);
+        }
         return fail(why);
     }
 

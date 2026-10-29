@@ -21,9 +21,16 @@
 #include <napi/native_api.h>
 
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
+
+#include <dirent.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <unistd.h>
 
 #include "exec/exec_session.h"
 
@@ -604,6 +611,52 @@ napi_value ExecCount(napi_env env, napi_callback_info /*info*/) {
     return MakeInt(env, static_cast<int64_t>(iec::Count()));
 }
 
+// Kills processes left over from a previous run of this application.
+//
+// The exec service's own sessions die with the process, but the *children* it
+// forked do not: after an app crash or a force-stop they are re-parented to init
+// and keep running. Every command the shell starts carries IEC_JOB in its
+// environment, which is the one marker that survives the parent and is readable
+// for same-uid processes (/proc/<pid>/environ). So the sweep is: same uid,
+// environ contains IEC_JOB, not this process -> SIGKILL.
+napi_value ExecKillStale(napi_env env, napi_callback_info /*info*/) {
+    DIR* dir = opendir("/proc");
+    if (dir == nullptr) return MakeInt(env, 0);
+
+    const long self = static_cast<long>(getpid());
+    int killed = 0;
+    struct dirent* ent = nullptr;
+    while ((ent = readdir(dir)) != nullptr) {
+        char* end = nullptr;
+        const long pid = std::strtol(ent->d_name, &end, 10);
+        if (pid <= 0 || end == nullptr || *end != '\0' || pid == self) continue;
+
+        char path[64];
+        std::snprintf(path, sizeof path, "/proc/%ld/environ", pid);
+        const int fd = open(path, O_RDONLY | O_CLOEXEC);
+        if (fd < 0) continue;
+        char buf[8192];
+        const ssize_t n = read(fd, buf, sizeof buf - 1);
+        close(fd);
+        if (n <= 0) continue;
+        buf[n] = '\0';
+
+        bool stale = false;
+        for (ssize_t i = 0; i < n;) {
+            const char* item = buf + i;
+            const size_t len = std::strlen(item);
+            if (len >= 8 && std::strncmp(item, "IEC_JOB=", 8) == 0) {
+                stale = true;
+                break;
+            }
+            i += static_cast<ssize_t>(len) + 1;
+        }
+        if (stale && kill(static_cast<pid_t>(pid), SIGKILL) == 0) killed++;
+    }
+    closedir(dir);
+    return MakeInt(env, killed);
+}
+
 }  // namespace
 
 void RegisterExecNapi(napi_env env, napi_value exports) {
@@ -618,6 +671,7 @@ void RegisterExecNapi(napi_env env, napi_value exports) {
         {"execRelease",    nullptr, ExecRelease,    nullptr, nullptr, nullptr, napi_default, nullptr},
         {"execList",       nullptr, ExecList,       nullptr, nullptr, nullptr, napi_default, nullptr},
         {"execCount",      nullptr, ExecCount,      nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"execKillStale",  nullptr, ExecKillStale,  nullptr, nullptr, nullptr, napi_default, nullptr},
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
 }
