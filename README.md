@@ -179,8 +179,9 @@ HAP 约 430MB（原生命令集 + CPython + 运行库）。某个 `.so` 缺失�
 
 ### 验证
 
+- **一键本地检查（推荐）**：`bash scripts/check-all.sh`（`--fast` 跳过较慢/依赖环境的项，`--list` 查看清单）
 - 纯逻辑回归（当前 **683 项**全绿）：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`
-- 服务层类型检查：`cd test/guncat-harness && node check-setup.mjs && npx tsc -p check/tsconfig.json`
+- 服务层类型检查：`cd test/guncat-harness && node check-setup.mjs && npx -y -p typescript@5.5.4 tsc -p check/tsconfig.json`
 - PPT / Word / Excel 离线验证环境：`test/pptx-harness`、`test/docx-harness`、`test/xlsx-harness`
 - 真实 ArkTS 编译（需本机 DevEco）：`powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`
 

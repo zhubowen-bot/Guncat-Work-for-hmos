@@ -50,3 +50,6 @@ third_party/bettersh/**/*.tar.gz binary
 *.pdf binary
 *.jar binary
 *.hap binary
+
+# 本地/CI 复用的一键检查脚本：在 WSL/Linux 下直接 bash 执行，必须保持 LF
+scripts/** text eol=lf

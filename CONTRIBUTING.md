@@ -25,7 +25,7 @@
 ```bash
 cd test/guncat-harness
 node setup.mjs        # 把 entry/src/main/ets 下的纯逻辑模块移植为 Node 可运行的 .ts
-node test-core.mjs    # 当前 521 项
+node test-core.mjs    # 当前 683 项
 ```
 
 覆盖 `PathMatcher` / `DiffUtil` / `EditCore` / `FileSearchCore` / `ToolRegistry` / `PromptBuilder` / `LoopDecisions` / `SSEProtocolAdapter` / `GuncatUiLang` 等纯逻辑，以及**大量提示词断言**。
@@ -47,6 +47,31 @@ node test/guncat-harness/check-ui-copy.mjs
 有些界面纪律**编译得过、单测也测不到**，漏了只表现为"真机上某块字没反应"。这类纪律用源码扫描守住：
 
 - **`check-ui-copy.mjs`**：交互界面（`GuncatUiView.ets`）里每个**内容型** `Text` 都必须挂 `.copyOption(CopyOptions.LocalDevice)`（长按弹出文本选择菜单，可选中复制/全选），否则报错。**交互控件标签**（按钮 / 选项卡 / 单选多选药丸 / 下拉项 / 标签选项 / 折叠触发器 / 追问胶囊 / 行内动作 / 序号圆点）**必须豁免**——它们的整块区域就是点击热区，挂上选择能力会跟自己的点击事件抢手势——豁免的写法是行尾 `// copy-off: 原因`（原因不能为空）。新增组件时漏挂 `copyOption`，这条会立刻变红。
+
+### 一键检查（本地 / CI 复用）
+
+上面各层分散成多条命令，提交前建议直接跑一键入口：
+
+```bash
+bash scripts/check-all.sh          # 全量
+bash scripts/check-all.sh --fast   # 跳过 soname / py_runner / IEC 命令集
+bash scripts/check-all.sh --list   # 只看检查项清单
+```
+
+按顺序执行 9 项：纯逻辑单测（683 项）、服务层 `tsc`、界面文案可复制护栏、
+Markdown 相对链接、随包许可、共享库 soname、`py_runner` 宿主协议、
+IEC 命令集宿主测试，以及存在时才跑的 `tools/check-iec-libs.py`。
+
+- 单项失败不会中断后续项；每项打印 `==> 名称` 与耗时，末尾给出
+  `SUMMARY: PASS=n FAIL=n SKIP=n`，有 FAIL 时整体非零退出。
+- `--fast` 跳过的项计入 `SKIP`（不是失败）。
+- 缺 Node / Python / 编译器、找不到 DevEco SDK 等环境依赖时会明确打印
+  `跳过: 原因` 并继续，不会因缺依赖崩掉。
+- soname 检查默认自动探测 DevEco / OHOS SDK 的 `native/llvm/bin`；也可手动指定
+  `GUNCAT_LLVM_BIN=/path/to/native/llvm/bin`。WSL 里若只装了 Windows 版 DevEco，
+  脚本会改用 GNU readelf 读取 ELF（Windows 的 `llvm-readelf.exe` 读不了 `/mnt` 路径）。
+
+> 一键入口只覆盖宿主侧检查；第 3 层真实 ArkTS 编译仍需本机 DevEco，见下节。
 
 ### 第 3 层 · 真实 ArkTS 编译（**只有编译器才知道的规则**）
 
