@@ -116,6 +116,11 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 - `libarchive` 系列：`libbsdtar.so` / `libbsdunzip.so` / `libbsdcpio.so` / `libzipcmd.so`
 - `libgit.so` / `libgit-remote-http.so`（git，含 https）
 - `libdropbear.so`（ssh / scp / key 工具）
+- `libsftpcmd.so`（OpenSSH sftp 客户端）
+- `libjqcmd.so`（jq 1.7.1，静态 oniguruma）
+- `libcurlcmd.so`（curl 8.22.0，静态 OpenSSL/zlib）
+- `libbccmd.so`（GNU bc 1.07.1）
+- `libnc.so` / `libhexdump.so` / `libdiff.so`（nc、hexdump、diff；diff 后端是随包 git）
 - `libnode.so`（node / npm / npx）
 - `libpython3.12.so`（shell 里的 `python3` 与 `run_python` 共用）
 

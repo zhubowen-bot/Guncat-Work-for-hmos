@@ -141,8 +141,8 @@ for (const [relSrc, relDst, replaces] of [
   ['service/ToolCallStream.ts', 'ToolCallStream.ts', []],
   ['service/LocalWebSearch.ts', 'LocalWebSearch.ts', []],
   ['service/JsCodeService.ts', 'JsCodeService.ts', [["from 'libguncatjs.so'", "from './jsvm-shim'"]]],
-  ['service/LinuxShellService.ts', 'LinuxShellService.ts',
-    [["from 'libguncatvm.so'", "from './vm-shim'"], ["from 'libguncatpy.so'", "from './py-shim'"]]],
+  // LinuxShellService（QEMU TCI 的 Linux VM）已随 shell/IEC 改造删除，shell 现在走
+  // IecShellService + IEC 运行时，不再有 libguncatvm.so 这个原生依赖。
   ['service/RawAsset.ts', 'RawAsset.ts', []],
   ['service/PythonService.ts', 'PythonService.ts', [["from 'libguncatpy.so'", "from './py-shim'"]]],
   ['service/WorkToolRunner.ets', 'WorkToolRunner.ts', []],

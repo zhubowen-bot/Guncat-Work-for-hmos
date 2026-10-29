@@ -219,6 +219,23 @@ export class IecRuntime {
     if (IecRuntime.hasSo('libdiff.so')) {
       add('diff', 'libdiff.so', 'iec_diff_main');
     }
+    // jq 1.7.1 + 静态 oniguruma：JSON 处理。
+    if (IecRuntime.hasSo('libjqcmd.so')) {
+      add('jq', 'libjqcmd.so', 'iec_jq_main');
+    }
+    // curl 8.22.0 + 静态 OpenSSL/zlib：命令行下载。CA 走 IecShellService 注入的
+    // CURL_CA_BUNDLE / SSL_CERT_FILE。
+    if (IecRuntime.hasSo('libcurlcmd.so')) {
+      add('curl', 'libcurlcmd.so', 'iec_curl_main');
+    }
+    // GNU bc 1.07.1（--with-readline 未启用）：任意精度计算。
+    if (IecRuntime.hasSo('libbccmd.so')) {
+      add('bc', 'libbccmd.so', 'iec_bc_main');
+    }
+    // OpenSSH 9.9p2 的 sftp 客户端（静态 OpenSSL/zlib）。
+    if (IecRuntime.hasSo('libsftpcmd.so')) {
+      add('sftp', 'libsftpcmd.so', 'iec_sftp_main');
+    }
     if (IecRuntime.hasSo('libnode.so')) {
       add('node', 'libnode.so', 'iec_node_main');
       add('nodejs', 'libnode.so', 'iec_node_main');

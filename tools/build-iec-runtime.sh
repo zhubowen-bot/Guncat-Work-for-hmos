@@ -34,14 +34,23 @@ build_deps() {
 	./scripts/optional/build_dropbear.sh
 }
 
+# 自写/依赖 shim 的补充命令：nc、hexdump、diff 先产出 shim 对象，后面的命令复用。
+build_commands() {
+	./scripts/build_extra_commands.sh
+	./scripts/optional/build_jq.sh
+	./scripts/optional/build_curlcmd.sh
+	./scripts/optional/build_bc.sh
+	./scripts/optional/build_sftp.sh
+}
+
 build_node() {
 	./scripts/optional/build_node.sh all
 }
 
 case "${1:-deps}" in
-	deps) build_deps ;;
+	deps) build_deps; build_commands ;;
 	node) build_node ;;
-	all)  build_deps; build_node ;;
+	all)  build_deps; build_commands; build_node ;;
 	*) echo "usage: $0 [deps|node|all]" >&2; exit 2 ;;
 esac
 
