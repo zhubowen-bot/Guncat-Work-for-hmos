@@ -568,6 +568,11 @@ static const struct { const char* from; const char* to_rel; } kPathMap[] = {
     { "/vendor/bin", "vendor/bin" },
     { "/system/lib", "system/lib" },
     { "/data/app/bin", "data/app/bin" },
+    /* The sandbox root has no /etc and no writable /tmp. Guests expect both:
+     * `id` reads /etc/passwd, `mktemp`/`date`/editors use /tmp. Mapping them into
+     * the resource root makes those paths real instead of "not found". */
+    { "/etc", "etc" },
+    { "/tmp", "tmp" },
     { "/usr/share/X11/xkb", "usr/share/x11/xkb" },
     /* Guests have **no real root filesystem**; absolute paths such as `/usr/...` do not exist
      * on the host. Debs installed by apt are full of these: code-server's

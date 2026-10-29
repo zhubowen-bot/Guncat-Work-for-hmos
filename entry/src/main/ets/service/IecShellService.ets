@@ -74,7 +74,10 @@ export class IecShellService {
     let env: Record<string, string> = {
       'PATH': IecRuntime.binDir() + ':' + IecRuntime.sysroot() + '/usr/bin:/usr/bin:/bin',
       'HOME': IecRuntime.sysroot() + '/home',
-      'TMPDIR': IecRuntime.sysroot() + '/tmp'
+      'TMPDIR': IecRuntime.sysroot() + '/tmp',
+      // 沙箱不支持硬链接，但 link() 被 fs shim 用"复制"兜底，git clone 看到
+      // inode 不一致会 fatal。打开 strict 后 link() 如实失败，git 自己回退到复制。
+      'IEC_SHIM_LINK_STRICT': '1'
     };
 
     // shell 里的 python3 用的是 Guncat 自带的 libpython3.12.so（launcher 已指向它）。
@@ -91,6 +94,14 @@ export class IecShellService {
       }
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'python env skipped: %{public}s', JSON.stringify(e));
+    }
+
+    // CA：把 certifi 的证书铺到 <sysroot>/etc/ssl/certs，git/openssl 按标准路径找。
+    const ca: string = IecRuntime.installCaBundle(context);
+    if (ca !== '') {
+      env['GIT_SSL_CAINFO'] = ca;
+      env['SSL_CERT_FILE'] = ca;
+      env['CURL_CA_BUNDLE'] = ca;
     }
 
     const run = await IecRuntime.run(context, command, {

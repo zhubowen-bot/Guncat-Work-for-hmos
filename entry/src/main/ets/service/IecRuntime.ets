@@ -144,6 +144,15 @@ export class IecRuntime {
     ensureDir(SYSROOT + '/home');
     ensureDir(SYSROOT + '/tmp');
     ensureDir(SYSROOT + '/usr/bin');
+    ensureDir(SYSROOT + '/etc/ssl/certs');
+
+    // `id`/`whoami` 读 /etc/passwd；沙箱根里没有，补一份真实的 uid 记录。
+    const ids: string[] = IecRuntime.readUidGid();
+    if (ids.length === 2) {
+      writeTxtFile(SYSROOT + '/etc/passwd',
+        'guncat:x:' + ids[0] + ':' + ids[1] + ':Guncat:/home:/bin/sh\n');
+      writeTxtFile(SYSROOT + '/etc/group', 'guncat:x:' + ids[1] + ':\n');
+    }
 
     // 先清空再重建。launcher 是**持久文件**：上一次安装写下的 tar→libbsdtar 不会
     // 因为这次不写而消失，结果就是"命令在、库不在"的假故障。这个目录只放我们的
@@ -318,6 +327,47 @@ export class IecRuntime {
       }
     }
     return names;
+  }
+
+  private static readUidGid(): string[] {
+    try {
+      const text: string = fileIo.readTextSync('/proc/self/status');
+      let uid: string = '';
+      let gid: string = '';
+      for (const line of text.split('\n')) {
+        if (line.startsWith('Uid:')) {
+          uid = line.substring(4).trim().split(/\s+/)[0];
+        } else if (line.startsWith('Gid:')) {
+          gid = line.substring(4).trim().split(/\s+/)[0];
+        }
+      }
+      if (uid !== '' && gid !== '') {
+        return [uid, gid];
+      }
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'cannot read uid: %{public}s', JSON.stringify(e));
+    }
+    return [];
+  }
+
+  // 把 Python 自带的 certifi 证书铺到 <sysroot>/etc/ssl/certs，git/openssl 系
+  // 工具就能按标准路径找到 CA，不用每次手写 GIT_SSL_CAINFO。
+  static installCaBundle(context: common.UIAbilityContext): string {
+    const src: string = context.filesDir + '/python/lib/python3.12/extras/certifi/cacert.pem';
+    const dst: string = SYSROOT + '/etc/ssl/certs/ca-certificates.crt';
+    try {
+      if (!fileIo.accessSync(src)) {
+        return '';
+      }
+      ensureDir(SYSROOT + '/etc/ssl/certs');
+      if (!fileIo.accessSync(dst)) {
+        fileIo.copyFileSync(src, dst);
+      }
+      return dst;
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'ca bundle install failed: %{public}s', JSON.stringify(e));
+      return '';
+    }
   }
 
   // bundle libs 里有没有这个 so。launcher 只在存在时写，避免"命令在、库不在"

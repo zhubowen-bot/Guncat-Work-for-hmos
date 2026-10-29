@@ -29,6 +29,8 @@ const TAG: string = 'PythonService';
 const RAW_ZIP: string = 'python/python312.zip';
 const RAW_SITE: string = 'python/site-packages.zip';
 const RAW_EXTRAS: string = 'python/extras.zip';
+// XlsxWriter 单独一个 zip：文档里承诺过，但之前的 extras 里没有。
+const RAW_XLSX: string = 'python/xlsxwriter.zip';
 const RAW_CERT: string = 'python/cacert.pem';
 // 中文字体: 思源黑体 SC(GB2312 子集, OFL-1.1), 让 matplotlib/Pillow 能直接画中文
 const RAW_FONT: string = 'python/fonts/SourceHanSansSC-Regular.otf';
@@ -68,9 +70,10 @@ export class PythonService {
     // 只给标准库 zip; C 扩展模块在应用的 lib 目录里(native 侧用 dladdr 自动并进 PYTHONPATH),
     // 因为设备上只有 lib 目录下的 .so 允许 dlopen。
     let stdlib: string = PythonService.runtimeDir(context) + '/' + PY_STDLIB_SUBDIR;
-    // 标准库 zip + 纯 Python 三方库 zip + extras(numpy/pandas 的 .py 部分)
+    // 标准库 zip + 纯 Python 三方库 zip + extras(numpy/pandas 的 .py 部分) + XlsxWriter
     // 注意顺序: extras 必须在应用 lib 目录之前 —— 那边只放 .so, 包本体要在这里先被找到
-    return stdlib + '/python312.zip' + ':' + stdlib + '/site-packages.zip' + ':' + stdlib + '/extras';
+    return stdlib + '/python312.zip' + ':' + stdlib + '/site-packages.zip' + ':' +
+      stdlib + '/extras' + ':' + stdlib + '/xlsxwriter.zip';
   }
 
   /** 首次调用时把 libpython 依赖的标准库/扩展模块释放到沙箱 */
@@ -108,6 +111,12 @@ export class PythonService {
         RawAsset.extract(context, RAW_SITE, stdlib + '/site-packages.zip');
       } catch (e) {
         hilog.warn(DOMAIN, TAG, 'extract site-packages failed: %{public}s', (e as Error).message);
+      }
+      // XlsxWriter(文档曾提到但实际没随包): 单独一个 zip, 直接挂在 PYTHONPATH 上。
+      try {
+        RawAsset.extract(context, RAW_XLSX, stdlib + '/xlsxwriter.zip');
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, 'extract xlsxwriter failed: %{public}s', (e as Error).message);
       }
       // numpy/pandas/PIL/matplotlib/scipy 的纯 Python 部分。
       // **必须解压成真实目录, 不能只把 zip 放那儿**: docx/pptx 的模板、pandas 的数据文件都用

@@ -49,6 +49,10 @@ READELF="${READELF:-$CLANG_DIR/llvm-readelf}"
 # BUILD.gn. They describe the C library the shell is compiled against.
 DEFS=(
 	-DMKSH_ASSUME_UTF8 -DMKSH_DONT_EMIT_IDSTRING -DMKSH_BUILDSH -D_GNU_SOURCE
+	# 上游默认 32 位算术（$((2000000000+2000000000)) 溢出为负）。这个 shell 是给
+	# 脚本和 agent 用的通用 shell，改成 64 位（long）更符合预期；上游为此保留了
+	# MKSH_LEGACY_MODE 分支，32 位断言也在该分支下关闭。
+	-DMKSH_LEGACY_MODE
 	-DSETUID_CAN_FAIL_WITH_EAGAIN
 	-DHAVE_STRING_POOLING=2
 	-DHAVE_ATTRIBUTE_BOUNDED=0 -DHAVE_ATTRIBUTE_FORMAT=1 -DHAVE_ATTRIBUTE_NORETURN=1
