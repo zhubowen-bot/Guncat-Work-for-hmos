@@ -153,8 +153,10 @@ Multimodal pre-parsing can be configured separately with its own model, endpoint
 
 ### Verification
 
-- **One-command local check (recommended)**: `bash scripts/check-all.sh` (`--fast` skips the slow/environment-dependent items, `--list` prints the 12-item list)
+- **One-command local check (recommended)**: `bash scripts/check-all.sh` (`--fast` skips the slow/environment-dependent items, `--list` prints the 14-item list)
 - **IEC hexdump property tests**: `bash third_party/bettersh/iec/tests/hexdump_fuzz/run.sh` (200 random inputs × `-C/-b/-c/-x/-d/-o` × `-n/-s/-v`, compared byte-for-byte with the system `hexdump`; wired into `check-all.sh`, SKIPs when no system `hexdump` is available)
+- **IEC nc property tests**: `bash third_party/bettersh/iec/tests/nc_fuzz/run.sh` (10 MB round trip / half-close both ways / concurrency / port reuse / SIGTERM)
+- **IEC diff property tests**: `bash third_party/bettersh/iec/tests/diff_fuzz/run.sh` (100 random file pairs compared byte-for-byte with `git diff --no-index`, plus options/paths/permissions/8 MB)
 - Pure-logic regression (currently **730 tests**, all green): `cd test/guncat-harness && node setup.mjs && node test-core.mjs`
 - Service-layer type check: `cd test/guncat-harness && node check-setup.mjs && npx -y -p typescript@5.5.4 tsc -p check/tsconfig.json`
 - PPT / Word / Excel offline verification environments: `test/pptx-harness`, `test/docx-harness`, `test/xlsx-harness`

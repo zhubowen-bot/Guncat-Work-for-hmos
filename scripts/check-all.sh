@@ -6,7 +6,7 @@
 #
 #   bash scripts/check-all.sh            # 全量
 #   bash scripts/check-all.sh --fast     # 跳过 soname / py_runner / IEC 命令集 /
-#                                        # hexdump 属性对拍 / exec 压测
+#                                        # hexdump / nc / diff 属性对拍 / exec 压测
 #   bash scripts/check-all.sh --list     # 只列出检查项
 #   bash scripts/check-all.sh --help
 #
@@ -69,6 +69,8 @@ ITEM_IDS=(
     py-runner
     cmd-tools
     hexdump-fuzz
+    nc-fuzz
+    diff-fuzz
     iec-native-host
     iec-exec-stress
     iec-libs
@@ -83,11 +85,13 @@ ITEM_NAMES=(
     "py_runner 宿主协议测试"
     "IEC 命令集宿主测试（nc / hexdump / diff）"
     "IEC hexdump 属性对拍（200 组随机输入 × 格式/截断/跳过）"
+    "IEC nc 属性/边界测试（10MB / 半关闭 / 并发 / 端口复用 / 信号）"
+    "IEC diff 属性/边界对拍（100 对随机文件 + 选项/路径/权限/8MB）"
     "IEC 原生代码宿主回归（exec 路由 / cwd / NCP / fs shim）"
     "IEC exec 会话并发/生命周期压测（8 路 / 终止 / fd / 超时）"
     "IEC 随包库检查（tools/check-iec-libs.py）"
 )
-ITEM_FAST_SKIP=(0 0 0 0 0 1 1 1 1 0 1 0)
+ITEM_FAST_SKIP=(0 0 0 0 0 1 1 1 1 1 1 0 1 0)
 
 print_list() {
     local i
@@ -413,7 +417,35 @@ check_iec_libs() {
     fi
 }
 
+# nc 属性/边界：10MB 双向、两个方向的半关闭、并发、端口复用、SIGTERM、二进制安全。
+check_nc_fuzz() {
+    local script="$ROOT/third_party/bettersh/iec/tests/nc_fuzz/run.sh"
+    if [[ ! -f "$script" ]]; then
+        skip_msg "third_party/bettersh/iec/tests/nc_fuzz/run.sh 不存在"
+        return 77
+    fi
+    command -v bash >/dev/null 2>&1 || { skip_msg "找不到 bash"; return 77; }
+    command -v cc >/dev/null 2>&1 || { skip_msg "找不到 cc"; return 77; }
+    command -v python3 >/dev/null 2>&1 || { skip_msg "找不到 python3"; return 77; }
+    bash "$script"
+}
+
+# diff 属性/边界：随机文件与 git 逐字节对拍、选项翻译、路径/权限/8MB。
+check_diff_fuzz() {
+    local script="$ROOT/third_party/bettersh/iec/tests/diff_fuzz/run.sh"
+    if [[ ! -f "$script" ]]; then
+        skip_msg "third_party/bettersh/iec/tests/diff_fuzz/run.sh 不存在"
+        return 77
+    fi
+    command -v bash >/dev/null 2>&1 || { skip_msg "找不到 bash"; return 77; }
+    command -v python3 >/dev/null 2>&1 || { skip_msg "找不到 python3"; return 77; }
+    command -v cc >/dev/null 2>&1 || { skip_msg "找不到 cc"; return 77; }
+    command -v git >/dev/null 2>&1 || { skip_msg "找不到 git"; return 77; }
+    bash "$script"
+}
+
 # ---- 运行与汇总 ---------------------------------------------------------
+
 run_check() {
     local index="$1" name="$2" fn="$3"
     local start_us end_us elapsed_ms rc=0
