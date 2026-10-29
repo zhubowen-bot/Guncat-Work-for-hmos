@@ -6,6 +6,7 @@ name: CI
 #   ✅ 交互界面文字可复制护栏（源码级扫描，见 check-ui-copy.mjs）
 #   ✅ docx / pptx / xlsx 三个 Office 生成器离线验证（Node 构建 + Python 结构校验）
 #   ✅ py_runner 宿主侧协议测试（x86_64 Linux，不需要设备）
+#   ✅ IEC 随包 .so 静态一致性（launcher 映射、blob、入口符号、NEEDED、源码新鲜度、HAP）
 #
 #   ❌ 真实 ArkTS 编译 / HAP 构建：第三层验证需要 DevEco Studio + HarmonyOS SDK +
 #      签名，GitHub 托管 runner 上无法提供。请在本地跑：
@@ -35,6 +36,18 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
+        with:
+          # 新鲜度检查要读每个文件"最后一次改动它的提交"的时间（git log -1 -- <path>）。
+          # 默认的浅克隆只有 HEAD，历史里没碰过该文件的路径会查不到时间，正常产物
+          # 会被误报成"没有提交记录"。
+          fetch-depth: 0
+
+      # 不需要设备/SDK：解析 ETS 的 launcher 映射，校验随包 .so 的 blob 与
+      # 工作区字节一致、入口符号、NEEDED 白名单，比较源码与产物的最后提交时间，
+      # 并在本机存在 HAP 时检查 libs/arm64-v8a 是否缺库。llvm-nm 不可用时入口
+      # 符号检查 SKIP；映射/新鲜度/blob 检查始终执行。
+      - name: IEC 随包 .so 一致性
+        run: python3 tools/check-iec-libs.py
 
       - uses: actions/setup-node@v5
         with:
