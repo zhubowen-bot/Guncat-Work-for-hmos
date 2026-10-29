@@ -39,8 +39,12 @@
 
 namespace {
 
-constexpr const char* kLibPython =
-    "/data/storage/el1/bundle/libs/arm64/libpython3.12.so";
+// 设备上解释器固定在 bundle 里；宿主测试要指向宿主自己的 libpython，所以
+// 留一个编译期覆盖点。只改路径来源，不改变运行行为。
+#ifndef IEC_PY_LIBPYTHON
+#define IEC_PY_LIBPYTHON "/data/storage/el1/bundle/libs/arm64/libpython3.12.so"
+#endif
+constexpr const char* kLibPython = IEC_PY_LIBPYTHON;
 
 bool g_started = false;
 
@@ -87,6 +91,9 @@ bool ReadString(int fd, std::string* out) {
 
 // Runs one python request. Returns after the response has been written.
 void HandleClient(int fd) {
+    // 客户端可能在任何一次 write 之前/之后消失。默认处置会让本 handler 直接
+    // 死于 SIGPIPE，连 waitpid 都走不到；这里只想看到 EPIPE 再决定怎么收尾。
+    signal(SIGPIPE, SIG_IGN);
     char head[12];
     if (!ReadFull(fd, head, sizeof head)) {
         close(fd);
@@ -158,10 +165,18 @@ void HandleClient(int fd) {
         dup2(in_pipe[0], STDIN_FILENO);
         dup2(out_pipe[1], STDOUT_FILENO);
         dup2(err_pipe[1], STDERR_FILENO);
-        close(in_pipe[0]); close(in_pipe[1]);
-        close(out_pipe[0]); close(out_pipe[1]);
-        close(err_pipe[0]); close(err_pipe[1]);
-        close(fd);
+        // 只关 2 以上的原 fd：runner 启动时关掉了自己的 0..1023，handler 里
+        // pipe() 会从 0 开始分配编号，于是 in_pipe/out_pipe 的某个原 fd 很可能
+        // 就是 0/1/2。dup2 之后那个编号已经是 stdio 本身，再按原编号 close
+        // 会把刚接好的 stdin/stdout/stderr 关掉，解释器就在没有任何标准流的
+        // 情况下启动（表现为没有输出、退出码也不是脚本给的）。
+        if (in_pipe[0] > 2) close(in_pipe[0]);
+        if (in_pipe[1] > 2) close(in_pipe[1]);
+        if (out_pipe[0] > 2) close(out_pipe[0]);
+        if (out_pipe[1] > 2) close(out_pipe[1]);
+        if (err_pipe[0] > 2) close(err_pipe[0]);
+        if (err_pipe[1] > 2) close(err_pipe[1]);
+        if (fd > 2) close(fd);
         for (const std::string& e : envs) {
             const size_t eq = e.find('=');
             if (eq != std::string::npos) {
@@ -197,27 +212,60 @@ void HandleClient(int fd) {
     close(out_pipe[1]);
     close(err_pipe[1]);
 
-    // stdin 交给孙进程后关闭，让它看到 EOF。
-    if (!stdin_data.empty()) {
-        WriteFull(in_pipe[1], stdin_data.data(), stdin_data.size());
+    // stdin 不能先整块写完再开始读 stdout/stderr：解释器完全可能先写满
+    // stdout 再回来读 stdin，双方各等对方的管道腾出空间，64KB 一满就是死锁。
+    // 所以把 stdin 也放进同一个 poll：可写就写一段，可读就读 stdout/stderr。
+    size_t in_off = 0;
+    if (stdin_data.empty()) {
+        close(in_pipe[1]);
+        in_pipe[1] = -1;
+    } else {
+        const int flags = fcntl(in_pipe[1], F_GETFL, 0);
+        if (flags >= 0) fcntl(in_pipe[1], F_SETFL, flags | O_NONBLOCK);
     }
-    close(in_pipe[1]);
 
     std::string out;
     std::string err;
     char buf[65536];
     // 同时读 stdout/stderr，避免任一管道写满把孙进程卡住。
     int open_fds = 2;
-    while (open_fds > 0) {
-        struct pollfd pfd[2];
+    while (open_fds > 0 || in_pipe[1] >= 0) {
+        struct pollfd pfd[3];
         pfd[0].fd = out_pipe[0]; pfd[0].events = POLLIN;
         pfd[1].fd = err_pipe[0]; pfd[1].events = POLLIN;
-        const int rc = poll(pfd, 2, -1);
+        pfd[2].fd = in_pipe[1];  pfd[2].events = POLLOUT;
+        const int nfds = in_pipe[1] >= 0 ? 3 : 2;
+        const int rc = poll(pfd, nfds, -1);
         if (rc < 0) {
             if (errno == EINTR) continue;
             break;
         }
         if (rc == 0) continue;
+
+        // stdin：写到 EAGAIN 为止，下一轮 POLLOUT 继续；全部写完就关闭，
+        // 让孙进程看到 EOF。对端先退出时 write 给 EPIPE（SIGPIPE 已忽略）。
+        if (in_pipe[1] >= 0 && (pfd[2].revents & (POLLOUT | POLLHUP | POLLERR)) != 0) {
+            bool close_in = (pfd[2].revents & (POLLHUP | POLLERR)) != 0;
+            while (!close_in && in_off < stdin_data.size()) {
+                const ssize_t n = write(in_pipe[1], stdin_data.data() + in_off,
+                                        stdin_data.size() - in_off);
+                if (n > 0) {
+                    in_off += static_cast<size_t>(n);
+                } else if (n < 0 && errno == EINTR) {
+                    continue;
+                } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                    break;  // 管道满了，等下一次 POLLOUT
+                } else {
+                    close_in = true;
+                }
+            }
+            if (in_off >= stdin_data.size()) close_in = true;
+            if (close_in) {
+                close(in_pipe[1]);
+                in_pipe[1] = -1;
+            }
+        }
+
         for (int i = 0; i < 2; i++) {
             if (pfd[i].fd < 0 || (pfd[i].revents & (POLLIN | POLLHUP | POLLERR)) == 0) continue;
             const ssize_t n = read(pfd[i].fd, buf, sizeof buf);
@@ -232,6 +280,7 @@ void HandleClient(int fd) {
             }
         }
     }
+    if (in_pipe[1] >= 0) close(in_pipe[1]);
     close(out_pipe[0]);
     close(err_pipe[0]);
 

@@ -5,6 +5,7 @@ name: CI
 #   ✅ guncat-harness 纯逻辑单测 + 服务层 tsc 类型检查
 #   ✅ 交互界面文字可复制护栏（源码级扫描，见 check-ui-copy.mjs）
 #   ✅ docx / pptx / xlsx 三个 Office 生成器离线验证（Node 构建 + Python 结构校验）
+#   ✅ py_runner 宿主侧协议测试（x86_64 Linux，不需要设备）
 #
 #   ❌ 真实 ArkTS 编译 / HAP 构建：第三层验证需要 DevEco Studio + HarmonyOS SDK +
 #      签名，GitHub 托管 runner 上无法提供。请在本地跑：
@@ -58,6 +59,26 @@ jobs:
       - name: 交互界面文字可复制护栏
         working-directory: test/guncat-harness
         run: node check-ui-copy.mjs
+
+  py-runner:
+    name: py_runner 宿主协议测试
+    # 不需要设备：用宿主的 libpython 覆盖编译期路径，走本机 UDS 跑完整的
+    # 退出码 / stdio 分离 / 二进制 / 并发 / SIGKILL / 大输出 / 错误路径断言。
+    # 入口见 third_party/bettersh/scripts/test_py_runner_host.sh。
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      # Ubuntu 24.04 自带 python3.12 运行时；-dev 包确保有可被 dlopen 的
+      # libpython3.12.so（run.py 会优先找 3.12）。
+      - name: 安装构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc g++ python3 libpython3.12-dev
+
+      - name: 宿主侧 py_runner 协议测试
+        run: bash third_party/bettersh/scripts/test_py_runner_host.sh
 
   office:
     name: Office 生成器离线验证
