@@ -167,6 +167,7 @@ class Context:
         self.runner = os.path.join(workdir, "build", "py_runner_host")
         self.client = os.path.join(workdir, "build", "py_client")
         self.proc = None
+        self.runner_pid = None
         self.log_path = os.path.join(workdir, "harness.log")
         self._log = None
 
@@ -180,7 +181,9 @@ def build(ctx):
     runner_o = os.path.join(ctx.workdir, "build", "py_runner.o")
 
     run_cmd([cc, "-std=gnu11", "-D_GNU_SOURCE", "-O1", "-g", "-Wall", "-Wextra"]
-            + inc + ["-c", HARNESS_SRC, "-o", harness_o])
+            + inc
+            + ['-DFAKE_SYSROOT="%s"' % ctx.workdir,
+               "-c", HARNESS_SRC, "-o", harness_o])
     run_cmd([cxx, "-std=c++17", "-O1", "-g", "-Wall", "-Wextra"]
             + inc
             + ['-DFAKE_SYSROOT="%s"' % ctx.workdir,
@@ -205,10 +208,33 @@ def start_runner(ctx):
         if ctx.proc.poll() is not None:
             raise Failure("runner 启动即退出：\n" + read_log(ctx))
         if os.path.exists(ctx.sock):
+            ctx.runner_pid = read_runner_pid(ctx)
             time.sleep(0.05)  # 让监听进入 poll 循环
             return
         time.sleep(0.01)
     raise Failure("等待 runner socket 超时：%s" % ctx.sock)
+
+
+def read_runner_pid(ctx, timeout=5.0):
+    """读 harness 落盘的 runner pid，并确认它确实是 harness 的子进程。
+
+    harness 的 cmdline 与 runner/handler/解释器完全一样（fork 后不 exec），
+    光靠命令行匹配分不出谁是谁；进程树断言必须有一个确定的 runner pid。
+    """
+    path = os.path.join(ctx.workdir, "runner.pid")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with open(path, "r") as f:
+                text = f.read().strip()
+            pid = int(text)
+        except (OSError, ValueError):
+            time.sleep(0.01)
+            continue
+        if pid > 0 and _ppid(pid) == ctx.proc.pid:
+            return pid
+        time.sleep(0.01)
+    raise Failure("拿不到 runner pid（%s）：harness 没有写出有效的子进程 pid" % path)
 
 
 def read_log(ctx):
@@ -304,6 +330,146 @@ def kill_pids(pids, sig=signal.SIGKILL):
             pass
         except PermissionError:
             pass
+
+
+def _stat_fields(pid):
+    """读 /proc/<pid>/stat。comm 里可能有空格和括号，按最后一个 ')' 切。"""
+    try:
+        with open("/proc/%d/stat" % pid, "rb") as f:
+            data = f.read()
+    except OSError:
+        return None
+    rp = data.rfind(b")")
+    if rp < 0 or rp + 2 >= len(data):
+        return None
+    return data[rp + 2:].split()
+
+
+def _ppid(pid):
+    fields = _stat_fields(pid)
+    if not fields or len(fields) < 2:
+        return None
+    try:
+        return int(fields[1])
+    except ValueError:
+        return None
+
+
+def proc_state(pid):
+    """进程状态字符（R/S/D/Z/…）；进程不存在返回 None。"""
+    fields = _stat_fields(pid)
+    if not fields:
+        return None
+    try:
+        return fields[0].decode("ascii", "replace")[:1]
+    except Exception:  # noqa: BLE001 - 极老的 /proc 格式不该让测试脚本崩掉
+        return None
+
+
+def _read_children(pid):
+    """读 /proc/<pid>/task/*/children，返回去重后的直接子进程集合。
+
+    比 `ps --ppid` 可靠：runner 是 setsid 出来的，且 handler 会立刻再 fork，
+    ps 在采样窗口里可能刚好错过；/proc 的 children 是内核现算的。
+    """
+    kids = set()
+    task_dir = "/proc/%d/task" % pid
+    try:
+        tids = os.listdir(task_dir)
+    except OSError:
+        return kids
+    for tid in tids:
+        try:
+            with open(os.path.join(task_dir, tid, "children"), "rb") as f:
+                for tok in f.read().split():
+                    kids.add(int(tok))
+        except (OSError, ValueError):
+            pass
+    return kids
+
+
+def live_descendants(pid):
+    """pid 名下所有存活后代（不含僵尸、不含 pid 自己），深度优先。"""
+    found = []
+    stack = list(_read_children(pid))
+    seen = set()
+    while stack:
+        child = stack.pop()
+        if child in seen:
+            continue
+        seen.add(child)
+        state = proc_state(child)
+        if state is None or state == "Z":
+            continue
+        found.append(child)
+        stack.extend(_read_children(child))
+    return found
+
+
+def wait_live_descendants(pid, at_least, timeout):
+    """轮询到存活后代数 >= at_least；超时抛 Failure。"""
+    deadline = time.monotonic() + timeout
+    last = []
+    while time.monotonic() < deadline:
+        last = live_descendants(pid)
+        if len(last) >= at_least:
+            return last
+        time.sleep(0.01)
+    raise Failure("等待 runner 后代达到 %d 个超时（只有 %d 个）"
+                  % (at_least, len(last)))
+
+
+def wait_descendants_gone(pid, timeout):
+    """轮询到存活后代清空；返回超时后仍活着的 pid 列表（空表示干净）。"""
+    deadline = time.monotonic() + timeout
+    left = live_descendants(pid)
+    while left and time.monotonic() < deadline:
+        time.sleep(0.02)
+        left = live_descendants(pid)
+    return left
+
+
+def fd_count(pid):
+    return len(os.listdir("/proc/%d/fd" % pid))
+
+
+def idle_fd_count(pid, samples=20, interval=0.01):
+    """采样取最小值：runner 正 accept 时会短暂多一个 fd，取最小即空闲基线。"""
+    best = None
+    for _ in range(samples):
+        try:
+            n = fd_count(pid)
+        except OSError:
+            return None
+        best = n if best is None else min(best, n)
+        time.sleep(interval)
+    return best
+
+
+def spawn_clients(ctx, scripts, stdin=subprocess.DEVNULL):
+    procs = []
+    for script in scripts:
+        procs.append(subprocess.Popen(
+            [ctx.client] + pycode(script),
+            stdin=stdin,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=client_env(ctx),
+        ))
+    return procs
+
+
+def collect(procs, timeout, what):
+    results = []
+    for p in procs:
+        try:
+            out, err = p.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            out, err = p.communicate()
+            raise Failure("%s 超时（>%ss）" % (what, timeout))
+        results.append((p.returncode, out, err))
+    return results
 
 
 # ── 用例 ─────────────────────────────────────────────────────────────────────
@@ -558,6 +724,183 @@ def t11_large_stdin_early_exit(ctx):
     check(rc == 0, "退出码应为 0，实际 %r；stderr=%r" % (rc, err))
     check(out == b"", "stdout 应为空，实际 %r" % out)
     check(err == b"", "stderr 应为空，实际 %r" % err)
+
+
+# ── 并发 / 生命周期压测 ──────────────────────────────────────────────────────
+
+
+@test
+def t13_eight_concurrent_sleep(ctx):
+    """8 个并发客户端各 sleep 0.3s → 总耗时 < 1.2s，输出与退出码各自正确。"""
+    count = 8
+    started = time.monotonic()
+    procs = spawn_clients(ctx, [
+        "import time\n"
+        "time.sleep(0.3)\n"
+        "print(%d)\n" % i
+        for i in range(count)
+    ])
+    results = collect(procs, 30, "8 路并发 sleep")
+    elapsed = time.monotonic() - started
+
+    for i, (rc, out, err) in enumerate(results):
+        check(rc == 0, "客户端 %d 退出码应为 0，实际 %r；stderr=%r" % (i, rc, err))
+        check(out == ("%d\n" % i).encode(),
+              "客户端 %d stdout 不对：%r" % (i, out))
+        check(err == b"", "客户端 %d stderr 应为空：%r" % (i, err))
+    # 串行至少 8 * 0.3 = 2.4s；并发只要 ~0.3s + 8 次解释器启动。
+    check(elapsed < 1.2,
+          "8 个 0.3s 请求总耗时 %.3fs，runner 没有并发服务（串行需 >2.4s）" % elapsed)
+
+
+@test
+def t14_concurrent_large_stdout(ctx):
+    """8 个客户端同时各写 4MB stdout → 8 份都逐字节完整（总量 32MB）。"""
+    count = 8
+    size = 4 * 1024 * 1024
+    payload = bytes(range(256)) * (size // 256)
+    script = ("import sys\n"
+              "sys.stdout.buffer.write(bytes(range(256)) * %d)\n" % (size // 256))
+    procs = spawn_clients(ctx, [script] * count)
+    results = collect(procs, 180, "8 路 4MB stdout")
+
+    total = 0
+    for i, (rc, out, err) in enumerate(results):
+        check(rc == 0, "客户端 %d 退出码应为 0，实际 %r；stderr=%r" % (i, rc, err))
+        check(len(out) == size,
+              "客户端 %d stdout 长度应为 %d，实际 %d" % (i, size, len(out)))
+        check(out == payload, "客户端 %d 的 4MB stdout 内容不一致" % i)
+        check(err == b"", "客户端 %d stderr 应为空：%r" % (i, err))
+        total += len(out)
+    check(total == count * size,
+          "8 路输出总量应为 %d，实际 %d" % (count * size, total))
+
+
+@test
+def t15_kill_storm_no_orphans(ctx):
+    """8 个 sleep(30) 客户端同时被 SIGKILL → runner 仍服务新请求（rc 7），且不留存活后代。"""
+    count = 8
+    marker = "PYRUNNER_KILL_STORM_30"
+    script = "import time\ntime.sleep(30)  # %s\n" % marker
+    procs = spawn_clients(ctx, [script] * count)
+    try:
+        # 先确认 8 个 handler + 8 个解释器都真的起来了，否则“杀完没后代”是空过。
+        wait_live_descendants(ctx.runner_pid, 2 * count, 15)
+
+        for p in procs:
+            p.kill()
+        for p in procs:
+            p.wait(timeout=5)
+        check(all(p.returncode == -signal.SIGKILL for p in procs),
+              "8 个客户端都应死于 SIGKILL，实际退出码 %r"
+              % [p.returncode for p in procs])
+        check(ctx.proc.poll() is None, "kill 风暴后 harness 不应退出")
+
+        # runner 不能把被杀的请求留在前台：新请求必须照常拿到真实退出码。
+        rc, out, err = run_client(ctx, pycode("import sys; sys.exit(7)"), timeout=10)
+        check(rc == 7, "kill 风暴之后新请求退出码应为 7，实际 %r；stderr=%r" % (rc, err))
+        check(out == b"", "kill 风暴之后新请求 stdout 应为空：%r" % out)
+
+        left = wait_descendants_gone(ctx.runner_pid, 10)
+        check(not left,
+              "kill 风暴后 runner 仍留着 %d 个存活后代（handler/解释器泄漏）：%r"
+              % (len(left), left))
+    finally:
+        for p in procs:
+            if p.poll() is None:
+                p.kill()
+                p.wait(timeout=5)
+        # 只收后代，runner 本体留给后面的用例。
+        kill_pids(wait_descendants_gone(ctx.runner_pid, 0.5))
+
+
+@test
+def t16_kill_then_50_requests(ctx):
+    """一个 sleep(30) 客户端被 SIGKILL 后，连续 50 次请求全部正常且总耗时 < 5s。"""
+    marker = "PYRUNNER_KILL_ONCE_30"
+    p = subprocess.Popen(
+        [ctx.client] + pycode("import time\ntime.sleep(30)  # %s\n" % marker),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=client_env(ctx),
+    )
+    try:
+        wait_live_descendants(ctx.runner_pid, 2, 10)
+        p.kill()
+        p.wait(timeout=5)
+        check(p.returncode == -signal.SIGKILL,
+              "客户端应死于 SIGKILL，实际退出码 %r" % p.returncode)
+
+        started = time.monotonic()
+        for i in range(50):
+            rc, out, err = run_client(ctx, pycode("print(1)"), timeout=15)
+            check(rc == 0, "第 %d 次请求退出码应为 0，实际 %r；stderr=%r"
+                  % (i + 1, rc, err))
+            check(out == b"1\n", "第 %d 次请求 stdout 不对：%r" % (i + 1, out))
+            check(err == b"", "第 %d 次请求 stderr 应为空：%r" % (i + 1, err))
+        elapsed = time.monotonic() - started
+        check(elapsed < 5.0,
+              "被 SIGKILL 的请求拖慢了 runner：50 次请求耗时 %.3fs（>5s）" % elapsed)
+    finally:
+        if p.poll() is None:
+            p.kill()
+            p.wait(timeout=5)
+        kill_pids(wait_descendants_gone(ctx.runner_pid, 0.5))
+
+
+@test
+def t17_large_stdin_and_stdout(ctx):
+    """8MB stdin 与 8MB stdout 同时走 → 客户端完整收发，不死锁、不丢字节。"""
+    size = 8 * 1024 * 1024
+    payload = bytes(range(256)) * (size // 256)
+    script = (
+        "import sys\n"
+        "while True:\n"
+        "    chunk = sys.stdin.buffer.read(65536)\n"
+        "    if not chunk:\n"
+        "        break\n"
+        "    sys.stdout.buffer.write(chunk)\n"
+    )
+    rc, out, err = run_client(ctx, pycode(script), stdin=payload, timeout=180)
+    check(rc == 0, "退出码应为 0，实际 %r；stderr=%r" % (rc, err))
+    check(len(out) == size, "stdout 长度应为 %d，实际 %d" % (size, len(out)))
+    check(out == payload, "8MB stdin/stdout 往返不一致")
+    check(err == b"", "stderr 应为空，实际 %r" % err)
+
+
+@test
+def t18_fd_stable_under_200_requests(ctx):
+    """200 次短请求后 harness/runner 的 fd 数不增长（±2），且没有遗留 handler。"""
+    def short_request(i):
+        rc, out, err = run_client(ctx, pycode("print(1)"), timeout=15)
+        check(rc == 0, "第 %d 次请求退出码应为 0，实际 %r；stderr=%r" % (i, rc, err))
+        check(out == b"1\n", "第 %d 次请求 stdout 不对：%r" % (i, out))
+
+    # 先跑几次，把 locale/编码等惰性初始化触发的 fd 打开，避免算进增长。
+    for i in range(1, 6):
+        short_request(i)
+
+    runner_fd0 = idle_fd_count(ctx.runner_pid)
+    harness_fd0 = idle_fd_count(ctx.proc.pid)
+    check(runner_fd0 is not None and harness_fd0 is not None,
+          "读不到 runner/harness 的 fd 目录")
+
+    for i in range(6, 206):
+        short_request(i)
+
+    left = wait_descendants_gone(ctx.runner_pid, 5)
+    check(not left,
+          "200 次请求后仍有 %d 个存活 handler/解释器：%r" % (len(left), left))
+
+    runner_fd1 = idle_fd_count(ctx.runner_pid)
+    harness_fd1 = idle_fd_count(ctx.proc.pid)
+    check(runner_fd1 is not None and harness_fd1 is not None,
+          "读不到 runner/harness 的 fd 目录")
+    check(abs(runner_fd1 - runner_fd0) <= 2,
+          "runner fd 数从 %d 涨到 %d（>2）" % (runner_fd0, runner_fd1))
+    check(abs(harness_fd1 - harness_fd0) <= 2,
+          "harness fd 数从 %d 涨到 %d（>2）" % (harness_fd0, harness_fd1))
 
 
 # ── 入口 ─────────────────────────────────────────────────────────────────────

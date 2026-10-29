@@ -50,11 +50,24 @@ bash third_party/bettersh/scripts/test_py_runner_host.sh
 | 客户端消失后收掉解释器 | runner 家族多出的 handler/解释器在调用者死后几秒内消失 |
 | 流式 stdin→stdout（各 1MB） | 不发生 stdin 写、stdout 读互相等待的死锁 |
 | 4MB stdin + 解释器立刻退出 | 仍拿到真实退出码，不被 SIGPIPE 打断 |
+| 8 路并发 sleep(0.3s) | 总耗时 < 1.2s（串行需 >2.4s），8 份输出/退出码各自正确 |
+| 8 路并发 4MB stdout | 8 份逐字节完整，总量 32MB |
+| kill 风暴（8 个 sleep(30) 同时 SIGKILL） | runner 仍能服务新请求（rc 7），且存活后代清空 |
+| 单请求 SIGKILL 后连续 50 次请求 | 50 次全部正常，总耗时 < 5s，runner 未被拖死 |
+| 8MB stdin + 8MB stdout 同时 | 客户端完整收发，不死锁、不丢字节 |
+| 200 次短请求 | harness/runner 的 fd 数增长 ≤2，且无遗留 handler/解释器 |
 
-后两项是回归用例：它们对应 `py_runner.cpp` 里“先把 stdin 整块写完、再开始读
-stdout/stderr”的旧实现会暴露的两个真实缺陷（死锁、SIGPIPE 打死 handler），修复
-后保留下来防止回退。“客户端消失后收掉解释器”是另一条同类回归：解释器不在调用者
-的作业里，handler 只看管道 EOF 就会留下一个没人能停的进程。
+“流式 stdin→stdout”与“4MB stdin + 解释器立刻退出”是回归用例：它们对应
+`py_runner.cpp` 里“先把 stdin 整块写完、再开始读 stdout/stderr”的旧实现会暴露的
+两个真实缺陷（死锁、SIGPIPE 打死 handler），修复后保留下来防止回退。“客户端消失
+后收掉解释器”是另一条同类回归：解释器不在调用者的作业里，handler 只看管道 EOF
+就会留下一个没人能停的进程。
+
+后 6 项是并发 / 生命周期压测。判断“runner 有没有留下后代”不能靠命令行匹配：
+harness、runner、handler 与解释器都是 fork 出来的同一条 cmdline（没有 exec），
+所以 harness 启动后会把 `StartPyRunner()` 那个子进程的 pid 写进
+`<FAKE_SYSROOT>/runner.pid`，`run.py` 用 `/proc/<runner>/task/*/children` 逐层
+遍历进程树，只把**非僵尸**后代算作存活。等待一律用轮询 + 期限，不靠 `sleep` 猜。
 
 ## 文件
 
@@ -62,7 +75,7 @@ stdout/stderr”的旧实现会暴露的两个真实缺陷（死锁、SIGPIPE �
 | --- | --- |
 | `run.sh` | 薄入口，转调 `run.py` |
 | `run.py` | 探测 libpython、编译 runner/客户端、逐项跑用例 |
-| `harness.c` | 调 `StartPyRunner()` 并保持父进程存活 |
+| `harness.c` | 调 `StartPyRunner()`、把 runner pid 落盘，并保持父进程存活 |
 | `client_main.c` | 给 `python_entry.c` 补 `main`，另留 `IEC_TEST_ARGC0` 错误路径开关 |
 
 编译产物与 socket 都在 `mktemp` 出来的临时目录里，默认跑完删除；`--keep` 保留。
