@@ -44,23 +44,30 @@ static int write_all(int fd, const char* buf, size_t n) {
     return 0;
 }
 
-// 双向转发直到对端关闭。
+// 双向转发，直到两个方向都结束。
 //
-// 关键语义：stdin 先 EOF 只表示“本端不再发送”（对端要能读到 EOF），不能因此结束
-// 整个 relay——对端可能还要继续发数据过来（`echo q | nc host port` 这种半关闭用法）。
-// 因此退出条件只看 socket：读到 0 才算对端关闭。
+// TCP 半关闭是两个独立的“写方向”：stdin EOF 只表示本端不再发送（要向对端
+// shutdown(SHUT_WR) 让对端读到 EOF），对端读到 0 也只表示对端不再发送。任何
+// 一侧先结束都不能把整个 relay 收掉，否则另一方向迟到的数据会被丢掉：
+//   - `echo q | nc host port`：stdin 先 EOF，对端稍后的应答仍要读出来；
+//   - 对端 shutdown(SHUT_WR) 后，本端 stdin 稍后才产生的数据仍要能发过去。
+// 因此分别记录 stdin_open / peer_open，两者都关闭才退出。
+//
+// POLLNVAL 说明 fd 已经不可用（例如调用方关掉了 stdin），按 EOF 处理，避免
+// poll 一直返回但读不到任何东西导致空转。
 static int relay(int sock, int timeout_sec) {
     char buf[65536];
     int stdin_open = 1;
+    int peer_open = 1; /* 对端的写方向是否还开着（读到 0 后关闭） */
     const int poll_ms = timeout_sec > 0 ? timeout_sec * 1000 : -1;
 
-    for (;;) {
+    while (stdin_open || peer_open) {
         struct pollfd pfd[2];
         int rc;
         pfd[0].fd = stdin_open ? STDIN_FILENO : -1;
         pfd[0].events = POLLIN;
         pfd[0].revents = 0;
-        pfd[1].fd = sock;
+        pfd[1].fd = peer_open ? sock : -1;
         pfd[1].events = POLLIN;
         pfd[1].revents = 0;
         rc = poll(pfd, 2, poll_ms);
@@ -71,7 +78,12 @@ static int relay(int sock, int timeout_sec) {
         }
         if (rc == 0) return 0; /* -w 指定的空闲超时 */
 
-        if (stdin_open && (pfd[0].revents & (POLLIN | POLLHUP | POLLERR))) {
+        if (stdin_open && (pfd[0].revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL))) {
+            if (pfd[0].revents & POLLNVAL) {
+                stdin_open = 0;
+                shutdown(sock, SHUT_WR);
+                continue;
+            }
             const ssize_t n = read(STDIN_FILENO, buf, sizeof buf);
             if (n < 0) {
                 if (errno == EINTR) continue;
@@ -84,13 +96,20 @@ static int relay(int sock, int timeout_sec) {
                 return 1;
             }
         }
-        if (pfd[1].revents & (POLLIN | POLLHUP | POLLERR)) {
+        if (peer_open && (pfd[1].revents & (POLLIN | POLLHUP | POLLERR))) {
             const ssize_t n = read(sock, buf, sizeof buf);
             if (n < 0) {
                 if (errno == EINTR) continue;
                 return 1;
             }
-            if (n == 0) break; /* 对端关闭 */
+            if (n == 0) {
+                /* 对端不再发送，但本端仍可以继续把 stdin 发过去。 */
+                peer_open = 0;
+                /* 交互式终端没有“稍后才有”的数据；若继续等用户 EOF，
+                   `nc host port` 会在对端关闭后挂住。管道/文件则保留半关闭语义。 */
+                if (isatty(STDIN_FILENO)) stdin_open = 0;
+                continue;
+            }
             if (write_all(STDOUT_FILENO, buf, (size_t)n) != 0) return 1;
         }
     }
