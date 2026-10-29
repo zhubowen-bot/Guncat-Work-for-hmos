@@ -1,0 +1,27 @@
+--- a/deps/v8/src/compiler/turboshaft/loop-unrolling-reducer.h
++++ b/deps/v8/src/compiler/turboshaft/loop-unrolling-reducer.h
+@@ -428,7 +428,23 @@
+   // folded loop iteration, not for the loop header).
+   __ SealAndSaveVariableSnapshot();
+   __ RestoreTemporaryVariableSnapshotAfter(output_graph_loop);
+-  base::SmallVector<std::pair<const PhiOp*, const OpIndex>, 16> phis;
++  // ── IEC OHOS port (see scripts/optional/node-ohos/patches/) ───────────
++  // This was `base::SmallVector<std::pair<const PhiOp*, const OpIndex>, 16>`,
++  // and SmallVector has an ASSERT_TRIVIALLY_COPYABLE (it moves elements with
++  // memcpy). The second std::pair member is `const OpIndex`; a const member
++  // makes the implicit copy assignment deleted, so clang's
++  // __is_trivially_copyable returns false (measured: gcc 13 says true,
++  // clang 15 and 18 say false), and turboshaft fails to compile:
++  //     error: static assertion failed due to requirement
++  //            '::v8::base::is_trivially_copyable<std::pair<const PhiOp*, const OpIndex>>'
++  // This is the only place in the tree that instantiates SmallVector with
++  // std::pair, so replace it with a trivial struct. The semantics are
++  // identical and the structured binding below still works for an aggregate.
++  struct InputPhiAndIndex {
++    const PhiOp* input_phi;   // pointer to const, not a const member
++    OpIndex output_phi_index; // must not be const OpIndex; see above
++  };
++  base::SmallVector<InputPhiAndIndex, 16> phis;
+   for (const Operation& op : __ input_graph().operations(
+            input_graph_loop->begin(), input_graph_loop->end())) {
+     if (auto* input_phi = op.TryCast<PhiOp>()) {

@@ -1,0 +1,9 @@
+{
+  "src": [
+    "pages/Index",
+    "pages/ClientWindow",
+    "pages/SettingsPage",
+    "pages/UserGuidePage",
+    "pages/GuideWebPage"
+  ]
+}

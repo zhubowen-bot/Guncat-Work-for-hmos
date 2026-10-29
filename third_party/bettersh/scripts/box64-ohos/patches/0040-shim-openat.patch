@@ -1,0 +1,15 @@
+--- a/src/wrapped/wrappedlibc.c
++++ b/src/wrapped/wrappedlibc.c
+@@ -5129,8 +5129,11 @@
+ EXPORT int my_openat(x64emu_t* emu, int dirfd, void* path, int flags, mode_t mode)
+ {
+     (void)emu;
+-    char buf[PATH_MAX];
++    char buf[PATH_MAX], shim[PATH_MAX];
+     path = (void*)box64_remap_path((const char*)path, buf, sizeof(buf));
++    /* OHOS_PATCH_SHIM_FS：x64syscall 的 openat（静态 guest 的 fopen 走这里）也得展开软链，
++     * 否则"打开软链=打开目标"在静态 glibc 组合里失效（实测：读到的内容为空） */
++    path = (void*)bsh_fs_resolve_path((const char*)path, shim, sizeof(shim));
+     return openat(dirfd, (const char*)path, flags, mode);
+ }
+ 

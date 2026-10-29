@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  BetterSH 应用图标（源文件）。
+
+  深色底板 #202629 + 黄色终端窗口，里面是 `>` 提示符与光标。
+  原始形态是 `<symbol id="slice" viewBox="0 0 256 256">`（供 SVG sprite 用），
+  这里把 symbol 外壳去掉、只保留形状，使其成为**可独立渲染**的 SVG ——
+  `<symbol>` 本身不参与渲染，直接当文件用会得到空白图。
+
+  底板是**满幅正方形**（没有 rx），这是分层图标的正确形态：前景/背景都由系统遮罩
+  统一裁圆角。自己再画一层圆角会变成双重遮罩 —— 系统那道弧比我们画的小，两者之间
+  的缝隙就会露出 layered_image.json 里的 background.png（表现为"四个角透出背景"）。
+
+  改完用 scripts/make_icon.sh 重新生成 PNG：
+      scripts/make_icon.sh              # → assets/icon/bettersh-icon-1024.png
+      scripts/make_icon.sh 512 1024     # 多个尺寸
+      APPLY=1 scripts/make_icon.sh 512  # 另外写回 AppScope/entry 的 foreground.png
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <rect width="256" height="256" fill="#202629"/>
+  <path d="M48 89 69 66H201Q211 66 211 77V173L190 196H58Q48 196 48 185Z" fill="#C9A433"/>
+  <path d="M48 89 69 66H201Q208 66 210 72L188 94Z" fill="#FFF1A7"/>
+  <path d="M190 94 211 73V173L190 196Z" fill="#D9B644"/>
+  <rect x="45" y="87" width="147" height="110" rx="14" fill="#F5D66D"/>
+  <path d="M57 102H179" stroke="#FFF0B2" stroke-width="3" stroke-linecap="round"/>
+  <path d="M75 118 98 141 75 164" fill="none" stroke="#29302D" stroke-width="11"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M122 165H155" stroke="#29302D" stroke-width="10" stroke-linecap="round"/>
+</svg>

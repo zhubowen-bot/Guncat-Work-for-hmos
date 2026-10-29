@@ -1,0 +1,171 @@
+diff --git a/src/core.c b/src/core.c
+index 8ac360551..3159fb033 100644
+--- a/src/core.c
++++ b/src/core.c
+@@ -1,3 +1,12 @@
++/* OHOS_PATCH_ROUTE_SELF_EXEC_V2 */
++extern int box64_self_execv (const char* path, char* const argv[]);
++extern int box64_self_execve(const char* path, char* const argv[], char* const envp[]);
++extern int box64_self_posix_spawn (int* outpid, const char* path,
++                                   const void* facts, const void* attr,
++                                   char* const argv[], char* const envp[]);
++extern int box64_self_posix_spawnp(int* outpid, const char* path,
++                                   const void* facts, const void* attr,
++                                   char* const argv[], char* const envp[]);
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -1265,7 +1274,7 @@ int initialize(int argc, const char **argv, char** env, x64emu_t** emulator, elf
+                     newenv[i] = box_strdup(env[i]);
+                 newenv[nenv] = "BOX32_PERSONA32BITS=1";
+                 // re-launch...
+-                if(execve(my_context->box64path, (void*)argv, newenv)<0)
++                if(box64_self_execve(my_context->box64path, (void*)argv, newenv)<0)
+                     printf_log(LOG_NONE, "Failed to relaunch. Error is %d/%s (argv[0]=\"%s\")\n", errno, strerror(errno), argv[0]);
+             }
+         }
+@@ -1397,7 +1406,7 @@ int initialize(int argc, const char **argv, char** env, x64emu_t** emulator, elf
+             int narg = 0;
+             while(argv[narg]) {newargv[narg] = box_strdup(argv[narg]); narg++;}
+             // launch with new env...
+-            if(execve(newargv[0], newargv, newenv)<0)
++            if(box64_self_execve(newargv[0], newargv, newenv)<0)
+                 printf_log(LOG_NONE, "Failed to relaunch. Error is %d/%s\n", errno, strerror(errno));
+         } else {
+             printf_log(LOG_INFO, "Using tcmalloc_minimal.so.4, and it's in the LD_PRELOAD command\n");
+diff --git a/src/wrapped/wrappedlibc.c b/src/wrapped/wrappedlibc.c
+index d63cd2ca2..80d1a1fdb 100644
+--- a/src/wrapped/wrappedlibc.c
++++ b/src/wrapped/wrappedlibc.c
+@@ -1,3 +1,12 @@
++/* OHOS_PATCH_ROUTE_SELF_EXEC_V2 */
++extern int box64_self_execv (const char* path, char* const argv[]);
++extern int box64_self_execve(const char* path, char* const argv[], char* const envp[]);
++extern int box64_self_posix_spawn (int* outpid, const char* path,
++                                   const void* facts, const void* attr,
++                                   char* const argv[], char* const envp[]);
++extern int box64_self_posix_spawnp(int* outpid, const char* path,
++                                   const void* facts, const void* attr,
++                                   char* const argv[], char* const envp[]);
+ /* OHOS_PATCH_PATH_REMAP_V2 */
+ extern void box64_remap_maybe_add_wineprefix_rule(void);
+ /* OHOS_PATCH_PATH_REMAP */
+@@ -2855,9 +2864,9 @@ EXPORT int32_t my_execv(x64emu_t* emu, const char* path, char* const argv[])
+ 
+         int ret;
+         if(envv)
+-            ret = execve(newargv[0], (char* const*)newargv, envv);
++            ret = box64_self_execve(newargv[0], (char* const*)newargv, envv);
+         else
+-            ret = execv(newargv[0], (char* const*)newargv);
++            ret = box64_self_execv(newargv[0], (char* const*)newargv);
+         box_free(newargv);
+         return ret;
+     }
+@@ -2909,7 +2918,7 @@ EXPORT int32_t my_execve(x64emu_t* emu, const char* path, char* const argv[], ch
+             newargv[toadd] = path;
+         }
+         printf_log(LOG_DEBUG, " => execve(\"%s\", %p [\"%s\", \"%s\", \"%s\"...:%d], %p)\n", newargv[0], newargv, newargv[0], (n+toadd-skip_first)?newargv[1]:"", ((n+toadd-skip_first)>1)?newargv[2]:"",n, envp);
+-        int ret = execve(newargv[0], (char* const*)newargv, envp);
++        int ret = box64_self_execve(newargv[0], (char* const*)newargv, envp);
+         return ret;
+     }
+     if(!strcmp(path + strlen(path) - strlen("/uname"), "/uname")
+@@ -2918,7 +2927,7 @@ EXPORT int32_t my_execve(x64emu_t* emu, const char* path, char* const argv[], ch
+         // uname -m is redirected to box64 -m
+         path = my_context->box64path;
+         char *argv2[3] = { my_context->box64path, argv[1], NULL };
+-        return execve(path, argv2, envp);
++        return box64_self_execve(path, argv2, envp);
+     }
+     #ifndef NOALIGN
+     if(!strcmp(path + strlen(path) - strlen("/grep"), "/grep")
+@@ -3274,7 +3283,7 @@ EXPORT int32_t my_posix_spawn(x64emu_t* emu, pid_t* pid, const char* fullpath,
+             newargv[toadd] = fullpath;
+         }
+         printf_log(/*LOG_DEBUG*/LOG_INFO, " => posix_spawn(%p, \"%s\", %p, %p, %p [\"%s\", \"%s\", \"%s\"...:%d], %p)\n", pid, newargv[0], actions, attrp, newargv, newargv[0], newargv[1], newargv[2]?newargv[2]:"", n, envp);
+-        ret = posix_spawn(pid, newargv[0], actions, attrp, (char* const*)newargv, envp);
++        ret = box64_self_posix_spawn(pid, newargv[0], actions, attrp, (char* const*)newargv, envp);
+         printf_log(/*LOG_DEBUG*/LOG_INFO, "posix_spawn returned %d\n", ret);
+         //box_free(newargv);
+     } else
+@@ -3318,7 +3327,7 @@ EXPORT int32_t my_posix_spawnp(x64emu_t* emu, pid_t* pid, const char* path,
+             newargv[toadd] = fullpath;
+         }
+         printf_log(/*LOG_DEBUG*/LOG_INFO, " => posix_spawn(%p, \"%s\", %p, %p, %p [\"%s\", \"%s\", \"%s\"...:%d], %p)\n", pid, newargv[0], actions, attrp, newargv, newargv[0], newargv[1], newargv[2]?newargv[2]:"", n, envp);
+-        ret = posix_spawn(pid, newargv[0], actions, attrp, (char* const*)newargv, envp);
++        ret = box64_self_posix_spawn(pid, newargv[0], actions, attrp, (char* const*)newargv, envp);
+         printf_log(/*LOG_DEBUG*/LOG_INFO, "posix_spawn returned %d\n", ret);
+         //box_free(newargv);
+     } else
+diff --git a/src/wrapped32/wrappedlibc.c b/src/wrapped32/wrappedlibc.c
+index 61e70cfe2..892b5d47e 100755
+--- a/src/wrapped32/wrappedlibc.c
++++ b/src/wrapped32/wrappedlibc.c
+@@ -1,3 +1,12 @@
++/* OHOS_PATCH_ROUTE_SELF_EXEC_V2 */
++extern int box64_self_execv (const char* path, char* const argv[]);
++extern int box64_self_execve(const char* path, char* const argv[], char* const envp[]);
++extern int box64_self_posix_spawn (int* outpid, const char* path,
++                                   const void* facts, const void* attr,
++                                   char* const argv[], char* const envp[]);
++extern int box64_self_posix_spawnp(int* outpid, const char* path,
++                                   const void* facts, const void* attr,
++                                   char* const argv[], char* const envp[]);
+ /* OHOS_PATCH_BOX32_ALLOC_LOW4GB */
+ #ifndef BOX64_OHOS_BOX32_ALLOC_GUARD
+ #define BOX64_OHOS_BOX32_ALLOC_GUARD 1
+@@ -2013,7 +2022,7 @@ EXPORT int32_t my32_execv(x64emu_t* emu, const char* path, ptr_t argv[])
+             newargv[toadd] = skip_first?from_ptrv(argv[skip_first]):path;
+         }
+         printf_log(LOG_DEBUG, " => execv(\"%s\", %p [\"%s\", \"%s\", \"%s\"...:%d])\n", emu->context->box64path, newargv, newargv[0], n?newargv[1]:"", (n>1)?newargv[2]:"",n);
+-        ret = execv(newargv[0], (char* const*)newargv);
++        ret = box64_self_execv(newargv[0], (char* const*)newargv);
+         box_free(newargv);
+         return ret;
+     }
+@@ -2094,7 +2103,7 @@ EXPORT int32_t my32_execve(x64emu_t* emu, const char* path, ptr_t argv[], ptr_t
+             newargv[i+1] = from_ptrv(argv[skip_first+i]);
+         if(self) newargv[1] = emu->context->fullpath;
+         printf_log(LOG_DEBUG, " => execve(\"%s\", %p [\"%s\", \"%s\", \"%s\"...:%d])\n", emu->context->box64path, newargv, newargv[0], n?newargv[1]:"", (n>1)?newargv[2]:"",n);
+-        ret = execve(newargv[0], (char* const*)newargv, newenvp);
++        ret = box64_self_execve(newargv[0], (char* const*)newargv, newenvp);
+         box_free(newargv);
+         box_free(newenvp);
+         return ret;
+@@ -2146,7 +2155,7 @@ EXPORT int32_t my32_execvp(x64emu_t* emu, const char* path, ptr_t argv[])
+             newargv[i+toadd] = from_ptrv(argv[skip_first+i]);
+         if(self) newargv[1] = emu->context->fullpath;
+         printf_log(LOG_DEBUG, " => execv(\"%s\", %p [\"%s\", \"%s\", \"%s\"...:%d])\n", emu->context->box64path, newargv, newargv[0], n?newargv[1]:"", (n>1)?newargv[2]:"",n);
+-        int ret = execv(newargv[0], (char* const*)newargv);
++        int ret = box64_self_execv(newargv[0], (char* const*)newargv);
+         box_free(newargv);
+         return ret;
+     }
+@@ -2205,7 +2214,7 @@ EXPORT int32_t my32_execvpe(x64emu_t* emu, const char* path, ptr_t argv[], ptr_t
+             newargv[i+toadd] = from_ptrv(argv[skip_first+i]);
+         if(self) newargv[1] = emu->context->fullpath;
+         printf_log(LOG_DEBUG, " => execv(\"%s\", %p [\"%s\", \"%s\", \"%s\"...:%d], %p)\n", emu->context->box64path, newargv, newargv[0], n?newargv[1]:"", (n>1)?newargv[2]:"",n, newenvp);
+-        int ret = execve(newargv[0], (char* const*)newargv, (char* const*)newenvp);
++        int ret = box64_self_execve(newargv[0], (char* const*)newargv, (char* const*)newenvp);
+         box_free(newargv);
+         box_free(newenvp);
+         return ret;
+@@ -2337,7 +2346,7 @@ EXPORT int32_t my32_posix_spawn(x64emu_t* emu, pid_t* pid, const char* fullpath,
+             newargv[j+1] = from_ptrv(argv[j]);
+         if(self) newargv[1] = emu->context->fullpath;
+         printf_log(LOG_DEBUG, " => posix_spawn(%p, \"%s\", %p, %p, %p [\"%s\", \"%s\"...:%d], %p)\n", pid, newargv[0], actions, attrp, newargv, newargv[1], i?newargv[2]:"", i, envp);
+-        int ret = posix_spawnp(pid, newargv[0], actions, attrp, newargv, newenvp);
++        int ret = box64_self_posix_spawnp(pid, newargv[0], actions, attrp, newargv, newenvp);
+         printf_log(LOG_DEBUG, "posix_spawn returned %d\n", ret);
+         //free(newargv);
+         return ret;
+@@ -2389,7 +2398,7 @@ EXPORT int32_t my32_posix_spawnp(x64emu_t* emu, pid_t* pid, const char* path,
+             newargv[j+1] = from_ptrv(argv[j]);
+         if(self) newargv[1] = emu->context->fullpath;
+         printf_log(LOG_DEBUG, " => posix_spawnp(%p, \"%s\", %p, %p, %p [\"%s\", \"%s\"...:%d], %p)\n", pid, newargv[0], actions, attrp, newargv, newargv[1], i?newargv[2]:"", i, envp);
+-        int ret = posix_spawnp(pid, newargv[0], actions, attrp, newargv, newenvp);
++        int ret = box64_self_posix_spawnp(pid, newargv[0], actions, attrp, newargv, newenvp);
+         printf_log(LOG_DEBUG, "posix_spawnp returned %d\n", ret);
+         //free(newargv);
+         return ret;

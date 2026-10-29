@@ -1,0 +1,12 @@
+# hvigor / CMake build outputs (this HAR lives inside the iec submodule,
+# so the parent repo's .gitignore does not apply here)
+/build/
+/.cxx/
+/oh_modules/
+/node_modules/
+/.hvigor/
+/.preview/
+/BuildProfile.ets
+*.o
+*.so
+*.so.*

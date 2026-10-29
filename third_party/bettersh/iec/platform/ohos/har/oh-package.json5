@@ -1,0 +1,11 @@
+{
+  "name": "iec",
+  "version": "1.0.0",
+  "description": "IEC runtime HAR.",
+  "main": "Index.ets",
+  "author": "",
+  "license": "",
+  "dependencies": {
+    "libiec_server.so": "file:./src/main/cpp/types/libiec_server"
+  }
+}

@@ -1,0 +1,29 @@
+libjli：不要 re-exec launcher。
+
+症状  java 启动器在沙箱里卡死 / execv 失败。
+根因  `RequiresSetenv()` 返回真值时，launcher 会设好 LD_LIBRARY_PATH 然后
+      **execv 自己** 重跑一遍。上游对 musl 硬编码返回 JNI_TRUE，
+      理由是早期 musl loader 需要 LD_LIBRARY_PATH 才能解析
+      libjava.so → libjvm.so 的依赖。
+修法  返回 JNI_FALSE。两个理由：
+      1) OHOS 应用沙箱没有 exec 权限；
+      2) 这里的 libjvm.so 由应用自己的 ELF loader 加载，依赖解析由 loader
+         完成，与 LD_LIBRARY_PATH 无关。
+
+--- a/src/java.base/unix/native/libjli/java_md.c
++++ b/src/java.base/unix/native/libjli/java_md.c
+@@ -234,8 +234,13 @@
+     /*
+      * The musl library loader requires LD_LIBRARY_PATH to be set in order
+      * to correctly resolve the dependency libjava.so has on libjvm.so.
++     *
++     * BetterSH/OHOS: 上游返回 JNI_TRUE 会触发 launcher re-exec 自己（先设好
++     * LD_LIBRARY_PATH 再 execv 重跑）。OHOS 应用沙箱没有 exec 权限，而这里的
++     * libjvm.so 又是应用自己的 ELF loader 加载的，依赖解析由 loader 完成、
++     * 与 LD_LIBRARY_PATH 无关。所以返回 JNI_FALSE，彻底绕开 re-exec。
+      */
+-    return JNI_TRUE;
++    return JNI_FALSE;
+ #endif
+ 
+ #ifdef AIX

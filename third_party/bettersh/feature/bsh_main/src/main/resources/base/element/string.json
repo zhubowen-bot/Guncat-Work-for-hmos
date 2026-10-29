@@ -1,0 +1,92 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "module description"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "description"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "BetterSH"
+    },
+    {
+      "name": "reason_read_pasteboard",
+      "value": "终端里的右键粘贴需要读取剪贴板内容"
+    },
+    {
+      "name": "Setting_title",
+      "value": "设置"
+    },
+    {
+      "name": "user_guide_title",
+      "value": "使用指南"
+    },
+    {
+      "name": "setting_block_display",
+      "value": "显示"
+    },
+    {
+      "name": "setting_keep_screen_on",
+      "value": "保持屏幕常亮"
+    },
+    {
+      "name": "setting_keep_screen_on_desc",
+      "value": "开启后，应用在前台时保持屏幕常亮"
+    },
+    {
+      "name": "setting_terminal",
+      "value": "终端"
+    },
+    {
+      "name": "setting_font_size",
+      "value": "字体大小"
+    },
+    {
+      "name": "setting_font_size_desc",
+      "value": "设置终端字体大小"
+    },
+    {
+      "name": "setting_font_family",
+      "value": "字体样式"
+    },
+    {
+      "name": "setting_font_family_desc",
+      "value": "选择终端字体"
+    },
+    {
+      "name": "setting_cursor_style",
+      "value": "光标样式"
+    },
+    {
+      "name": "setting_cursor_style_desc",
+      "value": "设置终端光标样式"
+    },
+    {
+      "name": "setting_cursor_blink",
+      "value": "光标闪烁"
+    },
+    {
+      "name": "setting_cursor_blink_desc",
+      "value": "设置终端光标闪烁"
+    },
+    {
+      "name": "guide_basic_title",
+      "value": "基本功能"
+    },
+    {
+      "name": "guide_linux_shell_title",
+      "value": "Linux Shell"
+    },
+    {
+      "name": "guide_linux_shell_desc",
+      "value": "Linux Shell 基本功能介绍"
+    },
+    {
+      "name": "guide_more_hint",
+      "value": "更多内容参照：python readme.py"
+    }
+  ]
+}

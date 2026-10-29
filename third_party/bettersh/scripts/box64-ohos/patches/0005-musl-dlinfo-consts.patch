@@ -1,0 +1,15 @@
+diff --git a/src/wrapped/wrappedlibdl.c b/src/wrapped/wrappedlibdl.c
+index 898b6783e..950d72ef0 100644
+--- a/src/wrapped/wrappedlibdl.c
++++ b/src/wrapped/wrappedlibdl.c
+@@ -1,3 +1,10 @@
++/* OHOS_PATCH_DLINFO_CONSTS */
++#ifndef RTLD_DL_LINKMAP
++#define RTLD_DL_LINKMAP 2
++#endif
++#ifndef RTLD_DL_SYMENT
++#define RTLD_DL_SYMENT  1
++#endif
+ #define _GNU_SOURCE         /* See feature_test_macros(7) */
+ #include <stdio.h>
+ #include <stdlib.h>

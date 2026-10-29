@@ -1,0 +1,32 @@
+--- a/src/emu/x64syscall.c
++++ b/src/emu/x64syscall.c
+@@ -772,6 +772,11 @@
+                     S_RAX = -errno;
+                 memcpy(old, &uts, sizeof(*old)); // old_uts is just missing a field from new_uts
+                 strcpy(old->machine, "x86_64");
++                /* OHOS_PATCH_SHIM_FS：同 my_uname —— 内核报 "HarmonyOS"，工具链的
++                 * isLinux() 判断会走错分支。 */
++                const char* bsh_real = getenv("BSH_UNAME_REAL");
++                if (!(bsh_real && *bsh_real && bsh_real[0] != '0'))
++                    strcpy(old->sysname, "Linux");
+             }
+             break;
+         case 72:    //fcntl
+--- a/src/wrapped/wrappedlibc.c
++++ b/src/wrapped/wrappedlibc.c
+@@ -795,6 +795,15 @@
+     //TODO: check sizeof(struct utsname) == 390
+     int ret = uname(buf);
+     strcpy(buf->machine, "x86_64");
++    /* OHOS_PATCH_SHIM_FS（os_shim 的 box64 版）：内核报的是 "HarmonyOS"，而工具链里一堆
++     * `isLinux()` 判断（hvigor / npm / 各种 configure）看 sysname —— 报错就会去 dlopen
++     * 不存在的 .dylib 或走错分支。只改 sysname，release/version/machine 保留。
++     * BSH_UNAME_REAL 非空且非 "0" 时看真值（排查用）。 */
++    {
++        const char* real = getenv("BSH_UNAME_REAL");
++        if (!(real && *real && real[0] != '0'))
++            strcpy(buf->sysname, "Linux");
++    }
+     return ret;
+ }
+ 

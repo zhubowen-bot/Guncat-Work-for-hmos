@@ -1,0 +1,46 @@
+diff --git a/src/wrapped/wrappedlibc.c b/src/wrapped/wrappedlibc.c
+index 80d1a1fdb..263a9e4cb 100644
+--- a/src/wrapped/wrappedlibc.c
++++ b/src/wrapped/wrappedlibc.c
+@@ -3660,6 +3660,9 @@ int last_mmap_idx = 0;
+ void* last_mmap_0_addr = NULL;
+ size_t last_mmap_0_len = 0;
+ #endif
++/* OHOS_PATCH_LOG_GATE forward decl */
++static int ohos_wrappedlibc_log_level(void);
++
+ EXPORT void* my_mmap64(x64emu_t* emu, void *addr, size_t length, int prot, int flags, int fd, ssize_t offset)
+ {
+     (void)emu;
+@@ -3685,12 +3688,14 @@ if (ret == MAP_FAILED && (e == ENOSYS || e == EINVAL)
+     if (!probe) fb_flags |= MAP_FIXED;
+     void* fb_ret = box_mmap(addr, length, prot, fb_flags, fd, offset);
+     int fb_e = errno;
+-    fprintf(stderr,
++    if (ohos_wrappedlibc_log_level() >= 2) {
++            fprintf(stderr,
+         "[mmap-noreplace] addr=%p len=0x%lx prot=0x%x flags=0x%x "
+         "%s -> %p errno=%d\n",
+         addr, (unsigned long)length, prot, flags,
+         probe ? "probe(HINT)" : "real(FIXED)",
+         fb_ret, fb_ret == MAP_FAILED ? fb_e : 0);
++        }
+     if (probe) {
+         if (fb_ret != MAP_FAILED && (uintptr_t)fb_ret != (uintptr_t)addr) {
+             /* 探测模式: kernel 不给 hint -> 模拟 NOREPLACE 失败 */
+@@ -5193,3 +5198,15 @@ EXPORT int my_symlinkat(x64emu_t* emu, void* target, int newdirfd, void* linkpat
+     return 0;
+ }
+ /* OHOS_PATCH_PATH_REMAP_V2 END */
++
++/* OHOS_PATCH_LOG_GATE — log gate helper (appended at EOF, used by my_mmap64) */
++#include <stdlib.h>
++static int ohos_wrappedlibc_log_level(void) {
++    static int cached = -1;
++    if (cached < 0) {
++        const char* v = getenv("BOX64_LOG");
++        cached = (v && *v) ? atoi(v) : 0;
++        if (cached < 0) cached = 0;
++    }
++    return cached;
++}

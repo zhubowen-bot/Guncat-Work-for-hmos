@@ -1,0 +1,49 @@
+diff --git a/src/elfs/elfloader32.c b/src/elfs/elfloader32.c
+index d2b72656b..449bd614f 100644
+--- a/src/elfs/elfloader32.c
++++ b/src/elfs/elfloader32.c
+@@ -114,6 +114,44 @@ static void GrabX32CopyMainElfReloc(elfheader_t* head)
+             }
+         }
+     }
++
++    /* OHOS_PATCH_PREFILL_IO_GLOBDATA START -- prefill globdata for stdout/stderr/stdin
++     *
++     * glibc 2.34+ i386 binaries use R_386_GLOB_DAT (not R_386_COPY) for
++     * stdout/stderr. Without a globdata entry, R_386_GLOB_DAT falls back
++     * to host musl FILE* (high addr), gets truncated, guest deref crashes.
++     *
++     * We allocate a 4-byte low-4GB slot containing to_ptrv(my__IO_2_1_*_).
++     * That low value matches what wrapper32's io_convert32() compares
++     * against, so guest passes "3" to e.g. setvbuf, wrapper translates to
++     * host musl stdout. Older binaries with real R_386_COPY are skipped
++     * by the GetSymbolStartEnd guard.
++     */
++    {
++        extern void* my__IO_2_1_stderr_;
++        extern void* my__IO_2_1_stdin_;
++        extern void* my__IO_2_1_stdout_;
++        extern void* box32_malloc(size_t);
++        static const char* const names[3]   = {"stdout", "stderr", "stdin"};
++        void* const* const     proxies[3]   = {(void*const*)&my__IO_2_1_stdout_,
++                                               (void*const*)&my__IO_2_1_stderr_,
++                                               (void*const*)&my__IO_2_1_stdin_};
++        for(int k=0; k<3; ++k) {
++            uintptr_t exo = 0, exe = 0;
++            if(GetSymbolStartEnd(my_context->globdata, names[k],
++                                 &exo, &exe, 2, "GLIBC_2.0", 1, 1))
++                continue;
++            uint32_t* slot = (uint32_t*)box32_malloc(4);
++            if(!slot) continue;
++            *slot = to_ptrv(*proxies[k]);
++            AddUniqueSymbol(my_context->globdata, names[k],
++                            (uintptr_t)slot, 4, 2, "GLIBC_2.0", 1);
++            printf_log(LOG_DEBUG,
++                "OHOS box32: prefilled globdata[%s] = %p (slot @%p)\n",
++                names[k], *proxies[k], slot);
++        }
++    }
++    /* OHOS_PATCH_PREFILL_IO_GLOBDATA END */
+ }
+ 
+ void checkHookedSymbols(elfheader_t* h);

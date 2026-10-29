@@ -1,0 +1,109 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index bb8b0e64b..6aea789e2 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1324,7 +1324,7 @@ add_library(mainobj OBJECT ${OS_LINUX_SRC} ${ELFLOADER_SRC} ${WRAPPEDS} ${WRAPPE
+ add_dependencies(mainobj generate_git_head_target)
+ add_dependencies(mainobj generate_dynacache_hashes)
+ 
+-add_executable(${BOX64})
++add_library(${BOX64} SHARED)
+ target_link_libraries(${BOX64} mainobj)
+ set_target_properties(${BOX64} PROPERTIES ENABLE_EXPORTS ON)
+ add_dependencies(${BOX64} WRAPPERS)
+@@ -2107,3 +2107,95 @@ if(BOX32)
+             -D TEST_REFERENCE=${CMAKE_SOURCE_DIR}/tests32/ref23.txt
+             -P ${CMAKE_SOURCE_DIR}/runTest.cmake )
+ endif()
++
++# OHOS_PATCH_FTS_TARGET ====================================
++if(TARGET box64)
++    target_sources(box64 PRIVATE ${CMAKE_SOURCE_DIR}/src/musl_fts.c)
++endif()
++# =========================================
++
++# OHOS_PATCH_OBSTACK_TARGET ====================================
++if(TARGET box64)
++    target_sources(box64 PRIVATE ${CMAKE_SOURCE_DIR}/src/musl_obstack.c)
++endif()
++# =========================================
++
++# OHOS_PATCH_ERROR_H_TARGET ====================================
++if(TARGET box64)
++    target_sources(box64 PRIVATE ${CMAKE_SOURCE_DIR}/src/musl_error.c)
++endif()
++# =========================================
++
++# OHOS_PATCH_MUSL_COMPAT_TARGET ====================================
++if(TARGET box64)
++    target_sources(box64 PRIVATE ${CMAKE_SOURCE_DIR}/src/musl_compat.c)
++endif()
++# =========================================
++
++# OHOS_PATCH_BOX32_LINK_STUBS
++target_sources(box64 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/musl_box32_stubs.c)
++
++# OHOS_PATCH_V4_SO_BUILD =====================
++if(TARGET box64)
++    target_sources(box64 PRIVATE
++        ${CMAKE_SOURCE_DIR}/src/sigsys_fallback.c
++        ${CMAKE_SOURCE_DIR}/src/box64_so_entry.c)
++    set_target_properties(box64 PROPERTIES
++        POSITION_INDEPENDENT_CODE  ON
++        C_VISIBILITY_PRESET        default
++        VISIBILITY_INLINES_HIDDEN  OFF
++        OUTPUT_NAME                box64
++        PREFIX                     lib)
++endif()
++# ============================================
++# OHOS_PATCH_PATH_REMAP_CM ===================================
++if(TARGET box64)
++    target_sources(box64 PRIVATE ${CMAKE_SOURCE_DIR}/src/box64_path_remap.c)
++endif()
++# =============================================
++# OHOS_PATCH_BOX64_SPAWN =====================================
++if(TARGET box64)
++    target_sources(box64 PRIVATE ${CMAKE_SOURCE_DIR}/src/box64_spawn.c)
++endif()
++# =========================================
++
++target_sources(box64 PRIVATE src/bsh_box64_entry.c)
++
++# =========================================
++# OHOS_PATCH_SHIM_FS =========================================
++# 把 shim/fs_shim.c 以"box64 内部模式"编进来（-DBSH_SHIM_BOX64）：入口改名成 bsh_fs_*，
++# 真实现直接调宿主 libc；box64 的 my_* 显式调用它们，给 guest 补上软链模拟等沙箱缺口。
++# 源码目录由 scripts/build_box64.sh 以 -DBSH_SHIM_DIR 传入（shim 是主仓库的源码，不复制）。
++# 为什么不用 -Wl,--wrap=：wrap 只改写 box64 自己的符号引用，够不着 guest 那一侧。
++if(TARGET box64 AND DEFINED BSH_SHIM_DIR)
++    target_sources(box64 PRIVATE ${BSH_SHIM_DIR}/fs_shim.c)
++    target_include_directories(box64 PRIVATE ${BSH_SHIM_DIR})
++    target_compile_definitions(box64 PRIVATE BSH_SHIM_BOX64)
++    # 前缀按模块给：两个 shim 都定义了 open，共用前缀会链接期撞名
++    # （实测 "duplicate symbol bsh_fs_open"）。
++    set_source_files_properties(${BSH_SHIM_DIR}/fs_shim.c
++        PROPERTIES COMPILE_DEFINITIONS "BSH_SHIM_PREFIX=bsh_fs_")
++endif()
++
++# =========================================
++# OHOS_PATCH_SHIM_TTY =========================================
++# tty shim 同一套 box64 模式编进来：isatty/tcgetattr/tcsetattr/ioctl 走它，termios 与
++# winsize 通过 procmgr 的 unix socket RPC 取（bsh_client.c 一起编进来，纯 socket、
++# 无额外依赖）。弱符号的 pty 钩子在这里取不到 —— 真 pty 是另一件事（P6）。
++if(TARGET box64 AND DEFINED BSH_SHIM_DIR AND DEFINED BSH_PROCMGR_DIR)
++    target_sources(box64 PRIVATE ${BSH_SHIM_DIR}/tty_shim.c ${BSH_SHIM_DIR}/pty_shim.c
++                                 ${BSH_PROCMGR_DIR}/bsh_client.c)
++    target_include_directories(box64 PRIVATE ${BSH_SHIM_DIR} ${BSH_PROCMGR_DIR})
++    set_source_files_properties(${BSH_SHIM_DIR}/tty_shim.c
++        PROPERTIES COMPILE_DEFINITIONS "BSH_SHIM_PREFIX=bsh_tty_")
++    # 假 pts（socketpair 当 master/slave）—— 沙箱打不开真 /dev/ptmx，这是唯一能拿到
++    # pty 的路，与 elfloader 的 guest shim 完全同源同语义。开关是 BSH_FAKE_PTY，
++    # 由 procmgr 的 ForkChild 给所有子进程设上（见 procmgr.cpp）。
++    # ⚠ 必须带 BSH_SHIM_MERGED_OPEN：本文件末尾那段"本机自测用"的替身定义的是**真名**
++    #   （open/openat/ioctl/isatty/ttyname/ttyname_r），编进 libbox64.so 会在 so **内部**
++    #   插到宿主同名符号上 —— box64 自己的 open/ioctl 调用全被劫走（实测：x86_64 guest
++    #   的 ttyname 一调就 SIGSEGV，四个组合全挂）。带了它那段整段不编，我们只用
++    #   bsh_pty_* 那几个钩子（tty_shim.c 通过弱符号调它们）。
++    set_source_files_properties(${BSH_SHIM_DIR}/pty_shim.c
++        PROPERTIES COMPILE_DEFINITIONS "BSH_SHIM_PREFIX=bsh_pty_;BSH_SHIM_MERGED_OPEN")
++endif()

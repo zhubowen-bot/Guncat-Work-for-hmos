@@ -1,0 +1,23 @@
+--- a/src/env.cc
++++ b/src/env.cc
+@@ -624,6 +624,20 @@
+   char exec_path_buf[2 * PATH_MAX];
+   size_t exec_path_len = sizeof(exec_path_buf);
+   std::string exec_path;
++#if defined(__OHOS__)
++  // ── IEC OHOS port (see scripts/optional/node-ohos/patches/) ─────────────
++  // This is libnode.so dlopen()ed into the host process; the kernel's
++  // /proc/self/exe is the host appspawn, not node. uv_exepath() reports that,
++  // so process.execPath becomes /system/bin/appspawn -- and npm lifecycle
++  // scripts, node-gyp and child_process all use process.execPath to start
++  // another node, which then tries to execute appspawn and fails.
++  // Use argv[0] instead: iec_node_entry.cc passes "node", which goes back
++  // through PATH and the launcher to libnode.so. That is the correct way to
++  // start a second node, and it needs no fake node executable.
++  if (!argv.empty()) {
++    exec_path = argv[0];
++  } else
++#endif
+   if (uv_exepath(exec_path_buf, &exec_path_len) == 0) {
+     exec_path = std::string(exec_path_buf, exec_path_len);
+   } else if (argv.size() > 0) {

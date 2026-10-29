@@ -1,6 +1,7 @@
 # Guncat Work 原生模块
 #   1) guncatjs: run_js 工具(JSVM-API 沙箱), 内嵌标准 JS 引擎执行动态代码
-#   2) guncatvm: shell 工具的 Linux VM 桥, dlopen QEMU(TCI 解释执行)并在同进程跑虚拟机
+#   2) guncatpy: run_python 工具, dlopen libpython3.12.so
+# shell 工具已改为 IEC 原生执行核（third_party/bettersh/iec 的 HAR），不再有 QEMU 桥。
 cmake_minimum_required(VERSION 3.5.0)
 project(guncat_native)
 
@@ -24,18 +25,8 @@ target_link_libraries(guncatjs PUBLIC
     libjsvm.so
     libhilog_ndk.z.so)
 
-# libguncatvm.so: ArkTS 侧 import guncatvm from 'libguncatvm.so'
-# QEMU 运行库(libs/<abi>/libqemu-system-aarch64-tci.so)在运行期 dlopen, 不参与链接
-add_library(guncatvm SHARED
-    vm/guncat_vm.cpp)
-
-target_link_libraries(guncatvm PUBLIC
-    libace_napi.z.so
-    libhilog_ndk.z.so
-    libdl.so)
-
 # libguncatpy.so: ArkTS 侧 import guncatpy from 'libguncatpy.so'
-# 原生 Python 工具: 运行期 dlopen libpython3.12.so(与 QEMU 同一套路, 不参与链接),
+# 原生 Python 工具: 运行期 dlopen libpython3.12.so(不参与链接),
 # 因此 x86_64 模拟器构建也能编译通过, 运行期再报"本机不支持"。
 add_library(guncatpy SHARED
     python/guncat_py.cpp)

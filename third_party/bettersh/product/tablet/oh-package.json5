@@ -1,0 +1,11 @@
+{
+  "name": "tablet",
+  "version": "1.0.0",
+  "description": "BetterSH 平板/2in1 入口（带 JIT 权限）",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {
+    "bsh_main": "file:../../feature/bsh_main"
+  }
+}

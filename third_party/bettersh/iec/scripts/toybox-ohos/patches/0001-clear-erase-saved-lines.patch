@@ -1,0 +1,17 @@
+--- a/toys/other/clear.c
++++ b/toys/other/clear.c
+@@ -15,5 +15,13 @@
+ 
+ void clear_main(void)
+ {
+-  printf("\e[2J\e[H");
++  // ── BetterSH(OHOS 补丁，见 scripts/toybox-ohos/patches/) ──────────────
++  // 比上游多一个 \e[3J。我们的终端是 weston-terminal，而它的 ED(2) 实现是"把屏幕
++  // 内容滚进回滚缓冲"（clients/terminal.c 里那句 "Clear screen by scrolling
++  // contents out"）—— 单靠 \e[2J 只会把内容往上推、屏幕留着旧内容，往上翻还能看见。
++  // 而 bsh 内置的 clear 发的是 "\e[H\e[2J\e[3J"，那条 \e[3J 在 weston 里落进
++  // "从光标擦到屏幕末尾"那个分支，恰好把残留擦干净 —— 于是同一件事在两个 shell 里
++  // 表现不一致（mksh 走的就是这份 applet）。这里对齐同一组序列，顺带也与 ncurses 版
++  // clear 在 xterm-256color 下的输出一致。
++  printf("\e[H\e[2J\e[3J");
+ }

@@ -1,0 +1,33 @@
+`os::Posix::print_uptime_info()`：musl 下跳过 utmpx 函数族。
+
+症状  error: use of undeclared identifier 'setutxent'
+根因  OHOS 的 <utmpx.h> 只提供 `struct utmpx`，没有 setutxent() /
+      getutxent() / endutxent()（musl 不实现这几个）。os_posix.cpp 无条件
+      调用它们。
+修法  用 `#ifdef MUSL_LIBC` 包起来，(void)ent; 保证变量不算未使用。
+      这段只用来打印 "OS uptime"，而且它上面的注释本来就写着在 Linux 上
+      拿不到 reboot 记录，跳过不损失任何诊断信息。
+
+--- a/src/hotspot/os/posix/os_posix.cpp
++++ b/src/hotspot/os/posix/os_posix.cpp
+@@ -469,6 +469,12 @@
+   int bootsec = -1;
+   int currsec = time(nullptr);
+   struct utmpx* ent;
++#ifdef MUSL_LIBC
++  // BetterSH/OHOS: OHOS 的 <utmpx.h> 只有 struct utmpx，没有 setutxent()/
++  // getutxent()（musl 不实现）。这段只用来打印 "OS uptime"，而且上面的注释
++  // 已经说明在 Linux 上本来就拿不到 reboot 记录 —— 跳过不损失诊断信息。
++  (void)ent;
++#else
+   setutxent();
+   while ((ent = getutxent())) {
+     if (!strcmp("system boot", ent->ut_line)) {
+@@ -476,6 +482,7 @@
+       break;
+     }
+   }
++#endif
+ 
+   if (bootsec != -1) {
+     os::print_dhm(st, "OS uptime:", (long) (currsec-bootsec));

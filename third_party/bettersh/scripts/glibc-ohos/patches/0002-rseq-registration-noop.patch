@@ -1,0 +1,31 @@
+--- a/sysdeps/unix/sysv/linux/rseq-internal.h
++++ b/sysdeps/unix/sysv/linux/rseq-internal.h
+@@ -29,14 +29,20 @@
+ static inline bool
+ rseq_register_current_thread (struct pthread *self, bool do_rseq)
+ {
+-  if (do_rseq)
+-    {
+-      int ret = INTERNAL_SYSCALL_CALL (rseq, &self->rseq_area,
+-                                       sizeof (self->rseq_area),
+-                                       0, RSEQ_SIG);
+-      if (!INTERNAL_SYSCALL_ERROR_P (ret))
+-        return true;
+-    }
++  /* ── BetterSH / HarmonyOS ─────────────────────────────────────────────
++     目标沙箱的 seccomp 过滤器对 rseq(aarch64 上 syscall 293)**不给返回值,
++     直接 SIGSYS 杀进程**;而 2.39 启动时无条件注册 rseq,于是任何用这份 glibc
++     起来的 guest 都会在 _dl_.../__libc_start_main 里被瞬间打掉(表现为"进程
++     无声退出",连 main 都进不去)。
++
++     可以像项目里那样靠 GLIBC_TUNABLES=glibc.pthread.rseq=0 绕,但那要求每个
++     调用点都记得设环境变量;既然这份 libc 就是给这台设备编的,干脆在这里直接
++     不调 syscall —— 语义等价于"内核不支持 rseq"(THREAD_SETMEM 到
++     RSEQ_CPU_ID_REGISTRATION_FAILED、__rseq_size 保持 0,于是
++     nptl/pthread_create.c 给新线程继承的 ATTR_FLAG_DO_RSEQ 也不会被置上,
++     不会撞上那里的 __libc_fatal)。依赖 rseq 的库看到 __rseq_size == 0 会自己
++     退回 syscall 路径。  */
++  (void) do_rseq;
+   THREAD_SETMEM (self, rseq_area.cpu_id, RSEQ_CPU_ID_REGISTRATION_FAILED);
+   return false;
+ }

@@ -1,0 +1,232 @@
+--- a/elf/dl-map-segments.h
++++ b/elf/dl-map-segments.h
+@@ -18,6 +18,133 @@
+    <https://www.gnu.org/licenses/>.  */
+ 
+ #include <dl-load.h>
++/* _dl_read_segment() 用 __pread64_nocancel():它是"不可取消"的那一版,把文件名
++   参数当普通 fd 用,rtld 里也在链接它(dl-load.c 读 program header 就靠它)。
++   它由 not-cancel.h 声明,而 dl-load.c 里这个头排在本文件**之后**,所以这里自己
++   先引一次(有 include guard,重复引用无害)。  */
++#include <not-cancel.h>
++
++/* ── BetterSH / HarmonyOS: 这里不再把库文件 mmap 进地址空间 ────────────────
++
++   目标平台的沙箱把"把非系统文件当可执行体"(execve,以及 file-backed 的可执行
++   mmap)交给 seccomp 用户态通知处理:用户看到"是否运行 xxx"确认框,拒绝即 EACCES,
++   于是 ld.so 报 "failed to map segment from shared object"。而且 $HOME 这类挂载点
++   是 noexec,从那种目录里做可执行的文件映射本来就该失败。
++
++   所以每个 PT_LOAD 段改成三步(和 entry/src/main/cpp/elfloader 装 guest 的做法一致):
++
++     1. 整块地址空间用 MAP_ANONYMOUS|PROT_NONE 预留(_dl_map_segment);
++     2. 逐段 mprotect(PROT_READ|PROT_WRITE) 后用 pread 把文件镜像读进来;
++     3. mprotect 成该段最终权限(代码段在这里才变成 r-x)。
++
++   地址空间里从此只有匿名页,不再有任何 file-backed 的可执行映射 —— 这正是
++   "不弹确认框"的判据(可用 /proc/self/maps 复核:库名不再出现在里面)。
++
++   文件尾之后的部分(以及最后一段的 bss 尾巴)是全新匿名页,本来就是 0,
++   与内核在 mmap 上"超出 EOF 的页读作 0"的行为一致,不用额外补零。  */
++
++/* 段是 pread 写进去的,数据可能还停在 D-cache 里;要当代码执行就得先清到 PoU
++   再无效化 I-cache(否则 CPU 可能取到旧指令)。等价于 __builtin___clear_cache,
++   但那个会引入对 libgcc 的 __clear_cache 的依赖,rtld 里不方便。  */
++static __always_inline void
++_dl_flush_icache (const void *start, size_t len)
++{
++#ifdef __aarch64__
++  uintptr_t p = (uintptr_t) start & ~(uintptr_t) 63;
++  uintptr_t end = (uintptr_t) start + len;
++
++  for (; p < end; p += 64)
++    __asm__ __volatile__ ("dc cvau, %0" : : "r" (p) : "memory");
++  __asm__ __volatile__ ("dsb ish" : : : "memory");
++  for (p = (uintptr_t) start & ~(uintptr_t) 63; p < end; p += 64)
++    __asm__ __volatile__ ("ic ivau, %0" : : "r" (p) : "memory");
++  __asm__ __volatile__ ("dsb ish" : : : "memory");
++  __asm__ __volatile__ ("isb" : : : "memory");
++#else
++  (void) start;
++  (void) len;
++#endif
++}
++
++#ifdef __aarch64__
++/* prctl(0x6a6974, 0, on):HarmonyOS 上的"允许本进程把匿名页变成可执行"开关 ——
++   0x6a6974 就是 ASCII 的 'jit',elfloader 的 jit_toggle() 用的是同一个。  */
++static __always_inline void
++_dl_prctl_jit (int on)
++{
++  INTERNAL_SYSCALL_CALL (prctl, 0x6a6974L, 0, on, 0, 0);
++}
++#endif
++
++/* mprotect 的包装:先直球,prot 带 PROT_EXEC 且直球失败时再套上 HarmonyOS 的
++   "jit" 开关重试一次(对齐 entry/src/main/cpp/elfloader 的 mprotect_final Mode A)。
++   **开关值必须与 elfloader/musl 一致:开门 = prctl('jit', 0, 0)、关门 = (…, 0, 1)** ——
++   写反(曾经写成 _dl_prctl_jit(1) 当"开门")等于没开门,匿名页拿不到可执行,
++   加载 bundle 之外的库(如数据目录里的 hdc 依赖、或 LD_PRELOAD 的 shim)时就会报
++   "cannot change memory protections"。原生 Linux 上这个 prctl 返回 EINVAL,
++   重试自然还是失败,行为不变。  */
++static __always_inline int
++_dl_mprotect (caddr_t addr, size_t len, int prot)
++{
++  if (__glibc_likely (__mprotect (addr, len, prot) == 0))
++    return 0;
++#ifdef __aarch64__
++  if ((prot & PROT_EXEC) != 0)
++    {
++      int rc;
++      _dl_prctl_jit (0);                       /* 开门(0 = 开,与 elfloader 一致) */
++      rc = __mprotect (addr, len, prot);
++      _dl_prctl_jit (1);                       /* 关门,与 Mode A 对称 */
++      return rc;
++    }
++#endif
++  return -1;
++}
++
++/* 把一个 PT_LOAD 段从 fd 读进已经预留好的匿名页(l->l_addr + c->mapstart)。
++   成功返回 NULL,失败返回 dl-load.c 用的错误串(便于和"文件映射被沙箱拒绝"
++   那条 "failed to map segment from shared object" 区分开)。  */
++static __always_inline const char *
++_dl_read_segment (struct link_map *l, const struct loadcmd *c, int fd)
++{
++  ElfW(Addr) addr = l->l_addr + c->mapstart;
++  size_t len = c->mapend - c->mapstart;
++  size_t done = 0;
++
++  if (__glibc_unlikely (len == 0))
++    return NULL;
++
++  if (__glibc_unlikely (__mprotect ((caddr_t) addr, len,
++				    PROT_READ | PROT_WRITE) < 0))
++    {
++      /* 固定地址的对象(ld.so 直接跑一个非 PIE 程序时)没人替我们预留,
++	 就地补一块。注意:走到这里说明该区间当前不可写 —— 它要么是空的,
++	 要么本来就是别的映射,后者与上游"直接往这个地址文件映射"的假设一样。  */
++      if (__mmap ((void *) addr, len, PROT_READ | PROT_WRITE,
++		  MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0) == MAP_FAILED)
++	return DL_MAP_SEGMENTS_ERROR_MPROTECT;
++    }
++
++  while (done < len)
++    {
++      ssize_t n = __pread64_nocancel (fd, (void *) (addr + done),
++				      len - done, c->mapoff + done);
++      if (__glibc_unlikely (n < 0))
++	{
++	  if (errno == EINTR)
++	    continue;
++	  return DL_MAP_SEGMENTS_ERROR_MAP_SEGMENT;
++	}
++      if (n == 0)
++	break;			/* 到文件尾:剩下的页保持 0 */
++      done += (size_t) n;
++    }
++
++  _dl_flush_icache ((const void *) addr, len);
++  if (__glibc_unlikely (_dl_mprotect ((caddr_t) addr, len, c->prot) < 0))
++    return DL_MAP_SEGMENTS_ERROR_MPROTECT;
++  return NULL;
++}
+ 
+ /* Map a segment and align it properly.  */
+ 
+@@ -25,9 +152,10 @@
+ _dl_map_segment (const struct loadcmd *c, ElfW(Addr) mappref,
+ 		 const size_t maplength, int fd)
+ {
++  /* 只预留地址区间,不碰文件(_dl_read_segment 负责往里面填内容)。  */
+   if (__glibc_likely (c->mapalign <= GLRO(dl_pagesize)))
+-    return (ElfW(Addr)) __mmap ((void *) mappref, maplength, c->prot,
+-				MAP_COPY|MAP_FILE, fd, c->mapoff);
++    return (ElfW(Addr)) __mmap ((void *) mappref, maplength, PROT_NONE,
++				MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
+ 
+   /* If the segment alignment > the page size, allocate enough space to
+      ensure that the segment can be properly aligned.  */
+@@ -36,30 +164,24 @@
+ 		       : (2 * c->mapalign));
+   ElfW(Addr) map_start = (ElfW(Addr)) __mmap ((void *) mappref, maplen,
+ 					      PROT_NONE,
+-					      MAP_ANONYMOUS|MAP_COPY,
++					      MAP_ANONYMOUS|MAP_PRIVATE,
+ 					      -1, 0);
+   if (__glibc_unlikely ((void *) map_start == MAP_FAILED))
+     return map_start;
+ 
+   ElfW(Addr) map_start_aligned = ALIGN_UP (map_start, c->mapalign);
+-  map_start_aligned = (ElfW(Addr)) __mmap ((void *) map_start_aligned,
+-					   maplength, c->prot,
+-					   MAP_COPY|MAP_FILE|MAP_FIXED,
+-					   fd, c->mapoff);
+-  if (__glibc_unlikely ((void *) map_start_aligned == MAP_FAILED))
+-    __munmap ((void *) map_start, maplen);
+-  else
+-    {
+-      /* Unmap the unused regions.  */
+-      ElfW(Addr) delta = map_start_aligned - map_start;
+-      if (delta)
+-	__munmap ((void *) map_start, delta);
+-      ElfW(Addr) map_end = map_start_aligned + maplength;
+-      map_end = ALIGN_UP (map_end, GLRO(dl_pagesize));
+-      delta = map_start + maplen - map_end;
+-      if (delta)
+-	__munmap ((void *) map_end, delta);
+-    }
++
++  {
++    /* Unmap the unused regions.  */
++    ElfW(Addr) delta = map_start_aligned - map_start;
++    if (delta)
++      __munmap ((void *) map_start, delta);
++    ElfW(Addr) map_end = map_start_aligned + maplength;
++    map_end = ALIGN_UP (map_end, GLRO(dl_pagesize));
++    delta = map_start + maplen - map_end;
++    if (delta)
++      __munmap ((void *) map_end, delta);
++  }
+ 
+   return map_start_aligned;
+ }
+@@ -122,6 +244,16 @@
+             return DL_MAP_SEGMENTS_ERROR_MPROTECT;
+         }
+ 
++      /* 上游的 _dl_map_segment 是"把整个文件镜像从 c->mapoff 映射 maplength
++	 字节",所以**第一个段顺带就有了**;我们只预留了地址,得自己把它读进来。
++	 (下面的循环从 postmap 开始,跳过第一个段的读取。)  */
++      if (c->mapend > c->mapstart)
++        {
++          const char *err = _dl_read_segment (l, c, fd);
++          if (__glibc_unlikely (err != NULL))
++            return err;
++        }
++
+       l->l_contiguous = 1;
+ 
+       goto postmap;
+@@ -134,14 +266,13 @@
+ 
+   while (c < &loadcmds[nloadcmds])
+     {
+-      if (c->mapend > c->mapstart
+-          /* Map the segment contents from the file.  */
+-          && (__mmap ((void *) (l->l_addr + c->mapstart),
+-                      c->mapend - c->mapstart, c->prot,
+-                      MAP_FIXED|MAP_COPY|MAP_FILE,
+-                      fd, c->mapoff)
+-              == MAP_FAILED))
+-        return DL_MAP_SEGMENTS_ERROR_MAP_SEGMENT;
++      if (c->mapend > c->mapstart)
++        {
++          /* Read the segment contents into fresh anonymous pages.  */
++          const char *err = _dl_read_segment (l, c, fd);
++          if (__glibc_unlikely (err != NULL))
++            return err;
++        }
+ 
+     postmap:
+       _dl_postprocess_loadcmd (l, header, c);

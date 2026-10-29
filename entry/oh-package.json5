@@ -6,7 +6,8 @@
   "author": "",
   "license": "",
   "dependencies": {
-    "@luvi/lv-markdown-in": "^3.4.6"
+    "@luvi/lv-markdown-in": "^3.4.6",
+    "iec": "file:../third_party/bettersh/iec/platform/ohos/har"
   },
   "devDependencies": {},
   "dynamicDependencies": {}

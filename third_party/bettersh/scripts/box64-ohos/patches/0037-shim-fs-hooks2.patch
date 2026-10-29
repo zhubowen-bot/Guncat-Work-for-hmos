@@ -1,0 +1,110 @@
+--- a/src/wrapped/wrappedlibc.c
++++ b/src/wrapped/wrappedlibc.c
+@@ -1804,6 +1804,12 @@
+ extern ssize_t bsh_fs_readlinkat(int dirfd, const char* path, char* buf, size_t bufsiz);
+ extern int     bsh_fs_symlink(const char* target, const char* linkpath);
+ extern int     bsh_fs_symlinkat(const char* target, int dirfd, const char* linkpath);
++extern int     bsh_fs_unlink(const char* path);
++extern int     bsh_fs_rename(const char* oldpath, const char* newpath);
++extern int     bsh_fs_access(const char* path, int mode);
++extern int     bsh_fs_faccessat(int dirfd, const char* path, int mode, int flags);
++extern DIR*    bsh_fs_opendir(const char* path);
++extern struct dirent* bsh_fs_readdir(DIR* dirp);
+ 
+ EXPORT int my_stat(x64emu_t *emu, void* filename, void* buf)
+ {
+@@ -2053,14 +2059,9 @@
+     }
+     else
+     {
+-        static pFp_t f = NULL;
+-        if(!f) {
+-            library_t* lib = my_lib;
+-            if(!lib) return NULL;
+-            f = (pFp_t)dlsym(lib->w.lib, "readdir");
+-        }
+-
+-        return f(dirp);
++        /* OHOS_PATCH_SHIM_FS：readdir 返回值就地改名（x.BSH_SYMLINK -> x、d_type=DT_LNK），
++         * 与 readdir(3) 同一套；不接这条，列目录会把标记文件当成普通文件露出去 */
++        return bsh_fs_readdir((DIR*)dirp);
+     }
+ }
+ 
+@@ -2685,6 +2686,14 @@
+     if(isProcSelf(path, "exe")) {
+         return fopen64(emu->context->fullpath, mode);
+     }
++    {
++        /* OHOS_PATCH_SHIM_FS：fopen 家族必须单独接 —— musl/glibc 的 fopen 都不走 open
++         * 符号（库内直接发 syscall），只拦 open 的话，fopen("软链") 会去读一个不存在的
++         * 真名字（实测 testprogs 里"经链接读到的内容不对: ''"就是这么来的）。 */
++        char _shim_fopen_buf[PATH_MAX];
++        const char* rp = bsh_fs_resolve_path(path, _shim_fopen_buf, sizeof(_shim_fopen_buf));
++        if (rp != path) return fopen64(rp, mode);
++    }
+     return fopen64(path, mode);
+ }
+ EXPORT FILE* my_fopen(x64emu_t* emu, const char* path, const char* mode) __attribute__((alias("my_fopen64")));
+@@ -5147,7 +5156,8 @@
+     (void)emu;
+     char buf[PATH_MAX];
+     path = (void*)box64_remap_path((const char*)path, buf, sizeof(buf));
+-    return opendir((const char*)path);
++    /* OHOS_PATCH_SHIM_FS：目录路径本身也可能是用户态软链 */
++    return bsh_fs_opendir((const char*)path);
+ }
+ 
+ EXPORT int my_access(x64emu_t* emu, void* path, int mode)
+@@ -5155,7 +5165,7 @@
+     (void)emu;
+     char buf[PATH_MAX];
+     path = (void*)box64_remap_path((const char*)path, buf, sizeof(buf));
+-    return access((const char*)path, mode);
++    return bsh_fs_access((const char*)path, mode);
+ }
+ 
+ EXPORT int my_faccessat(x64emu_t* emu, int dirfd, void* path, int mode, int flags)
+@@ -5163,7 +5173,7 @@
+     (void)emu;
+     char buf[PATH_MAX];
+     path = (void*)box64_remap_path((const char*)path, buf, sizeof(buf));
+-    return faccessat(dirfd, (const char*)path, mode, flags);
++    return bsh_fs_faccessat(dirfd, (const char*)path, mode, flags);
+ }
+ 
+ EXPORT int my_unlink(x64emu_t* emu, void* path)
+@@ -5171,7 +5181,9 @@
+     (void)emu;
+     char buf[PATH_MAX];
+     path = (void*)box64_remap_path((const char*)path, buf, sizeof(buf));
+-    return unlink((const char*)path);
++    /* OHOS_PATCH_SHIM_FS：删软链 = 删它的标记文件（不接这条，标记会一直留在目录里，
++     * 下一次 symlink 同名就 EEXIST —— 实测 testprogs 连跑两个组合就撞上） */
++    return bsh_fs_unlink((const char*)path);
+ }
+ 
+ EXPORT int my_rmdir(x64emu_t* emu, void* path)
+@@ -5188,15 +5200,15 @@
+     char buf1[PATH_MAX], buf2[PATH_MAX];
+     oldpath = (void*)box64_remap_path((const char*)oldpath, buf1, sizeof(buf1));
+     newpath = (void*)box64_remap_path((const char*)newpath, buf2, sizeof(buf2));
+-    return rename((const char*)oldpath, (const char*)newpath);
++    /* OHOS_PATCH_SHIM_FS：四个组合（链→链 / 链→普通 / 普通→链 / 普通→普通）由 shim 分辨，
++     * 免得名字空间不一致时把标记文件当成普通文件搬走 */
++    return bsh_fs_rename((const char*)oldpath, (const char*)newpath);
+ }
+ 
+-/* HAP 沙箱禁 symlink syscall. fake 返回 0:
+- *   - 配合 path remap, 后续 stat/open 命中真实目录 -> 透明
+- *   - 副作用: lstat 这个 link 会拿到 ENOENT, 真依赖此行为的代码会跑偏
+- *   - 当前 wineboot 路径 (dosdevices/c:) 完全靠 path remap 解决, 不依赖
+- *     真 symlink 存在
+- */
++/* HAP 沙箱禁 symlink(2)（宿主进程/命令 so/guest 三层、所有可写目录都是 EACCES）。
++ * 这里交给用户态模拟：真实现是 shim/fs_shim.c 里的 bsh_fs_symlink —— 建一个内容为目标串的
++ * 普通文件 <linkpath>.BSH_SYMLINK，由 my_lstat/my_stat/my_readlink/my_open/my_fopen 那
++ * 一批入口配合，把"链接"的语义在 libc 这一层重演出来。见 scripts/box64-ohos/README.md。 */
+ EXPORT int my_symlink(x64emu_t* emu, void* target, void* linkpath)
+ {
+     (void)emu;

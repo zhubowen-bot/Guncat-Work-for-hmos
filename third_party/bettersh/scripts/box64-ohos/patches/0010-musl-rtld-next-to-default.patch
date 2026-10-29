@@ -1,0 +1,81 @@
+diff --git a/src/libtools/libdl.c b/src/libtools/libdl.c
+index b38cf51a1..9a9e9de94 100644
+--- a/src/libtools/libdl.c
++++ b/src/libtools/libdl.c
+@@ -1,3 +1,4 @@
++/* OHOS_PATCH_RTLD_DEFAULT */
+ #define _GNU_SOURCE
+ #include <stdio.h>
+ #include <string.h>
+@@ -64,7 +65,7 @@ static void* (*real_dlsym)(void*, const char*) = NULL;
+ 
+ EXPORT void* dlopen(const char* path, int flags)
+ {
+-    if (!real_dlopen) real_dlopen = GetNativeSymbolUnversioned(RTLD_NEXT, "dlopen");
++    if (!real_dlopen) real_dlopen = GetNativeSymbolUnversioned(RTLD_DEFAULT, "dlopen");
+ 
+     // will look only for libs loaded with full path (and only on 64bits for now)
+     if(path && strchr(path, '/') && (/*(box64_is32bits && FileIsX86ELF(path)) ||*/ (!box64_is32bits && FileIsX64ELF(path)))) {
+@@ -91,7 +92,7 @@ EXPORT void* dlopen(const char* path, int flags)
+ 
+ EXPORT int dlclose(void* handle)
+ {
+-    if (!real_dlclose) real_dlclose = GetNativeSymbolUnversioned(RTLD_NEXT, "dlclose");
++    if (!real_dlclose) real_dlclose = GetNativeSymbolUnversioned(RTLD_DEFAULT, "dlclose");
+ 
+     if((uintptr_t)handle>=HOOKLIB && (uintptr_t)handle<HOOKLIB+hooked_size) {
+         uint32_t i = (uintptr_t)handle-HOOKLIB;
+@@ -106,7 +107,7 @@ EXPORT int dlclose(void* handle)
+ 
+ EXPORT void* dlsym(void* handle, const char* symbol)
+ {
+-    if (!real_dlsym) real_dlsym = GetNativeSymbolUnversioned(RTLD_NEXT, "dlsym");
++    if (!real_dlsym) real_dlsym = GetNativeSymbolUnversioned(RTLD_DEFAULT, "dlsym");
+ 
+     if((uintptr_t)handle>=HOOKLIB && (uintptr_t)handle<HOOKLIB+hooked_size) {
+         uint32_t i = (uintptr_t)handle-HOOKLIB;
+diff --git a/src/os/os_linux.c b/src/os/os_linux.c
+index 12f1e9ced..79cc4a814 100644
+--- a/src/os/os_linux.c
++++ b/src/os/os_linux.c
+@@ -1,3 +1,4 @@
++/* OHOS_PATCH_RTLD_DEFAULT */
+ /* OHOS_PATCH_MALLOPT */
+ #define _GNU_SOURCE
+ #include <sys/syscall.h>
+@@ -177,7 +178,7 @@ void* InternalMmap(void* addr, unsigned long length, int prot, int flags, int fd
+     typedef void* (*pFpLiiiL_t)(void*, unsigned long, int, int, int, size_t);
+     static pFpLiiiL_t libc_mmap64 = NULL;
+     if (grab) {
+-        libc_mmap64 = dlsym(RTLD_NEXT, "mmap64");
++        libc_mmap64 = dlsym(RTLD_DEFAULT, "mmap64");
+     }
+     void* ret = libc_mmap64(addr, length, prot, flags, fd, offset);
+ #endif
+@@ -193,7 +194,7 @@ int InternalMunmap(void* addr, unsigned long length)
+     typedef int (*iFpL_t)(void*, unsigned long);
+     static iFpL_t libc_munmap = NULL;
+     if (grab) {
+-        libc_munmap = dlsym(RTLD_NEXT, "munmap");
++        libc_munmap = dlsym(RTLD_DEFAULT, "munmap");
+     }
+     int ret = libc_munmap(addr, length);
+ #endif
+diff --git a/src/wrapped/wrappedlibdl.c b/src/wrapped/wrappedlibdl.c
+index 950d72ef0..a2a5ea392 100644
+--- a/src/wrapped/wrappedlibdl.c
++++ b/src/wrapped/wrappedlibdl.c
+@@ -1,3 +1,4 @@
++/* OHOS_PATCH_RTLD_DEFAULT */
+ /* OHOS_PATCH_DLINFO_CONSTS */
+ #ifndef RTLD_DL_LINKMAP
+ #define RTLD_DL_LINKMAP 2
+@@ -372,7 +373,7 @@ void* my_dlsym_internal(x64emu_t* emu, void *handle, void *symbol, int version,
+         return NULL;
+     }
+     if(handle==(void*)~0LL) {
+-        // special case, look globably after self in the lm chain (RTLD_NEXT)
++        // special case, look globably after self in the lm chain (RTLD_DEFAULT)
+         uintptr_t ret_addr = 0;
+         #ifdef BOX32
+         if(box64_is32bits)

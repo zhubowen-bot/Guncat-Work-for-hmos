@@ -1,0 +1,218 @@
+diff --git a/src/wrapped32/wrappedlibc.c b/src/wrapped32/wrappedlibc.c
+index 2d656e2ec..0f859c934 100755
+--- a/src/wrapped32/wrappedlibc.c
++++ b/src/wrapped32/wrappedlibc.c
+@@ -1,3 +1,15 @@
++/* OHOS_PATCH_BOX32_ALLOC_LOW4GB */
++#ifndef BOX64_OHOS_BOX32_ALLOC_GUARD
++#define BOX64_OHOS_BOX32_ALLOC_GUARD 1
++#include <string.h>
++extern void*  box32_malloc(size_t);
++extern void*  box32_calloc(size_t, size_t);
++extern void*  box32_realloc(void*, size_t);
++extern void   box32_free(void*);
++extern void*  box32_memalign(size_t, size_t);
++extern char*  box32_strdup(const char*);
++extern size_t box32_malloc_usable_size(void*);
++#endif
+ /* OHOS_PATCH_WRAPPEDLIBC32 */
+ #ifndef _GNU_SOURCE
+ #define _GNU_SOURCE
+@@ -3269,8 +3281,10 @@ EXPORT long my32_prlimit64(void* pid, uint32_t res, void* new_rlim, void* old_rl
+ #endif
+ EXPORT void* my32_reallocarray(void* ptr, size_t nmemb, size_t size)
+ {
+-    return realloc(ptr, nmemb*size);
++    /* OHOS_PATCH_BOX32_ALLOC_LOW4GB */
++    return box32_realloc(ptr, nmemb * size);
+ }
++
+ #if 0
+ #ifndef __OPEN_NEEDS_MODE
+ # define __OPEN_NEEDS_MODE(oflag) \
+@@ -3417,9 +3431,13 @@ EXPORT long my32_ftell(x64emu_t* emu, FILE* f)
+ // wrapped malloc using calloc, it seems x86 malloc set alloc'd block to zero somehow
+ EXPORT void* my32_malloc(unsigned long size)
+ {
+-    return calloc(1, size);
++    /* OHOS_PATCH_BOX32_ALLOC_LOW4GB: route to low-4GB heap */
++    void* p = box32_malloc((size_t)size);
++    if(p) memset(p, 0, (size_t)size);
++    return p;
+ }
+ 
++
+ struct sysinfo_32 {
+ 	long_t uptime;
+ 	ulong_t loads[3];
+@@ -3781,3 +3799,76 @@ void libc32_net_init();
+     my32_stderr = to_ptrv(my__IO_2_1_stderr_);
+ 
+ #include "wrappedlib_init32.h"
++
++
++/* ============================================================
++ * OHOS_PATCH_BOX32_ALLOC_LOW4GB extras
++ * 给 free/calloc/realloc/memalign/posix_memalign/strdup/strndup/
++ * valloc/malloc_usable_size 提供 my32_ 代理, 全部走 box32 低 4GB heap.
++ * ============================================================ */
++
++EXPORT void my32_free(void* p)
++{
++    box32_free(p);
++}
++
++EXPORT void* my32_calloc(size_t nmemb, size_t size)
++{
++    return box32_calloc(nmemb, size);
++}
++
++EXPORT void* my32_realloc(void* p, size_t size)
++{
++    return box32_realloc(p, size);
++}
++
++EXPORT void* my32_memalign(size_t align, size_t size)
++{
++    return box32_memalign(align, size);
++}
++
++EXPORT int my32_posix_memalign(void** memptr, size_t align, size_t size)
++{
++    if(!memptr) return 22 /* EINVAL */;
++    void* p = box32_memalign(align, size);
++    if(!p) { *memptr = NULL; return 12 /* ENOMEM */; }
++    *memptr = p;
++    return 0;
++}
++
++EXPORT void* my32_valloc(size_t size)
++{
++    /* page-aligned, in low-4GB heap */
++    return box32_memalign(4096, size);
++}
++
++EXPORT char* my32_strdup(const char* s)
++{
++    return box32_strdup(s);
++}
++
++EXPORT char* my32___strdup(const char* s)
++{
++    return box32_strdup(s);
++}
++
++EXPORT char* my32_strndup(const char* s, size_t n)
++{
++    if(!s) return NULL;
++    size_t len = 0;
++    while(len < n && s[len]) ++len;
++    char* p = (char*)box32_malloc(len + 1);
++    if(p) { memcpy(p, s, len); p[len] = 0; }
++    return p;
++}
++
++EXPORT char* my32___strndup(const char* s, size_t n)
++{
++    return my32_strndup(s, n);
++}
++
++EXPORT size_t my32_malloc_usable_size(void* p)
++{
++    return box32_malloc_usable_size(p);
++}
++/* OHOS_PATCH_BOX32_ALLOC_LOW4GB END */
+diff --git a/src/wrapped32/wrappedlibc_private.h b/src/wrapped32/wrappedlibc_private.h
+index a6c4f3b6a..ee22b4fa8 100755
+--- a/src/wrapped32/wrappedlibc_private.h
++++ b/src/wrapped32/wrappedlibc_private.h
+@@ -1,3 +1,4 @@
++/* OHOS_PATCH_BOX32_ALLOC_LOW4GB */
+ #if !(defined(GO) && defined(GOM) && defined(GO2) && defined(DATA) && defined(GOS))
+ #error Meh...
+ #endif
+@@ -118,7 +119,7 @@ GOM(bsearch, pEEppLLp) //%%
+ GOW(btowc, uEi)
+ GOW(bzero, vEpL)
+ GO(__bzero, vEpL)
+-GOW(calloc, pELL)
++GOWM(calloc, pELL)  //%%,noE
+ // callrpc
+ //GOW(canonicalize_file_name, pEp)
+ GO(capget, iFpp)
+@@ -398,7 +399,7 @@ GO(__fread_chk, uEpLLLS)
+ //GO(__freading, iEp)
+ GO(fread_unlocked, LEpLLS)
+ //GO(__fread_unlocked_chk, uEpuuup)
+-GO(free, vEp)
++GOM(free, vEp)  //%%,noE
+ GOM(freeaddrinfo, vEEp)
+ //DATAV(__free_hook, 4)
+ GO(freeifaddrs, vEp)
+@@ -1100,7 +1101,7 @@ GOM(malloc, pEL)            //%%,noE
+ // malloc_set_state // Weak
+ // malloc_stats // Weak
+ GOW(malloc_trim, iEL)
+-GOW(malloc_usable_size, LEp)
++GOWM(malloc_usable_size, LEp)  //%%,noE
+ GOW(mallopt, iEii)  // Weak
+ // mallwatch    // type B
+ //GO(mblen, iEpL)
+@@ -1122,7 +1123,7 @@ GO(mbtowc, iEppL)
+ // _mcleanup
+ //GOWM(mcount, vEpp)   //%%,noE
+ // _mcount
+-GOW(memalign, pELL)
++GOWM(memalign, pELL)  //%%,noE
+ //DATAV(__memalign_hook, 4)
+ GOW(memccpy, pEppiL)
+ GO(memchr, pEpiL)
+@@ -1285,7 +1286,7 @@ GO(posix_fadvise64, iEiIIi)
+ GO(posix_fallocate, iEill)
+ GO(posix_fallocate64, iEiII)
+ GO(posix_madvise, iEpLi)
+-GOW(posix_memalign, iEBp_LL)
++GOWM(posix_memalign, iEBp_LL)  //%%,noE
+ // posix_openpt // Weak
+ GOM(posix_spawn, iEEpppppp) //%%
+ GO(posix_spawnattr_destroy, iFp)
+@@ -1397,7 +1398,7 @@ GOM(readlinkat, iEEippL)
+ // __readlinkat_chk
+ // __readlink_chk
+ GOM(readv, lEEipi)
+-GO(realloc, pEpL)
++GOM(realloc, pEpL)  //%%,noE
+ //DATAV(__realloc_hook, 4)
+ GOM(realpath, pEEpp) //%%
+ GO2(__realpath_chk, pEEppi, my32_realpath)
+@@ -1691,8 +1692,8 @@ GO(strcspn, LEpp)
+ // __strcspn_c1
+ // __strcspn_c2
+ // __strcspn_c3
+-GOW(strdup, pEp)
+-GO(__strdup, pEp)
++GOWM(strdup, pEp)  //%%,noE
++GOM(__strdup, pEp)  //%%,noE
+ GO(strerror, tEi)
+ GO(strerror_l, pEia)
+ GO(__strerror_r, tEipL)
+@@ -1715,8 +1716,8 @@ GO(__strncat_chk, pEppLL)
+ GO(strncmp, iEppL)
+ GO(strncpy, pEppL)
+ GO(__strncpy_chk, pEppLL)
+-GOW(strndup, pEpL)
+-GO(__strndup, pEpL)
++GOWM(strndup, pEpL)  //%%,noE
++GOM(__strndup, pEpL)  //%%,noE
+ GO(strnlen, LEpL)
+ GO(strpbrk, pEpp)
+ // __strpbrk_c2
+@@ -1935,7 +1936,7 @@ GOM(utimensat, iEippi)  //%noE
+ GOWM(utimes, iEEpp)
+ //GOW(utmpname, iEp)
+ // utmpxname
+-GOW(valloc, pEL)
++GOWM(valloc, pEL)  //%%,noE
+ GOM(vasprintf, iEEppp) //%%
+ GOM(__vasprintf_chk, iEEpipp) //%%
+ // vdprintf // Weak

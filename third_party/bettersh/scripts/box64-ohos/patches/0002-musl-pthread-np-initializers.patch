@@ -1,0 +1,16 @@
+diff --git a/src/libtools/signals.c b/src/libtools/signals.c
+index 4d21a70a8..61c9035b9 100644
+--- a/src/libtools/signals.c
++++ b/src/libtools/signals.c
+@@ -1,3 +1,11 @@
++/* OHOS_PATCH_PTHREAD_NP */
++#include <pthread.h>
++#ifndef PTHREAD_ERRORCHECK_MUTEX_INITIALIZER_NP
++#define PTHREAD_ERRORCHECK_MUTEX_INITIALIZER_NP PTHREAD_MUTEX_INITIALIZER
++#endif
++#ifndef PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
++#define PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP PTHREAD_MUTEX_INITIALIZER
++#endif
+ #define _GNU_SOURCE
+ #include <stdlib.h>
+ #include <stdio.h>

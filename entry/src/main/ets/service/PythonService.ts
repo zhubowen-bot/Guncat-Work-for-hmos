@@ -1,13 +1,13 @@
-// PythonService: 原生 CPython 工具(run_python) + shell 跨域桥(npy)的执行后端。
+// PythonService: 原生 CPython 工具(run_python)的执行后端。
 //
 // 设计要点:
 //   * 解释器是**应用进程内的真 CPython**(libpython3.12.so, 由 libguncatpy.so 动态加载),
-//     不经过 QEMU 仿真 —— 同一段脚本比 VM 里的 python3 快 2~3 个数量级。
+//     不经过虚拟机 —— 同一段脚本比外部进程快 2~3 个数量级。
 //   * 工作目录固定为**会话工作区**, 与 shell / read_file / write_file 看到的是同一批文件
 //     (原生侧直接走 POSIX 文件 API, 不存在"两套目录"的问题)。
 //   * 没有 shell: subprocess 只能直接 exec 单个程序; multiprocessing 只有 fork 上下文可用
 //     (spawn/forkserver 要重新 exec 解释器, 原生侧会明确抛错), Queue/Pool 要 /dev/shm。
-//     需要调 Unix 工具请用 shell 工具(或 VM 内的 `npy` 桥反过来调原生 Python)。
+//     需要调 Unix 工具请用 shell 工具。
 //   * 原生侧全局串行(解释器有 GIL, 且只有一个实例), 这里再用 promise 链排队, 保证不并发进解释器。
 //     超时未回收的任务没结束前, 原生侧会直接拒绝新调用(不排队), 任务结束后自动恢复。
 import { common, bundleManager } from '@kit.AbilityKit';
@@ -29,6 +29,8 @@ const TAG: string = 'PythonService';
 const RAW_ZIP: string = 'python/python312.zip';
 const RAW_SITE: string = 'python/site-packages.zip';
 const RAW_EXTRAS: string = 'python/extras.zip';
+// XlsxWriter 单独一个 zip：文档里承诺过，但之前的 extras 里没有。
+const RAW_XLSX: string = 'python/xlsxwriter.zip';
 const RAW_CERT: string = 'python/cacert.pem';
 // 中文字体: 思源黑体 SC(GB2312 子集, OFL-1.1), 让 matplotlib/Pillow 能直接画中文
 const RAW_FONT: string = 'python/fonts/SourceHanSansSC-Regular.otf';
@@ -58,17 +60,20 @@ export class PythonService {
     return context.filesDir + '/' + PY_RUNTIME_DIR;
   }
 
-  private static pythonHome(context: common.UIAbilityContext): string {
+  /** 解释器的 PYTHONHOME（shell 里起同一个解释器时要用，见 IecShellService） */
+  static pythonHome(context: common.UIAbilityContext): string {
     return PythonService.runtimeDir(context);
   }
 
-  private static pythonPath(context: common.UIAbilityContext): string {
+  /** 解释器的 PYTHONPATH（标准库 zip + 三方纯 Python 包 + extras） */
+  static pythonPath(context: common.UIAbilityContext): string {
     // 只给标准库 zip; C 扩展模块在应用的 lib 目录里(native 侧用 dladdr 自动并进 PYTHONPATH),
     // 因为设备上只有 lib 目录下的 .so 允许 dlopen。
     let stdlib: string = PythonService.runtimeDir(context) + '/' + PY_STDLIB_SUBDIR;
-    // 标准库 zip + 纯 Python 三方库 zip + extras(numpy/pandas 的 .py 部分)
+    // 标准库 zip + 纯 Python 三方库 zip + extras(numpy/pandas 的 .py 部分) + XlsxWriter
     // 注意顺序: extras 必须在应用 lib 目录之前 —— 那边只放 .so, 包本体要在这里先被找到
-    return stdlib + '/python312.zip' + ':' + stdlib + '/site-packages.zip' + ':' + stdlib + '/extras';
+    return stdlib + '/python312.zip' + ':' + stdlib + '/site-packages.zip' + ':' +
+      stdlib + '/extras' + ':' + stdlib + '/xlsxwriter.zip';
   }
 
   /** 首次调用时把 libpython 依赖的标准库/扩展模块释放到沙箱 */
@@ -106,6 +111,12 @@ export class PythonService {
         RawAsset.extract(context, RAW_SITE, stdlib + '/site-packages.zip');
       } catch (e) {
         hilog.warn(DOMAIN, TAG, 'extract site-packages failed: %{public}s', (e as Error).message);
+      }
+      // XlsxWriter(文档曾提到但实际没随包): 单独一个 zip, 直接挂在 PYTHONPATH 上。
+      try {
+        RawAsset.extract(context, RAW_XLSX, stdlib + '/xlsxwriter.zip');
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, 'extract xlsxwriter failed: %{public}s', (e as Error).message);
       }
       // numpy/pandas/PIL/matplotlib/scipy 的纯 Python 部分。
       // **必须解压成真实目录, 不能只把 zip 放那儿**: docx/pptx 的模板、pandas 的数据文件都用
@@ -178,7 +189,7 @@ export class PythonService {
   }
 
   /**
-   * 直接执行一段 Python(不做工具层包装), 供 npy 桥与 run_python 共用。
+   * 直接执行一段 Python(不做工具层包装), 供 run_python 使用。
    * cwdRel 为工作区相对路径(空串表示工作区根); argv 会变成 sys.argv。
    */
   static async exec(context: common.UIAbilityContext, convId: string, code: string,

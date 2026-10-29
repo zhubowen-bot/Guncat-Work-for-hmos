@@ -1,0 +1,18 @@
+diff --git a/src/libtools/threads.c b/src/libtools/threads.c
+index 2737c9bde..0e72b8c3f 100644
+--- a/src/libtools/threads.c
++++ b/src/libtools/threads.c
+@@ -1,3 +1,4 @@
++/* OHOS_PATCH_PTHREAD_CLEANUP */
+ // __USE_UNIX98 is needed for sttype / gettype definition
+ #define __USE_UNIX98
+ #define _GNU_SOURCE
+@@ -47,8 +48,6 @@ typedef struct emuthread_s emuthread_t;
+ static vFppp_t real_pthread_cleanup_push_defer = NULL;
+ static vFpi_t real_pthread_cleanup_pop_restore = NULL;
+ static iFppip_t real_pthread_cond_clockwait = NULL;
+-void _pthread_cleanup_push(void* buffer, void* routine, void* arg);	// declare hidden functions
+-void _pthread_cleanup_pop(void* buffer, int exec);
+ // with glibc 2.34+, pthread_kill changed behaviour and might break some program, so using old version if possible
+ // it will be pthread_kill@GLIBC_2.17 on aarch64, but it's GLIBC_2.2.5 on x86_64
+ static iFli_t real_phtread_kill_old = NULL;

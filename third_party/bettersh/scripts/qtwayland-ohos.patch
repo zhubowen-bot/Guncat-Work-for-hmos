@@ -1,0 +1,50 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 60cec50b..cc38a2eb 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -18,7 +18,9 @@ find_package(Qt6 ${PROJECT_VERSION} CONFIG REQUIRED COMPONENTS
+ )
+ qt_internal_project_setup()
+ 
+-if(NOT MACOS AND NOT QNX AND (ANDROID OR NOT LINUX))
++# waymony/OHOS: LINUX 变量在 OHOS 工具链下为假，原条件会误跳过 qtwayland。
++# 只对 ANDROID 跳过（Wayland 客户端在 Android 无意义）；Linux/macOS/QNX/OHOS 放行。
++if(ANDROID)
+     message(NOTICE "Skipping the build as the condition \"LINUX OR MACOS OR QNX\" is not met.")
+     return()
+ endif()
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 2617e865..aaa9d618 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -25,6 +25,13 @@ endforeach()
+ 
+ qt_find_package(Wayland 1.15 PROVIDED_TARGETS ${wayland_libs})
+ 
++# [DBG-waymony] 临时诊断
++message(STATUS "DBG Wayland_FOUND=${Wayland_FOUND} VER=${Wayland_VERSION}")
++foreach(_dbl IN LISTS wayland_libs)
++    string(REPLACE "::" "_" _dv "${_dbl}")
++    message(STATUS "DBG ${_dbl}: LIB=${${_dv}_LIBRARY} INC=${${_dv}_INCLUDE_DIR} VER=${${_dv}_VERSION} FOUND=${${_dv}_FOUND}")
++endforeach()
++
+ if (NOT WaylandScanner_FOUND OR NOT Wayland_FOUND)
+     message(WARNING "QtWayland is missing required dependencies, nothing will be built. \
+ Although this could be considered an error, the configuration will still pass as coin (Qt's \
+@@ -41,11 +48,14 @@ if (QT_FEATURE_wayland_server)
+     add_subdirectory(compositor)
+ endif()
+ 
+-if (QT_FEATURE_wayland_client)
++# waymony/OHOS: qtbase 的 QT_FEATURE_wayland_client 在 OHOS 下评估为 OFF
++# （Wayland 查找在 summary-only 记录阶段被跳过），但 qtwayland 自己的
++# Wayland_FOUND 已为 TRUE。此处以 Wayland_FOUND 兜底放行 client 构建。
++if (QT_FEATURE_wayland_client OR Wayland_FOUND)
+     add_subdirectory(client)
+ endif()
+ 
+-if (QT_FEATURE_wayland_server OR QT_FEATURE_wayland_client)
++if (QT_FEATURE_wayland_server OR QT_FEATURE_wayland_client OR Wayland_FOUND)
+     add_subdirectory(hardwareintegration)
+     add_subdirectory(plugins)
+     add_subdirectory(imports)

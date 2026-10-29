@@ -1,0 +1,125 @@
+--- a/src/wrapped/wrappedlibc.c
++++ b/src/wrapped/wrappedlibc.c
+@@ -1819,6 +1819,16 @@
+ extern int     bsh_fs_faccessat(int dirfd, const char* path, int mode, int flags);
+ extern DIR*    bsh_fs_opendir(const char* path);
+ extern struct dirent* bsh_fs_readdir(DIR* dirp);
++/* OHOS_PATCH_SHIM_TTY —— tty 语义（isatty/termios/winsize）实现在 shim/tty_shim.c，
++ * 同样以 -DBSH_SHIM_BOX64 编进 libbox64.so（入口前缀 bsh_tty_）；状态在主进程那一侧，
++ * 经 BSH_CTRL_SOCK 的 unix socket RPC 取（procmgr/bsh_client.c 一起编进来）。
++ * 为什么需要：我们的会话终端是 socketpair，宿主看 isatty 恒 0、TCGETS 必失败。 */
++extern int bsh_tty_isatty(int fd);
++extern int bsh_tty_ioctl(int fd, int req, ...);
++extern int bsh_tty_fcntl(int fd, int cmd, ...);
++extern int bsh_tty_tcgetattr(int fd, struct termios* t);
++extern int bsh_tty_tcsetattr(int fd, int when, const struct termios* t);
++extern int bsh_tty_maybe_open(const char* path);   /* >=0 我处理了；-2 不归我管 */
+ 
+ EXPORT int my_stat(x64emu_t *emu, void* filename, void* buf)
+ {
+@@ -2367,6 +2377,9 @@
+ #define TMP_CPUCACHE_SIZE "box64_cpucachesize"
+ EXPORT int32_t my_open(x64emu_t* emu, void* pathname, int32_t flags, uint32_t mode)
+ {
++    /* OHOS_PATCH_SHIM_TTY：/dev/tty 这条特例先问 tty shim（没有控制终端时它返回 -2，
++     * 照旧落下去由宿主报 ENXIO —— 与内核语义一致） */
++    { int _tfd = bsh_tty_maybe_open((const char*)pathname); if (_tfd != -2) return _tfd; }
+     /* OHOS_PATCH_PATH_REMAP_V3 */
+     char _remap_buf_open[PATH_MAX], _shim_buf_open[PATH_MAX];
+     pathname = (void*)box64_remap_path((const char*)pathname, _remap_buf_open, sizeof(_remap_buf_open));
+@@ -2515,6 +2528,8 @@
+ 
+ EXPORT int32_t my_open64(x64emu_t* emu, void* pathname, int32_t flags, uint32_t mode)
+ {
++    /* OHOS_PATCH_SHIM_TTY：同 my_open —— /dev/tty 先问 tty shim */
++    { int _tfd = bsh_tty_maybe_open((const char*)pathname); if (_tfd != -2) return _tfd; }
+     /* OHOS_PATCH_PATH_REMAP */
+     char _remap_buf[PATH_MAX], _shim_buf[PATH_MAX];
+     pathname = (void*)box64_remap_path((const char*)pathname, _remap_buf, sizeof(_remap_buf));
+@@ -3444,7 +3459,9 @@
+         return ret;
+     }
+     #endif
+-    int ret = fcntl(a, b, c);
++    /* OHOS_PATCH_SHIM_TTY：走 shim 的 fcntl（它只多做一件事：F_DUPFD 复制 tty fd 时
++     * 把副本也登记成 tty，好让 isatty(副本) 仍为真；其余命令原样转发宿主 fcntl） */
++    int ret = bsh_tty_fcntl(a, b, c);
+     if(b==F_GETFL && ret!=-1)
+         ret = of_unconvert(ret);
+ 
+@@ -5129,6 +5146,8 @@
+ EXPORT int my_openat(x64emu_t* emu, int dirfd, void* path, int flags, mode_t mode)
+ {
+     (void)emu;
++    /* OHOS_PATCH_SHIM_TTY：静态 guest 的 openat 也走这里，/dev/tty 一并先问 tty shim */
++    { int _tfd = bsh_tty_maybe_open((const char*)path); if (_tfd != -2) return _tfd; }
+     char buf[PATH_MAX], shim[PATH_MAX];
+     path = (void*)box64_remap_path((const char*)path, buf, sizeof(buf));
+     /* OHOS_PATCH_SHIM_FS：x64syscall 的 openat（静态 guest 的 fopen 走这里）也得展开软链，
+@@ -5235,6 +5254,41 @@
+     (void)emu;
+     return bsh_fs_symlinkat((const char*)target, newdirfd, (const char*)linkpath);
+ }
++
++/* ── OHOS_PATCH_SHIM_TTY ────────────────────────────────────────────────────
++ * 会话终端是 socketpair（procmgr 那边才是真终端状态），所以宿主这一侧：isatty 恒 0、
++ * TCGETS/TIOCGWINSZ 必失败 —— vim/fflush 那一类"是不是终端"的判断全走错分支。
++ * 这五个入口交给 shim/tty_shim.c：一张"哪些 fd 是会话 tty"的表（由 procmgr 设的
++ * BSH_TTY_STDIO 播种）+ 向 procmgr 要 termios/winsize（bsh_client.c 的 RPC）。
++ * 表项在 wrappedlibc_private.h 里从 GO/GOW 改成 GOM，把 emu 传进来。 */
++EXPORT int my_isatty(x64emu_t* emu, int fd)
++{
++    (void)emu;
++    return bsh_tty_isatty(fd);
++}
++
++EXPORT int my_tcgetattr(x64emu_t* emu, int fd, struct termios* t)
++{
++    (void)emu;
++    return bsh_tty_tcgetattr(fd, t);
++}
++
++EXPORT int my_tcsetattr(x64emu_t* emu, int fd, int when, const struct termios* t)
++{
++    (void)emu;
++    return bsh_tty_tcsetattr(fd, when, t);
++}
++
++#ifndef PPC64LE
++/* aarch64 上原本没有 my_ioctl（上游那份被 #ifdef PPC64LE 包着，只管做 PPC 的 _IOC
++ * 位域转换），ioctl 是直通宿主的。这里补一个：先问 tty shim（winsize/前台组/termios
++ * 这些"会话状态"请求），其余原样落宿主。 */
++EXPORT int my_ioctl(x64emu_t* emu, int fd, unsigned long req, void* arg)
++{
++    (void)emu;
++    return bsh_tty_ioctl(fd, (int)req, arg);
++}
++#endif
+ /* OHOS_PATCH_PATH_REMAP_V2 END */
+ 
+ /* OHOS_PATCH_LOG_GATE — log gate helper (appended at EOF, used by my_mmap64) */
+--- a/src/wrapped/wrappedlibc_private.h
++++ b/src/wrapped/wrappedlibc_private.h
+@@ -1003,7 +1003,7 @@
+ GO(isascii, iFi)
+ //GOW(__isascii_l, 
+ //GO(isastream, 
+-GOW(isatty, iFi)
++GOM(isatty, iFEi)
+ GO(isblank, iFi)
+ //GO(__isblank_l, 
+ GOW(isblank_l, iFip)
+@@ -2205,11 +2205,11 @@
+ GOW(tcdrain, iFi)
+ GO(tcflow, iFii)
+ GO(tcflush, iFii)
+-GOW(tcgetattr, iFip)
++GOM(tcgetattr, iFEip)
+ GO(tcgetpgrp, iFi)
+ GO(tcgetsid, iFi)
+ GO(tcsendbreak, iFii)
+-GO(tcsetattr, iFiip)
++GOM(tcsetattr, iFEiip)
+ GO(tcsetpgrp, iFii)
+ //GO(__tdelete, 
+ GOWM(tdelete, pFEppp)

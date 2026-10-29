@@ -1,0 +1,13 @@
+diff --git a/src/include/box32.h b/src/include/box32.h
+index 22e5f4f82..e7eb5477c 100644
+--- a/src/include/box32.h
++++ b/src/include/box32.h
+@@ -12,7 +12,7 @@ typedef uint32_t ulong_t;
+ #endif
+ 
+ #define TEST32
+-#define TEST_ABORT
++/* OHOS_PATCH_BOX32_NO_ABORT: was #define TEST_ABORT */
+ 
+ static inline uintptr_t from_ptr(ptr_t p) {
+     return (uintptr_t)p;

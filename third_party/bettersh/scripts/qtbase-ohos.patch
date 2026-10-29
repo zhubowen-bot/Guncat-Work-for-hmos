@@ -1,0 +1,2314 @@
+diff --git a/src/corelib/animation/qabstractanimation.h b/src/corelib/animation/qabstractanimation.h
+index b4b43e64a1d..c48d170abab 100644
+--- a/src/corelib/animation/qabstractanimation.h
++++ b/src/corelib/animation/qabstractanimation.h
+@@ -90,7 +90,7 @@ public Q_SLOTS:
+     void stop();
+     void setCurrentTime(int msecs);
+ 
+-protected:
++public:
+     QAbstractAnimation(QAbstractAnimationPrivate &dd, QObject *parent = nullptr);
+     bool event(QEvent *event) override;
+ 
+@@ -126,7 +126,7 @@ Q_SIGNALS:
+     void started();
+     void stopped();
+ 
+-protected:
++public:
+     void advanceAnimation();
+     virtual void start();
+     virtual void stop();
+diff --git a/src/corelib/animation/qanimationgroup.h b/src/corelib/animation/qanimationgroup.h
+index 07d24ae1f73..3e29616179d 100644
+--- a/src/corelib/animation/qanimationgroup.h
++++ b/src/corelib/animation/qanimationgroup.h
+@@ -29,7 +29,7 @@ public:
+     QAbstractAnimation *takeAnimation(int index);
+     void clear();
+ 
+-protected:
++public:
+     QAnimationGroup(QAnimationGroupPrivate &dd, QObject *parent);
+     bool event(QEvent *event) override;
+ 
+diff --git a/src/corelib/animation/qparallelanimationgroup.h b/src/corelib/animation/qparallelanimationgroup.h
+index 9442f4f7355..7852c0bf007 100644
+--- a/src/corelib/animation/qparallelanimationgroup.h
++++ b/src/corelib/animation/qparallelanimationgroup.h
+@@ -22,7 +22,7 @@ public:
+ 
+     int duration() const override;
+ 
+-protected:
++public:
+     QParallelAnimationGroup(QParallelAnimationGroupPrivate &dd, QObject *parent);
+     bool event(QEvent *event) override;
+ 
+diff --git a/src/corelib/animation/qpauseanimation.h b/src/corelib/animation/qpauseanimation.h
+index bf7863a171c..6ca9766dfc7 100644
+--- a/src/corelib/animation/qpauseanimation.h
++++ b/src/corelib/animation/qpauseanimation.h
+@@ -26,7 +26,7 @@ public:
+     void setDuration(int msecs);
+     QBindable<int> bindableDuration();
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+     void updateCurrentTime(int) override;
+ 
+diff --git a/src/corelib/animation/qpropertyanimation.h b/src/corelib/animation/qpropertyanimation.h
+index 590a6ddaf15..f009d3c4546 100644
+--- a/src/corelib/animation/qpropertyanimation.h
++++ b/src/corelib/animation/qpropertyanimation.h
+@@ -33,7 +33,7 @@ public:
+     void setPropertyName(const QByteArray &propertyName);
+     QBindable<QByteArray> bindablePropertyName();
+ 
+-protected:
++public:
+     bool event(QEvent *event) override;
+     void updateCurrentValue(const QVariant &value) override;
+     void updateState(QAbstractAnimation::State newState, QAbstractAnimation::State oldState) override;
+diff --git a/src/corelib/animation/qsequentialanimationgroup.h b/src/corelib/animation/qsequentialanimationgroup.h
+index b7f9c1b17a1..2943fdbb227 100644
+--- a/src/corelib/animation/qsequentialanimationgroup.h
++++ b/src/corelib/animation/qsequentialanimationgroup.h
+@@ -34,7 +34,7 @@ public:
+ Q_SIGNALS:
+     void currentAnimationChanged(QAbstractAnimation *current);
+ 
+-protected:
++public:
+     QSequentialAnimationGroup(QSequentialAnimationGroupPrivate &dd, QObject *parent);
+     bool event(QEvent *event) override;
+ 
+diff --git a/src/corelib/animation/qvariantanimation.h b/src/corelib/animation/qvariantanimation.h
+index 172ee0d6090..a1dc0c4c08a 100644
+--- a/src/corelib/animation/qvariantanimation.h
++++ b/src/corelib/animation/qvariantanimation.h
+@@ -60,7 +60,7 @@ public:
+ Q_SIGNALS:
+     void valueChanged(const QVariant &value);
+ 
+-protected:
++public:
+     QVariantAnimation(QVariantAnimationPrivate &dd, QObject *parent = nullptr);
+     bool event(QEvent *event) override;
+ 
+diff --git a/src/corelib/global/qnativeinterface.h b/src/corelib/global/qnativeinterface.h
+index 9bcf2ae3bf7..0461ec99537 100644
+--- a/src/corelib/global/qnativeinterface.h
++++ b/src/corelib/global/qnativeinterface.h
+@@ -14,8 +14,9 @@ QT_BEGIN_NAMESPACE
+ // ensures that the typeinfo of the class is exported.
+ // By being protected, we also ensure that pointers to
+ // the interface can't be deleted.
++// waymony/PyQt6: Qt 6.12 析构为 protected，PyQt6 6.11 绑定需 delete → 放宽为 public
+ #define QT_DECLARE_NATIVE_INTERFACE_3(NativeInterface, Revision, BaseType) \
+-    protected: \
++    public: \
+         virtual ~NativeInterface(); \
+         \
+         struct TypeInfo { \
+diff --git a/src/corelib/global/qoperatingsystemversion.h b/src/corelib/global/qoperatingsystemversion.h
+index aaf0ab09d07..8987efd380b 100644
+--- a/src/corelib/global/qoperatingsystemversion.h
++++ b/src/corelib/global/qoperatingsystemversion.h
+@@ -87,7 +87,7 @@ public:
+     constexpr OSType type() const { return m_os; }
+     inline QString name() const { return name(*this); }
+ 
+-protected:
++public:
+     static Q_CORE_EXPORT int compare(QOperatingSystemVersionBase v1,
+                                      QOperatingSystemVersionBase v2) noexcept;
+ 
+diff --git a/src/corelib/io/qbuffer.h b/src/corelib/io/qbuffer.h
+index f4adfcee37e..47c25e7bab4 100644
+--- a/src/corelib/io/qbuffer.h
++++ b/src/corelib/io/qbuffer.h
+@@ -49,7 +49,7 @@ public:
+     bool atEnd() const override;
+     bool canReadLine() const override;
+ 
+-protected:
++public:
+ #ifndef QT_NO_QOBJECT
+     void connectNotify(const QMetaMethod &) override;
+     void disconnectNotify(const QMetaMethod &) override;
+diff --git a/src/corelib/io/qfiledevice.h b/src/corelib/io/qfiledevice.h
+index 4d51fa50d7e..16aefbedf45 100644
+--- a/src/corelib/io/qfiledevice.h
++++ b/src/corelib/io/qfiledevice.h
+@@ -143,7 +143,7 @@ public:
+     QDateTime fileTime(QFileDevice::FileTime time) const;
+     bool setFileTime(const QDateTime &newDate, QFileDevice::FileTime fileTime);
+ 
+-protected:
++public:
+     QFileDevice();
+ #ifdef QT_NO_QOBJECT
+     QFileDevice(QFileDevicePrivate &dd);
+diff --git a/src/corelib/io/qiodevice.h b/src/corelib/io/qiodevice.h
+index 263214ff012..bf78000c115 100644
+--- a/src/corelib/io/qiodevice.h
++++ b/src/corelib/io/qiodevice.h
+@@ -124,7 +124,7 @@ Q_SIGNALS:
+     void readChannelFinished();
+ #endif
+ 
+-protected:
++public:
+ #ifdef QT_NO_QOBJECT
+     QIODevice(QIODevicePrivate &dd);
+ #else
+diff --git a/src/corelib/io/qprocess.h b/src/corelib/io/qprocess.h
+index 3e634cab05f..07b9ade0e78 100644
+--- a/src/corelib/io/qprocess.h
++++ b/src/corelib/io/qprocess.h
+@@ -259,7 +259,7 @@ Q_SIGNALS:
+     void readyReadStandardOutput(QPrivateSignal);
+     void readyReadStandardError(QPrivateSignal);
+ 
+-protected:
++public:
+     void setProcessState(ProcessState state);
+ 
+     // QIODevice
+diff --git a/src/corelib/io/qresource.h b/src/corelib/io/qresource.h
+index 6b464de4f32..9c30aa4de21 100644
+--- a/src/corelib/io/qresource.h
++++ b/src/corelib/io/qresource.h
+@@ -51,14 +51,14 @@ public:
+     static bool registerResource(const uchar *rccData, const QString &resourceRoot=QString());
+     static bool unregisterResource(const uchar *rccData, const QString &resourceRoot=QString());
+ 
+-protected:
++public:
+     friend class QResourceFileEngine;
+     friend class QResourceFileEngineIterator;
+     bool isDir() const;
+     inline bool isFile() const { return !isDir(); }
+     QStringList children() const;
+ 
+-protected:
++public:
+     QScopedPointer<QResourcePrivate> d_ptr;
+ 
+ private:
+diff --git a/src/corelib/io/qsavefile.h b/src/corelib/io/qsavefile.h
+index f9346fb7eea..65acc5b03f4 100644
+--- a/src/corelib/io/qsavefile.h
++++ b/src/corelib/io/qsavefile.h
+@@ -62,7 +62,7 @@ public:
+     }
+ #endif // QT_CONFIG(cxx17_filesystem)
+ 
+-protected:
++public:
+     qint64 writeData(const char *data, qint64 len) override;
+ 
+ private:
+diff --git a/src/corelib/io/qsettings.h b/src/corelib/io/qsettings.h
+index 973ce2cee4b..eb5f3065698 100644
+--- a/src/corelib/io/qsettings.h
++++ b/src/corelib/io/qsettings.h
+@@ -175,7 +175,7 @@ public:
+     static Format registerFormat(const QString &extension, ReadFunc readFunc, WriteFunc writeFunc,
+                                  Qt::CaseSensitivity caseSensitivity = Qt::CaseSensitive);
+ 
+-protected:
++public:
+ #ifndef QT_NO_QOBJECT
+     bool event(QEvent *event) override;
+ #endif
+diff --git a/src/corelib/io/qtemporaryfile.h b/src/corelib/io/qtemporaryfile.h
+index 330d97b58d0..590c751a07f 100644
+--- a/src/corelib/io/qtemporaryfile.h
++++ b/src/corelib/io/qtemporaryfile.h
+@@ -90,7 +90,7 @@ public:
+     }
+ #endif // QT_CONFIG(cxx17_filesystem)
+ 
+-protected:
++public:
+     bool open(OpenMode flags) override;
+ 
+ private:
+diff --git a/src/corelib/itemmodels/qabstractitemmodel.h b/src/corelib/itemmodels/qabstractitemmodel.h
+index 6f95837c020..518348ffd3d 100644
+--- a/src/corelib/itemmodels/qabstractitemmodel.h
++++ b/src/corelib/itemmodels/qabstractitemmodel.h
+@@ -387,10 +387,10 @@ public Q_SLOTS:
+     virtual bool submit();
+     virtual void revert();
+ 
+-protected Q_SLOTS:
++public Q_SLOTS:
+     virtual void resetInternalData();
+ 
+-protected:
++public:
+     QAbstractItemModel(QAbstractItemModelPrivate &dd, QObject *parent = nullptr);
+ 
+     inline QModelIndex createIndex(int row, int column, const void *data = nullptr) const;
+@@ -470,7 +470,7 @@ public:
+ 
+     using QObject::parent;
+ 
+-protected:
++public:
+     QAbstractTableModel(QAbstractItemModelPrivate &dd, QObject *parent);
+ 
+ private:
+@@ -497,7 +497,7 @@ public:
+ 
+     using QObject::parent;
+ 
+-protected:
++public:
+     QAbstractListModel(QAbstractItemModelPrivate &dd, QObject *parent);
+ 
+ private:
+diff --git a/src/corelib/itemmodels/qidentityproxymodel.h b/src/corelib/itemmodels/qidentityproxymodel.h
+index 3520d6c5c28..1af1101ca0e 100644
+--- a/src/corelib/itemmodels/qidentityproxymodel.h
++++ b/src/corelib/itemmodels/qidentityproxymodel.h
+@@ -47,7 +47,7 @@ public:
+     bool handleSourceLayoutChanges() const;
+     bool handleSourceDataChanges() const;
+ 
+-protected:
++public:
+     QIdentityProxyModel(QIdentityProxyModelPrivate &dd, QObject* parent);
+     void setHandleSourceLayoutChanges(bool);
+     void setHandleSourceDataChanges(bool);
+diff --git a/src/corelib/itemmodels/qitemselectionmodel.h b/src/corelib/itemmodels/qitemselectionmodel.h
+index 230bc47f8fd..5ef23cdff50 100644
+--- a/src/corelib/itemmodels/qitemselectionmodel.h
++++ b/src/corelib/itemmodels/qitemselectionmodel.h
+@@ -164,7 +164,7 @@ Q_SIGNALS:
+     void currentColumnChanged(const QModelIndex &current, const QModelIndex &previous);
+     void modelChanged(QAbstractItemModel *model);
+ 
+-protected:
++public:
+     QItemSelectionModel(QItemSelectionModelPrivate &dd, QAbstractItemModel *model);
+     void emitSelectionChanged(const QItemSelection &newSelection, const QItemSelection &oldSelection);
+ 
+diff --git a/src/corelib/itemmodels/qrangemodel.h b/src/corelib/itemmodels/qrangemodel.h
+index fd69487af3f..703f24fff5b 100644
+--- a/src/corelib/itemmodels/qrangemodel.h
++++ b/src/corelib/itemmodels/qrangemodel.h
+@@ -192,10 +192,10 @@ Q_SIGNALS:
+     Q_REVISION(6, 12) void supportedDragActionsChanged(Qt::DropActions actions);
+     Q_REVISION(6, 12) void supportedDropActionsChanged(Qt::DropActions actions);
+ 
+-protected Q_SLOTS:
++public Q_SLOTS:
+     void resetInternalData() override;
+ 
+-protected:
++public:
+     bool event(QEvent *) override;
+     bool eventFilter(QObject *, QEvent *) override;
+ 
+diff --git a/src/corelib/itemmodels/qsortfilterproxymodel.h b/src/corelib/itemmodels/qsortfilterproxymodel.h
+index f96b8d553fe..b7c32ed8ae8 100644
+--- a/src/corelib/itemmodels/qsortfilterproxymodel.h
++++ b/src/corelib/itemmodels/qsortfilterproxymodel.h
+@@ -124,7 +124,7 @@ public Q_SLOTS:
+     void setFilterFixedString(const QString &pattern);
+     void invalidate();
+ 
+-protected:
++public:
+     virtual bool filterAcceptsRow(int source_row, const QModelIndex &source_parent) const;
+     virtual bool filterAcceptsColumn(int source_column, const QModelIndex &source_parent) const;
+     virtual bool lessThan(const QModelIndex &source_left, const QModelIndex &source_right) const;
+diff --git a/src/corelib/kernel/qcoreapplication.h b/src/corelib/kernel/qcoreapplication.h
+index 6a5d1d010a5..fcef459336c 100644
+--- a/src/corelib/kernel/qcoreapplication.h
++++ b/src/corelib/kernel/qcoreapplication.h
+@@ -208,7 +208,7 @@ Q_SIGNALS:
+     void applicationNameChanged();
+     void applicationVersionChanged();
+ 
+-protected:
++public:
+     bool event(QEvent *) override;
+ 
+ #  if QT_VERSION < QT_VERSION_CHECK(7, 0, 0)
+@@ -217,7 +217,7 @@ protected:
+ #  endif
+ #endif // QT_NO_QOBJECT
+ 
+-protected:
++public:
+     QCoreApplication(QCoreApplicationPrivate &p);
+ 
+ #ifdef QT_NO_QOBJECT
+diff --git a/src/corelib/kernel/qmimedata.h b/src/corelib/kernel/qmimedata.h
+index c3bab6dd182..8e6e0385a30 100644
+--- a/src/corelib/kernel/qmimedata.h
++++ b/src/corelib/kernel/qmimedata.h
+@@ -49,7 +49,7 @@ public:
+ 
+     void clear();
+ 
+-protected:
++public:
+     virtual QVariant retrieveData(const QString &mimetype, QMetaType preferredType) const;
+ 
+ private:
+diff --git a/src/corelib/kernel/qobject.h b/src/corelib/kernel/qobject.h
+index f8a866f8093..27c570e6189 100644
+--- a/src/corelib/kernel/qobject.h
++++ b/src/corelib/kernel/qobject.h
+@@ -363,7 +363,7 @@ public:
+ public Q_SLOTS:
+     void deleteLater();
+ 
+-protected:
++public:
+     QObject *sender() const;
+     int senderSignalIndex() const;
+     int receivers(const char *signal) const;
+@@ -376,10 +376,10 @@ protected:
+     virtual void connectNotify(const QMetaMethod &signal);
+     virtual void disconnectNotify(const QMetaMethod &signal);
+ 
+-protected:
++public:
+     QObject(QObjectPrivate &dd, QObject *parent = nullptr);
+ 
+-protected:
++public:
+     QScopedPointer<QObjectData> d_ptr;
+ 
+     friend struct QMetaObject;
+diff --git a/src/corelib/kernel/qsocketnotifier.h b/src/corelib/kernel/qsocketnotifier.h
+index d80b123c026..129b9119a75 100644
+--- a/src/corelib/kernel/qsocketnotifier.h
++++ b/src/corelib/kernel/qsocketnotifier.h
+@@ -52,7 +52,7 @@ Q_SIGNALS:
+     QT_MOC_COMPAT void activated(int socket, QPrivateSignal);
+ #endif
+ 
+-protected:
++public:
+     bool event(QEvent *) override;
+ 
+ private:
+diff --git a/src/corelib/kernel/qtimer.h b/src/corelib/kernel/qtimer.h
+index c8879fede7f..34737ab87be 100644
+--- a/src/corelib/kernel/qtimer.h
++++ b/src/corelib/kernel/qtimer.h
+@@ -145,7 +145,7 @@ public:
+ 
+     void start(std::chrono::milliseconds value);
+ 
+-protected:
++public:
+     void timerEvent(QTimerEvent *) override;
+ 
+ private:
+diff --git a/src/corelib/text/qstringconverter_base.h b/src/corelib/text/qstringconverter_base.h
+index 86730540587..6bfca0955ac 100644
+--- a/src/corelib/text/qstringconverter_base.h
++++ b/src/corelib/text/qstringconverter_base.h
+@@ -87,7 +87,7 @@ public:
+     };
+ 
+ #if QT_VERSION < QT_VERSION_CHECK(7, 0, 0) && !defined(Q_QDOC) && !defined(QT_BOOTSTRAPPED)
+-protected:
++public:
+     QStringConverterBase() = default;
+     ~QStringConverterBase() = default;
+     QStringConverterBase(QStringConverterBase &&) = default;
+@@ -114,8 +114,7 @@ public:
+         LastEncoding = System
+     };
+ 
+-protected:
+-
++public:
+     struct Interface
+     {
+         using DecoderFn = QChar * (*)(QChar *out, QByteArrayView in, State *state);
+@@ -186,7 +185,7 @@ public:
+         Error error;
+     };
+ 
+-protected:
++public:
+     const Interface *iface;
+     State state;
+ private:
+diff --git a/src/corelib/thread/qthread.h b/src/corelib/thread/qthread.h
+index 6e4e532fd7d..b52ae3b72aa 100644
+--- a/src/corelib/thread/qthread.h
++++ b/src/corelib/thread/qthread.h
+@@ -109,13 +109,13 @@ Q_SIGNALS:
+     void started(QPrivateSignal);
+     void finished(QPrivateSignal);
+ 
+-protected:
++public:
+     virtual void run();
+     int exec();
+ 
+     static void setTerminationEnabled(bool enabled = true);
+ 
+-protected:
++public:
+     QThread(QThreadPrivate &dd, QObject *parent = nullptr);
+ 
+ private:
+diff --git a/src/corelib/tools/qtimeline.h b/src/corelib/tools/qtimeline.h
+index 59b06d0fb41..ccffcedc58e 100644
+--- a/src/corelib/tools/qtimeline.h
++++ b/src/corelib/tools/qtimeline.h
+@@ -91,7 +91,7 @@ Q_SIGNALS:
+     void stateChanged(QTimeLine::State newState, QPrivateSignal);
+     void finished(QPrivateSignal);
+ 
+-protected:
++public:
+     void timerEvent(QTimerEvent *event) override;
+ 
+ private:
+diff --git a/src/gui/configure.cmake b/src/gui/configure.cmake
+index 1df630e8555..b7430f42bc0 100644
+--- a/src/gui/configure.cmake
++++ b/src/gui/configure.cmake
+@@ -1548,7 +1548,7 @@ qt_feature_definition("undogroup" "QT_NO_UNDOGROUP" NEGATE VALUE "1")
+ qt_feature("wayland" PUBLIC
+     SECTION "Platform plugins"
+     LABEL "Wayland"
+-    CONDITION TARGET Wayland::Client AND NOT QNX
++    CONDITION NOT QNX AND NOT ANDROID  # waymony/OHOS: feature 提取阶段无 Wayland target
+ )
+ qt_feature("waylandscanner" PUBLIC
+     SECTION "Wayland Scanner tool"
+diff --git a/src/gui/image/qpicture.h b/src/gui/image/qpicture.h
+index 1cc9b8155af..5fac2d803c9 100644
+--- a/src/gui/image/qpicture.h
++++ b/src/gui/image/qpicture.h
+@@ -53,7 +53,7 @@ public:
+ 
+     QPaintEngine *paintEngine() const override;
+ 
+-protected:
++public:
+     QPicture(QPicturePrivate &data);
+ 
+     int metric(PaintDeviceMetric m) const override;
+diff --git a/src/gui/image/qpixmap.h b/src/gui/image/qpixmap.h
+index c9d23099d7b..c0b15c7aab6 100644
+--- a/src/gui/image/qpixmap.h
++++ b/src/gui/image/qpixmap.h
+@@ -119,7 +119,7 @@ public:
+ 
+     inline bool operator!() const { return isNull(); }
+ 
+-protected:
++public:
+     int metric(PaintDeviceMetric) const override;
+     static QPixmap fromImageInPlace(QImage &image, Qt::ImageConversionFlags flags = Qt::AutoColor);
+ 
+diff --git a/src/gui/itemmodels/qfilesystemmodel.h b/src/gui/itemmodels/qfilesystemmodel.h
+index 07970ee5006..642e80c21c0 100644
+--- a/src/gui/itemmodels/qfilesystemmodel.h
++++ b/src/gui/itemmodels/qfilesystemmodel.h
+@@ -134,7 +134,7 @@ public:
+     QFileInfo fileInfo(const QModelIndex &index) const;
+     bool remove(const QModelIndex &index);
+ 
+-protected:
++public:
+     QFileSystemModel(QFileSystemModelPrivate &, QObject *parent = nullptr);
+     void timerEvent(QTimerEvent *event) override;
+     bool event(QEvent *event) override;
+diff --git a/src/gui/itemmodels/qstandarditemmodel.h b/src/gui/itemmodels/qstandarditemmodel.h
+index 3eeffdd6c7f..ff3936ce30c 100644
+--- a/src/gui/itemmodels/qstandarditemmodel.h
++++ b/src/gui/itemmodels/qstandarditemmodel.h
+@@ -199,7 +199,7 @@ public:
+ #endif
+     virtual bool operator<(const QStandardItem &other) const;
+ 
+-protected:
++public:
+     QStandardItem(const QStandardItem &other);
+     QStandardItem(QStandardItemPrivate &dd);
+     QStandardItem &operator=(const QStandardItem &other);
+@@ -378,7 +378,7 @@ public:
+ Q_SIGNALS:
+     void itemChanged(QStandardItem *item);
+ 
+-protected:
++public:
+     QStandardItemModel(QStandardItemModelPrivate &dd, QObject *parent = nullptr);
+ 
+ private:
+diff --git a/src/gui/kernel/qaccessibilityhints.h b/src/gui/kernel/qaccessibilityhints.h
+index d6e221f8679..30b8ffc1649 100644
+--- a/src/gui/kernel/qaccessibilityhints.h
++++ b/src/gui/kernel/qaccessibilityhints.h
+@@ -30,7 +30,7 @@ Q_SIGNALS:
+     void contrastPreferenceChanged(Qt::ContrastPreference contrastPreference);
+     void motionPreferenceChanged(Qt::MotionPreference motionPreference);
+ 
+-protected:
++public:
+     bool event(QEvent *event) override;
+ };
+ 
+diff --git a/src/gui/kernel/qaction.h b/src/gui/kernel/qaction.h
+index 8cc52efd318..8efcb572fc2 100644
+--- a/src/gui/kernel/qaction.h
++++ b/src/gui/kernel/qaction.h
+@@ -203,7 +203,7 @@ public:
+ 
+     bool showStatusText(QObject *object = nullptr);
+ 
+-protected:
++public:
+     bool event(QEvent *) override;
+     QAction(QActionPrivate &dd, QObject *parent);
+ 
+diff --git a/src/gui/kernel/qguiapplication.h b/src/gui/kernel/qguiapplication.h
+index 2ebf6ae5794..902c9616e7c 100644
+--- a/src/gui/kernel/qguiapplication.h
++++ b/src/gui/kernel/qguiapplication.h
+@@ -162,7 +162,7 @@ Q_SIGNALS:
+     QT_DEPRECATED_VERSION_X_6_0("Handle QEvent::ApplicationPaletteChange instead") void paletteChanged(const QPalette &pal);
+     QT_DEPRECATED_VERSION_X_6_0("Handle QEvent::ApplicationFontChange instead")  void fontChanged(const QFont &font);
+ #endif
+-protected:
++public:
+     bool event(QEvent *) override;
+ #  if QT_VERSION < QT_VERSION_CHECK(7, 0, 0)
+     QT_DEPRECATED_VERSION_X_6_10("This feature will be removed in Qt 7")
+diff --git a/src/gui/kernel/qpaintdevicewindow.h b/src/gui/kernel/qpaintdevicewindow.h
+index 397e22a25d8..a3ad5d937ca 100644
+--- a/src/gui/kernel/qpaintdevicewindow.h
++++ b/src/gui/kernel/qpaintdevicewindow.h
+@@ -30,7 +30,7 @@ public:
+ public Q_SLOTS:
+     void update();
+ 
+-protected:
++public:
+     void exposeEvent(QExposeEvent *) override;
+     void paintEvent(QPaintEvent *event) override;
+ 
+diff --git a/src/gui/kernel/qrasterwindow.h b/src/gui/kernel/qrasterwindow.h
+index 9db666a30eb..072be26f54b 100644
+--- a/src/gui/kernel/qrasterwindow.h
++++ b/src/gui/kernel/qrasterwindow.h
+@@ -21,7 +21,7 @@ public:
+     explicit QRasterWindow(QWindow *parent = nullptr);
+     ~QRasterWindow();
+ 
+-protected:
++public:
+     int metric(PaintDeviceMetric metric) const override;
+     QPaintDevice *redirected(QPoint *) const override;
+     void resizeEvent(QResizeEvent *event) override;
+diff --git a/src/gui/kernel/qshortcut.h b/src/gui/kernel/qshortcut.h
+index 3c8d01ead70..3c8619a39ef 100644
+--- a/src/gui/kernel/qshortcut.h
++++ b/src/gui/kernel/qshortcut.h
+@@ -194,7 +194,7 @@ Q_SIGNALS:
+     void activated();
+     void activatedAmbiguously();
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+ };
+ 
+diff --git a/src/gui/kernel/qwindow.h b/src/gui/kernel/qwindow.h
+index e910caa3416..068c544d267 100644
+--- a/src/gui/kernel/qwindow.h
++++ b/src/gui/kernel/qwindow.h
+@@ -327,7 +327,7 @@ Q_SIGNALS:
+ 
+     Q_REVISION(2, 13) void transientParentChanged(QWindow *transientParent);
+ 
+-protected:
++public:
+     virtual void exposeEvent(QExposeEvent *);
+     virtual void resizeEvent(QResizeEvent *);
+     virtual void paintEvent(QPaintEvent *);
+diff --git a/src/gui/painting/qpaintdevice.h b/src/gui/painting/qpaintdevice.h
+index 46c569838ec..f2c1206a617 100644
+--- a/src/gui/painting/qpaintdevice.h
++++ b/src/gui/painting/qpaintdevice.h
+@@ -56,7 +56,7 @@ public:
+ 
+     static inline qreal devicePixelRatioFScale() { return 0x10000; }
+     static inline int encodeMetricF(PaintDeviceMetric metric, double value);
+-protected:
++public:
+     QPaintDevice() noexcept;
+     virtual int metric(PaintDeviceMetric metric) const;
+     virtual void initPainter(QPainter *painter) const;
+diff --git a/src/gui/painting/qpdfwriter.h b/src/gui/painting/qpdfwriter.h
+index 170744e50fb..46cdfc27d60 100644
+--- a/src/gui/painting/qpdfwriter.h
++++ b/src/gui/painting/qpdfwriter.h
+@@ -68,7 +68,7 @@ public:
+     QPdfOutputIntent outputIntent() const;
+     void setOutputIntent(const QPdfOutputIntent &intent);
+ 
+-protected:
++public:
+     QPaintEngine *paintEngine() const override;
+     int metric(PaintDeviceMetric id) const override;
+ 
+diff --git a/src/gui/text/qabstracttextdocumentlayout.h b/src/gui/text/qabstracttextdocumentlayout.h
+index dfafb1098fe..c18f0602058 100644
+--- a/src/gui/text/qabstracttextdocumentlayout.h
++++ b/src/gui/text/qabstracttextdocumentlayout.h
+@@ -74,7 +74,7 @@ Q_SIGNALS:
+     void documentSizeChanged(const QSizeF &newSize);
+     void pageCountChanged(int newPages);
+ 
+-protected:
++public:
+     QAbstractTextDocumentLayout(QAbstractTextDocumentLayoutPrivate &, QTextDocument *);
+ 
+     virtual void documentChanged(int from, int charsRemoved, int charsAdded) = 0;
+diff --git a/src/gui/text/qsyntaxhighlighter.h b/src/gui/text/qsyntaxhighlighter.h
+index 3ce0e60e153..90a6750c4ba 100644
+--- a/src/gui/text/qsyntaxhighlighter.h
++++ b/src/gui/text/qsyntaxhighlighter.h
+@@ -37,7 +37,7 @@ public Q_SLOTS:
+     void rehighlight();
+     void rehighlightBlock(const QTextBlock &block);
+ 
+-protected:
++public:
+     virtual void highlightBlock(const QString &text) = 0;
+ 
+     void setFormat(int start, int count, const QTextCharFormat &format);
+diff --git a/src/gui/text/qtextdocument.h b/src/gui/text/qtextdocument.h
+index 11a8abcb505..f6a161345f2 100644
+--- a/src/gui/text/qtextdocument.h
++++ b/src/gui/text/qtextdocument.h
+@@ -287,7 +287,7 @@ public Q_SLOTS:
+     void appendUndoItem(QAbstractUndoItem *);
+     void setModified(bool m = true);
+ 
+-protected:
++public:
+     virtual QTextObject *createObject(const QTextFormat &f);
+     Q_INVOKABLE virtual QVariant loadResource(int type, const QUrl &name);
+ 
+diff --git a/src/gui/text/qtextobject.h b/src/gui/text/qtextobject.h
+index 875886f825d..47cd1ad3bea 100644
+--- a/src/gui/text/qtextobject.h
++++ b/src/gui/text/qtextobject.h
+@@ -25,7 +25,7 @@ class Q_GUI_EXPORT QTextObject : public QObject
+ {
+     Q_OBJECT
+ 
+-protected:
++public:
+     explicit QTextObject(QTextDocument *doc);
+     ~QTextObject();
+ 
+@@ -39,7 +39,7 @@ public:
+ 
+     int objectIndex() const;
+ 
+-protected:
++public:
+     QTextObject(QTextObjectPrivate &p, QTextDocument *doc);
+ 
+ private:
+@@ -53,7 +53,7 @@ class Q_GUI_EXPORT QTextBlockGroup : public QTextObject
+ {
+     Q_OBJECT
+ 
+-protected:
++public:
+     explicit QTextBlockGroup(QTextDocument *doc);
+     ~QTextBlockGroup();
+ 
+@@ -63,7 +63,7 @@ protected:
+ 
+     QList<QTextBlock> blockList() const;
+ 
+-protected:
++public:
+     QTextBlockGroup(QTextBlockGroupPrivate &p, QTextDocument *doc);
+ private:
+     Q_DECLARE_PRIVATE(QTextBlockGroup)
+@@ -136,7 +136,7 @@ public:
+     iterator begin() const;
+     iterator end() const;
+ 
+-protected:
++public:
+     QTextFrame(QTextFramePrivate &p, QTextDocument *doc);
+ private:
+     friend class QTextDocumentPrivate;
+diff --git a/src/plugins/platforms/wayland/CMakeLists.txt b/src/plugins/platforms/wayland/CMakeLists.txt
+index debce9ad801..828c9df6f1f 100644
+--- a/src/plugins/platforms/wayland/CMakeLists.txt
++++ b/src/plugins/platforms/wayland/CMakeLists.txt
+@@ -20,6 +20,14 @@ qt_internal_add_module(WaylandGlobalPrivate
+ # special case begin
+ # TODO: Ideally these macros would be part of the qtwaylandscanner tool, and not the compositor/client
+ include(../../../../src/tools/qtwaylandscanner/Qt6WaylandClientMacros.cmake)
++# waymony/OHOS: 交叉构建不注入 host 的 Qt6WaylandScannerTools 包（Qt 明确不支持
++# find_package(Qt6FooTools)），手动创建 host qtwaylandscanner 的 IMPORTED target
++# （scanner 是 host 工具，生成协议 C 代码后由交叉编译器编译）。
++if(NOT TARGET Qt6::qtwaylandscanner AND NOT "${QT_HOST_PATH}" STREQUAL "")
++    add_executable(Qt6::qtwaylandscanner IMPORTED)
++    set_target_properties(Qt6::qtwaylandscanner PROPERTIES
++        IMPORTED_LOCATION "${QT_HOST_PATH}/libexec/qtwaylandscanner")
++endif()
+ # special case end
+ 
+ # special case end
+@@ -190,7 +198,7 @@ qt_internal_extend_target(WaylandClient CONDITION QT_FEATURE_clipboard
+         qwaylandclipboard.cpp qwaylandclipboard_p.h
+ )
+ 
+-qt_internal_extend_target(WaylandClient CONDITION QT_FEATURE_vulkan
++qt_internal_extend_target(WaylandClient CONDITION QT_FEATURE_vulkan AND NOT OHOS
+     SOURCES
+         qwaylandvulkaninstance.cpp qwaylandvulkaninstance_p.h
+         qwaylandvulkanwindow.cpp qwaylandvulkanwindow_p.h
+diff --git a/src/plugins/platforms/wayland/qwaylandintegration.cpp b/src/plugins/platforms/wayland/qwaylandintegration.cpp
+index 21b61735452..16302b28a88 100644
+--- a/src/plugins/platforms/wayland/qwaylandintegration.cpp
++++ b/src/plugins/platforms/wayland/qwaylandintegration.cpp
+@@ -69,7 +69,7 @@
+ #include <QtGui/private/qxkbcommon_p.h>
+ #endif
+ 
+-#if QT_CONFIG(vulkan)
++#if QT_CONFIG(vulkan) && !defined(Q_OS_OHOS)
+ #include "qwaylandvulkaninstance_p.h"
+ #include "qwaylandvulkanwindow_p.h"
+ #endif
+@@ -147,7 +147,7 @@ QPlatformWindow *QWaylandIntegration::createPlatformWindow(QWindow *window) cons
+         && mDisplay->clientBufferIntegration())
+         return mDisplay->clientBufferIntegration()->createEglWindow(window);
+ 
+-#if QT_CONFIG(vulkan)
++#if QT_CONFIG(vulkan) && !defined(Q_OS_OHOS)
+     if (window->surfaceType() == QSurface::VulkanSurface)
+         return new QWaylandVulkanWindow(window, mDisplay.get());
+ #endif // QT_CONFIG(vulkan)
+@@ -314,11 +314,19 @@ QWaylandCursor *QWaylandIntegration::createPlatformCursor(QWaylandDisplay *displ
+    return new QWaylandCursor(display);
+ }
+ 
+-#if QT_CONFIG(vulkan)
++#if QT_CONFIG(vulkan) && !defined(Q_OS_OHOS)
+ QPlatformVulkanInstance *QWaylandIntegration::createPlatformVulkanInstance(QVulkanInstance *instance) const
+ {
+     return new QWaylandVulkanInstance(instance);
+ }
++#elif QT_CONFIG(vulkan)
++/* waymony/OHOS: OHOS SDK 无 vulkan_wayland.h，vulkan 平台集成不可用；
++   虚函数仍需定义（vtable），返回 nullptr（QtGui 层会自行处理） */
++QPlatformVulkanInstance *QWaylandIntegration::createPlatformVulkanInstance(QVulkanInstance *instance) const
++{
++    Q_UNUSED(instance);
++    return nullptr;
++}
+ #endif // QT_CONFIG(vulkan)
+ 
+ // May be called from non-GUI threads
+diff --git a/src/plugins/platforms/wayland/qwaylandnativeinterface.cpp b/src/plugins/platforms/wayland/qwaylandnativeinterface.cpp
+index eb35394b25e..2b6b5812724 100644
+--- a/src/plugins/platforms/wayland/qwaylandnativeinterface.cpp
++++ b/src/plugins/platforms/wayland/qwaylandnativeinterface.cpp
+@@ -16,7 +16,7 @@
+ #include <QtGui/private/qguiapplication_p.h>
+ #include <QtGui/QScreen>
+ #include <QtWaylandClient/private/qwaylandclientbufferintegration_p.h>
+-#if QT_CONFIG(vulkan)
++#if QT_CONFIG(vulkan) && !defined(Q_OS_OHOS)
+ #include <QtWaylandClient/private/qwaylandvulkanwindow_p.h>
+ #endif
+ 
+@@ -157,7 +157,7 @@ void *QWaylandNativeInterface::nativeResourceForWindow(const QByteArray &resourc
+     if (lowerCaseResource == "egldisplay" && m_integration->clientBufferIntegration())
+         return m_integration->clientBufferIntegration()->nativeResource(QWaylandClientBufferIntegration::EglDisplay);
+ 
+-#if QT_CONFIG(vulkan)
++#if QT_CONFIG(vulkan) && !defined(Q_OS_OHOS)
+     if (lowerCaseResource == "vksurface") {
+         if (window->surfaceType() == QSurface::VulkanSurface && window->handle()) {
+             // return a pointer to the VkSurfaceKHR value, not the value itself
+diff --git a/src/widgets/dialogs/qcolordialog.h b/src/widgets/dialogs/qcolordialog.h
+index adef4c3abca..aea090670a8 100644
+--- a/src/widgets/dialogs/qcolordialog.h
++++ b/src/widgets/dialogs/qcolordialog.h
+@@ -68,7 +68,7 @@ Q_SIGNALS:
+     void currentColorChanged(const QColor &color);
+     void colorSelected(const QColor &color);
+ 
+-protected:
++public:
+     void changeEvent(QEvent *event) override;
+     void done(int result) override;
+ 
+diff --git a/src/widgets/dialogs/qdialog.h b/src/widgets/dialogs/qdialog.h
+index cca029fc355..60af10d3929 100644
+--- a/src/widgets/dialogs/qdialog.h
++++ b/src/widgets/dialogs/qdialog.h
+@@ -56,7 +56,7 @@ public Q_SLOTS:
+     virtual void accept();
+     virtual void reject();
+ 
+-protected:
++public:
+     QDialog(QDialogPrivate &, QWidget *parent, Qt::WindowFlags f = Qt::WindowFlags());
+ 
+     void keyPressEvent(QKeyEvent *) override;
+diff --git a/src/widgets/dialogs/qerrormessage.h b/src/widgets/dialogs/qerrormessage.h
+index 9c11e818371..3b14a2f9da3 100644
+--- a/src/widgets/dialogs/qerrormessage.h
++++ b/src/widgets/dialogs/qerrormessage.h
+@@ -29,7 +29,7 @@ public Q_SLOTS:
+     void showMessage(const QString &message);
+     void showMessage(const QString &message, const QString &type);
+ 
+-protected:
++public:
+     void done(int) override;
+     void changeEvent(QEvent *e) override;
+ 
+diff --git a/src/widgets/dialogs/qfiledialog.h b/src/widgets/dialogs/qfiledialog.h
+index 7a1cbd37bb3..3f0cf3e3d08 100644
+--- a/src/widgets/dialogs/qfiledialog.h
++++ b/src/widgets/dialogs/qfiledialog.h
+@@ -229,7 +229,7 @@ public:
+ #endif
+ 
+ 
+-protected:
++public:
+     QFileDialog(const QFileDialogArgs &args);
+     void done(int result) override;
+     void accept() override;
+diff --git a/src/widgets/dialogs/qfontdialog.h b/src/widgets/dialogs/qfontdialog.h
+index 63f07528589..6ecf6931903 100644
+--- a/src/widgets/dialogs/qfontdialog.h
++++ b/src/widgets/dialogs/qfontdialog.h
+@@ -64,7 +64,7 @@ Q_SIGNALS:
+     void currentFontChanged(const QFont &font);
+     void fontSelected(const QFont &font);
+ 
+-protected:
++public:
+     void changeEvent(QEvent *event) override;
+     void done(int result) override;
+     bool eventFilter(QObject *object, QEvent *event) override;
+diff --git a/src/widgets/dialogs/qmessagebox.h b/src/widgets/dialogs/qmessagebox.h
+index bc2b2590eff..1e769d634f8 100644
+--- a/src/widgets/dialogs/qmessagebox.h
++++ b/src/widgets/dialogs/qmessagebox.h
+@@ -299,7 +299,7 @@ public Q_SLOTS:
+     int exec() override;
+ #endif
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+     void resizeEvent(QResizeEvent *event) override;
+     void showEvent(QShowEvent *event) override;
+diff --git a/src/widgets/dialogs/qprogressdialog.h b/src/widgets/dialogs/qprogressdialog.h
+index 95fd6ef67f1..513def811b7 100644
+--- a/src/widgets/dialogs/qprogressdialog.h
++++ b/src/widgets/dialogs/qprogressdialog.h
+@@ -77,13 +77,13 @@ public Q_SLOTS:
+ Q_SIGNALS:
+     void canceled();
+ 
+-protected:
++public:
+     void resizeEvent(QResizeEvent *event) override;
+     void closeEvent(QCloseEvent *event) override;
+     void changeEvent(QEvent *event) override;
+     void showEvent(QShowEvent *event) override;
+ 
+-protected Q_SLOTS:
++public Q_SLOTS:
+     void forceShow();
+ 
+ private:
+diff --git a/src/widgets/dialogs/qwizard.h b/src/widgets/dialogs/qwizard.h
+index c0e329cad35..8263d2270b4 100644
+--- a/src/widgets/dialogs/qwizard.h
++++ b/src/widgets/dialogs/qwizard.h
+@@ -150,7 +150,7 @@ public Q_SLOTS:
+     void setCurrentId(int id);
+     void restart();
+ 
+-protected:
++public:
+     bool event(QEvent *event) override;
+     void resizeEvent(QResizeEvent *event) override;
+     void paintEvent(QPaintEvent *event) override;
+@@ -207,7 +207,7 @@ public:
+ Q_SIGNALS:
+     void completeChanged();
+ 
+-protected:
++public:
+     void setField(const QString &name, const QVariant &value);
+     QVariant field(const QString &name) const;
+     void registerField(const QString &name, QWidget *widget, const char *property = nullptr,
+diff --git a/src/widgets/effects/qgraphicseffect.h b/src/widgets/effects/qgraphicseffect.h
+index 828c1bca056..6625d59df38 100644
+--- a/src/widgets/effects/qgraphicseffect.h
++++ b/src/widgets/effects/qgraphicseffect.h
+@@ -59,7 +59,7 @@ public Q_SLOTS:
+ Q_SIGNALS:
+     void enabledChanged(bool enabled);
+ 
+-protected:
++public:
+     QGraphicsEffect(QGraphicsEffectPrivate &d, QObject *parent = nullptr);
+     virtual void draw(QPainter *painter) = 0;
+     virtual void sourceChanged(ChangeFlags flags);
+@@ -108,7 +108,7 @@ Q_SIGNALS:
+     void colorChanged(const QColor &color);
+     void strengthChanged(qreal strength);
+ 
+-protected:
++public:
+     void draw(QPainter *painter) override;
+ 
+ private:
+@@ -147,7 +147,7 @@ Q_SIGNALS:
+     void blurRadiusChanged(qreal blurRadius);
+     void blurHintsChanged(BlurHints hints);
+ 
+-protected:
++public:
+     void draw(QPainter *painter) override;
+ 
+ private:
+@@ -205,7 +205,7 @@ Q_SIGNALS:
+     void blurRadiusChanged(qreal blurRadius);
+     void colorChanged(const QColor &color);
+ 
+-protected:
++public:
+     void draw(QPainter *painter) override;
+ 
+ private:
+@@ -234,7 +234,7 @@ Q_SIGNALS:
+     void opacityChanged(qreal opacity);
+     void opacityMaskChanged(const QBrush &mask);
+ 
+-protected:
++public:
+     void draw(QPainter *painter) override;
+ 
+ private:
+diff --git a/src/widgets/graphicsview/qgraphicsanchorlayout.h b/src/widgets/graphicsview/qgraphicsanchorlayout.h
+index 18777874198..865ec167c1d 100644
+--- a/src/widgets/graphicsview/qgraphicsanchorlayout.h
++++ b/src/widgets/graphicsview/qgraphicsanchorlayout.h
+@@ -67,7 +67,7 @@ public:
+     QGraphicsLayoutItem *itemAt(int index) const override;
+ 
+     void invalidate() override;
+-protected:
++public:
+     QSizeF sizeHint(Qt::SizeHint which, const QSizeF &constraint = QSizeF()) const override;
+ 
+ private:
+diff --git a/src/widgets/graphicsview/qgraphicsitem.h b/src/widgets/graphicsview/qgraphicsitem.h
+index 5dd03213a83..affe47b1b8a 100644
+--- a/src/widgets/graphicsview/qgraphicsitem.h
++++ b/src/widgets/graphicsview/qgraphicsitem.h
+@@ -363,7 +363,7 @@ public:
+     void installSceneEventFilter(QGraphicsItem *filterItem);
+     void removeSceneEventFilter(QGraphicsItem *filterItem);
+ 
+-protected:
++public:
+     void updateMicroFocus();
+     virtual bool sceneEventFilter(QGraphicsItem *watched, QEvent *event);
+     virtual bool sceneEvent(QEvent *event);
+@@ -396,7 +396,7 @@ protected:
+     virtual void setExtension(Extension extension, const QVariant &variant);
+     virtual QVariant extension(const QVariant &variant) const;
+ 
+-protected:
++public:
+     QGraphicsItem(QGraphicsItemPrivate &dd, QGraphicsItem *parent);
+     QScopedPointer<QGraphicsItemPrivate> d_ptr;
+ 
+@@ -517,7 +517,7 @@ public:
+     void ungrabGesture(Qt::GestureType type);
+ #endif
+ 
+-protected Q_SLOTS:
++public Q_SLOTS:
+     void updateMicroFocus();
+ 
+ Q_SIGNALS:
+@@ -534,7 +534,7 @@ Q_SIGNALS:
+     void widthChanged();
+     void heightChanged();
+ 
+-protected:
++public:
+     QGraphicsObject(QGraphicsItemPrivate &dd, QGraphicsItem *parent);
+ 
+     bool event(QEvent *ev) override;
+@@ -561,7 +561,7 @@ public:
+     bool isObscuredBy(const QGraphicsItem *item) const override;
+     QPainterPath opaqueArea() const override;
+ 
+-protected:
++public:
+     QAbstractGraphicsShapeItem(QAbstractGraphicsShapeItemPrivate &dd,
+                                QGraphicsItem *parent);
+ 
+@@ -593,7 +593,7 @@ public:
+     enum { Type = 2 };
+     int type() const override;
+ 
+-protected:
++public:
+     bool supportsExtension(Extension extension) const override;
+     void setExtension(Extension extension, const QVariant &variant) override;
+     QVariant extension(const QVariant &variant) const override;
+@@ -628,7 +628,7 @@ public:
+     enum { Type = 3 };
+     int type() const override;
+ 
+-protected:
++public:
+     bool supportsExtension(Extension extension) const override;
+     void setExtension(Extension extension, const QVariant &variant) override;
+     QVariant extension(const QVariant &variant) const override;
+@@ -672,7 +672,7 @@ public:
+     enum { Type = 4 };
+     int type() const override;
+ 
+-protected:
++public:
+     bool supportsExtension(Extension extension) const override;
+     void setExtension(Extension extension, const QVariant &variant) override;
+     QVariant extension(const QVariant &variant) const override;
+@@ -712,7 +712,7 @@ public:
+     enum { Type = 5 };
+     int type() const override;
+ 
+-protected:
++public:
+     bool supportsExtension(Extension extension) const override;
+     void setExtension(Extension extension, const QVariant &variant) override;
+     QVariant extension(const QVariant &variant) const override;
+@@ -751,7 +751,7 @@ public:
+     enum { Type = 6 };
+     int type() const override;
+ 
+-protected:
++public:
+     bool supportsExtension(Extension extension) const override;
+     void setExtension(Extension extension, const QVariant &variant) override;
+     QVariant extension(const QVariant &variant) const override;
+@@ -800,7 +800,7 @@ public:
+     ShapeMode shapeMode() const;
+     void setShapeMode(ShapeMode mode);
+ 
+-protected:
++public:
+     bool supportsExtension(Extension extension) const override;
+     void setExtension(Extension extension, const QVariant &variant) override;
+     QVariant extension(const QVariant &variant) const override;
+@@ -875,7 +875,7 @@ Q_SIGNALS:
+     void linkActivated(const QString &);
+     void linkHovered(const QString &);
+ 
+-protected:
++public:
+     bool sceneEvent(QEvent *event) override;
+     void mousePressEvent(QGraphicsSceneMouseEvent *event) override;
+     void mouseMoveEvent(QGraphicsSceneMouseEvent *event) override;
+@@ -933,7 +933,7 @@ public:
+     enum { Type = 9 };
+     int type() const override;
+ 
+-protected:
++public:
+     bool supportsExtension(Extension extension) const override;
+     void setExtension(Extension extension, const QVariant &variant) override;
+     QVariant extension(const QVariant &variant) const override;
+diff --git a/src/widgets/graphicsview/qgraphicslayout.h b/src/widgets/graphicsview/qgraphicslayout.h
+index bc17477f4cc..208e9ee55d3 100644
+--- a/src/widgets/graphicsview/qgraphicslayout.h
++++ b/src/widgets/graphicsview/qgraphicslayout.h
+@@ -38,7 +38,7 @@ public:
+ 
+     static void setInstantInvalidatePropagation(bool enable);
+     static bool instantInvalidatePropagation();
+-protected:
++public:
+     QGraphicsLayout(QGraphicsLayoutPrivate &, QGraphicsLayoutItem *);
+     void addChildLayoutItem(QGraphicsLayoutItem *layoutItem);
+ 
+diff --git a/src/widgets/graphicsview/qgraphicslayoutitem.h b/src/widgets/graphicsview/qgraphicslayoutitem.h
+index 598aec1a561..e9762f6c896 100644
+--- a/src/widgets/graphicsview/qgraphicslayoutitem.h
++++ b/src/widgets/graphicsview/qgraphicslayoutitem.h
+@@ -67,7 +67,7 @@ public:
+     QGraphicsItem *graphicsItem() const;
+     bool ownedByLayout() const;
+ 
+-protected:
++public:
+     void setGraphicsItem(QGraphicsItem *item);
+     void setOwnedByLayout(bool ownedByLayout);
+     QGraphicsLayoutItem(QGraphicsLayoutItemPrivate &dd);
+diff --git a/src/widgets/graphicsview/qgraphicsproxywidget.h b/src/widgets/graphicsview/qgraphicsproxywidget.h
+index 8951290d912..2390e49a7da 100644
+--- a/src/widgets/graphicsview/qgraphicsproxywidget.h
++++ b/src/widgets/graphicsview/qgraphicsproxywidget.h
+@@ -37,7 +37,7 @@ public:
+ 
+     QGraphicsProxyWidget *createProxyForChildWidget(QWidget *child);
+ 
+-protected:
++public:
+     QVariant itemChange(GraphicsItemChange change, const QVariant &value) override;
+ 
+     bool event(QEvent *event) override;
+@@ -84,7 +84,7 @@ protected:
+     QSizeF sizeHint(Qt::SizeHint which, const QSizeF &constraint = QSizeF()) const override;
+     void resizeEvent(QGraphicsSceneResizeEvent *event) override;
+ 
+-protected Q_SLOTS:
++public Q_SLOTS:
+     QGraphicsProxyWidget *newProxyWidget(const QWidget *);
+ 
+ private:
+diff --git a/src/widgets/graphicsview/qgraphicsscene.h b/src/widgets/graphicsview/qgraphicsscene.h
+index 30ab24243a7..d4977a0cad2 100644
+--- a/src/widgets/graphicsview/qgraphicsscene.h
++++ b/src/widgets/graphicsview/qgraphicsscene.h
+@@ -205,7 +205,7 @@ public Q_SLOTS:
+     void clearSelection();
+     void clear();
+ 
+-protected:
++public:
+     bool event(QEvent *event) override;
+     bool eventFilter(QObject *watched, QEvent *event) override;
+     virtual void contextMenuEvent(QGraphicsSceneContextMenuEvent *event);
+@@ -232,7 +232,7 @@ protected:
+                            const QStyleOptionGraphicsItem options[],
+                            QWidget *widget = nullptr);
+ 
+-protected Q_SLOTS:
++public Q_SLOTS:
+     virtual bool focusNextPrevChild(bool next);
+ 
+ Q_SIGNALS:
+diff --git a/src/widgets/graphicsview/qgraphicstransform.h b/src/widgets/graphicsview/qgraphicstransform.h
+index ad159f9c65e..50d8572ede4 100644
+--- a/src/widgets/graphicsview/qgraphicstransform.h
++++ b/src/widgets/graphicsview/qgraphicstransform.h
+@@ -27,10 +27,10 @@ public:
+ 
+     virtual void applyTo(QMatrix4x4 *matrix) const = 0;
+ 
+-protected Q_SLOTS:
++public Q_SLOTS:
+     void update();
+ 
+-protected:
++public:
+     QGraphicsTransform(QGraphicsTransformPrivate &p, QObject *parent);
+ 
+ private:
+diff --git a/src/widgets/graphicsview/qgraphicsview.h b/src/widgets/graphicsview/qgraphicsview.h
+index 23d5cc7dc87..8dc23841fff 100644
+--- a/src/widgets/graphicsview/qgraphicsview.h
++++ b/src/widgets/graphicsview/qgraphicsview.h
+@@ -198,10 +198,10 @@ Q_SIGNALS:
+     void rubberBandChanged(QRect viewportRect, QPointF fromScenePoint, QPointF toScenePoint);
+ #endif
+ 
+-protected Q_SLOTS:
++public Q_SLOTS:
+     void setupViewport(QWidget *widget) override;
+ 
+-protected:
++public:
+     QGraphicsView(QGraphicsViewPrivate &, QWidget *parent = nullptr);
+     bool event(QEvent *event) override;
+     bool viewportEvent(QEvent *event) override;
+diff --git a/src/widgets/graphicsview/qgraphicswidget.h b/src/widgets/graphicsview/qgraphicswidget.h
+index 48dc3596df4..461fc9e8ae4 100644
+--- a/src/widgets/graphicsview/qgraphicswidget.h
++++ b/src/widgets/graphicsview/qgraphicswidget.h
+@@ -147,7 +147,7 @@ Q_SIGNALS:
+ public Q_SLOTS:
+     bool close();
+ 
+-protected:
++public:
+     virtual void initStyleOption(QStyleOption *option) const;
+ 
+     QSizeF sizeHint(Qt::SizeHint which, const QSizeF &constraint = QSizeF()) const override;
+diff --git a/src/widgets/itemviews/qabstractitemview.h b/src/widgets/itemviews/qabstractitemview.h
+index ce509dc9e98..fb9a826e3df 100644
+--- a/src/widgets/itemviews/qabstractitemview.h
++++ b/src/widgets/itemviews/qabstractitemview.h
+@@ -223,7 +223,7 @@ public Q_SLOTS:
+     void scrollToBottom();
+     void update(const QModelIndex &index);
+ 
+-protected Q_SLOTS:
++public Q_SLOTS:
+     virtual void dataChanged(const QModelIndex &topLeft, const QModelIndex &bottomRight,
+                              const QList<int> &roles = QList<int>());
+     virtual void rowsInserted(const QModelIndex &parent, int start, int end);
+@@ -252,7 +252,7 @@ Q_SIGNALS:
+ 
+     void iconSizeChanged(const QSize &size);
+ 
+-protected:
++public:
+     QAbstractItemView(QAbstractItemViewPrivate &, QWidget *parent = nullptr);
+ 
+     enum CursorAction { MoveUp, MoveDown, MoveLeft, MoveRight,
+diff --git a/src/widgets/itemviews/qcolumnview.h b/src/widgets/itemviews/qcolumnview.h
+index d06ee0f4ceb..c01a952784e 100644
+--- a/src/widgets/itemviews/qcolumnview.h
++++ b/src/widgets/itemviews/qcolumnview.h
+@@ -49,7 +49,7 @@ public:
+     void setColumnWidths(const QList<int> &list);
+     QList<int> columnWidths() const;
+ 
+-protected:
++public:
+     QColumnView(QColumnViewPrivate &dd, QWidget *parent = nullptr);
+ 
+     // QAbstractItemView overloads
+diff --git a/src/widgets/itemviews/qheaderview.h b/src/widgets/itemviews/qheaderview.h
+index 5ef1ad0b6fb..f54afe24fce 100644
+--- a/src/widgets/itemviews/qheaderview.h
++++ b/src/widgets/itemviews/qheaderview.h
+@@ -165,13 +165,13 @@ Q_SIGNALS:
+     void sortIndicatorChanged(int logicalIndex, Qt::SortOrder order);
+     void sortIndicatorClearableChanged(bool clearable);
+ 
+-protected Q_SLOTS:
++public Q_SLOTS:
+     void updateSection(int logicalIndex);
+     void resizeSections();
+     void sectionsInserted(const QModelIndex &parent, int logicalFirst, int logicalLast);
+     void sectionsAboutToBeRemoved(const QModelIndex &parent, int logicalFirst, int logicalLast);
+ 
+-protected:
++public:
+     QHeaderView(QHeaderViewPrivate &dd, Qt::Orientation orientation, QWidget *parent = nullptr);
+     void initialize();
+ 
+diff --git a/src/widgets/itemviews/qitemdelegate.h b/src/widgets/itemviews/qitemdelegate.h
+index 87458f71eb6..cdbaf9575fc 100644
+--- a/src/widgets/itemviews/qitemdelegate.h
++++ b/src/widgets/itemviews/qitemdelegate.h
+@@ -53,7 +53,7 @@ public:
+     QItemEditorFactory *itemEditorFactory() const;
+     void setItemEditorFactory(QItemEditorFactory *factory);
+ 
+-protected:
++public:
+     virtual void drawDisplay(QPainter *painter, const QStyleOptionViewItem &option,
+                              const QRect &rect, const QString &text) const;
+     virtual void drawDecoration(QPainter *painter, const QStyleOptionViewItem &option,
+diff --git a/src/widgets/itemviews/qlistview.h b/src/widgets/itemviews/qlistview.h
+index 89ecfc35ac5..fdf1ee49cb5 100644
+--- a/src/widgets/itemviews/qlistview.h
++++ b/src/widgets/itemviews/qlistview.h
+@@ -105,7 +105,7 @@ public:
+ Q_SIGNALS:
+     void indexesMoved(const QModelIndexList &indexes);
+ 
+-protected:
++public:
+     QListView(QListViewPrivate &, QWidget *parent = nullptr);
+ 
+     bool event(QEvent *e) override;
+diff --git a/src/widgets/itemviews/qlistwidget.h b/src/widgets/itemviews/qlistwidget.h
+index 72783492fad..f0bf74edeb3 100644
+--- a/src/widgets/itemviews/qlistwidget.h
++++ b/src/widgets/itemviews/qlistwidget.h
+@@ -229,7 +229,7 @@ public:
+     void setSupportedDragActions(Qt::DropActions actions);
+     Qt::DropActions supportedDragActions() const;
+ #endif
+-protected:
++public:
+ #if QT_CONFIG(draganddrop)
+     void dropEvent(QDropEvent *event) override;
+ #endif
+@@ -251,7 +251,7 @@ Q_SIGNALS:
+ 
+     void itemSelectionChanged();
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+     virtual QStringList mimeTypes() const;
+     virtual QMimeData *mimeData(const QList<QListWidgetItem *> &items) const;
+diff --git a/src/widgets/itemviews/qstyleditemdelegate.h b/src/widgets/itemviews/qstyleditemdelegate.h
+index e3b5b3893da..1fa95457615 100644
+--- a/src/widgets/itemviews/qstyleditemdelegate.h
++++ b/src/widgets/itemviews/qstyleditemdelegate.h
+@@ -52,7 +52,7 @@ public:
+ 
+     virtual QString displayText(const QVariant &value, const QLocale &locale) const;
+ 
+-protected:
++public:
+     virtual void initStyleOption(QStyleOptionViewItem *option,
+                                 const QModelIndex &index) const;
+ 
+diff --git a/src/widgets/itemviews/qtableview.h b/src/widgets/itemviews/qtableview.h
+index 63e065a0fb6..091571c1cfe 100644
+--- a/src/widgets/itemviews/qtableview.h
++++ b/src/widgets/itemviews/qtableview.h
+@@ -98,7 +98,7 @@ public Q_SLOTS:
+     void sortByColumn(int column, Qt::SortOrder order);
+     void setShowGrid(bool show);
+ 
+-protected Q_SLOTS:
++public Q_SLOTS:
+     void rowMoved(int row, int oldIndex, int newIndex);
+     void columnMoved(int column, int oldIndex, int newIndex);
+     void rowResized(int row, int oldHeight, int newHeight);
+@@ -106,7 +106,7 @@ protected Q_SLOTS:
+     void rowCountChanged(int oldCount, int newCount);
+     void columnCountChanged(int oldCount, int newCount);
+ 
+-protected:
++public:
+     QTableView(QTableViewPrivate &, QWidget *parent);
+     void scrollContentsBy(int dx, int dy) override;
+ 
+diff --git a/src/widgets/itemviews/qtablewidget.h b/src/widgets/itemviews/qtablewidget.h
+index 7cd0e818472..7a976fbe020 100644
+--- a/src/widgets/itemviews/qtablewidget.h
++++ b/src/widgets/itemviews/qtablewidget.h
+@@ -305,14 +305,14 @@ Q_SIGNALS:
+ 
+     void currentCellChanged(int currentRow, int currentColumn, int previousRow, int previousColumn);
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+     virtual QStringList mimeTypes() const;
+     virtual QMimeData *mimeData(const QList<QTableWidgetItem *> &items) const;
+     virtual bool dropMimeData(int row, int column, const QMimeData *data, Qt::DropAction action);
+     virtual Qt::DropActions supportedDropActions() const;
+ 
+-protected:
++public:
+ #if QT_CONFIG(draganddrop)
+     void dropEvent(QDropEvent *event) override;
+ #endif
+diff --git a/src/widgets/itemviews/qtreeview.h b/src/widgets/itemviews/qtreeview.h
+index eed842a0802..bd68eb7d57a 100644
+--- a/src/widgets/itemviews/qtreeview.h
++++ b/src/widgets/itemviews/qtreeview.h
+@@ -129,7 +129,7 @@ public Q_SLOTS:
+     void collapseAll();
+     void expandToDepth(int depth);
+ 
+-protected Q_SLOTS:
++public Q_SLOTS:
+     void columnResized(int column, int oldSize, int newSize);
+     void columnCountChanged(int oldCount, int newCount);
+     void columnMoved();
+@@ -137,7 +137,7 @@ protected Q_SLOTS:
+     void rowsRemoved(const QModelIndex &parent, int first, int last);
+     void verticalScrollbarValueChanged(int value) override;
+ 
+-protected:
++public:
+     QTreeView(QTreeViewPrivate &dd, QWidget *parent = nullptr);
+     void scrollContentsBy(int dx, int dy) override;
+     void rowsInserted(const QModelIndex &parent, int start, int end) override;
+diff --git a/src/widgets/itemviews/qtreewidget.h b/src/widgets/itemviews/qtreewidget.h
+index f4e72301d3a..04e61037b1f 100644
+--- a/src/widgets/itemviews/qtreewidget.h
++++ b/src/widgets/itemviews/qtreewidget.h
+@@ -166,7 +166,7 @@ public:
+     inline void sortChildren(int column, Qt::SortOrder order)
+         { sortChildren(column, order, false); }
+ 
+-protected:
++public:
+     void emitDataChanged();
+ 
+ private:
+@@ -316,7 +316,7 @@ Q_SIGNALS:
+     void currentItemChanged(QTreeWidgetItem *current, QTreeWidgetItem *previous);
+     void itemSelectionChanged();
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+     virtual QStringList mimeTypes() const;
+     virtual QMimeData *mimeData(const QList<QTreeWidgetItem *> &items) const;
+diff --git a/src/widgets/kernel/qapplication.h b/src/widgets/kernel/qapplication.h
+index bdaa26f06e3..3a5350dd92e 100644
+--- a/src/widgets/kernel/qapplication.h
++++ b/src/widgets/kernel/qapplication.h
+@@ -134,7 +134,7 @@ public Q_SLOTS:
+     static void closeAllWindows();
+     static void aboutQt();
+ 
+-protected:
++public:
+     bool event(QEvent *) override;
+ #  if QT_VERSION < QT_VERSION_CHECK(7, 0, 0)
+     QT_DEPRECATED_VERSION_X_6_10("This feature will be removed in Qt 7")
+diff --git a/src/widgets/kernel/qgridlayout.h b/src/widgets/kernel/qgridlayout.h
+index 00af2ac8ef9..5354a0b59bb 100644
+--- a/src/widgets/kernel/qgridlayout.h
++++ b/src/widgets/kernel/qgridlayout.h
+@@ -82,7 +82,7 @@ public:
+     void setDefaultPositioning(int n, Qt::Orientation orient);
+     void getItemPosition(int idx, int *row, int *column, int *rowSpan, int *columnSpan) const;
+ 
+-protected:
++public:
+     void addItem(QLayoutItem *) override;
+ 
+ private:
+diff --git a/src/widgets/kernel/qlayout.h b/src/widgets/kernel/qlayout.h
+index f591006c755..5975dbb9575 100644
+--- a/src/widgets/kernel/qlayout.h
++++ b/src/widgets/kernel/qlayout.h
+@@ -119,7 +119,7 @@ public:
+ 
+     static QSize closestAcceptableSize(const QWidget *w, const QSize &s);
+ 
+-protected:
++public:
+     void widgetEvent(QEvent *);
+     void childEvent(QChildEvent *e) override;
+     void addChildLayout(QLayout *l);
+@@ -127,7 +127,7 @@ protected:
+     bool adoptLayout(QLayout *layout);
+ 
+     QRect alignmentRect(const QRect&) const;
+-protected:
++public:
+     QLayout(QLayoutPrivate &d, QLayout*, QWidget*);
+ 
+ private:
+diff --git a/src/widgets/kernel/qwidget.h b/src/widgets/kernel/qwidget.h
+index 7ce5c086f7b..b76304591e3 100644
+--- a/src/widgets/kernel/qwidget.h
++++ b/src/widgets/kernel/qwidget.h
+@@ -655,7 +655,7 @@ Q_SIGNALS:
+     void windowIconTextChanged(const QString &iconText);
+     void customContextMenuRequested(const QPoint &pos);
+ 
+-protected:
++public:
+     // Event handlers
+     bool event(QEvent *event) override;
+     virtual void mousePressEvent(QMouseEvent *event);
+@@ -712,10 +712,9 @@ public:
+     Qt::InputMethodHints inputMethodHints() const;
+     void setInputMethodHints(Qt::InputMethodHints hints);
+ 
+-protected Q_SLOTS:
++public Q_SLOTS:
+     void updateMicroFocus(Qt::InputMethodQuery query = Qt::ImQueryAll);
+-protected:
+-
++public:
+     void create(WId = 0, bool initializeWindow = true,
+                          bool destroyOldWindow = true);
+     void destroy(bool destroyWindow = true,
+@@ -726,7 +725,7 @@ protected:
+     inline bool focusNextChild() { return focusNextPrevChild(true); }
+     inline bool focusPreviousChild() { return focusNextPrevChild(false); }
+ 
+-protected:
++public:
+     QWidget(QWidgetPrivate &d, QWidget* parent, Qt::WindowFlags f);
+ private:
+     void setBackingStore(QBackingStore *store);
+diff --git a/src/widgets/kernel/qwidgetaction.h b/src/widgets/kernel/qwidgetaction.h
+index ec3dbaf3bd8..cd18c90a0f3 100644
+--- a/src/widgets/kernel/qwidgetaction.h
++++ b/src/widgets/kernel/qwidgetaction.h
+@@ -29,7 +29,7 @@ public:
+     QWidget *requestWidget(QWidget *parent);
+     void releaseWidget(QWidget *widget);
+ 
+-protected:
++public:
+     virtual bool event(QEvent *) override;
+     virtual bool eventFilter(QObject *, QEvent *) override;
+     virtual QWidget *createWidget(QWidget *parent);
+diff --git a/src/widgets/styles/qproxystyle.h b/src/widgets/styles/qproxystyle.h
+index 345f46f1957..aafab0e0373 100644
+--- a/src/widgets/styles/qproxystyle.h
++++ b/src/widgets/styles/qproxystyle.h
+@@ -58,7 +58,7 @@ public:
+     void unpolish(QWidget *widget) override;
+     void unpolish(QApplication *app) override;
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+ 
+ private:
+diff --git a/src/widgets/util/qcompleter.h b/src/widgets/util/qcompleter.h
+index 660c0d5035b..42995df51bb 100644
+--- a/src/widgets/util/qcompleter.h
++++ b/src/widgets/util/qcompleter.h
+@@ -108,7 +108,7 @@ public:
+     virtual QString pathFromIndex(const QModelIndex &index) const;
+     virtual QStringList splitPath(const QString &path) const;
+ 
+-protected:
++public:
+     bool eventFilter(QObject *o, QEvent *e) override;
+     bool event(QEvent *) override;
+ 
+diff --git a/src/widgets/util/qsystemtrayicon.h b/src/widgets/util/qsystemtrayicon.h
+index 9e2d277eb93..ed29bf47264 100644
+--- a/src/widgets/util/qsystemtrayicon.h
++++ b/src/widgets/util/qsystemtrayicon.h
+@@ -74,7 +74,7 @@ Q_SIGNALS:
+     void activated(QSystemTrayIcon::ActivationReason reason);
+     void messageClicked();
+ 
+-protected:
++public:
+     bool event(QEvent *event) override;
+ 
+ private:
+diff --git a/src/widgets/widgets/qabstractbutton.h b/src/widgets/widgets/qabstractbutton.h
+index 9aaf98798c7..38ecccec5f5 100644
+--- a/src/widgets/widgets/qabstractbutton.h
++++ b/src/widgets/widgets/qabstractbutton.h
+@@ -92,7 +92,7 @@ Q_SIGNALS:
+     void clicked(bool checked = false);
+     void toggled(bool checked);
+ 
+-protected:
++public:
+     void paintEvent(QPaintEvent *e) override = 0;
+     virtual bool hitButton(const QPoint &pos) const;
+     virtual void checkStateSet();
+@@ -110,7 +110,7 @@ protected:
+     void timerEvent(QTimerEvent *e) override;
+ 
+ 
+-protected:
++public:
+     QAbstractButton(QAbstractButtonPrivate &dd, QWidget* parent = nullptr);
+ 
+ private:
+diff --git a/src/widgets/widgets/qabstractscrollarea.h b/src/widgets/widgets/qabstractscrollarea.h
+index a8dbca2116a..4975a00ccb1 100644
+--- a/src/widgets/widgets/qabstractscrollarea.h
++++ b/src/widgets/widgets/qabstractscrollarea.h
+@@ -67,7 +67,7 @@ public:
+     SizeAdjustPolicy sizeAdjustPolicy() const;
+     void setSizeAdjustPolicy(SizeAdjustPolicy policy);
+ 
+-protected:
++public:
+     QAbstractScrollArea(QAbstractScrollAreaPrivate &dd, QWidget *parent = nullptr);
+     void setViewportMargins(int left, int top, int right, int bottom);
+     void setViewportMargins(const QMargins &margins);
+diff --git a/src/widgets/widgets/qabstractslider.h b/src/widgets/widgets/qabstractslider.h
+index f686cbec99b..297f54f86a7 100644
+--- a/src/widgets/widgets/qabstractslider.h
++++ b/src/widgets/widgets/qabstractslider.h
+@@ -95,7 +95,7 @@ Q_SIGNALS:
+ 
+     void actionTriggered(int action);
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+ 
+     void setRepeatAction(SliderAction action, int thresholdTime = 500, int repeatTime = 50);
+@@ -117,7 +117,7 @@ protected:
+     void changeEvent(QEvent *e) override;
+ 
+ 
+-protected:
++public:
+     QAbstractSlider(QAbstractSliderPrivate &dd, QWidget *parent = nullptr);
+ 
+ private:
+diff --git a/src/widgets/widgets/qabstractspinbox.h b/src/widgets/widgets/qabstractspinbox.h
+index af03dc8245f..7b8640c64cb 100644
+--- a/src/widgets/widgets/qabstractspinbox.h
++++ b/src/widgets/widgets/qabstractspinbox.h
+@@ -104,7 +104,7 @@ public Q_SLOTS:
+     void stepDown();
+     void selectAll();
+     virtual void clear();
+-protected:
++public:
+     void resizeEvent(QResizeEvent *event) override;
+     void keyPressEvent(QKeyEvent *event) override;
+     void keyReleaseEvent(QKeyEvent *event) override;
+@@ -134,7 +134,7 @@ protected:
+ Q_SIGNALS:
+     void editingFinished();
+     void returnPressed();
+-protected:
++public:
+     QAbstractSpinBox(QAbstractSpinBoxPrivate &dd, QWidget *parent = nullptr);
+ 
+ private:
+diff --git a/src/widgets/widgets/qcalendarwidget.h b/src/widgets/widgets/qcalendarwidget.h
+index 49b1180f88f..b414afb6ebb 100644
+--- a/src/widgets/widgets/qcalendarwidget.h
++++ b/src/widgets/widgets/qcalendarwidget.h
+@@ -108,7 +108,7 @@ public:
+     int dateEditAcceptDelay() const;
+     void setDateEditAcceptDelay(int delay);
+ 
+-protected:
++public:
+     bool event(QEvent *event) override;
+     bool eventFilter(QObject *watched, QEvent *event) override;
+     void mousePressEvent(QMouseEvent *event) override;
+diff --git a/src/widgets/widgets/qcheckbox.h b/src/widgets/widgets/qcheckbox.h
+index e78832ac137..03558629bf3 100644
+--- a/src/widgets/widgets/qcheckbox.h
++++ b/src/widgets/widgets/qcheckbox.h
+@@ -43,7 +43,7 @@ Q_SIGNALS:
+ #endif
+     void checkStateChanged(Qt::CheckState);
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+     bool hitButton(const QPoint &pos) const override;
+     void checkStateSet() override;
+diff --git a/src/widgets/widgets/qcombobox.h b/src/widgets/widgets/qcombobox.h
+index fab56b3530c..f3bd487f38d 100644
+--- a/src/widgets/widgets/qcombobox.h
++++ b/src/widgets/widgets/qcombobox.h
+@@ -187,7 +187,7 @@ Q_SIGNALS:
+     void currentIndexChanged(int index);
+     void currentTextChanged(const QString &);
+ 
+-protected:
++public:
+     void focusInEvent(QFocusEvent *e) override;
+     void focusOutEvent(QFocusEvent *e) override;
+     void changeEvent(QEvent *e) override;
+@@ -209,7 +209,7 @@ protected:
+     virtual void initStyleOption(QStyleOptionComboBox *option) const;
+ 
+ 
+-protected:
++public:
+     QComboBox(QComboBoxPrivate &, QWidget *);
+ 
+ private:
+diff --git a/src/widgets/widgets/qcommandlinkbutton.h b/src/widgets/widgets/qcommandlinkbutton.h
+index d816860803d..2088d5aff86 100644
+--- a/src/widgets/widgets/qcommandlinkbutton.h
++++ b/src/widgets/widgets/qcommandlinkbutton.h
+@@ -36,7 +36,7 @@ public:
+     QSize minimumSizeHint() const override;
+     void initStyleOption(QStyleOptionButton *option) const override;
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+     void paintEvent(QPaintEvent *) override;
+ 
+diff --git a/src/widgets/widgets/qdatetimeedit.h b/src/widgets/widgets/qdatetimeedit.h
+index f7b90bbf10c..0f2c93dcb59 100644
+--- a/src/widgets/widgets/qdatetimeedit.h
++++ b/src/widgets/widgets/qdatetimeedit.h
+@@ -154,7 +154,7 @@ public Q_SLOTS:
+     void setDate(QDate date);
+     void setTime(QTime time);
+ 
+-protected:
++public:
+     void keyPressEvent(QKeyEvent *event) override;
+ #if QT_CONFIG(wheelevent)
+     void wheelEvent(QWheelEvent *event) override;
+diff --git a/src/widgets/widgets/qdial.h b/src/widgets/widgets/qdial.h
+index 35c5f68f20f..63ea0c071cc 100644
+--- a/src/widgets/widgets/qdial.h
++++ b/src/widgets/widgets/qdial.h
+@@ -45,7 +45,7 @@ public Q_SLOTS:
+     void setNotchesVisible(bool visible);
+     void setWrapping(bool on);
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+     void resizeEvent(QResizeEvent *re) override;
+     void paintEvent(QPaintEvent *pe) override;
+diff --git a/src/widgets/widgets/qdialogbuttonbox.h b/src/widgets/widgets/qdialogbuttonbox.h
+index c38ea534eb2..468ea2bd989 100644
+--- a/src/widgets/widgets/qdialogbuttonbox.h
++++ b/src/widgets/widgets/qdialogbuttonbox.h
+@@ -117,7 +117,7 @@ Q_SIGNALS:
+     void helpRequested();
+     void rejected();
+ 
+-protected:
++public:
+     void changeEvent(QEvent *event) override;
+     bool event(QEvent *event) override;
+ 
+diff --git a/src/widgets/widgets/qdockwidget.h b/src/widgets/widgets/qdockwidget.h
+index 1b2a9b3db56..caea6e33665 100644
+--- a/src/widgets/widgets/qdockwidget.h
++++ b/src/widgets/widgets/qdockwidget.h
+@@ -85,7 +85,7 @@ Q_SIGNALS:
+     void visibilityChanged(bool visible); // ### Qt7: Deprecate this. Better listen to hide/show events
+     void dockLocationChanged(Qt::DockWidgetArea area);
+ 
+-protected:
++public:
+     void changeEvent(QEvent *event) override;
+     void closeEvent(QCloseEvent *event) override;
+     void paintEvent(QPaintEvent *event) override;
+diff --git a/src/widgets/widgets/qfocusframe.h b/src/widgets/widgets/qfocusframe.h
+index 1af5415a6b6..76740eda07e 100644
+--- a/src/widgets/widgets/qfocusframe.h
++++ b/src/widgets/widgets/qfocusframe.h
+@@ -24,7 +24,7 @@ public:
+     void setWidget(QWidget *widget);
+     QWidget *widget() const;
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+ 
+     bool eventFilter(QObject *, QEvent *) override;
+diff --git a/src/widgets/widgets/qfontcombobox.h b/src/widgets/widgets/qfontcombobox.h
+index cb3bc7f854d..ac29b7f1571 100644
+--- a/src/widgets/widgets/qfontcombobox.h
++++ b/src/widgets/widgets/qfontcombobox.h
+@@ -60,7 +60,7 @@ public Q_SLOTS:
+ Q_SIGNALS:
+     void currentFontChanged(const QFont &f);
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+ 
+ private:
+diff --git a/src/widgets/widgets/qframe.h b/src/widgets/widgets/qframe.h
+index 8578f4729b3..507860e6bf3 100644
+--- a/src/widgets/widgets/qframe.h
++++ b/src/widgets/widgets/qframe.h
+@@ -72,14 +72,14 @@ public:
+     QRect frameRect() const;
+     void setFrameRect(const QRect &);
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+     void paintEvent(QPaintEvent *) override;
+     void changeEvent(QEvent *) override;
+     void drawFrame(QPainter *);
+ 
+ 
+-protected:
++public:
+     QFrame(QFramePrivate &dd, QWidget* parent = nullptr, Qt::WindowFlags f = Qt::WindowFlags());
+     virtual void initStyleOption(QStyleOptionFrame *option) const;
+ 
+diff --git a/src/widgets/widgets/qgroupbox.h b/src/widgets/widgets/qgroupbox.h
+index b765baf252e..4581ad68a8b 100644
+--- a/src/widgets/widgets/qgroupbox.h
++++ b/src/widgets/widgets/qgroupbox.h
+@@ -49,7 +49,7 @@ Q_SIGNALS:
+     void clicked(bool checked = false);
+     void toggled(bool);
+ 
+-protected:
++public:
+     bool event(QEvent *event) override;
+     void childEvent(QChildEvent *event) override;
+     void resizeEvent(QResizeEvent *event) override;
+diff --git a/src/widgets/widgets/qkeysequenceedit.h b/src/widgets/widgets/qkeysequenceedit.h
+index 49e16569ad8..7806405f01a 100644
+--- a/src/widgets/widgets/qkeysequenceedit.h
++++ b/src/widgets/widgets/qkeysequenceedit.h
+@@ -46,7 +46,7 @@ Q_SIGNALS:
+     void editingFinished();
+     void keySequenceChanged(const QKeySequence &keySequence);
+ 
+-protected:
++public:
+     QKeySequenceEdit(QKeySequenceEditPrivate &d, QWidget *parent, Qt::WindowFlags f);
+ 
+     bool event(QEvent *) override;
+diff --git a/src/widgets/widgets/qlabel.h b/src/widgets/widgets/qlabel.h
+index 876c4aa4c4d..8b2fb7a37d1 100644
+--- a/src/widgets/widgets/qlabel.h
++++ b/src/widgets/widgets/qlabel.h
+@@ -112,7 +112,7 @@ Q_SIGNALS:
+     void linkActivated(const QString& link);
+     void linkHovered(const QString& link);
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+     void keyPressEvent(QKeyEvent *ev) override;
+     void paintEvent(QPaintEvent *) override;
+diff --git a/src/widgets/widgets/qlcdnumber.h b/src/widgets/widgets/qlcdnumber.h
+index 43f40ceb2ae..62d79aa8fba 100644
+--- a/src/widgets/widgets/qlcdnumber.h
++++ b/src/widgets/widgets/qlcdnumber.h
+@@ -68,7 +68,7 @@ public Q_SLOTS:
+ Q_SIGNALS:
+     void overflow();
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+     void paintEvent(QPaintEvent *) override;
+ 
+diff --git a/src/widgets/widgets/qlineedit.h b/src/widgets/widgets/qlineedit.h
+index b191e835ec5..76f5d57ba08 100644
+--- a/src/widgets/widgets/qlineedit.h
++++ b/src/widgets/widgets/qlineedit.h
+@@ -173,7 +173,7 @@ Q_SIGNALS:
+     void selectionChanged();
+     void inputRejected();
+ 
+-protected:
++public:
+     void mousePressEvent(QMouseEvent *) override;
+     void mouseMoveEvent(QMouseEvent *) override;
+     void mouseReleaseEvent(QMouseEvent *) override;
+@@ -201,7 +201,7 @@ public:
+     Q_INVOKABLE QVariant inputMethodQuery(Qt::InputMethodQuery property, QVariant argument) const;
+     void timerEvent(QTimerEvent *) override;
+     bool event(QEvent *) override;
+-protected:
++public:
+     QRect cursorRect() const;
+ 
+ public:
+diff --git a/src/widgets/widgets/qmainwindow.h b/src/widgets/widgets/qmainwindow.h
+index 08eae994789..be1bf3a0622 100644
+--- a/src/widgets/widgets/qmainwindow.h
++++ b/src/widgets/widgets/qmainwindow.h
+@@ -170,7 +170,7 @@ Q_SIGNALS:
+     void tabifiedDockWidgetActivated(QDockWidget *dockWidget);
+ #endif
+ 
+-protected:
++public:
+ #ifndef QT_NO_CONTEXTMENU
+     void contextMenuEvent(QContextMenuEvent *event) override;
+ #endif
+diff --git a/src/widgets/widgets/qmdiarea.h b/src/widgets/widgets/qmdiarea.h
+index b27dfb28f61..e271be82409 100644
+--- a/src/widgets/widgets/qmdiarea.h
++++ b/src/widgets/widgets/qmdiarea.h
+@@ -107,10 +107,10 @@ public Q_SLOTS:
+     void activateNextSubWindow();
+     void activatePreviousSubWindow();
+ 
+-protected Q_SLOTS:
++public Q_SLOTS:
+     void setupViewport(QWidget *viewport) override;
+ 
+-protected:
++public:
+     bool event(QEvent *event) override;
+     bool eventFilter(QObject *object, QEvent *event) override;
+     void paintEvent(QPaintEvent *paintEvent) override;
+diff --git a/src/widgets/widgets/qmdisubwindow.h b/src/widgets/widgets/qmdisubwindow.h
+index 0ccf6172210..90e57462355 100644
+--- a/src/widgets/widgets/qmdisubwindow.h
++++ b/src/widgets/widgets/qmdisubwindow.h
+@@ -71,7 +71,7 @@ public Q_SLOTS:
+ #endif
+     void showShaded();
+ 
+-protected:
++public:
+     bool eventFilter(QObject *object, QEvent *event) override;
+     bool event(QEvent *event) override;
+     void showEvent(QShowEvent *showEvent) override;
+diff --git a/src/widgets/widgets/qmenu.h b/src/widgets/widgets/qmenu.h
+index f726962318b..e1f0ddd6315 100644
+--- a/src/widgets/widgets/qmenu.h
++++ b/src/widgets/widgets/qmenu.h
+@@ -184,7 +184,7 @@ Q_SIGNALS:
+     void triggered(QAction *action);
+     void hovered(QAction *action);
+ 
+-protected:
++public:
+     int columnCount() const;
+ 
+     void changeEvent(QEvent *) override;
+@@ -214,7 +214,7 @@ private:
+     Q_PRIVATE_SLOT(d_func(), void _q_overrideMenuActionDestroyed())
+     Q_PRIVATE_SLOT(d_func(), void _q_platformMenuAboutToShow())
+ 
+-protected:
++public:
+     QMenu(QMenuPrivate &dd, QWidget* parent = nullptr);
+ 
+ private:
+diff --git a/src/widgets/widgets/qmenubar.h b/src/widgets/widgets/qmenubar.h
+index 058158118ef..5151c18b457 100644
+--- a/src/widgets/widgets/qmenubar.h
++++ b/src/widgets/widgets/qmenubar.h
+@@ -76,7 +76,7 @@ Q_SIGNALS:
+     void triggered(QAction *action);
+     void hovered(QAction *action);
+ 
+-protected:
++public:
+     void changeEvent(QEvent *) override;
+     void keyPressEvent(QKeyEvent *) override;
+     void mouseReleaseEvent(QMouseEvent *) override;
+diff --git a/src/widgets/widgets/qplaintextedit.h b/src/widgets/widgets/qplaintextedit.h
+index 9691e5f9fbb..3bf18d3800b 100644
+--- a/src/widgets/widgets/qplaintextedit.h
++++ b/src/widgets/widgets/qplaintextedit.h
+@@ -191,7 +191,7 @@ Q_SIGNALS:
+     void blockCountChanged(int newBlockCount);
+     void modificationChanged(bool);
+ 
+-protected:
++public:
+     virtual bool event(QEvent *e) override;
+     virtual void timerEvent(QTimerEvent *e) override;
+     virtual void keyPressEvent(QKeyEvent *e) override;
+@@ -273,7 +273,7 @@ public:
+ 
+     void requestUpdate();
+ 
+-protected:
++public:
+     void documentChanged(int from, int /*charsRemoved*/, int charsAdded) override;
+ 
+ 
+diff --git a/src/widgets/widgets/qprogressbar.h b/src/widgets/widgets/qprogressbar.h
+index 35529f6cba6..98cc75bc39f 100644
+--- a/src/widgets/widgets/qprogressbar.h
++++ b/src/widgets/widgets/qprogressbar.h
+@@ -73,7 +73,7 @@ public Q_SLOTS:
+ Q_SIGNALS:
+     void valueChanged(int value);
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+     void paintEvent(QPaintEvent *) override;
+     virtual void initStyleOption(QStyleOptionProgressBar *option) const;
+diff --git a/src/widgets/widgets/qpushbutton.h b/src/widgets/widgets/qpushbutton.h
+index ebfcb8f8cd1..ddd34d65813 100644
+--- a/src/widgets/widgets/qpushbutton.h
++++ b/src/widgets/widgets/qpushbutton.h
+@@ -52,7 +52,7 @@ public Q_SLOTS:
+     void showMenu();
+ #endif
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+     void paintEvent(QPaintEvent *) override;
+     void keyPressEvent(QKeyEvent *) override;
+diff --git a/src/widgets/widgets/qradiobutton.h b/src/widgets/widgets/qradiobutton.h
+index e22a6845872..0cb69825f33 100644
+--- a/src/widgets/widgets/qradiobutton.h
++++ b/src/widgets/widgets/qradiobutton.h
+@@ -28,7 +28,7 @@ public:
+     QSize sizeHint() const override;
+     QSize minimumSizeHint() const override;
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+     bool hitButton(const QPoint &) const override;
+     void paintEvent(QPaintEvent *) override;
+diff --git a/src/widgets/widgets/qrubberband.h b/src/widgets/widgets/qrubberband.h
+index 86b1032682f..69cec8d0cf3 100644
+--- a/src/widgets/widgets/qrubberband.h
++++ b/src/widgets/widgets/qrubberband.h
+@@ -37,7 +37,7 @@ public:
+     inline void resize(const QSize &s)
+     { resize(s.width(), s.height()); }
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+     void paintEvent(QPaintEvent *) override;
+     void changeEvent(QEvent *) override;
+diff --git a/src/widgets/widgets/qscrollarea.h b/src/widgets/widgets/qscrollarea.h
+index 49b614e866c..fcdc0620da6 100644
+--- a/src/widgets/widgets/qscrollarea.h
++++ b/src/widgets/widgets/qscrollarea.h
+@@ -41,7 +41,7 @@ public:
+     void ensureVisible(int x, int y, int xmargin = 50, int ymargin = 50);
+     void ensureWidgetVisible(QWidget *childWidget, int xmargin = 50, int ymargin = 50);
+ 
+-protected:
++public:
+     QScrollArea(QScrollAreaPrivate &dd, QWidget *parent = nullptr);
+     bool event(QEvent *) override;
+     bool eventFilter(QObject *, QEvent *) override;
+diff --git a/src/widgets/widgets/qscrollbar.h b/src/widgets/widgets/qscrollbar.h
+index 62280e90ef7..1ff4a2a7571 100644
+--- a/src/widgets/widgets/qscrollbar.h
++++ b/src/widgets/widgets/qscrollbar.h
+@@ -32,7 +32,7 @@ public:
+     QMenu *createStandardContextMenu(QPoint position);
+ #endif
+ 
+-protected:
++public:
+ #if QT_CONFIG(wheelevent)
+     void wheelEvent(QWheelEvent *) override;
+ #endif
+diff --git a/src/widgets/widgets/qsizegrip.h b/src/widgets/widgets/qsizegrip.h
+index 3e2e503b5ea..437574f18b6 100644
+--- a/src/widgets/widgets/qsizegrip.h
++++ b/src/widgets/widgets/qsizegrip.h
+@@ -23,7 +23,7 @@ public:
+     QSize sizeHint() const override;
+     void setVisible(bool) override;
+ 
+-protected:
++public:
+     void paintEvent(QPaintEvent *) override;
+     void mousePressEvent(QMouseEvent *) override;
+     void mouseMoveEvent(QMouseEvent *) override;
+diff --git a/src/widgets/widgets/qslider.h b/src/widgets/widgets/qslider.h
+index f345bd443a7..148d6a0dea3 100644
+--- a/src/widgets/widgets/qslider.h
++++ b/src/widgets/widgets/qslider.h
+@@ -49,7 +49,7 @@ public:
+ 
+     bool event(QEvent *event) override;
+ 
+-protected:
++public:
+     void paintEvent(QPaintEvent *ev) override;
+     void mousePressEvent(QMouseEvent *ev) override;
+     void mouseReleaseEvent(QMouseEvent *ev) override;
+diff --git a/src/widgets/widgets/qspinbox.h b/src/widgets/widgets/qspinbox.h
+index da9afb29edf..eb99f0db946 100644
+--- a/src/widgets/widgets/qspinbox.h
++++ b/src/widgets/widgets/qspinbox.h
+@@ -58,7 +58,7 @@ public:
+     int displayIntegerBase() const;
+     void setDisplayIntegerBase(int base);
+ 
+-protected:
++public:
+     bool event(QEvent *event) override;
+     QValidator::State validate(QString &input, int &pos) const override;
+     virtual int valueFromText(const QString &text) const;
+diff --git a/src/widgets/widgets/qsplashscreen.h b/src/widgets/widgets/qsplashscreen.h
+index 17b25d0ba38..343ef244bc3 100644
+--- a/src/widgets/widgets/qsplashscreen.h
++++ b/src/widgets/widgets/qsplashscreen.h
+@@ -37,7 +37,7 @@ public Q_SLOTS:
+ Q_SIGNALS:
+     void messageChanged(const QString &message);
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+     virtual void drawContents(QPainter *painter);
+     void mousePressEvent(QMouseEvent *) override;
+diff --git a/src/widgets/widgets/qsplitter.h b/src/widgets/widgets/qsplitter.h
+index 62c4fdfc760..79499535813 100644
+--- a/src/widgets/widgets/qsplitter.h
++++ b/src/widgets/widgets/qsplitter.h
+@@ -72,7 +72,7 @@ public:
+ Q_SIGNALS:
+     void splitterMoved(int pos, int index);
+ 
+-protected:
++public:
+     virtual QSplitterHandle *createHandle();
+ 
+     void childEvent(QChildEvent *) override;
+@@ -109,7 +109,7 @@ public:
+ 
+     QSize sizeHint() const override;
+ 
+-protected:
++public:
+     void paintEvent(QPaintEvent *) override;
+     void mouseMoveEvent(QMouseEvent *) override;
+     void mousePressEvent(QMouseEvent *) override;
+diff --git a/src/widgets/widgets/qstackedwidget.h b/src/widgets/widgets/qstackedwidget.h
+index 7838a6c5dc4..233af2862af 100644
+--- a/src/widgets/widgets/qstackedwidget.h
++++ b/src/widgets/widgets/qstackedwidget.h
+@@ -44,7 +44,7 @@ Q_SIGNALS:
+     void widgetRemoved(int index);
+     void widgetAdded(int index);
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+ 
+ private:
+diff --git a/src/widgets/widgets/qstatusbar.h b/src/widgets/widgets/qstatusbar.h
+index ef10badaa2e..0aeb0f54295 100644
+--- a/src/widgets/widgets/qstatusbar.h
++++ b/src/widgets/widgets/qstatusbar.h
+@@ -43,7 +43,7 @@ public Q_SLOTS:
+ Q_SIGNALS:
+     void messageChanged(const QString &text);
+ 
+-protected:
++public:
+     void showEvent(QShowEvent *) override;
+     void paintEvent(QPaintEvent *) override;
+     void resizeEvent(QResizeEvent *) override;
+diff --git a/src/widgets/widgets/qtabbar.h b/src/widgets/widgets/qtabbar.h
+index 5e154cc02ad..aee658474e1 100644
+--- a/src/widgets/widgets/qtabbar.h
++++ b/src/widgets/widgets/qtabbar.h
+@@ -156,7 +156,7 @@ Q_SIGNALS:
+     void tabBarClicked(int index);
+     void tabBarDoubleClicked(int index);
+ 
+-protected:
++public:
+     virtual QSize tabSizeHint(int index) const;
+     virtual QSize minimumTabSizeHint(int index) const;
+     virtual void tabInserted(int index);
+diff --git a/src/widgets/widgets/qtabwidget.h b/src/widgets/widgets/qtabwidget.h
+index f9c2c8a2722..bd9d055d1b1 100644
+--- a/src/widgets/widgets/qtabwidget.h
++++ b/src/widgets/widgets/qtabwidget.h
+@@ -125,7 +125,7 @@ Q_SIGNALS:
+     void tabBarClicked(int index);
+     void tabBarDoubleClicked(int index);
+ 
+-protected:
++public:
+     virtual void tabInserted(int index);
+     virtual void tabRemoved(int index);
+ 
+diff --git a/src/widgets/widgets/qtextbrowser.h b/src/widgets/widgets/qtextbrowser.h
+index 10cfbfb2723..07aba0449af 100644
+--- a/src/widgets/widgets/qtextbrowser.h
++++ b/src/widgets/widgets/qtextbrowser.h
+@@ -69,7 +69,7 @@ Q_SIGNALS:
+     void highlighted(const QUrl &);
+     void anchorClicked(const QUrl &);
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+     virtual void keyPressEvent(QKeyEvent *ev) override;
+     virtual void mouseMoveEvent(QMouseEvent *ev) override;
+diff --git a/src/widgets/widgets/qtextedit.h b/src/widgets/widgets/qtextedit.h
+index 9c2e4ff9f1e..1f2790aafc6 100644
+--- a/src/widgets/widgets/qtextedit.h
++++ b/src/widgets/widgets/qtextedit.h
+@@ -239,7 +239,7 @@ Q_SIGNALS:
+     void selectionChanged();
+     void cursorPositionChanged();
+ 
+-protected:
++public:
+     virtual bool event(QEvent *e) override;
+     virtual void timerEvent(QTimerEvent *e) override;
+     virtual void keyPressEvent(QKeyEvent *e) override;
+diff --git a/src/widgets/widgets/qtoolbar.h b/src/widgets/widgets/qtoolbar.h
+index 4234d11ecf3..e2bbdd476ac 100644
+--- a/src/widgets/widgets/qtoolbar.h
++++ b/src/widgets/widgets/qtoolbar.h
+@@ -98,7 +98,7 @@ Q_SIGNALS:
+     void topLevelChanged(bool topLevel);
+     void visibilityChanged(bool visible);
+ 
+-protected:
++public:
+     void actionEvent(QActionEvent *event) override;
+     void changeEvent(QEvent *event) override;
+     void paintEvent(QPaintEvent *event) override;
+diff --git a/src/widgets/widgets/qtoolbox.h b/src/widgets/widgets/qtoolbox.h
+index 6b516d71b02..de1a75bcc2b 100644
+--- a/src/widgets/widgets/qtoolbox.h
++++ b/src/widgets/widgets/qtoolbox.h
+@@ -59,7 +59,7 @@ public Q_SLOTS:
+ Q_SIGNALS:
+     void currentChanged(int index);
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+     virtual void itemInserted(int index);
+     virtual void itemRemoved(int index);
+diff --git a/src/widgets/widgets/qtoolbutton.h b/src/widgets/widgets/qtoolbutton.h
+index 96f2ed5ba22..81500013cfa 100644
+--- a/src/widgets/widgets/qtoolbutton.h
++++ b/src/widgets/widgets/qtoolbutton.h
+@@ -69,7 +69,7 @@ public Q_SLOTS:
+ Q_SIGNALS:
+     void triggered(QAction *);
+ 
+-protected:
++public:
+     bool event(QEvent *e) override;
+     void mousePressEvent(QMouseEvent *) override;
+     void mouseReleaseEvent(QMouseEvent *) override;
+diff --git a/src/corelib/plugin/qfactoryloader.cpp b/src/corelib/plugin/qfactoryloader.cpp
+--- a/src/corelib/plugin/qfactoryloader.cpp
++++ b/src/corelib/plugin/qfactoryloader.cpp
+@@ -377,10 +377,14 @@ void QFactoryLoader::update()
+ 
+     const QStringList paths = QCoreApplication::libraryPaths();
+     for (const QString &pluginDir : paths) {
+-#ifdef Q_OS_ANDROID
++// BSH: HAP 的原生库目录和 APK 一样是平铺的 —— hvigor 只收 libs/<abi>/ 这一层
++// 的 *.so,Qt 默认查找的类别子目录(platforms/、wayland-shell-integration/)
++// 没法随包进设备。这里跟 Android 走同一分支:每个 library path 直接平扫,
++// 配 QT_PLUGIN_PATH 指向 libs/arm64 即可找到 QPA 与 shell integration 插件。
++#if defined(Q_OS_ANDROID) || defined(Q_OS_OHOS)
+         QString path = pluginDir;
+ #else
+         QString path = pluginDir + d->suffix;
+ #endif
+         d->updateSinglePath(path);
+     }

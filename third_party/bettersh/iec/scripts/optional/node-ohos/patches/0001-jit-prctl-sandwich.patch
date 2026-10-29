@@ -1,0 +1,74 @@
+--- a/deps/v8/src/base/platform/platform-posix.cc
++++ b/deps/v8/src/base/platform/platform-posix.cc
+@@ -31,6 +31,25 @@
+ #include <android/log.h>
+ #endif
+ 
++// ── IEC JitFort ACL port (see scripts/optional/node-ohos/patches/) ───────
++// On OHOS, making a page executable requires the JitFort ACL: open the gate
++// with prctl(0x6a6974, 0, 0/1) around mprotect/mmap(PROT_EXEC), otherwise the
++// kernel returns EPERM. The official JSVM uses the same sequence
++// (arkcompiler/jsvm platform_ohos.cpp, SetSecurityMode).
++// Kernels that do not need it return EINVAL; the return value is ignored, so this is a safe no-op there.
++// The guard uses the compiler's __linux__ and not V8_OS_LINUX: build_config.h
++// has not been included at this point, so `#if V8_OS_LINUX` would silently be
++// 0 and the whole block would become a no-op (measured).
++#if defined(__linux__)
++#include <sys/prctl.h>
++#define V8_IEC_JITFORT_PRCTL 0x6a6974L /* ASCII 'jit' */
++#define V8_IEC_JITFORT_ENTER() prctl(V8_IEC_JITFORT_PRCTL, 0, 0)
++#define V8_IEC_JITFORT_LEAVE() prctl(V8_IEC_JITFORT_PRCTL, 0, 1)
++#else
++#define V8_IEC_JITFORT_ENTER() ((void)0)
++#define V8_IEC_JITFORT_LEAVE() ((void)0)
++#endif
++
+ #include <cmath>
+ #include <cstdlib>
+ 
+@@ -172,7 +191,10 @@
+                PageType page_type) {
+   int prot = GetProtectionFromMemoryPermission(access);
+   int flags = GetFlagsForMemoryPermission(access, page_type);
++  // OHOS: executable mappings need the gate too (see V8_IEC_JITFORT_* above)
++  if (prot & PROT_EXEC) V8_IEC_JITFORT_ENTER();
+   void* result = mmap(hint, size, prot, flags, kMmapFd, kMmapFdOffset);
++  if (prot & PROT_EXEC) V8_IEC_JITFORT_LEAVE();
+   if (result == MAP_FAILED) return nullptr;
+ 
+ #if V8_ENABLE_PRIVATE_MAPPING_FORK_OPTIMIZATION
+@@ -451,7 +473,9 @@
+   DCHECK_EQ(0, size % AllocatePageSize());
+   int prot = GetProtectionFromMemoryPermission(access);
+   int fd = FileDescriptorFromSharedMemoryHandle(handle);
++  if (prot & PROT_EXEC) V8_IEC_JITFORT_ENTER();
+   void* result = mmap(hint, size, prot, MAP_SHARED, fd, offset);
++  if (prot & PROT_EXEC) V8_IEC_JITFORT_LEAVE();
+   if (result == MAP_FAILED) return nullptr;
+   return result;
+ }
+@@ -476,7 +500,10 @@
+   DCHECK_EQ(0, size % CommitPageSize());
+ 
+   int prot = GetProtectionFromMemoryPermission(access);
++  // OHOS: mprotect to executable uses the same gate
++  if (prot & PROT_EXEC) V8_IEC_JITFORT_ENTER();
+   int ret = mprotect(address, size, prot);
++  if (prot & PROT_EXEC) V8_IEC_JITFORT_LEAVE();
+ 
+   // MacOS 11.2 on Apple Silicon refuses to switch permissions from
+   // rwx to none. Just use madvise instead.
+@@ -961,8 +988,11 @@
+   DCHECK(Contains(address, size));
+   int prot = GetProtectionFromMemoryPermission(access);
+   int fd = FileDescriptorFromSharedMemoryHandle(handle);
+-  return mmap(address, size, prot, MAP_SHARED | MAP_FIXED, fd, offset) !=
+-         MAP_FAILED;
++  if (prot & PROT_EXEC) V8_IEC_JITFORT_ENTER();
++  int ret = mmap(address, size, prot, MAP_SHARED | MAP_FIXED, fd, offset) !=
++            MAP_FAILED;
++  if (prot & PROT_EXEC) V8_IEC_JITFORT_LEAVE();
++  return ret;
+ }
+ #endif  // !defined(V8_OS_MACOS)
+ 

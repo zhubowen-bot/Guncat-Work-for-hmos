@@ -1,0 +1,25 @@
+diff --git a/src/os/os_linux.c b/src/os/os_linux.c
+index 49fa526ca..12f1e9ced 100644
+--- a/src/os/os_linux.c
++++ b/src/os/os_linux.c
+@@ -1,3 +1,4 @@
++/* OHOS_PATCH_MALLOPT */
+ #define _GNU_SOURCE
+ #include <sys/syscall.h>
+ #include <sched.h>
+@@ -150,9 +151,15 @@ void PersonalityAddrLimit32Bit(void)
+         setrlimit(RLIMIT_DATA, &l);
+     }*/
+     // setting 32bits malloc options
++#ifdef M_ARENA_TEST
+     mallopt(M_ARENA_TEST, 2);
++#endif
++#ifdef M_ARENA_MAX
+     mallopt(M_ARENA_MAX, 2);
++#endif
++#ifdef M_MMAP_THRESHOLD
+     mallopt(M_MMAP_THRESHOLD, 128*1024);
++#endif
+     #endif
+ }
+ 

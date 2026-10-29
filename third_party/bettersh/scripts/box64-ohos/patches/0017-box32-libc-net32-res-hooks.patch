@@ -1,0 +1,31 @@
+diff --git a/src/libtools/libc_net32.c b/src/libtools/libc_net32.c
+index c54e805fd..8af53b53c 100644
+--- a/src/libtools/libc_net32.c
++++ b/src/libtools/libc_net32.c
+@@ -1,3 +1,4 @@
++/* OHOS_PATCH_LIBC_NET32_HOOKS */
+ #define _GNU_SOURCE         /* See feature_test_macros(7) */
+ #include <stdlib.h>
+ #include <stdio.h>
+@@ -570,8 +571,8 @@ void* convert_res_state_to_32(void* d, void* s)
+     dst->ipv6_unavail = src->ipv6_unavail;
+     dst->unused = src->unused;
+     memmove(dst->sort_list, src->sort_list, sizeof(dst->sort_list));
+-    dst->__glibc_unused_qhook = to_ptrv(src->__glibc_unused_qhook);
+-    dst->__glibc_unused_rhook = to_ptrv(src->__glibc_unused_rhook);
++    /* OHOS musl: __res_state has no __glibc_unused_qhook */
++    /* OHOS musl: __res_state has no __glibc_unused_rhook */
+     dst->res_h_errno = src->res_h_errno;
+     dst->_vcsock = src->_vcsock;
+     dst->_flags = src->_flags;
+@@ -590,8 +591,8 @@ void* convert_res_state_to_64(void* d, void* s)
+     dst->_flags = src->_flags;
+     dst->_vcsock = src->_vcsock;
+     dst->res_h_errno = src->res_h_errno;
+-    dst->__glibc_unused_rhook = from_ptrv(src->__glibc_unused_rhook);
+-    dst->__glibc_unused_qhook = from_ptrv(src->__glibc_unused_qhook);
++    /* OHOS musl: __res_state has no __glibc_unused_rhook */
++    /* OHOS musl: __res_state has no __glibc_unused_qhook */
+     memmove(dst->sort_list, src->sort_list, sizeof(dst->sort_list));
+     dst->unused = src->unused;
+     dst->ipv6_unavail = src->ipv6_unavail;

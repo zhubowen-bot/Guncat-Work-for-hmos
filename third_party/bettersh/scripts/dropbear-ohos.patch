@@ -1,0 +1,63 @@
+--- a/src/svr-chansession.c	2026-09-12 20:05:28.788695110 +0800
++++ b/src/svr-chansession.c	2026-09-12 20:05:40.760875141 +0800
+@@ -612,9 +612,20 @@
+ 	if (chansess->master != -1) {
+ 		dropbear_exit("Multiple pty requests");
+ 	}
+-	if (pty_allocate(&chansess->master, &chansess->slave, namebuf, 64) == 0) {
+-		TRACE(("leave sessionpty: failed to allocate pty"))
+-		return DROPBEAR_FAILURE;
++	/* BetterSH 沙箱没有真 pty:/dev/tty 与 /dev/ptmx 都是 EACCES,openpty() 同样
++	 * 失败;而 pty_allocate() 拿到 fd 之后还要 ttyname(),pty_setowner() 还要
++	 * stat() —— 那两条路都会直接 dropbear_exit。这里改用 socketpair 模拟:
++	 * master 归会话侧读写,slave 交给 exec 出来的 shell 当 stdio
++	 * (约定与 entry/src/main/cpp/tty/softpty.h 一致)。tty 名字只作标识用。 */
++	{
++		int sv[2];
++		if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) < 0) {
++			TRACE(("leave sessionpty: socketpair failed"))
++			return DROPBEAR_FAILURE;
++		}
++		chansess->master = sv[0];
++		chansess->slave  = sv[1];
++		snprintf(namebuf, sizeof(namebuf), "softpty");
+ 	}
+ 	
+ 	chansess->tty = m_strdup(namebuf);
+@@ -625,7 +636,8 @@
+ 	pw = getpwnam(ses.authstate.pw_name);
+ 	if (!pw)
+ 		dropbear_exit("getpwnam failed after succeeding previously");
+-	pty_setowner(pw, chansess->tty);
++	/* 软 pty 不是设备节点:没有属主/权限可改,pty_setowner() 里的 stat() 会直接
++	 * dropbear_exit,所以跳过。 */
+ 
+ 	/* Set up the rows/col counts */
+ 	sessionwinchange(chansess);
+@@ -849,7 +861,9 @@
+ 		/* redirect stdin/stdout/stderr */
+ 		close(chansess->master);
+ 
+-		pty_make_controlling_tty(&chansess->slave, chansess->tty);
++		/* 软 pty 没有"控制终端"可言:pty_make_controlling_tty() 里的
++		 * setsid/open(_PATH_TTY)/ioctl(TIOCSCTTY) 在这里只会刷错误日志,
++		 * 而且它拿到的也不是设备节点,直接跳过。 */
+ 		
+ 		if ((dup2(chansess->slave, STDIN_FILENO) < 0) ||
+ 			(dup2(chansess->slave, STDOUT_FILENO) < 0)) {
+--- a/src/svr-runopts.c	2026-09-12 20:05:28.791399988 +0800
++++ b/src/svr-runopts.c	2026-09-12 20:05:40.764845553 +0800
+@@ -194,7 +194,12 @@
+         svr_opts.pubkey_plugin = NULL;
+         svr_opts.pubkey_plugin_options = NULL;
+ #endif
+-	svr_opts.pass_on_env = 0;
++	/* BetterSH 沙箱:会话子进程必须保留宿主环境。procmgr 的控制 socket 路径走
++	 * BSH_CTRL_SOCK,而 dropbear 默认会给会话清空环境(只留它自己那套
++	 * HOME/USER/SHELL/PATH/TERM);清掉之后会话里的 exec 委托就找不到 procmgr
++	 * —— 实测会话 shell 直接报 "cannot exec: BSH_CTRL_SOCK 未设置" 并以 127 退出。
++	 * 设为 1 等价于总是带 -e,省得每次起服务端都要记着。 */
++	svr_opts.pass_on_env = 1;
+ 	svr_opts.reexec_childpipe = -1;
+ 
+ #ifndef DISABLE_ZLIB

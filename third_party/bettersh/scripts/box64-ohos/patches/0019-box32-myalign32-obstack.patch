@@ -1,0 +1,35 @@
+diff --git a/src/libtools/myalign32.c b/src/libtools/myalign32.c
+index b9997375d..3f88e8e66 100755
+--- a/src/libtools/myalign32.c
++++ b/src/libtools/myalign32.c
+@@ -1,3 +1,4 @@
++/* OHOS_PATCH_MYALIGN32_OBSTACK_SKIP */
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -1478,9 +1479,9 @@ void convert_obstack_to_32(void* d, void* s)
+     dst->object_base = to_ptrv(src->object_base);
+     dst->next_free = to_ptrv(src->next_free);
+     dst->chunk_limit = to_ptrv(src->chunk_limit);
+-    dst->temp.tempptr = to_ptrv(src->temp.tempptr);
+-    dst->chunkfun = to_ptrv(src->chunkfun);
+-    dst->freefun = to_ptrv(src->freefun);
++    /* OHOS musl-obstack: temp layout differs */ (void)0;
++    /* OHOS musl-obstack: chunkfun is anon union */ (void)0;
++    /* OHOS musl-obstack: freefun is anon union */ (void)0;
+     dst->extra_arg = to_ptrv(src->extra_arg);
+     dst->use_extra_arg = src->use_extra_arg;
+     dst->maybe_empty_object = src->maybe_empty_object;
+@@ -1496,9 +1497,9 @@ void convert_obstack_to_64(void* d, void* s)
+     dst->maybe_empty_object = src->maybe_empty_object;
+     dst->use_extra_arg = src->use_extra_arg;
+     dst->extra_arg = from_ptrv(src->extra_arg);
+-    dst->freefun = from_ptrv(src->freefun);
+-    dst->chunkfun = from_ptrv(src->chunkfun);
+-    dst->temp.tempptr = from_ptrv(src->temp.tempptr);
++    /* OHOS musl-obstack: freefun is anon union */ (void)0;
++    /* OHOS musl-obstack: chunkfun is anon union */ (void)0;
++    /* OHOS musl-obstack: temp layout differs */ (void)0;
+     dst->chunk_limit = from_ptrv(src->chunk_limit);
+     dst->next_free = from_ptrv(src->next_free);
+     dst->object_base = from_ptrv(src->object_base);

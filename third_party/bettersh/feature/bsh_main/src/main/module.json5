@@ -1,0 +1,11 @@
+{
+  "module": {
+    "name": "bsh_main",
+    "type": "har",
+    "deviceTypes": [
+      "phone",
+      "tablet",
+      "2in1"
+    ]
+  }
+}

@@ -1,0 +1,54 @@
+[submodule "thirdparty/toybox"]
+	path = thirdparty/toybox
+	url = https://github.com/landley/toybox.git
+[submodule "thirdparty/third_party_llvm-project"]
+	path = thirdparty/third_party_llvm-project
+	url = https://gitcode.com/openharmony/third_party_llvm-project.git
+[submodule "thirdparty/vim"]
+	path = thirdparty/vim
+	url = https://gitee.com/mirrors/vim.git
+[submodule "thirdparty/zlib"]
+	path = thirdparty/zlib
+	url = https://gitee.com/mirrors/zlib.git
+[submodule "thirdparty/ncurses"]
+	path = thirdparty/ncurses
+	url = https://gitcode.com/openharmony/third_party_ncurses.git
+[submodule "thirdparty/fastfetch"]
+	path = thirdparty/fastfetch
+	url = https://gh-proxy.com/https://github.com/AdamZhang0425/FastfetchOnHarmonyOSShell.git
+[submodule "thirdparty/mksh"]
+	path = thirdparty/mksh
+	url = https://gitcode.com/openharmony/third_party_mksh.git
+[submodule "thirdparty/wayland"]
+	path = thirdparty/wayland
+	url = https://atomgit.com/qq_35859034/wayland-waymony.git
+[submodule "thirdparty/wayland-protocols"]
+	path = thirdparty/wayland-protocols
+	url = https://gitlab.freedesktop.org/wayland/wayland-protocols.git
+[submodule "thirdparty/libffi"]
+	path = thirdparty/libffi
+	url = https://github.com/libffi/libffi.git
+[submodule "thirdparty/weston"]
+	path = thirdparty/weston
+	url = https://gitlab.freedesktop.org/wayland/weston.git
+[submodule "thirdparty/dropbear"]
+	path = thirdparty/dropbear
+	url = https://github.com/mkj/dropbear.git
+[submodule "thirdparty/qemu"]
+	path = thirdparty/qemu
+	url = https://github.com/qemu/qemu.git
+[submodule "thirdparty/pcre2"]
+	path = thirdparty/pcre2
+	url = https://github.com/PCRE2Project/pcre2.git
+[submodule "thirdparty/glib"]
+	path = thirdparty/glib
+	url = https://gitlab.gnome.org/GNOME/glib.git
+[submodule "thirdparty/mbedtls"]
+	path = thirdparty/mbedtls
+	url = https://github.com/Mbed-TLS/mbedtls.git
+[submodule "thirdparty/zstd"]
+	path = thirdparty/zstd
+	url = https://github.com/facebook/zstd.git
+[submodule "iec"]
+	path = iec
+	url = https://github.com/panedioic/iec.git

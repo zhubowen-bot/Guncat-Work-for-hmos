@@ -1,0 +1,68 @@
+# 0002-no-std-locale-for-ascii-lowercase.patch
+#
+# 症状：native app_packing_tool 一跑就报
+#         [src/packager.cpp:175][IsPathValid][W] Param parse error
+#         Error Message: --json-path must be the config.json file or module.json file.
+#       明明 module.json 就在那儿；换任何参数都一样，"Param parse error" 是对每个路径
+#       参数各打一次。
+# 根因：Packager::IsPathValid / Utils::IsPathValid / Packager::CompatibleProcess 里用
+#         const std::locale englishLocale(EN_US_UTF_8);   // "en_US.UTF-8"
+#       只是为了给文件名的 ASCII 小写化（后缀大小写不敏感）配一个 locale。libstdc++
+#       的 std::locale 构造要去 libc 找该 locale；musl（含 OHOS 的）**不提供 locale 数据**，
+#       构造直接抛 std::runtime_error → 被 IsPathValid 的 catch (...) 吞成
+#       "Param parse error" → 返回 false → 判定 json-path 非法 → 整个打包在参数校验
+#       阶段就死。这不是"缺一个路径"，而是 musl 上没有 locale 这件事。
+# 修法：去掉 locale 对象与它的捕获，直接用 <cctype> 的 std::tolower（C locale，纯 ASCII
+#       语义）。这里本来就是 ASCII 后缀匹配（.json/.so/.hap/.dex…），行为完全一致，
+#       而且与宿主上 jar 版/其它平台的结果对齐。
+# 归属：由 scripts/build_haptools.sh 在构建目录里的源码副本上应用；上游 clone 不动。
+--- a/src/packager.cpp
++++ b/src/packager.cpp
+@@ -164,10 +164,9 @@
+             if (!fs::is_regular_file(path)) {
+                 return false;
+             }
+-            const std::locale englishLocale(EN_US_UTF_8);
+             std::string name = fs::path(path).filename();
+             std::transform(name.begin(), name.end(), name.begin(),
+-                           [&englishLocale](unsigned char c) { return std::tolower(c); });
++                           [](unsigned char c) { return std::tolower(c); });
+             return Utils::EndsWith(name, suffix);
+         }
+         return fs::is_directory(path);
+@@ -273,9 +272,8 @@
+     if (IsPathValid(inputPath, false)) {
+         for (const auto& fileItem : fs::recursive_directory_iterator(inputPath)) {
+             std::string name = fileItem.path().filename();
+-            std::locale englishLocale(EN_US_UTF_8);
+             std::transform(name.begin(), name.end(), name.begin(),
+-                 [&englishLocale](unsigned char c) { return std::tolower(c); });
++                 [](unsigned char c) { return std::tolower(c); });
+             if (Utils::EndsWith(name, suffix)) {
+                 fileList.push_back(fileItem.path().string());
+             }
+@@ -306,9 +304,8 @@
+     if (IsPathValid(inputPath, false)) {
+         for (const auto& fileItem : fs::recursive_directory_iterator(inputPath)) {
+             std::string name = fileItem.path().filename();
+-            std::locale englishLocale(EN_US_UTF_8);
+             std::transform(name.begin(), name.end(), name.begin(),
+-                 [&englishLocale](unsigned char c) { return std::tolower(c); });
++                 [](unsigned char c) { return std::tolower(c); });
+             if (Utils::EndsWith(name, suffix) || Utils::EndsWith(name, extraSuffix)) {
+                 fileList.push_back(fileItem.path().string());
+             }
+--- a/src/utils.cpp
++++ b/src/utils.cpp
+@@ -576,10 +576,9 @@
+             if (!fs::is_regular_file(path)) {
+                 return false;
+             }
+-            const std::locale englishLocale(EN_US_UTF_8);
+             std::string name = fs::path(path).filename();
+             std::transform(name.begin(), name.end(), name.begin(),
+-                           [&englishLocale](unsigned char c) {return std::tolower(c);});
++                           [](unsigned char c) {return std::tolower(c);});
+             return Utils::EndsWith(name, suffix);
+         }
+         return fs::is_directory(path);

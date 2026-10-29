@@ -1,0 +1,25 @@
+`javaSignalHandler`：未识别的信号不要 abort。
+
+症状  进程被系统侧信号"误杀"，日志里只有一句 vm_exit/abort 甚至什么都没有。
+根因  `JVM_HANDLE_XXX_SIGNAL(sig, info, context, abort_if_unrecognized)` 的
+      最后一位为 true 时，凡是 JVM 没注册处理器的信号都会直接 vm_exit。
+      OHOS 应用沙箱会往进程里投递一些系统侧信号（清理/权限探测等）。
+修法  传 false —— 我们本来也不处理这些信号，交回默认处置即可。
+
+--- a/src/hotspot/os/posix/signals_posix.cpp
++++ b/src/hotspot/os/posix/signals_posix.cpp
+@@ -663,7 +663,14 @@
+ static void javaSignalHandler(int sig, siginfo_t* info, void* context) {
+   // Do not add any code here!
+   // Only add code to either JVM_HANDLE_XXX_SIGNAL or PosixSignals::pd_hotspot_signal_handler.
++#ifdef MUSL_LIBC
++  // BetterSH/OHOS: 最后一个参数是 abort_if_unrecognized。传 true 时，凡是 JVM
++  // 没注册处理器的信号都会走 vm_exit/abort；OHOS 沙箱会往进程里投递一些系统侧
++  // 信号，原行为等于被系统误杀。我们本来也不处理它们，交回默认处置即可。
++  (void)JVM_HANDLE_XXX_SIGNAL(sig, info, context, false);
++#else
+   (void)JVM_HANDLE_XXX_SIGNAL(sig, info, context, true);
++#endif
+ }
+ 
+ static void UserHandler(int sig, siginfo_t* siginfo, void* context) {

@@ -1,0 +1,31 @@
+# BetterSH / OHOS：OpenJDK 21u (jdk-21.0.5-ga) 交叉编译补丁系列
+#
+# 应用方式：cd <jdk 源码根> && patch -p1 < <patches>/<file>
+# （build_jdk.sh 的 patches 阶段自带幂等：先 reverse --dry-run 判断是否已打过。）
+#
+# 为什么不用 git apply：jdk 源码被解到 build/ 下，而 build/ 位于 BetterSH 这个
+# git 仓库的工作区内，git apply 会从仓库根解析路径，可能"返回 0 却一个 hunk
+# 都没打上"。
+#
+# 每条补丁的「症状 / 根因 / 修法」写在补丁文件开头的说明里。
+# 拆成 10 条而不是按文件合并，是为了能在 make 报错时按需单独回退一条。
+
+# ── musl 能力缺口：不打就编不过 ───────────────────────────────
+0001-os-linux-drop-dlvsym-shim.patch
+0002-os-linux-no-dlinfo.patch
+0005-os-posix-no-utmpx-apis.patch
+
+# ── OHOS 沙箱行为：编得过，但跑不起来 / 被误杀 ────────────────
+0003-sun-boot-library-path-from-env.patch
+0004-java-home-from-env.patch
+0006-signals-no-abort-on-unknown.patch
+0007-aarch64-poll-segv-fallback.patch
+0008-safepoint-poll-page-readable.patch
+0009-libjli-no-reexec.patch
+0010-ipv6-probe-when-procfs-unreadable.patch
+
+# ── 宿主环境适配 ─────────────────────────────────────────────
+0011-config-guess-no-wsl.patch
+
+# ── libc 能力缺口（第二轮审计发现）─────────────────────────────
+0012-no-xpg-strerror-r-on-musl.patch

@@ -1,0 +1,35 @@
+diff --git a/src/wrapped/wrappedlibc.c b/src/wrapped/wrappedlibc.c
+index 0cef898bb..bb643afcb 100644
+--- a/src/wrapped/wrappedlibc.c
++++ b/src/wrapped/wrappedlibc.c
+@@ -3628,8 +3628,30 @@ EXPORT void* my_mmap64(x64emu_t* emu, void *addr, size_t length, int prot, int f
+ {
+     (void)emu;
+     if(BOX64ENV(dynarec_log)>=LOG_DEBUG) {printf_log(LOG_NONE, "mmap64(%p, 0x%zx, 0x%x, 0x%x, %d, %zd) ", addr, length, prot, flags, fd, offset);}
++    /* OHOS_PATCH_MMAP_NOREPLACE_FALLBACK START
++     * HAP seccomp denies mmap with MAP_FIXED_NOREPLACE via
++     * SECCOMP_RET_ERRNO(ENOSYS). Retry without the flag and
++     * simulate NOREPLACE semantics by checking returned address.
++     * Without this, wine/ntdll fails VA probing and exits. */
++#ifndef BOX64_OHOS_MAP_FIXED_NOREPLACE
++#define BOX64_OHOS_MAP_FIXED_NOREPLACE 0x100000
++#endif
+     void* ret = box_mmap(addr, length, prot, flags, fd, offset);
+     int e = errno;
++    if (ret == MAP_FAILED && (e == ENOSYS || e == EINVAL)
++        && (flags & BOX64_OHOS_MAP_FIXED_NOREPLACE)
++        && !(flags & MAP_FIXED) && addr) {
++        int fb_flags = flags & ~BOX64_OHOS_MAP_FIXED_NOREPLACE;
++        ret = box_mmap(addr, length, prot, fb_flags, fd, offset);
++        e = errno;
++        if (ret != MAP_FAILED && (uintptr_t)ret != (uintptr_t)addr) {
++            /* hint not honored -> caller asked NOREPLACE, fail with EEXIST */
++            box_munmap(ret, length);
++            ret = MAP_FAILED;
++            e = EEXIST;
++        }
++    }
++    /* OHOS_PATCH_MMAP_NOREPLACE_FALLBACK END */
+     if(emu && box64_is32bits && ret!=MAP_FAILED && ((ret>(void*)0xc0000000) || (ret+length>(void*)0xc0000000))) {
+         // do not allow allocating memory that high for 32bits process
+         box_munmap(ret, length);

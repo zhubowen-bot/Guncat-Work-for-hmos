@@ -1,0 +1,23 @@
+diff --git a/src/wrapped/wrappedlibc.c b/src/wrapped/wrappedlibc.c
+index f8f09d3ba..0cef898bb 100644
+--- a/src/wrapped/wrappedlibc.c
++++ b/src/wrapped/wrappedlibc.c
+@@ -4897,12 +4897,12 @@ EXPORT char* secure_getenv(const char* name)
+ #include "libtools/static_libc.h"
+ #endif
+ 
+-#ifndef STATICBUILD
+-#define PRE_INIT\
+-    if(1)                                                      \
+-        lib->w.lib = dlopen(NULL, RTLD_LAZY | RTLD_GLOBAL);    \
+-    else
+-#endif
++/* OHOS_PATCH_NO_PRE_INIT_DLOPEN */
++/* PRE_INIT was: dlopen(NULL,...) -- disabled on OHOS musl, */
++/* see patch 19 notes. Empty macro is fine because the */
++/* template uses bare 'PRE_INIT' with no trailing ';' and the */
++/* following '{' becomes a plain compound statement.        */
++#define PRE_INIT
+ 
+ #if defined(ANDROID)
+ #ifdef STATICBUILD

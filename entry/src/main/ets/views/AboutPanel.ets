@@ -88,8 +88,9 @@ export struct AboutPanel {
               context.openLink(REPO_URL);
             })
 
-            // 第三方组件与许可: shell 工具内含 QEMU(GPL-2.0)、Linux 内核(GPL-2.0)、Alpine 等,
-            // 声明原文随包放在 rawfile/licenses/, 同时给出仓库里的可读链接。
+            // 第三方组件与许可: shell 工具用 IEC 执行核 + mksh/toybox/libarchive/git/
+            // dropbear/node, 均以独立 .so 分发; 声明原文随包放在 rawfile/licenses/,
+            // 同时给出仓库里的可读链接。
             Row() {
               Text('§')
                 .fontSize(15)
