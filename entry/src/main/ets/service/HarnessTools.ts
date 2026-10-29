@@ -82,6 +82,13 @@ class DeviceFsAdapter implements FsAdapter {
 export const WEB_FETCH_TOOL_NAME: string = 'web_fetch';
 
 export class HarnessTools {
+  // shell 工具的后端钩子：由 EntryAbility 注入原生执行核（IEC）的实现。
+  // 之所以用钩子而不是直接 import：IecShellService 是 ArkTS(.ets)，而本文件是
+  // TS，TS 不能 import ArkTS 模块；反过来 ArkTS 可以 import TS，所以由 .ets 侧
+  // 在启动时把实现挂上来。未注入时退回原来的 QEMU 后端。
+  static shellBackendHook: ((context: common.UIAbilityContext, convId: string,
+    args: Record<string, Object>) => Promise<ToolExecResult>) | null = null;
+
   // ===== 工具分类(与 WorkFileService 的并发调度联动) =====
 
   static isReadOnly(name: string): boolean {
@@ -185,6 +192,10 @@ export class HarnessTools {
       return await JsCodeService.run(root, args);
     }
     if (name === LinuxShellService.TOOL_NAME) {
+      const backend = HarnessTools.shellBackendHook;
+      if (backend !== null) {
+        return await backend(context, convId, args);
+      }
       return await LinuxShellService.run(context, convId, args);
     }
     if (name === PythonService.TOOL_NAME) {
@@ -662,12 +673,12 @@ export class HarnessTools {
         'timeout_ms', HarnessTools.strProp('可选: 执行超时毫秒数, 默认 10000, 范围 1000~30000')),
       ['code']));
     defs.push(HarnessTools.makeTool(LinuxShellService.TOOL_NAME,
-      '在设备上真实运行的 Linux(Alpine, QEMU 解释执行、无 JIT)里执行一条 shell 命令, 返回退出码与 stdout/stderr。' +
-      '**目录与其它工具完全一致**: 命令的工作目录就是本会话工作区 —— 与 read_file/write_file/edit/glob 看到的是同一个目录(经 virtio-9p 直接共享, 不是副本), 所以 `cat data/a.csv` 与 read_file("data/a.csv") 读的是同一份内容, 用 shell 改过的文件立刻能被 read_file 读到。' +
-      '适用: 批量重命名/批量转换、sed/awk/grep/find/xargs 流水线、tar/gzip 打包、跨文件统计与比对、需要真程序的活(busybox; **已预装 Python 3 + pip + jq**, 其它包可 `apk add` 联网安装)。' +
+      '在设备上**原生执行**一条 shell 命令(IEC 运行核: 命令以 HarmonyOS `.so` 形式 fork 后直接跑, 不经虚拟机、不需要 JIT 权限), 返回退出码与 stdout/stderr。' +
+      '**目录与其它工具完全一致**: 命令的工作目录就是本会话工作区 —— 与 read_file/write_file/edit/glob 看到的是同一个目录(同一个文件系统, 不是副本), 所以 `cat data/a.csv` 与 read_file("data/a.csv") 读的是同一份内容, 用 shell 改过的文件立刻能被 read_file 读到。' +
+      '适用: 批量重命名/批量转换、sed/awk/grep/find/xargs 流水线、tar/gzip 打包、跨文件统计与比对、需要真程序的活(toybox 工具集; git/python/node 等以随包的运行库为准)。' +
       '**不要**用它做 read_file/write_file/search_files/glob/grep/transform_file 已经能做好的事(每次调用都有开销); 也不要逐条 `ls`/`cat` 摸索目录 —— 用 list_files/glob 更快。' +
       '语法: 标准 sh(管道、重定向、通配符、变量、&&/||、for/while、函数)。相对路径以工作区根为基准, cwd 可切到子目录。' +
-      '开销: 首次调用需要引导虚拟机(冷启动数十秒, TCI 逐条解释执行, 比 JIT 慢但不需要受限权限), 之后同一进程内复用, 调用很快; 空闲 10 分钟后自动关机, 下次再冷启动。' +
+      '开销: 不需要引导虚拟机; 每条命令的进程创建是毫秒级, CPU 密集任务接近原生速度。' +
       '限制: 只能访问本会话工作区(/workspace, 隔离于其它会话); 单条命令默认 60 秒超时(可用 timeout_ms 放宽到 240 秒); 输出超过 60KB 会截断, 全文自动存到工作区 .spill/ 目录供 read_file 读回; 退出码非 0 不算工具失败(如 grep 无匹配返回 1), 请按退出码与 stderr 自行判断。',
       HarnessTools.props4(
         'command', HarnessTools.strProp('要执行的 shell 命令(可多行脚本; 引号/管道/重定向按 sh 语义)'),

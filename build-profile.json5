@@ -51,6 +51,12 @@
           ]
         }
       ]
+    },
+    {
+      // 设备内原生执行核（IEC）。vendored 在 third_party/bettersh 下，作为本地
+      // 模块参与构建；entry 通过 oh-package 的 file: 依赖使用它的 ArkTS 入口。
+      "name": "iec",
+      "srcPath": "./third_party/bettersh/iec/platform/ohos/har"
     }
   ]
 }

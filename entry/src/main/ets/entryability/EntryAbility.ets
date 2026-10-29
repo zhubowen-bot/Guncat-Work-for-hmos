@@ -13,12 +13,15 @@
  * limitations under the License.
  */
 
-import { AbilityConstant, ConfigurationConstant, UIAbility, Want, Configuration } from '@kit.AbilityKit';
+import { AbilityConstant, ConfigurationConstant, UIAbility, Want, Configuration, common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { systemShare } from '@kit.ShareKit';
 import { window } from '@kit.ArkUI';
 import { BackgroundTaskService } from '../service/BackgroundTaskService';
+import { HarnessTools } from '../service/HarnessTools';
+import { IecShellService } from '../service/IecShellService';
+import { ToolExecResult } from '../service/WorkFileService';
 
 const DOMAIN = 0x0000;
 
@@ -36,6 +39,11 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate<boolean>('systemColorMode', false);
     AppStorage.setOrCreate<string>('sharedFileUris', '');
     this.publishSharedFiles(want);
+    // shell 工具切到设备内原生执行核（IEC）：不启 QEMU、不需要 JIT 权限。
+    // 钩子由 .ets 侧注入，HarnessTools(.ts) 只负责调用；注入失败会退回 QEMU 后端。
+    HarnessTools.shellBackendHook =
+      (context: common.UIAbilityContext, convId: string, args: Record<string, Object>):
+        Promise<ToolExecResult> => IecShellService.run(context, convId, args);
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
   }
 
