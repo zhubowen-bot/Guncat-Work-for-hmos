@@ -66,6 +66,7 @@ ITEM_IDS=(
     sonames
     py-runner
     cmd-tools
+    iec-native-host
     iec-libs
 )
 ITEM_NAMES=(
@@ -77,14 +78,15 @@ ITEM_NAMES=(
     "共享库 soname 依赖（check-sonames.py --strict）"
     "py_runner 宿主协议测试"
     "IEC 命令集宿主测试（nc / hexdump / diff）"
+    "IEC 原生代码宿主回归（exec 路由 / cwd / NCP / fs shim）"
     "IEC 随包库检查（tools/check-iec-libs.py）"
 )
-ITEM_FAST_SKIP=(0 0 0 0 0 1 1 1 0)
+ITEM_FAST_SKIP=(0 0 0 0 0 1 1 1 0 0)
 
 print_list() {
     local i
     for i in "${!ITEM_IDS[@]}"; do
-        printf '%2d. %-10s %s%s\n' \
+        printf '%2d. %-16s %s%s\n' \
             "$((i + 1))" "${ITEM_IDS[$i]}" "${ITEM_NAMES[$i]}" \
             "$([[ ${ITEM_FAST_SKIP[$i]} == 1 ]] && echo '  [--fast 跳过]')"
     done
@@ -307,6 +309,22 @@ check_cmd_tools() {
     command -v od >/dev/null 2>&1 || { skip_msg "找不到 od"; return 77; }
 
     bash "$ROOT/third_party/bettersh/iec/tests/cmd_tools/run.sh"
+}
+
+# IEC 原生代码的宿主回归：exec 路由（ResolveKind）、cwd 校验、NCP 拒绝分类、
+# fs shim 路径映射。全部在宿主编/跑，不需要设备或 OHOS SDK；脚本尚未合入时跳过。
+check_iec_native_host() {
+    local script="$ROOT/third_party/bettersh/iec/scripts/test_iec_native_host.sh"
+    if [[ ! -f "$script" ]]; then
+        skip_msg "third_party/bettersh/iec/scripts/test_iec_native_host.sh 不存在（该检查尚未合入）"
+        return 77
+    fi
+    command -v bash >/dev/null 2>&1 || { skip_msg "找不到 bash"; return 77; }
+    command -v cmake >/dev/null 2>&1 || { skip_msg "找不到 cmake"; return 77; }
+    command -v cc >/dev/null 2>&1 || { skip_msg "找不到 cc"; return 77; }
+    command -v c++ >/dev/null 2>&1 || { skip_msg "找不到 c++"; return 77; }
+
+    bash "$script"
 }
 
 # 找到能用的 Linux 版 llvm-nm 目录。WSL 下 Windows 的 llvm-nm.exe 读不了

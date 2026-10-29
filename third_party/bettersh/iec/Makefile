@@ -68,14 +68,15 @@ SHIM_WRAPS := open close dup dup2 dup3 fcntl ioctl isatty ttyname \
 WRAP_FLAGS := $(foreach s,$(SHIM_WRAPS),-Wl,--wrap=$(s))
 
 SERVER_BIN  := $(DIST)/iec_server
-SERVER_SRCS := main.cpp tty/tty_server.cpp exec/exec_server.cpp exec/path_resolver.cpp exec/caps.cpp \
+SERVER_SRCS := main.cpp tty/tty_server.cpp exec/exec_server.cpp exec/exec_route.cpp exec/path_resolver.cpp exec/caps.cpp \
                exec/exec_loader.cpp loader/loader.cpp $(GUEST_SWITCH_SRC) \
                exec/exec_so.cpp exec/exec_qemu.cpp exec/exec_shebang.cpp exec/elf.cpp \
                fs/resolver.c logger/logger.cpp common/proc.c common/sock_server.cpp
 SERVER_HDR  := common/constant.h tty/tty_server.h exec/exec_server.h exec/caps.h \
                exec/exec_loader.h loader/loader.h exec/exec_so.h exec/exec_types.h \
                exec/exec_qemu.h exec/exec_shebang.h \
-               exec/exec_route.h exec/elf.h common/sock_server.h \
+               exec/exec_route.h exec/exec_ncp.h exec/exec_ncp_refusal.h exec/elf.h \
+               common/sock_server.h \
                common/sock_operation.h common/proc.h logger/logger.h fs/resolver.h
 
 ifeq ($(MODE),warp)

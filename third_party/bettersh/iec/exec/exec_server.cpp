@@ -27,6 +27,7 @@
 #include "elf.h"
 #include "exec_loader.h"
 #include "exec_ncp.h"
+#include "exec_ncp_refusal.h"
 #include "exec_qemu.h"
 #include "exec_route.h"
 #include "exec_shebang.h"
@@ -115,35 +116,9 @@ static bool ResolveSelfPath(std::string* path, pid_t caller) {
 /* ------------------------------------------------------------------ */
 /* Resolver                                                           */
 /* ------------------------------------------------------------------ */
-
-LaunchKind ResolveKind(const std::string& path) {
-    const HostCapabilities& caps = Caps();
-
-    if (caps.fork == 1 && ReadShebang(path))  return LaunchKind::kShebang;
-    // A launcher is not an executable image: it is a text file naming a .so and an
-    // entry point. Recognising it therefore must not depend on fork -- the native
-    // child process route loads the same launcher (SpawnNcp handles kSo too), so
-    // gating this on fork made every command on a no-fork device resolve to
-    // kUnexecutable while an NCP route was available.
-    if (IsSoLauncher(path)) return LaunchKind::kSo;
-
-    const uint16_t machine = ElfMachine(path);
-    const bool host_arch = machine == HOST_ARCH;
-
-    // An executable bit that exists only in <path>.IEC_CHMOD is not visible to
-    // execve(): the kernel will still see the old mode and fail. Route such a
-    // file through a loader that does not ask the kernel about the bit.
-    const bool emulated_exec = EmulatedExecutable(path);
-
-    if (host_arch && caps.fork == 1) {
-        if (caps.exec == 2 && !emulated_exec) return LaunchKind::kExec;
-        if (caps.jit > 0) return LaunchKind::kLoader;
-    }
-
-    if (machine == EM_AARCH64) return LaunchKind::kQemu_aarch64;
-    if (machine == EM_X86_64) return LaunchKind::kQemu_x86_64;
-    return LaunchKind::kUnexecutable;
-}
+/* ResolveKind() itself lives in exec_route.cpp: it is a pure question about a path
+ * and the capability word, and keeping it in a file of its own is what lets a host
+ * test link it without dragging in the whole server. */
 
 static bool SearchesPath(CallMethod method) {
     switch (method) {
@@ -444,20 +419,9 @@ static pid_t StartChild(SpawnRequest* req, LaunchKind kind, std::string* why) {
         // such as "only so file for now!" or "bad launcher ..." describes *this
         // request* rather than the device, and latching on it would disable a
         // working NCP route for every later launcher -- on a device without fork,
-        // for every command after the first non-.so one.
-        static const char* kPlatformWide[] = {
-            "start native child failed",
-            "cannot register the exit callback",
-            "the platform has no native child process API",
-        };
-        bool platform_refused = false;
-        for (const char* prefix : kPlatformWide) {
-            if (ncp_error.compare(0, std::strlen(prefix), prefix) == 0) {
-                platform_refused = true;
-                break;
-            }
-        }
-        if (platform_refused) g_ncp_refused.store(true);
+        // for every command after the first non-.so one. The prefix list lives in
+        // exec_ncp_refusal.h so a host test can pin it.
+        if (IsNcpPlatformRefusal(ncp_error)) g_ncp_refused.store(true);
         // A launcher that asked for "auto" must not lose the route that works:
         // the probe only proves the library exports the entry point, not that this
         // application is allowed to start a child with it. Fall through to fork --

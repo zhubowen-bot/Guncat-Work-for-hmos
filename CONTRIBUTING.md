@@ -58,9 +58,14 @@ bash scripts/check-all.sh --fast   # 跳过 soname / py_runner / IEC 命令集
 bash scripts/check-all.sh --list   # 只看检查项清单
 ```
 
-按顺序执行 9 项：纯逻辑单测（683 项）、服务层 `tsc`、界面文案可复制护栏、
+按顺序执行 10 项：纯逻辑单测（683 项）、服务层 `tsc`、界面文案可复制护栏、
 Markdown 相对链接、随包许可、共享库 soname、`py_runner` 宿主协议、
-IEC 命令集宿主测试，以及存在时才跑的 `tools/check-iec-libs.py`。
+IEC 命令集宿主测试、IEC 原生代码宿主回归，以及存在时才跑的 `tools/check-iec-libs.py`。
+
+- IEC 原生代码宿主回归对应
+  `third_party/bettersh/iec/scripts/test_iec_native_host.sh`：在宿主编出
+  `iec_server`，直接钉住 `ResolveKind` 的路由分类、cwd 无搜索权限必须拒绝、
+  NCP 平台级拒绝分类，以及 fs shim 的绝对路径映射；不需要设备或 OHOS SDK。
 
 - 单项失败不会中断后续项；每项打印 `==> 名称` 与耗时，末尾给出
   `SUMMARY: PASS=n FAIL=n SKIP=n`，有 FAIL 时整体非零退出。

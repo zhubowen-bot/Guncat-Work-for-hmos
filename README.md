@@ -180,6 +180,7 @@ HAP 约 430MB（原生命令集 + CPython + 运行库）。某个 `.so` 缺失�
 ### 验证
 
 - **一键本地检查（推荐）**：`bash scripts/check-all.sh`（`--fast` 跳过较慢/依赖环境的项，`--list` 查看清单）
+- **IEC 原生代码宿主回归**：`bash third_party/bettersh/iec/scripts/test_iec_native_host.sh`（exec 路由 / cwd 校验 / NCP 拒绝分类 / fs shim 路径映射；已接入 `check-all.sh`，不需要设备或 OHOS SDK）
 - 纯逻辑回归（当前 **683 项**全绿）：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`
 - 服务层类型检查：`cd test/guncat-harness && node check-setup.mjs && npx -y -p typescript@5.5.4 tsc -p check/tsconfig.json`
 - PPT / Word / Excel 离线验证环境：`test/pptx-harness`、`test/docx-harness`、`test/xlsx-harness`
