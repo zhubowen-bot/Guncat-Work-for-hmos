@@ -26,7 +26,7 @@
 # Output:
 #   $IEC_DEPS_DIR/usr/lib/$TARGET/libarchive.a
 #   $IEC_DEPS_DIR/usr/lib/$TARGET/libarchive.so*
-#   platform/ohos/har/libs/arm64-v8a/libarchive.so*   (when LIBARCHIVE_SHARED=1)
+#   platform/ohos/har/libs/arm64-v8a/libarchive.so.13  (when LIBARCHIVE_SHARED=1)
 #   platform/ohos/har/libs/arm64-v8a/libbsdtar.so     (when LIBARCHIVE_CLI=1)
 #   platform/ohos/har/libs/arm64-v8a/libbsdunzip.so
 #   platform/ohos/har/libs/arm64-v8a/libbsdcpio.so
@@ -154,14 +154,17 @@ if [ "$SHARED" = "1" ]; then
 		-Wl,-soname,libarchive.so.13 -Wl,-Bsymbolic-functions \
 		"${FS_WRAP_FLAGS[@]}" -lpthread -lm \
 		|| iec_err "libarchive.so link failed"
-	ln -sf "libarchive.so.13" "$HAR_LIBS/libarchive.so"
+	# HAR 的 libs/ 会原样进 HAP，里面不能有符号链接（部分打包/安装链路不保留
+	# 链接，链接目标也会重复占空间）。HAR 里只放实体文件 libarchive.so.13；
+	# 构建期需要 libarchive.so 这个开发名时，用 IEC_DEPS_LIB 里 install 出的那份。
+	rm -f "$HAR_LIBS/libarchive.so"
 
-	iec_log "shared object: $HAR_LIBS/libarchive.so"
-	"$READELF" -d "$HAR_LIBS/libarchive.so" | grep -E 'NEEDED|SONAME' >&2 || true
-	"$NM" -D --defined-only "$HAR_LIBS/libarchive.so" \
+	iec_log "shared object: $SO13"
+	"$READELF" -d "$SO13" | grep -E 'NEEDED|SONAME' >&2 || true
+	"$NM" -D --defined-only "$SO13" \
 		| grep -E ' (T|W) archive_read_new$' >/dev/null \
 		|| iec_err "archive_read_new is not exported"
-	if "$READELF" -d "$HAR_LIBS/libarchive.so" | grep -q 'NEEDED.*libz'; then
+	if "$READELF" -d "$SO13" | grep -q 'NEEDED.*libz'; then
 		iec_err "libarchive.so depends on a shared zlib; the HAR has only static libz.a"
 	fi
 fi
