@@ -53,12 +53,27 @@ export interface IecRunResult {
   out: string;
   err: string;
   timedOut: boolean;
-  // 输出里出现了非法 UTF-8（解码成 U+FFFD）。二进制内容应重定向到文件，
-  // 不要当文本用。
+  // 结束程序的信号（0 = 正常退出）。引擎在 Finish() 里同时给 code=128+signal，
+  // 只把 code 交出去会让"被 SIGKILL"与"自己 exit 137"分不开，所以单独带一份。
+  signal: number;
+  // 输出里出现了非法 UTF-8（解码成 U+FFFD）或 NUL 字节。二进制内容应重定向到
+  // 文件，不要当文本用。NUL 单独判是因为它是合法 UTF-8（U+0000），只看替换字符
+  // 会把"全 NUL 的二进制"当文本放过。
   binary: boolean;
   outDropped: number;
   errDropped: number;
+  // 命令根本没起来（execStart 拒绝 / 运行核未就绪），而不是起来了才拿不到状态。
+  // 调用方要靠它区分"启动失败"与"超时后主动终止"，两者都可能是 code<0。
+  startFailed: boolean;
   elapsedMs: number;
+}
+
+// 两条流"被引擎上限读掉丢弃"的累计字节。主循环、超时后的收尾、drainToEof 都会
+// 更新它：进程退出后读线程仍会从管道里搬出尾巴，那一段同样可能被上限丢掉，只记
+// 主循环最后一次的值会少报，正文提示的字节数就和实际丢弃量对不上。
+class ExecDropped {
+  out: number = 0;
+  err: number = 0;
 }
 
 // `toybox` 无参输出的解析结果。complete=false 表示进程没正常退出（超时/被杀）、
@@ -592,9 +607,11 @@ export class IecRuntime {
   static async run(context: common.UIAbilityContext, command: string,
     options: IecRunOptions): Promise<IecRunResult> {
     const startedAt: number = Date.now();
+    // startFailed 先给 true：运行核没起来（下面 ready !== ''）也是"命令没跑"，
+    // 和 execStart 抛错同一种，调用方要按失败处理。
     let result: IecRunResult = {
-      code: -1, out: '', err: '', timedOut: false, binary: false,
-      outDropped: 0, errDropped: 0, elapsedMs: 0
+      code: -1, out: '', err: '', timedOut: false, signal: 0, binary: false,
+      outDropped: 0, errDropped: 0, startFailed: true, elapsedMs: 0
     };
 
     const ready: string = await IecRuntime.ensure(context);
@@ -607,11 +624,11 @@ export class IecRuntime {
     await IecRuntime.acquireSlot();
     const outChunks: Uint8Array[] = [];
     const errChunks: Uint8Array[] = [];
+    const dropped: ExecDropped = new ExecDropped();
     let handleId: number = -1;
     let code: number = -1;
+    let signal: number = 0;
     let timedOut: boolean = false;
-    let outDropped: number = 0;
-    let errDropped: number = 0;
     let failure: string = '';
     let graceful: boolean = false;
     try {
@@ -632,20 +649,21 @@ export class IecRuntime {
         const poll = execPoll(id, 64 * 1024, 64 * 1024, 'base64');
         IecRuntime.collect(outChunks, poll.out);
         IecRuntime.collect(errChunks, poll.err);
-        outDropped = poll.outDropped;
-        errDropped = poll.errDropped;
+        IecRuntime.observeDropped(dropped, poll.outDropped, poll.errDropped);
         if (poll.exited) {
           code = poll.code;
+          signal = poll.signal;
           timedOut = poll.timedOut;
           graceful = true;
           break;
         }
         if (Date.now() > deadline) {
           // 引擎自己的 timeoutMs 应该已经动手了；这里再兜一层，防止
-          // "服务还活着但命令卡在不可中断的调用里"。不再阻塞等 3 秒：
-          // Release 拒绝运行中的会话，等不到就放弃 = 每次卡死漏一条会话
-          // （4 个线程 + 输出缓冲）。立刻按 job 发 SIGKILL，回收交给
-          // releaseSession() 在后台重试。
+          // "服务还活着但命令卡在不可中断的调用里"。原来那条路是发完 SIGKILL
+          // 立刻走人，代价是结果里只剩一个 -1：模型分不清"超时被杀"和"根本没
+          // 起来"。这里改成终止后再收最多 500ms（不是原来否掉的 3 秒），拿到
+          // 引擎记的 128+signal 就报真值，同时把终止前最后一刻的输出与 dropped
+          // 计数一并收进来；500ms 内还是没结束才退回 -1。
           try {
             execTerminate(id, 0);
           } catch (e) {
@@ -653,7 +671,25 @@ export class IecRuntime {
               id, JSON.stringify(e));
           }
           timedOut = true;
-          code = -1;
+          const reclaimUntil: number = Date.now() + 500;
+          while (Date.now() < reclaimUntil) {
+            const tail = execPoll(id, 64 * 1024, 64 * 1024, 'base64');
+            IecRuntime.collect(outChunks, tail.out);
+            IecRuntime.collect(errChunks, tail.err);
+            IecRuntime.observeDropped(dropped, tail.outDropped, tail.errDropped);
+            if (tail.exited) {
+              code = tail.code;
+              signal = tail.signal;
+              // execTerminate(id, 0) 发的是 SIGKILL，它拦不住也处理不了：退出码
+              // 是 0 且没有信号，说明命令在这一轮 poll 之前就自己正常结束了，
+              // 只是没被赶上。那就不该报"超时终止"（会和 exit 0 自相矛盾）。
+              if (code === 0 && signal === 0) {
+                timedOut = false;
+              }
+              break;
+            }
+            await IecRuntime.sleep(10);
+          }
           break;
         }
         await IecRuntime.sleep(10);
@@ -661,7 +697,7 @@ export class IecRuntime {
 
       // 子进程退出不等于管道读干净了：把退出瞬间还在管道里的字节收完。
       if (graceful && failure === '') {
-        await IecRuntime.drainToEof(id, outChunks, errChunks, 1000);
+        await IecRuntime.drainToEof(id, outChunks, errChunks, dropped, 1000);
       }
     } catch (e) {
       failure = IecRuntime.describeFailure(e);
@@ -674,19 +710,45 @@ export class IecRuntime {
     }
 
     result.code = code;
+    result.signal = signal;
     result.timedOut = timedOut;
-    result.outDropped = outDropped;
-    result.errDropped = errDropped;
+    result.startFailed = failure !== '';
+    result.outDropped = dropped.out;
+    result.errDropped = dropped.err;
     result.out = IecRuntime.decodeChunks(outChunks);
     result.err = IecRuntime.decodeChunks(errChunks);
     if (failure !== '') {
       result.err = result.err === '' ? failure : result.err + '\n' + failure;
     }
-    // 非 UTF-8 字节在解码时变成 U+FFFD。这里把"输出已损坏"变成显式标记，
-    // 而不是让调用方把乱码当内容用（二进制请重定向到文件，或用 base64）。
-    result.binary = result.out.indexOf('\uFFFD') !== -1 || result.err.indexOf('\uFFFD') !== -1;
+    // 非 UTF-8 字节在解码时变成 U+FFFD；NUL 是合法 UTF-8，解码看不出来，得看
+    // 原始字节。两者任一命中就把"输出已损坏"变成显式标记，而不是让调用方把乱码
+    // 当内容用（二进制请重定向到文件，或用 base64）。
+    result.binary = IecRuntime.hasNulByte(outChunks) || IecRuntime.hasNulByte(errChunks) ||
+      result.out.indexOf('\uFFFD') !== -1 || result.err.indexOf('\uFFFD') !== -1;
     result.elapsedMs = Date.now() - startedAt;
     return result;
+  }
+
+  // 记一次 poll 的两条流 dropped 计数。dropped 是累计值且单调不回头，每轮都覆盖
+  // 即可；漏掉某一轮（例如只记主循环、不记收尾）就会少报，正文里的字节数就和
+  // 实际丢弃量对不上。
+  private static observeDropped(dropped: ExecDropped, outDropped: number,
+    errDropped: number): void {
+    dropped.out = outDropped;
+    dropped.err = errDropped;
+  }
+
+  // 原始字节里有没有 NUL。只靠解码后的 U+FFFD 判二进制会漏掉"全是 NUL 或
+  // ASCII+NUL"的内容，那种输出在使用者眼里仍是二进制，当文本交给模型就是乱码。
+  private static hasNulByte(chunks: Uint8Array[]): boolean {
+    for (const chunk of chunks) {
+      for (let i: number = 0; i < chunk.length; i++) {
+        if (chunk[i] === 0) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   // 收一次 poll 的字节块。走 base64 而不是让 NAPI 直接把每个 64KB 块解成
@@ -727,8 +789,12 @@ export class IecRuntime {
   // 收完；有字节时连续取（每约 1MB 让出一次事件循环），不再每轮 sleep(10)，
   // 否则 1s 上限内只能搬约 6.4MB。
   // 后台进程继承着管道时 EOF 可能一直不来，所以仍有 waitMs 上限。
+  //
+  // dropped 也要在这里更新：退出瞬间读线程可能还在把管道里的尾巴搬进会话缓冲，
+  // 上限已经用光时那部分同样算"读掉丢弃"。只在主循环记最后一次值会少报，正文
+  // 里"丢弃 N 字节"就和实际丢弃量对不上。
   private static async drainToEof(id: number, outChunks: Uint8Array[],
-    errChunks: Uint8Array[], waitMs: number): Promise<void> {
+    errChunks: Uint8Array[], dropped: ExecDropped, waitMs: number): Promise<void> {
     const until: number = Date.now() + waitMs;
     let polls: number = 0;
     while (Date.now() < until) {
@@ -736,6 +802,7 @@ export class IecRuntime {
       const gotData: boolean = poll.out !== '' || poll.err !== '';
       IecRuntime.collect(outChunks, poll.out);
       IecRuntime.collect(errChunks, poll.err);
+      IecRuntime.observeDropped(dropped, poll.outDropped, poll.errDropped);
       if (poll.outEof && poll.errEof && !gotData) {
         return;
       }

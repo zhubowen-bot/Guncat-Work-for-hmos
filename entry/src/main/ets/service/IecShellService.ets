@@ -116,7 +116,9 @@ export class IecShellService {
     });
     const elapsed: number = Date.now() - startedAt;
 
-    if (run.out === '' && run.err !== '' && run.code < 0) {
+    // 只有"命令压根没起来"才算工具失败。超时后主动终止时 code 也是负的，
+    // 但它有输出、有退出状态行（超时终止），当成失败会把超时文案吞掉。
+    if (run.startFailed) {
       const failed: ToolExecResult = IecShellService.fail(run.err);
       failed.timeout = run.timedOut;
       return failed;
@@ -138,26 +140,82 @@ export class IecShellService {
     spillOut: string, spillErr: string): string {
     const seconds: string = (elapsedMs / 1000).toFixed(2);
     const parts: string[] = [];
-    parts.push('[exit ' + run.code.toString() + ' · ' + seconds + 's · cwd ' + cwdLabel +
-      (run.timedOut ? ' · 超时终止' : '') + ']');
-    if (run.binary) {
-      parts.push('[...输出含非 UTF-8 字节，文本视图会显示 �；二进制请重定向到文件' +
-        '（如 `cmd > out.bin`）再用 download_file 取，或用 `base64` 转成文本]');
+    // 状态行。引擎的 code 与 shell 的 $? 一致（正常退出是退出码，被信号杀是
+    // 128+signal），但只有数字的话，"被 SIGKILL 杀(137)"、"超时被杀(137)"、
+    // "启动/观测失败(-1)"在模型眼里是同一串数字。超时、信号、状态丢失分别写出来。
+    let status: string = '[exit ' + run.code.toString();
+    if (run.timedOut) {
+      status += ' · 超时终止';
     }
-    parts.push(IecShellService.body(run.out, spillOut));
+    if (run.signal > 0) {
+      status += ' · 被信号 ' + IecShellService.signalName(run.signal) + ' 终止';
+    }
+    if (run.code < 0 && run.signal === 0 && !run.timedOut) {
+      status += ' · 未观测到退出状态(会话丢失)';
+    }
+    status += ' · ' + seconds + 's · cwd ' + cwdLabel + ']';
+    parts.push(status);
 
-    if (run.err.trim() !== '') {
-      parts.push('--- stderr ---');
-      parts.push(IecShellService.body(run.err, spillErr));
+    // .spill 落盘的是解码后的字符串，不是原始字节：二进制内容已经被 � 替换，
+    // 不能让"完整内容在工作区"这句话把模型引去读一份坏掉的文件。
+    const caveat: string = run.binary
+      ? '其中非 UTF-8 字节已替换为 �，落盘的是解码后的文本，不能当原始二进制用'
+      : '';
+    if (run.binary) {
+      parts.push('[...输出含二进制字节(非 UTF-8 或含 NUL)，文本视图里非法字节显示为 �' +
+        '；二进制请重定向到文件（如 `cmd > out.bin`）再用 download_file 取，' +
+        '或用 `base64` 转成文本]');
     }
+    const bodyOut: string = IecShellService.body(run.out, spillOut, caveat);
+    if (bodyOut !== '') {
+      parts.push(bodyOut);
+    }
+
+    // 只含空白字符的 stderr 也是 stderr（进度条常用 \r 收尾）：原来的 trim()
+    // 判断会把它整段丢掉，模型就看不到命令最后说了什么。
+    if (run.err !== '') {
+      parts.push('--- stderr ---');
+      parts.push(IecShellService.body(run.err, spillErr, caveat));
+    }
+    // 引擎 cap 丢弃的字节和壳层"截断到前 N 字符"是两个原因，必须分开说：
+    // 前者连 .spill 里都没有，后者 .spill 里有。
     if (run.outDropped > 0 || run.errDropped > 0) {
-      parts.push('[...引擎输出上限丢弃 ' + (run.outDropped + run.errDropped).toString() +
-        ' 字节; 需要完整输出请重定向到文件后用 read_file 读回]');
+      const streams: string[] = [];
+      if (run.outDropped > 0) {
+        streams.push('stdout ' + run.outDropped.toString() + ' 字节');
+      }
+      if (run.errDropped > 0) {
+        streams.push('stderr ' + run.errDropped.toString() + ' 字节');
+      }
+      parts.push('[引擎输出上限已丢弃 ' + streams.join('、') +
+        '，这部分不在上面的文本/ .spill 文件里；要完整输出请重定向到文件后用 read_file 读回]');
     }
     return parts.join('\n');
   }
 
-  private static body(text: string, spillRel: string): string {
+  // 常见信号的名字，只为了正文能写"被 SIGKILL(9) 终止"而不是裸的 137。
+  // 没列到的按编号输出，不猜。
+  private static signalName(signo: number): string {
+    switch (signo) {
+      case 1: return 'SIGHUP(1)';
+      case 2: return 'SIGINT(2)';
+      case 3: return 'SIGQUIT(3)';
+      case 4: return 'SIGILL(4)';
+      case 5: return 'SIGTRAP(5)';
+      case 6: return 'SIGABRT(6)';
+      case 7: return 'SIGBUS(7)';
+      case 8: return 'SIGFPE(8)';
+      case 9: return 'SIGKILL(9)';
+      case 11: return 'SIGSEGV(11)';
+      case 13: return 'SIGPIPE(13)';
+      case 14: return 'SIGALRM(14)';
+      case 15: return 'SIGTERM(15)';
+      case 31: return 'SIGSYS(31)';
+      default: return 'signal ' + signo.toString();
+    }
+  }
+
+  private static body(text: string, spillRel: string, caveat: string): string {
     let head: string = text;
     let truncated: boolean = spillRel !== '';
     if (head.length > Constants.WORK_SHELL_HEAD_CHARS) {
@@ -167,11 +225,14 @@ export class IecShellService {
     if (!truncated) {
       return head;
     }
+    const extra: string = caveat === '' ? '' : '；' + caveat;
     if (spillRel !== '') {
-      return head + '\n\n[...输出已截断: 完整内容在工作区 ' + spillRel +
-        ', 需要时用 read_file 读回]';
+      // 只承诺"已收到的内容"：被引擎 cap 丢掉的那部分不在这里，写"完整内容"是假话。
+      return head + '\n\n[...输出已截断: 已收到的内容在工作区 ' + spillRel +
+        extra + '；需要时用 read_file 读回]';
     }
-    return head + '\n\n[...输出已截断; 落盘失败, 建议把输出重定向到文件后用 read_file 读]';
+    return head + '\n\n[...输出已截断; 落盘失败, 建议把输出重定向到文件后用 read_file 读' +
+      extra + ']';
   }
 
   // 超过工具单次返回上限的内容落盘到工作区 .spill/，返回相对路径；不需要时返回空串。
