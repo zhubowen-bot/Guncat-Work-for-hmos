@@ -270,6 +270,52 @@ void TestCwdValidation() {
         }
     }
 
+    // 子进程必须拿回 SIGPIPE 的默认处置。会话的 stdin feeder 在**应用进程**里
+    // 忽略 SIGPIPE（写无读者管道不能杀整个应用），而 execve 不会复位被忽略的
+    // 信号；exec_server 的复位循环若不显式恢复 SIGPIPE，所有命令都会继承
+    // “忽略”，`kill -PIPE $$` 杀不死自己，`yes | head` 这类管道语义也会变。
+    {
+        // 先触发一次带 stdin 的 Start，让会话实现把 SIGPIPE 设为忽略；接下来
+        // 的子进程才是“继承 SIG_IGN”的被测对象。
+        iec::ExecOptions warm;
+        warm.cmd = "/bin/true";
+        warm.stdin_data = std::string(4096, 'x');
+        iec::ExecState warm_state;
+        std::string warm_error;
+        const int warm_id = iec::Start(warm, &warm_state, &warm_error);
+        Check(warm_id > 0, "SIGPIPE 用例预热（带 stdin 的 Start）");
+        if (warm_id > 0) {
+            iec::Wait(warm_id, 5000, &warm_state);
+            iec::Release(warm_id);
+        }
+
+        iec::ExecOptions options;
+        options.cmd = "sh";
+        options.args = {"-c", "kill -PIPE $$; echo survived"};
+        iec::ExecState state;
+        std::string error;
+        const int id = iec::Start(options, &state, &error);
+        Check(id > 0, "SIGPIPE 用例启动" +
+                          (id < 0 ? (": " + error) : std::string()));
+        if (id > 0) {
+            iec::Wait(id, 5000, &state);
+            std::string out;
+            for (;;) {
+                iec::ExecChunk chunk;
+                iec::Poll(id, 1u << 20, 1u << 20, &chunk, &state);
+                out += chunk.out;
+                if (state.exited && chunk.out.empty() && state.out_eof) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            Check(state.signal == SIGPIPE,
+                  "命令收到 SIGPIPE 并按默认处置终止（signal=" +
+                      std::to_string(state.signal) + "）");
+            Check(out.find("survived") == std::string::npos,
+                  "没有继承“忽略 SIGPIPE”的旧行为（无 survived 输出）");
+            iec::Release(id);
+        }
+    }
+
     // 恢复权限并删除临时树。
     chmod(no_search.c_str(), 0700);
     std::string cmd = "rm -rf '" + base + "'";

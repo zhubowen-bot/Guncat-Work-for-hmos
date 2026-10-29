@@ -315,7 +315,14 @@ void ResetSignalDispositions() {
 
     for (int sig = 1; sig < NSIG; sig++) {
         if (sigaction(sig, nullptr, &old) != 0) continue;
-        if (old.sa_handler == SIG_IGN || old.sa_handler == SIG_DFL) continue;
+        // SIGPIPE 是例外：会话的 stdin feeder 在应用进程里把 SIGPIPE 设成
+        // SIG_IGN（写无读者管道时不要让整个应用被杀）。execve 不会复位被忽略
+        // 的信号，若不在这里显式恢复，所有 shell 命令都会继承“忽略 SIGPIPE”，
+        // `yes | head -1` 这类管道的语义就变了。命令进程必须拿回默认处置。
+        if (sig != SIGPIPE &&
+            (old.sa_handler == SIG_IGN || old.sa_handler == SIG_DFL)) {
+            continue;
+        }
         memset(&dfl, 0, sizeof dfl);
         dfl.sa_handler = SIG_DFL;
         sigemptyset(&dfl.sa_mask);
