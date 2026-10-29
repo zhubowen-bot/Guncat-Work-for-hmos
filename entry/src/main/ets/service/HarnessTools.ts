@@ -3,7 +3,7 @@
 // str-replace-editor) / web_fetch(对齐 web-fetch-http) / ask_user_question(对齐 ask-user) /
 // schedule_*/goal_*(会话级提醒与目标) / subagent(进程内嵌套代理) / session_search(事件日志检索) /
 // run_js(JSVM-API 沙箱, 见 JsCodeService —— 纯计算场景的"执行代码"通道之一,
-// 另两条是 run_python(原生 CPython) 与 shell(设备内 Alpine))。
+// 另两条是 run_python(原生 CPython) 与 shell(设备内 IEC 原生命令))。
 // 与 WorkFileService 的既有 25 工具并存; dispatch 由 WorkFileService 兜底转发至此。
 import { fileIo } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
@@ -84,7 +84,7 @@ export class HarnessTools {
   // shell 工具的后端钩子：由 EntryAbility 注入原生执行核（IEC）的实现。
   // 之所以用钩子而不是直接 import：IecShellService 是 ArkTS(.ets)，而本文件是
   // TS，TS 不能 import ArkTS 模块；反过来 ArkTS 可以 import TS，所以由 .ets 侧
-  // 在启动时把实现挂上来。未注入时退回原来的 QEMU 后端。
+  // 在启动时把实现挂上来。未注入时直接报错，不静默降级。
   static shellBackendHook: ((context: common.UIAbilityContext, convId: string,
     args: Record<string, Object>) => Promise<ToolExecResult>) | null = null;
 
@@ -193,7 +193,7 @@ export class HarnessTools {
     if (name === Constants.WORK_SHELL_TOOL_NAME) {
       const backend = HarnessTools.shellBackendHook;
       if (backend === null) {
-        // 没有 QEMU 回退：后端没接上就是配置错误，直接报出来，不要静默降级。
+        // 没有静默回退：后端没接上就是配置错误，直接报出来。
         return HarnessTools.fail('shell 后端未初始化（IEC 运行核没有接上）');
       }
       return await backend(context, convId, args);
