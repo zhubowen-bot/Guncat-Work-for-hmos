@@ -3,10 +3,11 @@
 // ResolveKind() answers only "how would this path be entered?" from the path and
 // the capability word; it starts nothing and touches no server state. It used to
 // live in exec_server.cpp, where reaching it meant linking the whole service (and
-// its sockets, threads and tables). The definition moved here unchanged so that
-// scripts/test_iec_native_host.sh can pin the routing rules -- in particular that
-// a #IECSOv2 launcher resolves to kSo even when fork is unavailable, which was a
-// real regression once gated on fork.
+// its sockets, threads and tables). The definition moved here so that
+// scripts/test_iec_native_host.sh can pin the routing rules. One rule changed in
+// the move: a #IECSOv2 launcher now resolves to kSo even when fork is unavailable,
+// because gating it on fork was a real regression (every command on a no-fork
+// device resolved to kUnexecutable even though the NCP route could start it).
 #include "exec_route.h"
 
 #include "caps.h"

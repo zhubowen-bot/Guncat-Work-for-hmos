@@ -11,7 +11,6 @@
 | `filesDir/workspaces/<会话ID>/` | **会话工作区**：上传件、模型产出、`.todo.json`、`.goal.json`、`.schedule.json`、`.searches.md`、`.spill/`（工具结果溢出全文）、`subagents/sa_*/`（子代理产出） | 会话删除时整目录删除；崩溃残留由启动清扫回收 |
 | `filesDir/sessions/<会话ID>.jsonl` | 会话事件日志（turn/tool/steer/driver_step…），`session_search` 的数据源 | 会话删除时删除；同样参与启动清扫 |
 | `filesDir/guncat_conversations.json` | 全部会话（含消息、附件解析文本；图片 base64 超阈值时剥离） | 每次变更原子写（`.tmp` + rename） |
-| `filesDir/linux/{vm,ipc}/` | VM 内核/rootfs 镜像、宿主↔客人命令通道 | 全局共享，与单个会话无关；`ipc/<会话>/in|out/<jobId>` 每条命令用完即清，下次引导整体清空 |
 | `filesDir/python/` | 原生 CPython 运行时（共享，约 1GB 量级） | 随包版本，与会话无关 |
 | `cacheDir/work_office/`、`cacheDir/dim_*` 等 | Office/PDF 解析的临时解包目录 | 每次解析 `finally` 删除；缓存目录由系统按需回收 |
 

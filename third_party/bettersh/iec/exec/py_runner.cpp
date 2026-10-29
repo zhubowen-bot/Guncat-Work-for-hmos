@@ -325,8 +325,10 @@ void HandleClient(int fd) {
     do {
         reaped = waitpid(pid, &status, 0);
     } while (reaped < 0 && errno == EINTR);
-    // -1 is the only honest code when the status could not be observed. Falling
-    // through with the initialised status (0) claimed a success nobody saw.
+    // No status was observed, so never fall through with the initialised status
+    // (0) -- that claimed a success nobody saw. 127 is the status this client
+    // already uses for "the runner could not carry out the request"
+    // (python_entry.c); the caller only needs a failure that is not 0.
     int code = -1;
     if (reaped == pid) {
         if (WIFEXITED(status)) code = WEXITSTATUS(status);

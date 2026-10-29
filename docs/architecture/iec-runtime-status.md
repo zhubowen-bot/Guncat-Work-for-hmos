@@ -26,7 +26,8 @@ node/npm/npx + python3**，不再有“node 编不出来”的缺口。命令 �
 
 位置 `third_party/bettersh/iec/platform/ohos/har/libs/arm64-v8a/`，hvigor 合进 HAP 的
 `libs/arm64-v8a/`；`IecRuntime` 只在 `.so` 存在时注册 launcher。解包当前 HAP 核对，
-下表所有 `.so` 均在包内（命令 so 与 534 个 `.so` 里的 Python 扩展同目录分发）。
+下表所有 `.so` 均在包内（命令 so 与 Python 扩展同目录分发；当前签名 HAP 的
+`libs/arm64-v8a/` 共 534 个随包文件，其中 516 个是 `.so`，其余是带版本号的运行库）。
 
 | 命令 | so | 入口 | 状态 |
 | --- | --- | --- | --- |
@@ -77,7 +78,8 @@ libpython3.12.so` 并跑 `Py_BytesMain`。
 
 ## 4. 体积
 
-当前签名 HAP 约 452.7 MB（452,695,999 字节左右，约 432 MiB）。主要构成：`libnode.so`（约 108MB）、CPython + numpy/scipy/
+当前签名 HAP 约 452.7 MB（约 432 MiB；精确字节数随构建与签名变化）。主要构成：
+`libnode.so`（约 108MB）、CPython + numpy/scipy/
 pandas/matplotlib 等运行库、命令 so 与技能资源。`libnode.so` 是可选能力，但当前
 **默认随包**；若要瘦身，可在构建时排除它，`node`/`npm`/`npx` 会干净地报
 `command not found`，其余命令不受影响。
@@ -109,5 +111,5 @@ CA/git https、python3 退出码、jq/curl/bc/nc/hexdump/diff/sftp、node/npm、
 
 `THIRD_PARTY_NOTICES.md` 第 1 节：IEC/BetterSH（MIT）、mksh（MirOS）、toybox（0BSD）、
 libarchive（BSD-2）、git（GPL-2.0，附源码 tag 与构建脚本）、dropbear（MIT）、
-OpenSSH sftp（BSD）、jq（MIT）、curl（curl）、bc（GPL-2.0+）、Node.js（MIT）。
+OpenSSH sftp（BSD）、jq（MIT）、curl（curl）、bc（GPL-3.0-or-later）、Node.js（MIT）。
 `LICENSES/` 与 `rawfile/licenses/` 已同步；QEMU/HiSH/libslirp 的声明与原文已删。

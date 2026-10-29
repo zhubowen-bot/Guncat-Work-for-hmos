@@ -113,10 +113,10 @@ GitHub 直连在 WSL 里通常不通（`codeload.github.com` 可以）：`pcre2`
 * 超时由引擎线程强制（先 TERM 后 KILL），不依赖 ArkTS 轮询；`timeout_ms`
   上限沿用 `Constants.WORK_SHELL_MAX_TIMEOUT_MS`。
 * 输出超过 `WORK_SHELL_MAX_OUTPUT_BYTES` 时整段落 `.spill/`，返回里给相对路径。
-* 输出含非法 UTF-8（图片/压缩包）时返回 `binary=true`，工具结果会明确提示改用
+* 输出含非法 UTF-8 或 NUL 字节（图片/压缩包）时返回 `binary=true`，工具结果会明确提示改用
   "重定向到文件"或 `base64`，不把乱码当内容。
-* 并发：最多 8 条命令同时跑（`IecRuntime.MAX_RUNS`），超出的排队；每条命令独占
-  4 个管道线程与 8MB 输出缓冲，所以必须有上限。
+* 并发：最多 8 条命令同时跑（`IecRuntime.MAX_RUNS`），超出的排队；每条命令最多占
+  5 个线程（stdin feeder、两条 reader、waiter、watchdog）与 8MB 输出缓冲，所以必须有上限。
 * 作业级取消：每个会话的命令带 `IEC_JOB`，取消时按 job 杀整棵树（管道里的每个
   进程、后台子进程都在内），不会留孤儿。
 

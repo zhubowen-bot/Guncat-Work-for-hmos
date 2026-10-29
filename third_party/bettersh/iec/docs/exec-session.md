@@ -67,8 +67,9 @@ execRelease(handle.id);
 * **env.** Overlaid on this process's environment by default (`envReplace: true`
   makes it the whole environment). `PATH` and `HOME` are filled in when absent.
   `IEC_JOB` is always set by the engine and cannot be overridden.
-* **stdin.** `stdin` is written before `execStart` returns control, then stdin is
-  closed unless `keepStdinOpen` is set. Later writes go through `execWrite`.
+* **stdin.** `stdin` is fed by a detached thread, so `execStart` can return while
+  a large payload is still being written; when `keepStdinOpen` is not set the
+  write end is closed after the payload. Later writes go through `execWrite`.
 * **timeout.** Enforced by a thread inside the engine, not by the caller. A
   command that outlives its deadline is terminated and `timedOut` is set — even
   if the app stopped polling, which is exactly the case the caller cannot cover.
@@ -93,8 +94,9 @@ execRelease(handle.id);
 
 ### Concurrency
 
-Each session owns three pipes and four small threads (two readers, one waiter,
-one deadline thread). Sessions are independent; `execStart` from several ArkTS
+Each session owns three pipes and up to five small threads (one stdin feeder when
+input is supplied, two readers, one waiter, one deadline thread when a timeout is
+set). Sessions are independent; `execStart` from several ArkTS
 tasks at once is safe. `execCount()` reports how many are alive, and an app that
 runs many commands should release finished ones — the buffers are per session and
 are only freed on release.

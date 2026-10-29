@@ -7,9 +7,9 @@
 //   * IEC 的 exec 服务是按"替换调用者"设计的（execve shim）；这个文件把它包成
 //     ArkTS 能用的"起一个进程、给三条管道、带超时"的接口。
 //
-// 生命周期：进程内只启动一次；launcher 只在版本戳变化时重写。
+// 生命周期：进程内只启动一次；每次进程启动都会清空并重建 launcher
+// （toybox applet 清单另有一份带 size+mtime 头的缓存，见 APPLET_CACHE）。
 import { common } from '@kit.AbilityKit';
-import { deviceInfo } from '@kit.BasicServicesKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { util } from '@kit.ArkTS';
@@ -65,7 +65,6 @@ export interface IecRunResult {
   // 命令根本没起来（execStart 拒绝 / 运行核未就绪），而不是起来了才拿不到状态。
   // 调用方要靠它区分"启动失败"与"超时后主动终止"，两者都可能是 code<0。
   startFailed: boolean;
-  elapsedMs: number;
 }
 
 // 两条流"被引擎上限读掉丢弃"的累计字节。主循环、超时后的收尾、drainToEof 都会
@@ -91,8 +90,9 @@ export class IecRuntime {
   // 各自把 npm.tar.gz 解到同一个目录。这里缓存的是同一个 Promise，后来者只等待。
   private static ensureTask: Promise<string> | undefined = undefined;
 
-  // 并发上限。每次运行占 4 个读/写线程与最多 8MB 缓冲；没有上限时，模型并行
-  // 发十几条命令就能把内存和线程数推上去。超出的排队，不丢请求。
+  // 并发上限。每次运行最多占 5 个线程（stdin feeder、两条 reader、waiter、watchdog）
+  // 与 8MB 缓冲；没有上限时，模型并行发十几条命令就能把内存和线程数推上去。
+  // 超出的排队，不丢请求。
   private static readonly MAX_RUNS: number = 8;
   private static activeRuns: number = 0;
   private static waiters: Array<() => void> = [];
@@ -185,16 +185,16 @@ export class IecRuntime {
     }
   }
 
+  // 显式注册过的命令名。toybox 里也有 nc 之类的 applet，枚举时不能让它把
+  // 我们自己编的 launcher（libnc/hexdump/diff…）覆盖掉。
+  private static explicitNames: Set<string> = new Set<string>();
+
   // 命令 so 的 launcher。写不存在的 so 不会报错（执行到它才失败），这样
   // "构建了哪些命令"不必和这里耦合。
   //
   // 返回空串表示最小可用集（toybox + sh/mksh）都写成功了；否则是失败原因。
   // 只检查这三个：缺一个可选命令是 "command not found" 的正常降级，缺 shell
   // 本体却继续启动，只会让之后每条命令都报一个看不出根因的 "cannot start"。
-  // 显式注册过的命令名。toybox 里也有 nc 之类的 applet，枚举时不能让它把
-  // 我们自己编的 launcher（libnc/hexdump/diff…）覆盖掉。
-  private static explicitNames: Set<string> = new Set<string>();
-
   private static writeLaunchers(): string {
     ensureDir(BIN_DIR);
     ensureDir(SYSROOT + '/home');
@@ -606,18 +606,16 @@ export class IecRuntime {
   // 跑一条命令。out/err 是整条流按 UTF-8 解码一次后的文本。
   static async run(context: common.UIAbilityContext, command: string,
     options: IecRunOptions): Promise<IecRunResult> {
-    const startedAt: number = Date.now();
     // startFailed 先给 true：运行核没起来（下面 ready !== ''）也是"命令没跑"，
     // 和 execStart 抛错同一种，调用方要按失败处理。
     let result: IecRunResult = {
       code: -1, out: '', err: '', timedOut: false, signal: 0, binary: false,
-      outDropped: 0, errDropped: 0, startFailed: true, elapsedMs: 0
+      outDropped: 0, errDropped: 0, startFailed: true
     };
 
     const ready: string = await IecRuntime.ensure(context);
     if (ready !== '') {
       result.err = ready;
-      result.elapsedMs = Date.now() - startedAt;
       return result;
     }
 
@@ -730,7 +728,6 @@ export class IecRuntime {
     // 当内容用（二进制请重定向到文件，或用 base64）。
     result.binary = IecRuntime.hasNulByte(outChunks) || IecRuntime.hasNulByte(errChunks) ||
       result.out.indexOf('\uFFFD') !== -1 || result.err.indexOf('\uFFFD') !== -1;
-    result.elapsedMs = Date.now() - startedAt;
     return result;
   }
 
@@ -830,8 +827,9 @@ export class IecRuntime {
   }
 
   // 释放会话。Release 对运行中的会话会拒绝；拒绝后如果直接放弃，会话的
-  // 4 个线程与输出缓冲会永久留下（每次超时/异常漏一条）。先按 job 发
-  // SIGKILL，再在后台重试 Release，直到引擎确认会话结束。
+  // 线程与输出缓冲会永久留下（每次超时/异常漏一条）。先按 job 发 SIGKILL，
+  // 再在后台重试 Release，直到引擎确认会话结束。Release 抛异常也不能当成
+  // "已释放"直接返回——它同样意味着会话可能还在，要走同一条终止/重试路径。
   private static releaseSession(id: number): void {
     try {
       if (execRelease(id)) {
@@ -840,7 +838,6 @@ export class IecRuntime {
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'release %{public}d failed: %{public}s',
         id, JSON.stringify(e));
-      return;
     }
     try {
       execTerminate(id, 0);
@@ -895,11 +892,5 @@ export class IecRuntime {
         '若缺，按 docs/architecture/iec-runtime.md 重新构建。';
     }
     return '命令启动失败: ' + text;
-  }
-
-  // 给状态面板/排障用：当前设备类型与是否已就绪。
-  static status(): string {
-    return 'iec=' + (IecRuntime.started ? 'ready' : 'not-started') +
-      ' device=' + deviceInfo.deviceType;
   }
 }

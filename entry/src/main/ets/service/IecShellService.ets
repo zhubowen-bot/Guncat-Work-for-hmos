@@ -28,7 +28,6 @@ const DOMAIN: number = 0x0000;
 const TAG: string = 'IecShell';
 
 export class IecShellService {
-  static readonly TOOL_NAME: string = Constants.WORK_SHELL_TOOL_NAME;
   // .spill 文件名里的进程内序号，避免同毫秒并发落盘互相覆盖。
   private static spillSeq: number = 0;
 

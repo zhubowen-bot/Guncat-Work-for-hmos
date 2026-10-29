@@ -16,7 +16,7 @@
 | 项 | 值 |
 | --- | --- |
 | 签名包 | `entry/build/default/outputs/default/entry-default-signed.hap` |
-| 大小 | 约 452.7 MB（452,695,999 字节左右，约 432 MiB，本机当前构建） |
+| 大小 | 约 452.7 MB（约 432 MiB；精确字节数随构建与签名变化） |
 | 包名 | `com.bowenapp.guncataibeta` |
 | Ability | `EntryAbility` |
 
@@ -102,7 +102,7 @@ SELFTEST DONE
 
 ### 1.4 其余检查怎么执行
 
-自检只覆盖第 3 节的一部分，第 4 节的补充项要让模型在**工作模式**调用 `shell` 工具执行。提示词示例：
+自检覆盖第 3 节列出的项；第 4 节的补充项要让模型在**工作模式**调用 `shell` 工具执行。提示词示例：
 
 ```text
 请用 shell 依次执行下面的检查命令，保留完整 stdout/stderr 和退出码，不要省略失败项。
@@ -224,7 +224,7 @@ Windows 上用 `Select-String` 代替 `grep`，或直接在 Git Bash 里跑。
 | `diff` 输出不是传统 normal diff，或某些选项不认 | `diff` 后端是随包 git（`git diff --no-index`），只做 `-u`/`-U n`/`-q`/`-s` 的转发 | 这是已知实现；需要 normal diff 用 `git diff --no-index`；缺文件返回 2 是对齐 GNU 的行为 |
 | `sftp` 连不上/`subsystem request failed` | 包里只有 sftp **客户端**，没有 sftp-server；目标主机也没开 sftp 子系统 | 换一个有 sftp-server 的远端；本机不提供 sftp 服务，这不是安装失败 |
 | `node` 很慢，或 `process.execArgv` 里有 `--jitless` | 设备拿不到可写可执行内存，`iec_node_entry` 自动降级到 V8 纯解释器 | 预期行为，见 6；功能不受影响，只是慢；确认不是偶发 OOM |
-| 命令输出里有 `�`，但内容其实是二进制 | 二进制检测只看“非法 UTF-8”；纯 ASCII 字节序列会被当作文本 | 预期限制；把输出重定向到文件再 `download_file`/`base64`，不要直接读 |
+| 命令输出里有 `�`，但内容其实是二进制 | 二进制检测看“非法 UTF-8”与 NUL 字节；既不含 NUL、又是纯 ASCII 的字节序列仍会被当作文本 | 预期限制；把输出重定向到文件再 `download_file`/`base64`，不要直接读 |
 | 自检没有 `SELFTEST DONE` | 60 秒超时、应用被杀，或启动走了 `onNewWant`（自检没执行） | 先 `aa force-stop` 再 `aa start ... --ps iecSelfTest 1`；看 hilog `IecSelfTest` 是否有 `starting`；必要时重试一次 |
 
 ## 6. 已知限制
@@ -232,8 +232,9 @@ Windows 上用 `Select-String` 代替 `grep`，或直接在 Git Bash 里跑。
 - **node 无 JIT 时自动 `--jitless`**：`iec_node_entry` 会探测可写可执行内存，拿不到就加
   `--jitless --no-expose-wasm`，走 V8 纯解释器。功能完整但明显更慢；用
   `node -p "process.execArgv"` 可确认。这是预期降级，不是安装问题。
-- **纯 ASCII 的二进制输出可能不被识别为 binary**：`IecRuntime` 只在解码出现非法 UTF-8
-  （`U+FFFD`）时置 `binary=true`。纯 ASCII 字节会被当文本；二进制请重定向到文件或 `base64`。
+- **不含 NUL 的纯 ASCII 二进制输出可能不被识别为 binary**：`IecRuntime` 在解码出现非法
+  UTF-8（`U+FFFD`）或原始字节含 NUL 时置 `binary=true`；既无 NUL 又是纯 ASCII 的字节会被
+  当文本。二进制请重定向到文件或 `base64`。
 - **`diff` 是 git 后端**：输出是 unified 格式，只支持 `-u` / `-U n` / `-q` / `-s` 的转发；
   不是 GNU diffutils 的完整选项集。
 - **`sftp` 只含客户端**：没有 sftp-server，不能拿手机当 sftp 服务端。

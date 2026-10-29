@@ -154,7 +154,7 @@ Windows 侧 `git clone` 到 `third_party/bettersh/iec/thirdparty/` 下。
 **GCC ≤13**——node 22 的 V8 在 GCC 15 下编不过（`std::formatter<subrange>`/ranges 报错）。
 当前仓库已随包 `libnode.so`（node 22.19）；只有重建时才需要满足上述宿主条件。
 
-HAP 约 452.7 MB（452,695,999 字节左右，约 432 MiB；原生命令集 + CPython + 运行库）。某个 `.so` 缺失时，对应的 launcher 不会注册，
+HAP 约 452.7 MB（约 432 MiB；精确字节数随构建与签名变化；原生命令集 + CPython + 运行库）。某个 `.so` 缺失时，对应的 launcher 不会注册，
 命令会干净地报 `command not found`，不影响其它命令。
 
 ### 首次配置

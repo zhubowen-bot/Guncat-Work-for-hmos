@@ -839,11 +839,21 @@ bool ExecServer::onExecute(const Packet& req, Reply& reply) {
         // Existing is not the same as enterable: chdir() also needs search
         // permission, and the launch routes treat a failed chdir() as "stay in the
         // server's directory", which is exactly the silent wrong-cwd this refusal
-        // exists to prevent.
-        if (stat(sr.cwd.c_str(), &st) != 0 || !S_ISDIR(st.st_mode) ||
-            access(sr.cwd.c_str(), X_OK) != 0) {
+        // exists to prevent. Keep the failing errno from the check that failed:
+        // reading it afterwards can report an unrelated stale errno (for a regular
+        // file that was "No child processes", which sent the reader down the wrong
+        // path).
+        int why = 0;
+        if (stat(sr.cwd.c_str(), &st) != 0) {
+            why = errno;
+        } else if (!S_ISDIR(st.st_mode)) {
+            why = ENOTDIR;
+        } else if (access(sr.cwd.c_str(), X_OK) != 0) {
+            why = errno;
+        }
+        if (why != 0) {
             Logger::GetInstance()->LogW("[exec] cwd %s is not an enterable directory: %s",
-                                        sr.cwd.c_str(), strerror(errno));
+                                        sr.cwd.c_str(), strerror(why));
             put32(reply.body, 0);
             put32(reply.body, static_cast<uint32_t>(ENOENT));
             return true;

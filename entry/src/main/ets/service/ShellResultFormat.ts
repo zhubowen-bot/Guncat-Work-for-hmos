@@ -6,7 +6,7 @@
 // 设备上不好复现的语义也能逐字断言。
 //
 // 约束：本文件不 import 任何 HarmonyOS API，也不读写文件；文案与换行必须与
-// IecShellService 内联实现逐字一致。
+// 拆分前 IecShellService 的内联实现逐字一致（test/guncat-harness 逐字断言）。
 
 // 正文里输出被截断时附在末尾的说明。spillRel 非空表示完整内容已落盘；
 // 为空表示落盘失败（或压根没落盘），两种文案不能混。
