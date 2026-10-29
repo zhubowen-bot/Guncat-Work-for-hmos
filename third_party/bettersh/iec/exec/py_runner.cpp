@@ -274,7 +274,11 @@ void HandleClient(int fd) {
             } else if (n < 0 && errno == EINTR) {
                 continue;
             } else {
+                // pfd 每轮都从 out_pipe[0]/err_pipe[0] 重建：只把 pfd[i].fd 置 -1
+                // 不够，原 fd 编号下一轮又会被拿回 poll，对已关闭的 fd poll 会立刻
+                // 返回 POLLNVAL → 忙等自旋。这里同步把源变量也置 -1。
                 close(pfd[i].fd);
+                if (i == 0) out_pipe[0] = -1; else err_pipe[0] = -1;
                 pfd[i].fd = -1;
                 open_fds--;
             }

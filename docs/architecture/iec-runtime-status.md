@@ -65,7 +65,7 @@ libpython3.12.so` 并跑 `Py_BytesMain`。
 ## 3. 并发与边角
 
 - **并发上限 8**（`IecRuntime.MAX_RUNS`）：超出的排队，不丢请求。
-- **超时不再泄漏会话**：`execTerminate` 后等进程真正退出（最多 3s）再 `execRelease`。
+- **超时不再泄漏会话**：`execTerminate`（job 级 SIGKILL）后在后台异步重试 `execRelease`（每 500ms，最多 30 次），`finally` 不阻塞等待。
 - **二进制输出**：检测到非法 UTF-8 时工具结果标记并提示改走“重定向到文件/base64”。
 - **孤儿进程**：`execKillStale()`（NAPI）启动时按 `IEC_JOB` 扫描 `/proc`，杀掉上次运行
   遗留的命令进程。
