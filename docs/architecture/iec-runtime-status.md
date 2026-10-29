@@ -45,8 +45,11 @@ node 因宿主工具链（GCC 15）编不过，单独列为已知缺口。
 子进程继承了应用进程里**已初始化**的 CPython（`run_python` 的），再初始化一次会在
 `pyinit_core_reconfigure` 崩溃（表现：`-V/-h` 能跑，`-c`/脚本/stdin 必崩，且退出码 0）。
 
-现在 launcher 指向 `libpycmd.so`：先在子进程里 `PyOS_AfterFork_Child()` +
-`Py_FinalizeEx()` 把继承的运行时归零，再走 `Py_BytesMain`。父进程不受影响（写时复制）。
+现在 launcher 指向 `libpycmd.so`：先给当前线程挂一个 tstate
+（`PyThreadState_New(PyInterpreterState_Main())` + `PyThreadState_Swap`），再
+`Py_FinalizeEx()` 把继承的运行时归零，最后走 `Py_BytesMain`；收尾失败会返回 1 并
+打到 stderr。父进程不受影响（写时复制）。这个变体在 host 的 fork 场景里验证通过
+（直接 `AfterFork+Finalize` 会 SIGABRT）。
 
 ## 3. 并发与边角
 

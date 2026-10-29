@@ -130,7 +130,11 @@ tools/build-iec-runtime.sh node     # V8，最久（约 85MB 源码）
 GitHub 直连在 WSL 里通常不通（codeload 可用）：`pcre2` / `git` / `dropbear` 的源码需先在
 Windows 侧 `git clone` 到 `third_party/bettersh/iec/thirdparty/` 下。
 
-HAP 约 100MB（原生命令集 + CPython + 运行库）。某个 `.so` 缺失时，对应的 launcher 不会注册，
+`node` 另有两个宿主前提：Python 3.8–3.13（3.14 可临时放宽 `configure` 的版本表）和
+**GCC ≤13**——node 22 的 V8 在 GCC 15 下编不过（`std::formatter<subrange>`/ranges 报错）。
+没有满足条件的宿主时 `libnode.so` 不产出，shell 里 `node` 不注册 launcher。
+
+HAP 约 320MB（原生命令集 + CPython + 运行库）。某个 `.so` 缺失时，对应的 launcher 不会注册，
 命令会干净地报 `command not found`，不影响其它命令。
 
 ### 首次配置
