@@ -153,6 +153,8 @@ Multimodal pre-parsing can be configured separately with its own model, endpoint
 
 ### Verification
 
+- **One-command local check (recommended)**: `bash scripts/check-all.sh` (`--fast` skips the slow/environment-dependent items, `--list` prints the 12-item list)
+- **IEC hexdump property tests**: `bash third_party/bettersh/iec/tests/hexdump_fuzz/run.sh` (200 random inputs × `-C/-b/-c/-x/-d/-o` × `-n/-s/-v`, compared byte-for-byte with the system `hexdump`; wired into `check-all.sh`, SKIPs when no system `hexdump` is available)
 - Pure-logic regression (currently **730 tests**, all green): `cd test/guncat-harness && node setup.mjs && node test-core.mjs`
 - Service-layer type check: `cd test/guncat-harness && node check-setup.mjs && npx tsc -p check/tsconfig.json`
 - PPT / Word / Excel offline verification environments: `test/pptx-harness`, `test/docx-harness`, `test/xlsx-harness`

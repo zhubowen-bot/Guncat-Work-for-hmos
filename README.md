@@ -179,7 +179,8 @@ HAP 约 452.7 MB（452,695,999 字节左右，约 432 MiB；原生命令集 + CP
 
 ### 验证
 
-- **一键本地检查（推荐）**：`bash scripts/check-all.sh`（`--fast` 跳过较慢/依赖环境的项，`--list` 查看 11 项清单）
+- **一键本地检查（推荐）**：`bash scripts/check-all.sh`（`--fast` 跳过较慢/依赖环境的项，`--list` 查看 12 项清单）
+- **IEC hexdump 属性对拍**：`bash third_party/bettersh/iec/tests/hexdump_fuzz/run.sh`（200 组随机输入 × `-C/-b/-c/-x/-d/-o` × `-n/-s/-v`，与系统 `hexdump` 逐字节比较；已接入 `check-all.sh`，没有系统 `hexdump` 时 SKIP）
 - **IEC 原生代码宿主回归**：`bash third_party/bettersh/iec/scripts/test_iec_native_host.sh`（exec 路由 / cwd 校验 / NCP 拒绝分类 / fs shim 路径映射；已接入 `check-all.sh`，不需要设备或 OHOS SDK）
 - **IEC exec 会话压测**：`bash third_party/bettersh/iec/scripts/stress_exec_session.sh`（8 路并发整条流上限 / 中途终止 / 50 轮 fd 与 RSS / 200 次短会话 / 0-1-50ms 超时；已接入 `check-all.sh`，`--fast` 跳过，不需要设备或 OHOS SDK）
 - 纯逻辑回归（当前 **730 项**全绿）：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`

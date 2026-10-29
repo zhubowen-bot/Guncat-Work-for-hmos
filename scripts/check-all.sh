@@ -5,7 +5,8 @@
 # 表示存在失败。供本地提交前预检与 CI 复用。
 #
 #   bash scripts/check-all.sh            # 全量
-#   bash scripts/check-all.sh --fast     # 跳过 soname / py_runner / IEC 命令集 / exec 压测
+#   bash scripts/check-all.sh --fast     # 跳过 soname / py_runner / IEC 命令集 /
+#                                        # hexdump 属性对拍 / exec 压测
 #   bash scripts/check-all.sh --list     # 只列出检查项
 #   bash scripts/check-all.sh --help
 #
@@ -40,7 +41,7 @@ usage() {
 
 选项:
   --fast    跳过需要额外环境或较慢的项（soname 检查、py_runner、IEC 命令集、
-            IEC exec 会话压测），
+            IEC hexdump 属性对拍、IEC exec 会话压测），
             被跳过的项计入 SUMMARY 的 SKIP
   --list    列出所有检查项后退出
   -h, --help
@@ -67,6 +68,7 @@ ITEM_IDS=(
     sonames
     py-runner
     cmd-tools
+    hexdump-fuzz
     iec-native-host
     iec-exec-stress
     iec-libs
@@ -80,11 +82,12 @@ ITEM_NAMES=(
     "共享库 soname 依赖（check-sonames.py --strict）"
     "py_runner 宿主协议测试"
     "IEC 命令集宿主测试（nc / hexdump / diff）"
+    "IEC hexdump 属性对拍（200 组随机输入 × 格式/截断/跳过）"
     "IEC 原生代码宿主回归（exec 路由 / cwd / NCP / fs shim）"
     "IEC exec 会话并发/生命周期压测（8 路 / 终止 / fd / 超时）"
     "IEC 随包库检查（tools/check-iec-libs.py）"
 )
-ITEM_FAST_SKIP=(0 0 0 0 0 1 1 1 0 1 0)
+ITEM_FAST_SKIP=(0 0 0 0 0 1 1 1 1 0 1 0)
 
 print_list() {
     local i
@@ -312,6 +315,25 @@ check_cmd_tools() {
     command -v od >/dev/null 2>&1 || { skip_msg "找不到 od"; return 77; }
 
     bash "$ROOT/third_party/bettersh/iec/tests/cmd_tools/run.sh"
+}
+
+# hexdump 属性对拍：200 组随机输入 × 六种格式 / -n / -s / -v，与系统 hexdump
+# 逐字节比较。宿主没有 hexdump 时按任务约定 SKIP（脚本本身也会返回 77）。
+check_hexdump_fuzz() {
+    local script="$ROOT/third_party/bettersh/iec/tests/hexdump_fuzz/run.sh"
+    if [[ ! -f "$script" ]]; then
+        skip_msg "third_party/bettersh/iec/tests/hexdump_fuzz/run.sh 不存在"
+        return 77
+    fi
+    command -v bash >/dev/null 2>&1 || { skip_msg "找不到 bash"; return 77; }
+    command -v python3 >/dev/null 2>&1 || { skip_msg "找不到 python3"; return 77; }
+    command -v cc >/dev/null 2>&1 || { skip_msg "找不到 cc"; return 77; }
+    command -v hexdump >/dev/null 2>&1 || {
+        skip_msg "找不到系统 hexdump（util-linux / bsdextrautils）"
+        return 77
+    }
+
+    bash "$script"
 }
 
 # IEC 原生代码的宿主回归：exec 路由（ResolveKind）、cwd 校验、NCP 拒绝分类、

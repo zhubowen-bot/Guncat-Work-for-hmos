@@ -222,6 +222,11 @@ int iec_hexdump_main(int argc, char** argv) {
         }
     }
 
+    /* -n 0 表示不读取任何输入：util-linux/BSD 连文件都不打开，也不因 -s 推进
+     * 偏移或打印最终偏移行（`hexdump -n 0 -s 5 file` 输出为空、退出 0）。
+     * 必须在打开/跳过之前返回，否则 -s 会把 off 推高并多打一行最终偏移。 */
+    if (d.remaining == 0) return 0;
+
     if (i >= argc) {
         rc = dump_file(stdin, &d);
         finish(&d);
