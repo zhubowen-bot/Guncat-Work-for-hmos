@@ -96,8 +96,8 @@ export class IecShellService {
       hilog.warn(DOMAIN, TAG, 'python env skipped: %{public}s', JSON.stringify(e));
     }
 
-    // CA：把 certifi 的证书铺到 <sysroot>/etc/ssl/certs，git/openssl 按标准路径找。
-    const ca: string = IecRuntime.installCaBundle(context);
+    // CA：IEC 内置证书铺到 <sysroot>/etc/ssl/certs，git/openssl 按标准路径找。
+    const ca: string = IecRuntime.installShellCaBundle();
     if (ca !== '') {
       env['GIT_SSL_CAINFO'] = ca;
       env['SSL_CERT_FILE'] = ca;

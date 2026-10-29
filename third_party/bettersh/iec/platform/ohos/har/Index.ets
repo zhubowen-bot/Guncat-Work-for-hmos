@@ -25,7 +25,8 @@ import {
   execRelease,
   execList,
   execCount,
-  execKillStale
+  execKillStale,
+  startPyRunner
 } from 'libiec_server.so';
 
 export {
@@ -52,5 +53,6 @@ export {
   execRelease,
   execList,
   execCount,
-  execKillStale
+  execKillStale,
+  startPyRunner
 };
