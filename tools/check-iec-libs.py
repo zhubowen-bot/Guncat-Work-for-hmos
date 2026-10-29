@@ -11,7 +11,9 @@
      （防 autocrlf / 过滤器把二进制改坏）；
   3. 用 llvm-nm 校验 .so 确实导出了对应入口（无 llvm 时 SKIP）；
   4. 用 python 解析 ELF 动态段，校验 NEEDED 白名单；
-  5. 用 git 提交时间比较"源码 -> 产物"的新鲜度（node 只警告）；
+  5. 用 blob 内容比较"源码 -> 产物"的新鲜度：产物那次提交里的源码哈希与工作区
+     不同即失败（能抓到"改了源码还没重编"，不会被只改文件模式的提交误报）；
+     node 构建耗时大，只警告；
   6. 若本机有已打包的签名 HAP，检查 libs/arm64-v8a 下是否缺 .so。
 
 只依赖 Python 3 标准库与 git；不连设备、不需要 HarmonyOS SDK。
@@ -196,6 +198,26 @@ def git_ts(paths):
         return None
     text = out.decode("ascii", "replace").strip()
     return int(text) if text.isdigit() else None
+
+
+def git_blob(rev, path):
+    """rev 中 path 的 blob hash；该版本没有此文件时返回 None。
+
+    新鲜度用内容比较而不是提交时间：一次只改可执行位/换行的提交也会刷新
+    路径的“最后提交时间”，按时间判断会把正常的产物误报成落后。
+    """
+    code, out, _ = git("rev-parse", "%s:%s" % (rev, path))
+    if code != 0:
+        return None
+    return out.decode("ascii", "replace").strip() or None
+
+
+def worktree_blob(path):
+    """工作区文件的 blob hash（走 git 的过滤器，CRLF 不会造成误报）。"""
+    code, out, _ = git("hash-object", "--", path)
+    if code != 0:
+        return None
+    return out.decode("ascii", "replace").strip() or None
 
 
 def fmt_ts(ts):
@@ -747,15 +769,27 @@ def check_freshness(reporter):
         if product_ts is None:
             reporter.fail("%s 没有提交记录，无法判断源码新鲜度" % product_rel)
             continue
-        source_ts = git_ts(item["sources"])
-        if source_ts is None:
-            reporter.warn("%s 的源码没有提交记录，跳过该映射" % product)
+        product_commit = git_text("log", "-1", "--format=%H", "--", product_rel).strip()
+        if not product_commit:
+            reporter.fail("%s 没有提交记录，无法判断源码新鲜度" % product_rel)
             continue
+        # 内容比较：产物那次提交里的源码 blob 与**工作区**是否相同。这样能抓到
+        # “源码改了还没提交/没重编”，也不会被只改文件模式的提交误报。
+        stale = []
+        for src in item["sources"]:
+            current = worktree_blob(src)
+            if current is None:
+                continue  # 源文件已被删除，无从比较
+            if git_blob(product_commit, src) != current:
+                stale.append(src)
         checked += 1
-        if source_ts <= product_ts:
+        if not stale:
             continue
-        message = ("%s 落后于源码：源码最后提交 %s，产物最后提交 %s；请运行 %s"
-                   % (product, fmt_ts(source_ts), fmt_ts(product_ts), item["hint"]))
+        source_ts = git_ts(item["sources"])
+        message = ("%s 落后于源码（%s 内容有改动%s）；请运行 %s"
+                   % (product, "、".join(stale),
+                      "，源码最后提交 %s" % fmt_ts(source_ts) if source_ts else "",
+                      item["hint"]))
         if item["warn_only"]:
             reporter.warn(message)
         else:
