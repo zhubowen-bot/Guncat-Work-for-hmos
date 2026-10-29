@@ -121,7 +121,7 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 - `libcurlcmd.so`（curl 8.22.0，静态 OpenSSL/zlib）
 - `libbccmd.so`（GNU bc 1.07.1）
 - `libnc.so` / `libhexdump.so` / `libdiff.so`（nc、hexdump、diff；diff 后端是随包 git）
-- `libnode.so`（node / npm / npx）
+- `libnode.so`（node / npm / npx；npm 的 JS 树在 `rawfile/tools/npm.tar.gz`，首次启动解到资源根）
 - `libpython3.12.so`（shell 里的 `python3` 与 `run_python` 共用）
 
 在 WSL2 + Linux 版 HarmonyOS SDK 下重建（脚本会按需拉取源码、交叉编译并直接放进 HAR 的 `libs/`）：

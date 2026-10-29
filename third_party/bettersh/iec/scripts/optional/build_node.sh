@@ -20,7 +20,8 @@
 #        - the IEC fs/tty/exec shims,
 #        - exit() and uname() wrappers,
 #        - the in-memory dlopen fallback (loader/elf_dl.cpp + loader/wrap.c),
-#   5. pack deps/npm as <resource-dir>/npm.tar.
+#   5. pack deps/npm as <resource-dir>/npm.tar.gz (gz，省 HAP 体积；
+#      IecRuntime 用 unpackResource 解到 <sysroot>，npm 入口找 <sysroot>/npm/bin/npm-cli.js)。
 #
 # Usage:
 #   scripts/optional/build_node.sh [src|configure|build|all]
@@ -35,7 +36,7 @@
 #
 # Output:
 #   platform/ohos/har/libs/arm64-v8a/libnode.so
-#   platform/ohos/har/src/main/resources/rawfile/tools/npm.tar
+#   platform/ohos/har/src/main/resources/rawfile/tools/npm.tar.gz
 set -euo pipefail
 
 IEC_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -259,7 +260,7 @@ do_build() {
 	local WRAPS=(symlink symlinkat readlink readlinkat lstat stat fstatat fstat
 		chmod fchmod fchmodat
 		open openat unlink unlinkat rename renameat access faccessat realpath
-		link linkat opendir readdir scandir fopen freopen syscall
+		link linkat opendir readdir scandir fopen freopen utimensat syscall
 		close dup dup2 dup3 fcntl ioctl isatty ttyname ttyname_r
 		tcgetattr tcsetattr tcgetpgrp tcsetpgrp getpt grantpt unlockpt ptsname
 		openpty login_tty forkpty
@@ -305,11 +306,12 @@ do_build() {
 	# ── npm: pure JavaScript, packed as a rawfile tar ─────────────────────
 	local npm_src="$SRC/deps/npm"
 	[ -f "$npm_src/bin/npm-cli.js" ] || iec_err "missing npm source: $npm_src"
-	iec_log "pack npm.tar"
+	iec_log "pack npm.tar.gz"
 	( cd "$SRC/deps" && tar --format=ustar \
 		--exclude='npm/docs' --exclude='npm/man' --exclude='npm/tap-snapshots' \
-		-cf "$RESDIR/npm.tar" npm ) || iec_err "could not pack npm.tar"
-	iec_log "done: $RESDIR/npm.tar ($(du -h "$RESDIR/npm.tar" | cut -f1))"
+		-cf - npm | gzip -9 > "$RESDIR/npm.tar.gz" ) \
+		|| iec_err "could not pack npm.tar.gz"
+	iec_log "done: $RESDIR/npm.tar.gz ($(du -h "$RESDIR/npm.tar.gz" | cut -f1))"
 }
 
 case "$PHASE" in

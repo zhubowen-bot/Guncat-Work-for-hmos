@@ -17,3 +17,6 @@ third_party/bettersh/**/*.so.* binary
 third_party/bettersh/**/*.a binary
 third_party/bettersh/**/*.png binary
 third_party/bettersh/**/*.woff2 binary
+# 随包资源里的 tar / tar.gz（npm 的 JS 树）：CRLF 归一化会直接把 gzip 弄坏
+third_party/bettersh/**/*.tar binary
+third_party/bettersh/**/*.tar.gz binary

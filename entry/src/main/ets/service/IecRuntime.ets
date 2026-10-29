@@ -23,6 +23,7 @@ import {
   installCaBundle,
   probeCaps,
   startIecServer,
+  unpackResource,
   writeSoLauncher,
   writeTxtFile
 } from 'iec';
@@ -127,6 +128,11 @@ export class IecRuntime {
       // 抄清单的后果是 diff/bc/hexdump 这类没编进去的 applet 也留一个 launcher，
       // 执行时报 "Unknown command"；反过来 dd/md5sum/od 这些编进去的又没注册。
       await IecRuntime.writeToyboxApplets();
+
+      // npm 是纯 JS 树（node 源码里的 deps/npm），随包成 rawfile/tools/npm.tar.gz，
+      // 首次启动解到 <sysroot>/npm —— iec_npm_main 拼的命令行就是
+      // <sysroot>/npm/bin/npm-cli.js。解包靠 libarchive（HAR 里的 libarchive.so.13）。
+      IecRuntime.unpackNpm();
 
       IecRuntime.started = true;
       hilog.info(DOMAIN, TAG, 'IEC runtime ready');
@@ -256,6 +262,30 @@ export class IecRuntime {
     }
 
     hilog.info(DOMAIN, TAG, 'launchers written, failures=%{public}d', fails);
+  }
+
+  // 解 npm 的 JS 树。只在 libnode 随包、且目标还不存在时做：npm-cli.js 已经在了
+  // 就跳过，避免每次冷启动都重解 2.6MB 的 tar.gz。
+  private static unpackNpm(): void {
+    if (!IecRuntime.hasSo('libnode.so')) {
+      return;
+    }
+    const cli: string = SYSROOT + '/npm/bin/npm-cli.js';
+    try {
+      if (fileIo.accessSync(cli)) {
+        return;
+      }
+    } catch (e) {
+      // accessSync 在文件不存在时抛异常，等同于"还没有"，继续解包。
+    }
+    try {
+      const rc: number = unpackResource('tools/npm.tar.gz', SYSROOT);
+      if (rc !== 0) {
+        hilog.warn(DOMAIN, TAG, 'unpack npm.tar.gz failed: rc=%{public}d', rc);
+      }
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'unpack npm.tar.gz failed: %{public}s', JSON.stringify(e));
+    }
   }
 
   // 清空 launcher 目录。只删文件，不递归；这里的每一项都是 writeSoLauncher 写的。

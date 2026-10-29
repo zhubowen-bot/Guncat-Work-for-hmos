@@ -64,6 +64,11 @@ hvigorw --no-daemon assembleHap --mode module -p product=default
 孙进程，孙进程才 `dlopen libpython3.12.so` 并跑 `Py_BytesMain`。`libpycmd.so` 只是 UDS
 客户端（`NEEDED` 只有 libc），负责把 argv/stdin/env 发过去、把 stdout/stderr/退出码收回来。
 
+`node` 的 `npm` / `npx` 需要 npm 的纯 JS 树：`deps/npm` 打成 `rawfile/tools/npm.tar.gz`
+（约 2.6MB），首次启动由 `unpackResource()`（HAR 里的 `libarchive.so.13`）解到
+`<sysroot>/npm`；`iec_npm_main` 拼出的命令行是 `<sysroot>/npm/bin/npm-cli.js`。
+`libnode.so` 本身 NEEDED `libc.so` 与 `libc++_shared.so`。
+
 这样：被 SIGKILL 只影响那一次请求，runner 不受影响；`sys.exit(n)` 的退出码原样回传；
 子进程的 CPython 永远是干净的，不继承 `run_python` 的解释器状态。
 
