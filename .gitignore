@@ -4,6 +4,8 @@
 /.idea
 **/build
 /.hvigor
+# harness 等子目录下的 hvigor 缓存/报告同样是本地产物（根目录那条规则覆盖不到）
+**/.hvigor/
 .cxx
 /.clangd
 /.clang-format
@@ -19,6 +21,8 @@ test/*/png.b64
 test/*/_check.txt
 test/*/_docsize.txt
 test/.npm-cache/
+__pycache__/
+*.pyc
 
 # 注: Linux VM(shell 工具)的二进制产物**随仓库提供**（git 压缩后合计约 21MB）:
 #   entry/libs/arm64-v8a/libqemu-system-aarch64-tci.so、libslirp.so.0
