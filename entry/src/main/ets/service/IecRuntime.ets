@@ -20,6 +20,7 @@ import {
   execStart,
   execTerminate,
   initIecResourceManager,
+  installCaBundle,
   probeCaps,
   startIecServer,
   writeSoLauncher,
@@ -207,6 +208,17 @@ export class IecRuntime {
     if (IecRuntime.hasSo('libzipcmd.so')) {
       add('zip', 'libzipcmd.so', 'iec_zip_main');
     }
+    // 自己编的补充命令：nc / hexdump / diff（diff 后端是随包的 git）。
+    if (IecRuntime.hasSo('libnc.so')) {
+      add('nc', 'libnc.so', 'iec_nc_main');
+    }
+    if (IecRuntime.hasSo('libhexdump.so')) {
+      add('hexdump', 'libhexdump.so', 'iec_hexdump_main');
+      add('hd', 'libhexdump.so', 'iec_hexdump_main');
+    }
+    if (IecRuntime.hasSo('libdiff.so')) {
+      add('diff', 'libdiff.so', 'iec_diff_main');
+    }
     if (IecRuntime.hasSo('libnode.so')) {
       add('node', 'libnode.so', 'iec_node_main');
       add('nodejs', 'libnode.so', 'iec_node_main');
@@ -350,18 +362,15 @@ export class IecRuntime {
     return [];
   }
 
-  // 把 Python 自带的 certifi 证书铺到 <sysroot>/etc/ssl/certs，git/openssl 系
-  // 工具就能按标准路径找到 CA，不用每次手写 GIT_SSL_CAINFO。
-  static installCaBundle(context: common.UIAbilityContext): string {
-    const src: string = context.filesDir + '/python/lib/python3.12/extras/certifi/cacert.pem';
-    const dst: string = SYSROOT + '/etc/ssl/certs/ca-certificates.crt';
+  // 把 IEC 内置的 CA 证书铺到 <sysroot>/etc/ssl/certs，git/openssl 系工具就能
+  // 按标准路径找到 CA，不依赖 Python 是否已经解包、也不用每次手写 GIT_SSL_CAINFO。
+  static installShellCaBundle(): string {
+    const dir: string = SYSROOT + '/etc/ssl/certs';
+    const dst: string = dir + '/cacert.pem';
     try {
-      if (!fileIo.accessSync(src)) {
+      ensureDir(dir);
+      if (!installCaBundle(dir)) {
         return '';
-      }
-      ensureDir(SYSROOT + '/etc/ssl/certs');
-      if (!fileIo.accessSync(dst)) {
-        fileIo.copyFileSync(src, dst);
       }
       return dst;
     } catch (e) {

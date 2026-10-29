@@ -22,6 +22,7 @@ import { BackgroundTaskService } from '../service/BackgroundTaskService';
 import { HarnessTools } from '../service/HarnessTools';
 import { IecShellService } from '../service/IecShellService';
 import { ToolExecResult } from '../service/WorkFileService';
+import { startPyRunner } from 'iec';
 
 const DOMAIN = 0x0000;
 
@@ -39,8 +40,16 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate<boolean>('systemColorMode', false);
     AppStorage.setOrCreate<string>('sharedFileUris', '');
     this.publishSharedFiles(want);
-    // shell 工具切到设备内原生执行核（IEC）：不启 QEMU、不需要 JIT 权限。
-    // 钩子由 .ets 侧注入，HarnessTools(.ts) 只负责调用；注入失败会退回 QEMU 后端。
+    // shell 工具走设备内原生执行核（IEC）：不启 QEMU、不需要 JIT 权限。
+    // 钩子由 .ets 侧注入，HarnessTools(.ts) 只负责调用。
+    // 先起 python3 的独立解释器 runner：必须在任何 run_python 之前 fork，此时
+    // 进程内还没有初始化 CPython，runner 才能给出干净的解释器。
+    try {
+      const ok: boolean = startPyRunner();
+      hilog.info(DOMAIN, 'testTag', 'python runner: %{public}s', ok ? 'started' : 'failed');
+    } catch (e) {
+      hilog.warn(DOMAIN, 'testTag', 'python runner failed: %{public}s', JSON.stringify(e));
+    }
     HarnessTools.shellBackendHook =
       (context: common.UIAbilityContext, convId: string, args: Record<string, Object>):
         Promise<ToolExecResult> => IecShellService.run(context, convId, args);

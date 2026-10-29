@@ -33,6 +33,7 @@
 #include <unistd.h>
 
 #include "exec/exec_session.h"
+#include "exec/py_runner.h"
 
 namespace {
 
@@ -657,6 +658,12 @@ napi_value ExecKillStale(napi_env env, napi_callback_info /*info*/) {
     return MakeInt(env, killed);
 }
 
+// startPyRunner(): 在应用启动时（Python 还没初始化）fork 一个独立的解释器 runner。
+// shell 的 python3 走它，避免继承 run_python 的解释器状态。
+napi_value StartPyRunnerNapi(napi_env env, napi_callback_info /*info*/) {
+    return MakeBool(env, StartPyRunner());
+}
+
 }  // namespace
 
 void RegisterExecNapi(napi_env env, napi_value exports) {
@@ -672,6 +679,7 @@ void RegisterExecNapi(napi_env env, napi_value exports) {
         {"execList",       nullptr, ExecList,       nullptr, nullptr, nullptr, napi_default, nullptr},
         {"execCount",      nullptr, ExecCount,      nullptr, nullptr, nullptr, napi_default, nullptr},
         {"execKillStale",  nullptr, ExecKillStale,  nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"startPyRunner",  nullptr, StartPyRunnerNapi, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
 }

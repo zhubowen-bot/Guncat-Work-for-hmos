@@ -46,6 +46,7 @@ add_library(iec_har SHARED
     "${IEC_ROOT}/tty/tty_server.cpp"
     "${IEC_ROOT}/exec/exec_server.cpp"
     "${IEC_ROOT}/exec/exec_session.cpp"
+    "${IEC_ROOT}/exec/py_runner.cpp"
     "${IEC_ROOT}/exec/exec_ncp.cpp"
     "${IEC_ROOT}/exec/path_resolver.cpp"
     "${IEC_ROOT}/exec/exec_loader.cpp"

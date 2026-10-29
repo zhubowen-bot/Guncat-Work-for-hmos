@@ -156,3 +156,10 @@ export const execCount: () => number;
  * 返回杀掉的进程数。
  */
 export const execKillStale: () => number;
+
+/**
+ * 启动独立的 python 解释器 runner（应用启动时调用一次，早于任何 run_python）。
+ * shell 里的 python3 通过 UDS 把 argv/stdin 发给它，解释器在 runner 的孙进程里
+ * 全新初始化，不继承本进程 run_python 的状态。返回是否启动成功。
+ */
+export const startPyRunner: () => boolean;
