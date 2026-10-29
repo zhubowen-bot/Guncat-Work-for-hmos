@@ -26,7 +26,7 @@ node/npm/npx + python3**，不再有“node 编不出来”的缺口。命令 �
 
 位置 `third_party/bettersh/iec/platform/ohos/har/libs/arm64-v8a/`，hvigor 合进 HAP 的
 `libs/arm64-v8a/`；`IecRuntime` 只在 `.so` 存在时注册 launcher。解包当前 HAP 核对，
-下表所有 `.so` 均在包内（命令 so 与 516 个 `.so` 里的 Python 扩展同目录分发）。
+下表所有 `.so` 均在包内（命令 so 与 534 个 `.so` 里的 Python 扩展同目录分发）。
 
 | 命令 | so | 入口 | 状态 |
 | --- | --- | --- | --- |
@@ -77,7 +77,7 @@ libpython3.12.so` 并跑 `Py_BytesMain`。
 
 ## 4. 体积
 
-当前签名 HAP 约 430MB。主要构成：`libnode.so`（约 108MB）、CPython + numpy/scipy/
+当前签名 HAP 452,695,999 字节（约 432 MiB）。主要构成：`libnode.so`（约 108MB）、CPython + numpy/scipy/
 pandas/matplotlib 等运行库、命令 so 与技能资源。`libnode.so` 是可选能力，但当前
 **默认随包**；若要瘦身，可在构建时排除它，`node`/`npm`/`npx` 会干净地报
 `command not found`，其余命令不受影响。
@@ -86,21 +86,22 @@ pandas/matplotlib 等运行库、命令 so 与技能资源。`libnode.so` 是可
 
 ```bash
 hdc install -r entry/build/default/outputs/default/entry-default-signed.hap
+hdc shell aa force-stop com.bowenapp.guncataibeta
 hdc shell aa start -a EntryAbility -b com.bowenapp.guncataibeta --ps iecSelfTest 1
-hdc shell hilog -x | grep -A 30 IecSelfTest
+hdc shell hilog -x | grep -A 120 IecSelfTest
 ```
 
-自检分 8 组，互不阻断（每段先打印 `--- 名称`，失败只追加 `[FAIL]`，末行
-`SELFTEST DONE`）：PATH 枚举（19 个命令）、mksh 64 位算术、`/tmp` 与 `id`、
+自检分 8 组、共 13 个 `---` 段，互不阻断（每段先打印 `--- 名称`，失败只追加
+`[FAIL]`，末行 `SELFTEST DONE`）：PATH 枚举（19 个命令）、mksh 64 位算术、`/tmp` 与 `id`、
 CA/git https、python3 退出码、jq/curl/bc/nc/hexdump/diff/sftp、node/npm、清理。
 
 重点看：
 
-1. 每段不应出现 `[FAIL]`；PATH 段应逐个打印 `ok`；
-2. `--- mksh` 的 `$((2000000000+2000000000))` 应为 `4000000000`；
-3. `--- python` 的 `sys.exit(7)` 之后应打印 `rc=7`，且不出现 `Fatal Python error`；
-4. `--- jq` 应为 `1`，`--- bc` 应为 `2`，`--- diff` 的 `rc` 应为 `1`；
-5. `--- node` 应输出 `v22.19.x`，`npm -v` 应输出 `10.9.x`。
+1. 每段不应出现 `[FAIL]`；PATH 段应逐个打印 `ok   <命令>`；
+2. `--- mksh 64-bit arithmetic` 的 `$((2000000000+2000000000))` 应打印 `2000000000+2000000000=4000000000`；
+3. `--- python3` 的 `sys.exit(7)` 之后应打印 `rc=7 (expect 7)`，且不出现 `Fatal Python error`；
+4. `--- jq` 应为 `1`，`--- bc` 应为 `2`，`--- diff` 的末行应为 `diff rc=1 (expect 1)`；
+5. `--- node/npm` 应分别输出 `v22.19.0`、`10.9.3`。
 
 完整清单、期望输出与故障对照见 [真机验收清单](../guides/device-verification.md)。
 

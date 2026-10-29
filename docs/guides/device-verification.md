@@ -16,7 +16,7 @@
 | 项 | 值 |
 | --- | --- |
 | 签名包 | `entry/build/default/outputs/default/entry-default-signed.hap` |
-| 大小 | 452,672,253 字节（约 432 MiB，本机当前构建） |
+| 大小 | 452,695,999 字节（约 432 MiB，本机当前构建） |
 | 包名 | `com.bowenapp.guncataibeta` |
 | Ability | `EntryAbility` |
 
@@ -81,18 +81,22 @@ grep -A 120 IecSelfTest iec-selftest.log
 ... IecSelfTest ... starting
 ... IecSelfTest ... RESULT
 [exit 0 · 12.34s · cwd .]
-echo IEC_OK
+IEC_OK
 Linux
-/data/storage/el2/base/files/workspaces/__iec_selftest
+<filesDir>/workspaces/__iec_selftest
 ...
 SELFTEST DONE
 ```
+
+> shell 工具只回显命令的**输出**，不回显命令行本身，所以正文第一行是 `IEC_OK`（`echo IEC_OK`
+> 的结果），不是 `echo IEC_OK`。`pwd` 打的是会话工作区：`<filesDir>` 是应用沙箱的
+> `context.filesDir`（随模块/设备而变），不是 IEC 的 `<sysroot>`（后者见 2.2）。
 
 判读规则：
 
 - **`SELFTEST DONE` 必须出现**。没有它说明整组命令没跑完（60 秒超时、进程被杀等）。
 - 头部 `[exit 0 · …s · cwd .]` 只代表最后一条 `echo` 成功，**不代表全过**；逐行看 `[FAIL]`。
-- PATH 段应有 **19 行 `ok`**（19 个命令，见 3.1）。
+- PATH 段应有 **19 行 `ok   <命令>`**（19 个命令，见 3.1）。
 - 只有 `starting` 没有 `RESULT`：先等满 60 秒；仍没有就看 hilog 的 `IecRuntime` / `IecShell`。
 - 连 `starting` 都没有：启动走了 `onNewWant`（应用没被真正停掉），重做 `aa force-stop` 后再启动。
 
@@ -165,7 +169,7 @@ Windows 上用 `Select-String` 代替 `grep`，或直接在 Git Bash 里跑。
 
 | 项目 | 检查命令 | 期望输出 | 失败时看哪里 |
 | --- | --- | --- | --- |
-| PATH（19 个命令） | `for c in dd md5sum od nproc jq curl bc nc hexdump diff sftp node npm tar unzip zip git ssh python3; do command -v "$c" \|\| echo "MISSING $c"; done` | 19 行绝对路径，全部形如 `/data/storage/el2/base/files/bin/<命令>`；**没有 `MISSING`** | hilog `IecRuntime` 的 `launchers written, failures=N`；`ls -l <sysroot>/bin`；按 2.3 查 HAP 里对应的 `.so`。缺某个 `.so` 时只有该命令不注册，属预期降级 |
+| PATH（19 个命令） | `for c in dd md5sum od nproc jq curl bc nc hexdump diff sftp node npm tar unzip zip git ssh python3; do if command -v "$c" >/dev/null 2>&1; then echo "ok   $c"; else echo "[FAIL] $c not found"; fi; done` | 19 行 `ok   <命令>`；**没有 `[FAIL]`**。想核对绝对路径时单独跑 `command -v <命令>`，应指向 `/data/storage/el2/base/files/bin/<命令>` | hilog `IecRuntime` 的 `launchers written, failures=N`；`ls -l <sysroot>/bin`；按 2.3 查 HAP 里对应的 `.so`。缺某个 `.so` 时只有该命令不注册，属预期降级 |
 
 > PATH 只证明 launcher 已注册，不证明命令能跑；`git`、`python3`、`node`、`npm`、`jq`、
 > `curl`、`bc`、`nc`、`hexdump`、`diff`、`sftp` 由下面的实际执行项覆盖。
@@ -174,19 +178,19 @@ Windows 上用 `Select-String` 代替 `grep`，或直接在 Git Bash 里跑。
 
 | 项目 | 检查命令 | 期望输出 | 失败时看哪里 |
 | --- | --- | --- | --- |
-| mksh 64 位算术 | `echo $((2000000000+2000000000))` | `4000000000`；若为 `-294967296` 说明是 32 位算术 | hilog `IecRuntime`；确认 `libmksh.so` 是当前包（重编时带 64 位算术选项） |
-| `/tmp` 可写 | `echo x > /tmp/_t && cat /tmp/_t && rm -f /tmp/_t` | `x`；`/tmp` 实际落在 `<sysroot>/tmp` | hilog `IecRuntime`；`ls -ld /tmp /data/storage/el2/base/files/tmp` |
-| `id` | `id; id -u` | 第一行 `uid=<应用真实 uid> gid=<gid> ...`，**不是 uid=0**；第二行是同样的数字 uid | `<sysroot>/etc/passwd`、`<sysroot>/etc/group`；hilog `IecRuntime` 的 `cannot read uid` |
-| CA bundle | `echo "$GIT_SSL_CAINFO"; ls -l "$GIT_SSL_CAINFO"` | 第一行 `/data/storage/el2/base/files/etc/ssl/certs/cacert.pem`；第二行文件存在且大小非 0。`SSL_CERT_FILE`、`CURL_CA_BUNDLE` 同值 | hilog `IecRuntime` 的 `ca bundle install failed`；确认 `<sysroot>/etc/ssl/certs/` 可写 |
-| git 走 https | `GIT_TERMINAL_PROMPT=0 timeout 10 git ls-remote https://github.com/git/git.git HEAD` | 一个 40 位 commit 加 `HEAD`，退出码 `0`。网络不通时 `rc=124/128` 只说明网络问题，不算 shell 故障 | 证书报错先看 CA 行；`Could not resolve host` 查设备网络；hilog `IecRuntime` |
-| python3 退出码 | `python3 -c "import sys; sys.exit(7)"; echo "rc=$?"; python3 -c "print(1+1)"` | 先 `rc=7`，再输出 `2`；没有 `Fatal Python error` | `rc=127` 且 stderr 有 `cannot reach the interpreter runner` → 看 5 的 runner 行；`ModuleNotFoundError`/找不到标准库 → `PYTHONHOME`/`PYTHONPATH`（hilog `IecShell`） |
+| mksh 64 位算术 | `v=$((2000000000+2000000000)); echo "2000000000+2000000000=$v"` | `2000000000+2000000000=4000000000`；若为 `-294967296` 说明是 32 位算术，并追加 `[FAIL] arithmetic (expect 4000000000)` | hilog `IecRuntime`；确认 `libmksh.so` 是当前包（重编时带 64 位算术选项） |
+| `/tmp` 可写 | `echo x > /tmp/_t && cat /tmp/_t && rm -f /tmp/_t \|\| echo "[FAIL] /tmp write"` | `x`；`/tmp` 实际落在 `<sysroot>/tmp` | hilog `IecRuntime`；`ls -ld /tmp /data/storage/el2/base/files/tmp` |
+| `id` | `id; id 2>/dev/null \| grep -q "uid=" \|\| echo "[FAIL] id (no uid)"` | 一行 `uid=<应用真实 uid> gid=<gid> ...`，**不是 uid=0**；没有 `[FAIL] id (no uid)` | `<sysroot>/etc/passwd`、`<sysroot>/etc/group`；hilog `IecRuntime` 的 `cannot read uid` |
+| CA bundle | `echo "GIT_SSL_CAINFO=${GIT_SSL_CAINFO:-<empty>}"; [ -n "$GIT_SSL_CAINFO" ] && [ -f "$GIT_SSL_CAINFO" ] \|\| echo "[FAIL] CA bundle"` | `GIT_SSL_CAINFO=/data/storage/el2/base/files/etc/ssl/certs/cacert.pem`，且没有 `[FAIL] CA bundle`；`SSL_CERT_FILE`、`CURL_CA_BUNDLE` 同值（单独 `echo` 可确认）。要确认大小非 0 再加 `ls -l "$GIT_SSL_CAINFO"` | hilog `IecRuntime` 的 `ca bundle install failed`；确认 `<sysroot>/etc/ssl/certs/` 可写 |
+| git 走 https | `out=$(GIT_TERMINAL_PROMPT=0 timeout 10 git ls-remote https://github.com/git/git.git HEAD 2>&1); rc=$?; echo "$out" \| head -3; echo "git ls-remote rc=$rc (网络失败不算自检失败)"` | 前 3 行含一个 40 位 commit 加 `HEAD`，末尾 `git ls-remote rc=0 (网络失败不算自检失败)`。网络不通时 `rc=124/128` 只记录，**不判 `[FAIL]`** | 证书报错先看 CA 行；`Could not resolve host` 查设备网络；hilog `IecRuntime` |
+| python3 退出码 | `timeout 10 python3 -c "import sys; sys.exit(7)"; echo "rc=$? (expect 7)"; timeout 10 python3 -c "print(1+1)"` | 先 `rc=7 (expect 7)`，再输出 `2`；没有 `Fatal Python error` | `rc=127` 且 stderr 有 `cannot reach the interpreter runner` → 看 5 的 runner 行；`ModuleNotFoundError`/找不到标准库 → `PYTHONHOME`/`PYTHONPATH`（hilog `IecShell`） |
 | jq | `printf '{"a":1}\n' \| jq -r .a` | `1` | hilog `IecRuntime`；按 2.3 确认 `libjqcmd.so` 在包内 |
 | curl | `curl --version \| head -1` | 以 `curl 8.22.0` 开头（构建固定 8.22.0） | hilog `IecRuntime`；`libcurlcmd.so` |
 | bc | `echo '1+1' \| bc` | `2` | hilog `IecRuntime`；`libbccmd.so` |
 | nc | `{ nc -h 2>&1; nc 2>&1; } \| head -1` | 含 `usage: nc` 的一行（自编 nc 没有 `-h` 也走 usage） | hilog `IecRuntime`；`libnc.so` |
-| hexdump | `printf AB \| hexdump -C` | `00000000  41 42 ...  \|AB\|` | hilog `IecRuntime`；`libhexdump.so` |
-| diff 退出码 | `printf 'a\n' > /tmp/_d1; printf 'b\n' > /tmp/_d2; diff -u /tmp/_d1 /tmp/_d2; echo "rc=$?"; rm -f /tmp/_d1 /tmp/_d2` | unified 头 `---`/`+++`/`@@`，内容 `-a`/`+b`，`rc=1`（有差异是正确结果）；同文件 `rc=0`；操作数不存在 `rc=2` | hilog `IecRuntime`；`libdiff.so`；后端是随包 git，不是 GNU diffutils |
-| sftp | `{ sftp -V 2>&1; sftp -h 2>&1; sftp 2>&1; } \| head -1` | 能打印 `unknown option -- V` 或 `usage: sftp ...`（OpenSSH sftp 没有 `-V`，打印 usage/报未知选项都正常）；关键是没有 `command not found` | hilog `IecRuntime`；`libsftpcmd.so`。这里只有**客户端**，没有 sftp-server |
+| hexdump | `printf AB \| hexdump -C` | 两行：首行 `00000000  41 42` + 按 16 字节补空格 + `\|AB\|`（`\|` 在第 60 列），第二行 `00000002`（最终偏移）。**不是**旧的 `00000000  41 42 \|AB\|` 单空格/无末行格式 | hilog `IecRuntime`；`libhexdump.so` |
+| diff 退出码 | `printf 'a\n' > /tmp/_d1; printf 'b\n' > /tmp/_d2; timeout 10 diff -u /tmp/_d1 /tmp/_d2; echo "diff rc=$? (expect 1)"` | 依次为 `diff --git a/tmp/_d1 b/tmp/_d2`、`index …`、`--- a/tmp/_d1`、`+++ b/tmp/_d2`、`@@ -1 +1 @@`、`-a`、`+b`，末行 `diff rc=1 (expect 1)`（有差异是正确结果）；同文件 `rc=0`；操作数不存在 `rc=2` | hilog `IecRuntime`；`libdiff.so`；后端是随包 git，不是 GNU diffutils |
+| sftp | `{ sftp -V 2>&1; sftp -h 2>&1; sftp 2>&1; } \| head -1` | OpenSSH 9.9p2 的第一行是 `unknown option -- V`；单独跑 `sftp -h`/无参时以 `usage: sftp ...` 开头。关键是没有 `command not found` | hilog `IecRuntime`；`libsftpcmd.so`。这里只有**客户端**，没有 sftp-server |
 | node | `node -v` | `v22.19.0` | hilog `IecRuntime`；`libnode.so`。可加 `node -p "process.execArgv"` 看是否自动 `--jitless`（见 6） |
 | npm | `npm -v` | `10.9.3`（Node 22.19.0 自带版本） | 版本能打出来说明 `npm-cli.js` 路径与 launcher 都对；`MODULE_NOT_FOUND` 见 5 的 npm 行；标记文件 `<sysroot>/npm/.unpack-complete` |
 

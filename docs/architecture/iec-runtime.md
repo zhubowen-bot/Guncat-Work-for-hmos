@@ -130,9 +130,12 @@ GitHub 直连在 WSL 里通常不通（`codeload.github.com` 可以）：`pcre2`
 设备在线时，用 Want 参数触发一次自检（不需要模型、不需要 UI 操作；**由你执行**）：
 
 ```bash
+hdc shell aa force-stop com.bowenapp.guncataibeta
 hdc shell aa start -a EntryAbility -b com.bowenapp.guncataibeta --ps iecSelfTest 1
 hdc shell hilog -x | grep -A 120 IecSelfTest
 ```
+
+> `onNewWant()` 不处理 `iecSelfTest`，必须在应用未运行时冷启动；否则自检不会执行。
 
 自检由一组**互不阻断**的段组成：每段先打印 `--- 名称`，某项失败只追加一行
 `[FAIL] ...`，后面的段照常执行；每个可能阻塞的命令都套 `timeout 10`，整组以
@@ -142,23 +145,23 @@ hdc shell hilog -x | grep -A 120 IecSelfTest
 
 | 段 | 执行内容 | 期望值 |
 | --- | --- | --- |
-| 基线 | `uname -s`、`pwd` | `Linux`；工作区绝对路径（`…/files/workspace/__iec_selftest` 一类） |
-| PATH | `command -v` 枚举 `dd md5sum od nproc jq curl bc nc hexdump diff sftp node npm tar unzip zip git ssh python3` | 每个都打 `ok <名字>`；缺失时单独一行 `[FAIL] <名字> not found`，不中断后续段 |
-| mksh 64 位算术 | `$((2000000000+2000000000))` | `4000000000`（32 位会溢出成负数，并追加 `[FAIL] arithmetic`） |
-| `/tmp` + `id` | `echo x > /tmp/_t && cat /tmp/_t && rm -f /tmp/_t`；`id` | 打印 `x`；`id` 输出含 `uid=<真实 uid>`（缺失或读不到时 `[FAIL]`） |
-| CA + git 网络 | `echo $GIT_SSL_CAINFO`、检查文件存在；`GIT_TERMINAL_PROMPT=0 git ls-remote https://github.com/git/git.git HEAD` | 变量非空且指向存在的 `…/etc/ssl/certs/cacert.pem`；`rc=0` 且输出 40 位 commit（网络不通时 `rc=124/128` 只记录，**不判自检失败**） |
-| python3 | `python3 -c "import sys; sys.exit(7)"`；`python3 -c "print(1+1)"` | `rc=7`（退出码原样透传）；`2` |
+| 基线 | `uname -s`、`pwd` | `Linux`；工作区绝对路径（`<filesDir>/workspaces/__iec_selftest` 一类） |
+| PATH | `command -v` 枚举 `dd md5sum od nproc jq curl bc nc hexdump diff sftp node npm tar unzip zip git ssh python3` | 每个都打 `ok   <名字>`（`ok` 后 3 个空格）；缺失时单独一行 `[FAIL] <名字> not found`，不中断后续段 |
+| mksh 64 位算术 | `v=$((2000000000+2000000000)); echo "2000000000+2000000000=$v"` | `2000000000+2000000000=4000000000`（32 位会溢出成负数，并追加 `[FAIL] arithmetic`） |
+| `/tmp` + `id` | `echo x > /tmp/_t && cat /tmp/_t && rm -f /tmp/_t \|\| echo "[FAIL] /tmp write"`；`id; id 2>/dev/null \| grep -q "uid=" \|\| echo "[FAIL] id (no uid)"` | 打印 `x`；`id` 输出含 `uid=<真实 uid>`，没有 `[FAIL]` |
+| CA + git 网络 | `echo "GIT_SSL_CAINFO=${GIT_SSL_CAINFO:-<empty>}"`；`[ -n "$GIT_SSL_CAINFO" ] && [ -f "$GIT_SSL_CAINFO" ]`；`GIT_TERMINAL_PROMPT=0 git ls-remote https://github.com/git/git.git HEAD` | `GIT_SSL_CAINFO=` 指向存在的 `…/etc/ssl/certs/cacert.pem`；git 输出前 3 行含 40 位 commit，末行 `git ls-remote rc=0 (网络失败不算自检失败)`（网络不通时 `rc=124/128` 只记录，**不判自检失败**） |
+| python3 | `python3 -c "import sys; sys.exit(7)"`；`python3 -c "print(1+1)"` | `rc=7 (expect 7)`（退出码原样透传）；`2` |
 | jq | `printf '{"a":1}\n' \| jq -r .a` | `1` |
-| curl | `curl --version \| head -1` | `curl 8.x…` |
+| curl | `curl --version \| head -1` | 以 `curl 8.22.0` 开头 |
 | bc | `echo '1+1' \| bc` | `2` |
 | nc | `nc -h` / 无参，取 usage 首行 | 含 `usage: nc`（自编 nc 没有 `-h` 也走 usage） |
-| hexdump | `printf AB \| hexdump -C` | `00000000  41 42 …  \|AB\|` |
-| diff | `/tmp/_d1`=a、`/tmp/_d2`=b，`diff -u` | unified diff（`-a` / `+b`）且 `diff rc=1`（有差异是正确结果） |
-| sftp | `sftp -V` / `sftp -h` / 无参，取首行 | OpenSSH sftp 的 usage（没有 `-V` 属正常） |
-| node/npm | `node -v`、`npm -v` | 两行 `vX.Y.Z`（npm 有版本号说明 `npm-cli.js` 解包与 launcher 都对） |
+| hexdump | `printf AB \| hexdump -C` | 首行 `00000000  41 42` + 补齐空格 + `\|AB\|`（`\|` 在第 60 列），第二行 `00000002`（最终偏移） |
+| diff | `/tmp/_d1`=a、`/tmp/_d2`=b，`diff -u` | git 前缀 + unified diff（`-a` / `+b`），末行 `diff rc=1 (expect 1)`（有差异是正确结果） |
+| sftp | `sftp -V` / `sftp -h` / 无参，取首行 | OpenSSH sftp 的 `unknown option -- V` 或 `usage: sftp ...`（没有 `-V` 属正常） |
+| node/npm | `node -v`、`npm -v` | `v22.19.0` 与 `10.9.3`（npm 有版本号说明 `npm-cli.js` 解包与 launcher 都对） |
 | 清理 | `rm -f /tmp/_t /tmp/_d1 /tmp/_d2 t.txt t.tar` | 无输出；随后 `SELFTEST DONE` |
 
-`SELFTEST DONE` 之前的任一行 `[FAIL]` 都对应上表某一项；PATH 段的 `ok` 行数应为 19。
+`SELFTEST DONE` 之前的任一行 `[FAIL]` 都对应上表某一项；PATH 段的 `ok   <名字>` 行数应为 19。
 自检只读/临时写 `/tmp` 与工作区内的 `t.txt`/`t.tar`（跑完即删），不碰用户数据。
 
 ## 回退
