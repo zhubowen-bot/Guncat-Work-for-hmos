@@ -18,14 +18,14 @@ powershell -ExecutionPolicy Bypass -File tools/build-check.ps1
 2. `tooling/python/check-sonames.py --strict` —— **随包 .so 依赖闭合**：soname 齐全、
    Python 扩展都带 `libpython3.12.so`、无 glibc 泄漏（失败 `exit 6`）；
 3. `tooling/license-check.py --strict` —— 随包组件是否都有许可声明（缺失 `exit 5`）；
-4. `tooling/python/run-verify-stack.sh` —— **22 项**运行库自检（失败 `exit 3`）。
+4. `tooling/python/run-verify-stack.sh` —— **24 项**运行库自检（失败 `exit 3`）。
 
 > 为什么要第 2 道：qemu 验证会被构建机/rootfs 里的同名库遮住（Alpine 自带 `libz.so.1`），
 > 真机上才暴露 `libz.so.1` 缺失、扩展缺 `DT_NEEDED libpython` 这类问题。
 > 静态扫 soname 不需要设备，能在打包前拦住。
 
 它会在调 hvigor 之前跑 `tooling/python/run-verify-stack.sh`（**按真机布局**组装：
-extras 解压到临时目录、libs 只提供 `.so`、qemu 跑目标 python），21 项全过才继续打包。
+extras 解压到临时目录、libs 只提供 `.so`、qemu 跑目标 python），24 项全过才继续打包。
 失败会以 `exit 3` 中止。
 
 单项排查：
@@ -62,5 +62,5 @@ libs 里的 `.py`，所以 `.py` 必须在 extras 或 zip 里）。
 ## 5. 提交前
 
 ```bash
-cd test/guncat-harness && node setup.mjs && node test-core.mjs   # 应全绿(现 543 项)
+cd test/guncat-harness && node setup.mjs && node test-core.mjs   # 应全绿(现 683 项)
 ```

@@ -1,8 +1,8 @@
 # 三端实现对照与对齐现状
 
-> 注：7.0.1 起 `shell` 已从 QEMU/Alpine 改为 IEC 原生执行核（命令是 HarmonyOS `.so`，
-> 无虚拟机）。本文中关于 shell 后端的对照记录的是 7.0.0 的状态，当前实现见
-> [architecture/iec-runtime.md](architecture/iec-runtime.md)。
+> **历史文档**：7.0.1 起 `shell` 已从 QEMU/Alpine 改为 IEC 原生执行核（命令是
+> HarmonyOS `.so`，无虚拟机）。本文中关于 shell 后端的对照记录的是 7.0.0 的状态，
+> 当前实现见 [architecture/iec-runtime.md](architecture/iec-runtime.md)。
 
 > 日期：2026-10-28 ｜ 对照：`Guncat-Work-for-pc`(0.2.1)、`Guncat-Work-for-android`(0.2.1)、
 > `Guncat-Work-for-hmos`(7.0.0)

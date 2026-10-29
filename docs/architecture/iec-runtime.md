@@ -45,10 +45,14 @@ hvigorw --no-daemon assembleHap --mode module -p product=default
 | 命令 | so | 入口 |
 | --- | --- | --- |
 | `sh` / `mksh` | `libmksh.so` | `main` |
-| `ls/cat/grep/sed/awk/find/xargs/…`（70+） | `libtoybox.so` | `bsh_toybox_main` |
-| `tar/bsdtar`、`unzip`、`cpio`、`zip` | `libbsdtar.so` / `libbsdunzip.so` / `libbsdcpio.so` / `libzipcmd.so` | `iec_bsdtar_main` 等 |
-| `git`（含 https） | `libgit.so` / `libgit-remote-http.so` | `iec_git_main` / `iec_git_remote_http_main` |
-| `ssh/scp/ssh-keygen/…` | `libdropbear.so` | `iec_dropbear_main` |
+| `toybox` 及 70+ applet（`ls/cat/grep/sed/awk/find/xargs/…`） | `libtoybox.so` | `bsh_toybox_main` |
+| `tar` / `bsdtar` | `libbsdtar.so` | `iec_bsdtar_main` |
+| `unzip` | `libbsdunzip.so` | `iec_bsdunzip_main` |
+| `cpio` / `bsdcpio` | `libbsdcpio.so` | `iec_bsdcpio_main` |
+| `zip` | `libzipcmd.so` | `iec_zip_main` |
+| `git` / `git-upload-pack` / `git-receive-pack` / `git-upload-archive` | `libgit.so` | `iec_git_main` |
+| `git-remote-http` / `git-remote-https` | `libgit-remote-http.so` | `iec_git_remote_http_main` |
+| `ssh` / `scp` / `ssh-keygen` / `dbclient` / `dropbearkey` / `dropbearconvert` / `dropbear` | `libdropbear.so` | `iec_dropbear_main` |
 | `sftp` | `libsftpcmd.so` | `iec_sftp_main` |
 | `nc` | `libnc.so` | `iec_nc_main` |
 | `hexdump` / `hd` | `libhexdump.so` | `iec_hexdump_main` |
@@ -56,8 +60,13 @@ hvigorw --no-daemon assembleHap --mode module -p product=default
 | `jq` | `libjqcmd.so` | `iec_jq_main` |
 | `curl` | `libcurlcmd.so` | `iec_curl_main` |
 | `bc` | `libbccmd.so` | `iec_bc_main` |
-| `node/npm/npx`（条件产物） | `libnode.so` | `iec_node_main` / `iec_npm_main` / `iec_npx_main` |
-| `python3` / `python` | `libpycmd.so`（Guncat 自带） | `iec_python_main` |
+| `node` / `nodejs` | `libnode.so` | `iec_node_main` |
+| `npm` | `libnode.so` | `iec_npm_main` |
+| `npx` | `libnode.so` | `iec_npx_main` |
+| `python3` / `python` | `libpycmd.so` + `libpython3.12.so` | `iec_python_main` |
+
+上表与 `IecRuntime.writeLaunchers()` 的 `add(...)` 完全一致；每个命令只在对应 `.so` 存在时注册
+（`hasSo()`），所以不会出现“命令在、库不在”的误导性 dlopen 错误。
 
 `python3` 走独立解释器进程：应用启动时 `startPyRunner()`（NAPI）在 **CPython 尚未初始化**
 的进程里 fork 一个常驻 runner，runner 自己从不加载 libpython；每个请求再由它 fork 一个
@@ -84,8 +93,9 @@ tools/build-iec-runtime.sh node     # V8，最久
 GitHub 直连在 WSL 里通常不通（`codeload.github.com` 可以）：`pcre2` / `git` / `dropbear`
 源码要先在 Windows 侧 clone 到 `third_party/bettersh/iec/thirdparty/`。
 
-`python3` / `python` 的 launcher 指向 Guncat 自带的 `libpython3.12.so`
-（入口 `Py_BytesMain`）。所以只要那个 `.so` 在包里，shell 里就能起同一个解释器；
+`python3` / `python` 的 launcher 指向 Guncat 自带的 `libpycmd.so`（入口 `iec_python_main`），
+后者把请求转给常驻 python runner；runner 再 fork 的孙进程才 `dlopen libpython3.12.so` 并跑
+`Py_BytesMain`。所以只要 `libpython3.12.so` 在包里，shell 里就能起同一个解释器；
 `PYTHONHOME`/`PYTHONPATH` 由 `IecShellService` 传入。
 
 ## 语义
@@ -95,10 +105,11 @@ GitHub 直连在 WSL 里通常不通（`codeload.github.com` 可以）：`pcre2`
 * 环境：`IecShellService` 显式给 `PATH=<sysroot>/bin:<sysroot>/usr/bin:/usr/bin:/bin`、
   `HOME=<sysroot>/home`、`TMPDIR=<sysroot>/tmp`。**PATH 必须给**——IEC 起进程不会替
   我们拼 PATH，而应用进程自己的环境里没有 launcher 目录，不给就是 `command not found`。
-* Python：launcher `python3`/`python` 指向 Guncat 的 `libpython3.12.so`（`Py_BytesMain`），
-  并在每次调用前把 `PYTHONHOME`/`PYTHONPATH`（stdlib zip + site-packages + extras +
-  bundle libs）传进去，所以 shell 里的 `python3 script.py` 与 `run_python` 是同一份解释器、
-  同一份标准库。首次调用会等 `PythonService.ensureRuntime()` 把 stdlib 解出来。
+* Python：launcher `python3`/`python` 指向 `libpycmd.so`（`iec_python_main`），由常驻
+  python runner 的子进程 `dlopen libpython3.12.so` 并跑 `Py_BytesMain`；每次调用前把
+  `PYTHONHOME`/`PYTHONPATH`（stdlib zip + site-packages + extras + bundle libs）传进去，
+  所以 shell 里的 `python3 script.py` 与 `run_python` 是同一份解释器、同一份标准库。
+  首次调用会等 `PythonService.ensureRuntime()` 把 stdlib 解出来。
 * 超时由引擎线程强制（先 TERM 后 KILL），不依赖 ArkTS 轮询；`timeout_ms`
   上限沿用 `Constants.WORK_SHELL_MAX_TIMEOUT_MS`。
 * 输出超过 `WORK_SHELL_MAX_OUTPUT_BYTES` 时整段落 `.spill/`，返回里给相对路径。

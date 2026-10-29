@@ -2,82 +2,83 @@
 
 ## 0. 结论
 
-`shell` 工具已完全切到 IEC 原生执行核，**QEMU 回退已删除**。随包命令集从
-"mksh + toybox" 扩到 **libarchive 四件套 + git + ssh/scp + python3**；
-node 因宿主工具链（GCC 15）编不过，单独列为已知缺口。
+`shell` 工具已完全切到 IEC 原生执行核，**QEMU 虚拟机回退已删除**。随包命令集已覆盖
+**mksh + toybox + libarchive 四件套 + git + ssh/scp/sftp + jq/curl/bc + nc/hexdump/diff +
+node/npm/npx + python3**，不再有“node 编不出来”的缺口。命令 → `.so` → 入口的完整表见
+[iec-runtime.md](iec-runtime.md#随包的命令-so)。
 
-## 1. 已删除的旧实现（省 ~94MB）
+## 1. 已删除的旧实现（历史记录）
 
 | 项 | 说明 |
 | --- | --- |
-| `entry/src/main/cpp/vm/guncat_vm.cpp`、`types/libguncatvm/` | QEMU 桥与 NAPI |
-| `entry/libs/arm64-v8a/libqemu-system-aarch64-tci.so`（42.7MB）、`libslirp.so.0` | 虚拟机运行库 |
-| `entry/src/main/resources/rawfile/vm/`（49.2MB） | 内核、rootfs、efi rom、keymaps、guest 脚本 |
-| `entry/src/main/ets/service/LinuxShellService.ts` | QEMU 后端 |
-| `tooling/linux-vm/`、`docs/architecture/linux-shell.md` | 构建链与文档 |
-| `HarnessTools` 里的回退分支 | 钩子为空时直接报"shell 后端未初始化" |
+| `entry/src/main/cpp/vm/guncat_vm.cpp`、`types/libguncatvm/` | 旧 QEMU 桥与 NAPI |
+| `entry/libs/arm64-v8a/libqemu-system-aarch64-tci.so`、`libslirp.so.0` | 旧虚拟机运行库 |
+| `entry/src/main/resources/rawfile/vm/` | 旧内核、rootfs、efi rom、keymaps、guest 脚本 |
+| `entry/src/main/ets/service/LinuxShellService.ts` | 旧 QEMU 后端 |
+| `tooling/linux-vm/`、`docs/architecture/linux-shell.md` | 旧构建链与文档 |
+| `HarnessTools` 里的回退分支 | 钩子为空时直接报“shell 后端未初始化” |
 
-`Constants` 里的 `WORK_LINUX_*` 一并移除。HAP 里已确认没有 `qemu`/`slirp`/`rawfile/vm`。
+`Constants` 里的 `WORK_LINUX_*` 一并移除；HAP 里已确认没有 `qemu` / `slirp` / `rawfile/vm`。
+这些名字只应出现在历史文档（`docs/releases/`、`native-python.md`、
+`jit-permission-application.md`、`ALIGNMENT_STATUS.md`、`CHANGELOG.md` 的旧版本小节）里。
 
 ## 2. 已随包的命令 so
 
 位置 `third_party/bettersh/iec/platform/ohos/har/libs/arm64-v8a/`，hvigor 合进 HAP 的
-`libs/arm64-v8a/`；`IecRuntime` 只在 `.so` 存在时注册 launcher。
+`libs/arm64-v8a/`；`IecRuntime` 只在 `.so` 存在时注册 launcher。解包当前 HAP 核对，
+下表所有 `.so` 均在包内（命令 so 与 516 个 `.so` 里的 Python 扩展同目录分发）。
 
-| 命令 | so | 入口 | 验证 |
+| 命令 | so | 入口 | 状态 |
 | --- | --- | --- | --- |
 | `sh` / `mksh` | `libmksh.so` | `main` | 真机通过 |
-| 70+ toybox 命令 | `libtoybox.so` | `bsh_toybox_main` | 真机通过（含 `seq/stat/cmp/diff`） |
-| `tar` / `bsdtar` | `libbsdtar.so`（906K） | `iec_bsdtar_main` | 符号已核 |
-| `unzip` | `libbsdunzip.so`（299K） | `iec_bsdunzip_main` | 符号已核 |
-| `cpio` / `bsdcpio` | `libbsdcpio.so`（874K） | `iec_bsdcpio_main` | 符号已核 |
-| `zip` | `libzipcmd.so`（422K） | `iec_zip_main` | 脚本断言 |
-| `git` | `libgit.so`（4.5M） | `iec_git_main` | 符号已核 |
-| `git-remote-http(s)` | `libgit-remote-http.so`（7.9M） | `iec_git_remote_http_main` | 脚本断言 |
-| `ssh/scp/ssh-keygen/dropbear` | `libdropbear.so`（508K） | `iec_dropbear_main` | 符号已核 |
-| `python3` / `python` | `libpycmd.so`（13K）+ `libpython3.12.so` | `iec_python_main` | 待真机验证 |
+| 70+ toybox applet | `libtoybox.so` | `bsh_toybox_main` | 真机通过 |
+| `tar` / `bsdtar` | `libbsdtar.so` | `iec_bsdtar_main` | 已在包 |
+| `unzip` | `libbsdunzip.so` | `iec_bsdunzip_main` | 已在包 |
+| `cpio` / `bsdcpio` | `libbsdcpio.so` | `iec_bsdcpio_main` | 已在包 |
+| `zip` | `libzipcmd.so` | `iec_zip_main` | 已在包 |
+| `git` 及 upload/receive/archive | `libgit.so` | `iec_git_main` | 已在包 |
+| `git-remote-http(s)` | `libgit-remote-http.so` | `iec_git_remote_http_main` | 已在包 |
+| `ssh` / `scp` / key 工具 | `libdropbear.so` | `iec_dropbear_main` | 真机通过 |
+| `sftp` | `libsftpcmd.so` | `iec_sftp_main` | 已在包 |
+| `jq` | `libjqcmd.so` | `iec_jq_main` | 已在包 |
+| `curl` | `libcurlcmd.so` | `iec_curl_main` | 已在包 |
+| `bc` | `libbccmd.so` | `iec_bc_main` | 已在包 |
+| `nc` | `libnc.so` | `iec_nc_main` | 已在包 |
+| `hexdump` / `hd` | `libhexdump.so` | `iec_hexdump_main` | 已在包 |
+| `diff` | `libdiff.so` | `iec_diff_main` | 已在包 |
+| `node` / `nodejs` | `libnode.so`（node 22.19） | `iec_node_main` | 已在包 |
+| `npm` / `npx` | `libnode.so` + `rawfile/tools/npm.tar.gz` | `iec_npm_main` / `iec_npx_main` | 已在包 |
+| `python3` / `python` | `libpycmd.so` + `libpython3.12.so` | `iec_python_main` | 待真机复验 |
 
-所有命令 so 的 `NEEDED` 只有 `libc.so`（libpycmd 额外需要 `libpython3.12.so`）。
+### 2.1 python3：独立 runner，不继承应用进程的解释器
 
-### 2.1 python3 的关键修复
+`python3` 不直接在 shell 子进程里调 `Py_BytesMain`。应用启动时 `startPyRunner()`
+（NAPI）在 **CPython 尚未初始化**的进程里 fork 一个常驻 runner；runner 自己从不加载
+libpython。每个 shell 请求由 runner 再 fork 一个孙进程，孙进程才 `dlopen
+libpython3.12.so` 并跑 `Py_BytesMain`。
 
-旧 launcher 直接指向 `libpython3.12.so` 的 `Py_BytesMain`。shell 命令是 fork 出来的，
-子进程继承了应用进程里**已初始化**的 CPython（`run_python` 的），再初始化一次会在
-`pyinit_core_reconfigure` 崩溃（表现：`-V/-h` 能跑，`-c`/脚本/stdin 必崩，且退出码 0）。
-
-现在 launcher 指向 `libpycmd.so`：先给当前线程挂一个 tstate
-（`PyThreadState_New(PyInterpreterState_Main())` + `PyThreadState_Swap`），再
-`Py_FinalizeEx()` 把继承的运行时归零，最后走 `Py_BytesMain`；收尾失败会返回 1 并
-打到 stderr。父进程不受影响（写时复制）。这个变体在 host 的 fork 场景里验证通过
-（直接 `AfterFork+Finalize` 会 SIGABRT）。
+`libpycmd.so` 只是 UDS 客户端（`NEEDED` 只有 libc），负责把 argv/stdin/env 发过去、
+把 stdout/stderr/退出码收回来。这样被 SIGKILL 只影响当次请求，runner 不受影响；
+`sys.exit(n)` 的退出码原样回传；子进程的 CPython 永远干净，不会在
+`pyinit_core_reconfigure` 崩溃。`PYTHONHOME`/`PYTHONPATH` 由 `IecShellService` 传入。
 
 ## 3. 并发与边角
 
 - **并发上限 8**（`IecRuntime.MAX_RUNS`）：超出的排队，不丢请求。
 - **超时不再泄漏会话**：`execTerminate` 后等进程真正退出（最多 3s）再 `execRelease`。
-- **二进制输出**：检测到非法 UTF-8 时工具结果标记并提示改走"重定向到文件/base64"，
-  不再把乱码当内容。
-- **孤儿进程**：新增 `execKillStale()`（NAPI），启动时按 `IEC_JOB` 环境变量扫描 `/proc`，
-  杀掉上次运行遗留的命令进程；`ensure()` 里调用并记录数量。
+- **二进制输出**：检测到非法 UTF-8 时工具结果标记并提示改走“重定向到文件/base64”。
+- **孤儿进程**：`execKillStale()`（NAPI）启动时按 `IEC_JOB` 扫描 `/proc`，杀掉上次运行
+  遗留的命令进程。
 - **launcher 目录**：每次启动先清空再按实际存在的 `.so` 重建，旧 launcher 不会残留。
+- **npm 解包**：`rawfile/tools/npm.tar.gz` 首次启动解到 `<sysroot>/npm`，之后按
+  `npm/bin/npm-cli.js` 是否存在跳过。
 
-## 4. 没完成的：node
+## 4. 体积
 
-`libnode.so` **没有产出**。两个独立的坑，都不是应用代码问题：
-
-1. **宿主工具链**：node 的宿主工具（torque/gyp 自带工具）要 C++20。机器上只有 GCC 15；
-   SDK 的 clang-15 读不懂 GCC 15 的 `<format>`（`consteval` 取地址报错），
-   直接用 g++ 15 又会被 node 的 clang 专属参数（`-Wno-nullability-completeness`）拒绝。
-   后来用 apt 下载了 **clang-19**（解包在 `/home/a1519/clang19`，不动系统）作为宿主
-   `cc_host`/`cxx_host`，`<format>/<chrono>` 能编译。
-2. **node-ohos 的 gyp 生成重复规则**：换成 clang-19 后，`configure` 能过，但 ninja 报
-   `multiple rules generate gen/.../js_protocol.stamp`（v22 与 v24 都一样），
-   `obj/` 与 `obj.host/` 为同一批生成文件各写了一条规则。清空 `out/Release` 重配仍复现，
-   逐个删重复边会继续冒出 `gen/torque-generated/bit-fields.h` 等，属于生成器层面问题。
-
-结论：要出 `libnode.so`，需要修 `node-ohos` 的 gyp 配置（让 host/target 只生成一份
-inspector/torque 产物），或用 node 官方支持的宿主组合（较新的 clang + 对应 libstdc++）。
-当前 `node/npm/npx` 不注册 launcher，shell 里是干净的 `command not found`；`run_js` 仍可用。
+当前签名 HAP 约 430MB。主要构成：`libnode.so`（约 108MB）、CPython + numpy/scipy/
+pandas/matplotlib 等运行库、命令 so 与技能资源。`libnode.so` 是可选能力，但当前
+**默认随包**；若要瘦身，可在构建时排除它，`node`/`npm`/`npx` 会干净地报
+`command not found`，其余命令不受影响。
 
 ## 5. 待真机验证（由用户执行，不再自动连设备）
 
@@ -87,16 +88,18 @@ hdc shell aa start -a EntryAbility -b com.bowenapp.guncataibeta --ps iecSelfTest
 hdc shell hilog -x | grep -A 30 IecSelfTest
 ```
 
-自检会依次跑 `uname -s`、`pwd`、`seq`、`tar`、`git --version`、`ssh -V`、`node -v`（预期
-not found）、`python3 -c`。重点看：
+自检会依次跑 `uname -s`、`pwd`、`seq`、`tar`、`git --version`、`ssh -V`、`node -v`、
+`python3 -c`。重点看：
 
-1. `--- python` 段应输出 `3.12.15 <cwd>`，不再 `Fatal Python error`；
+1. `--- python` 段应输出 `3.12.15 <cwd>`，不出现 `Fatal Python error`；
 2. `--- tar` 应有 `t.tar` 的 `ls -l` 行；
 3. `--- git` 应有 `git version 2.56.0`；
-4. `--- ssh` 应有 `Dropbear ssh` 版本行。
+4. `--- ssh` 应有 Dropbear 版本行；
+5. `--- node` 应输出 `v22.19.x`，`npm -v` / `npx -v` 也应可用。
 
 ## 6. 许可
 
-`THIRD_PARTY_NOTICES.md` 第 1 节已重写：IEC/BetterSH（MIT）、mksh（MirOS）、toybox（0BSD）、
-libarchive（BSD-2）、git（GPL-2.0，附源码 tag 与构建脚本）、dropbear（MIT）、Node.js（MIT，
-暂未分发）。`LICENSES/` 与 `rawfile/licenses/` 已同步；QEMU/HiSH/libslirp 的声明与原文已删。
+`THIRD_PARTY_NOTICES.md` 第 1 节：IEC/BetterSH（MIT）、mksh（MirOS）、toybox（0BSD）、
+libarchive（BSD-2）、git（GPL-2.0，附源码 tag 与构建脚本）、dropbear（MIT）、
+OpenSSH sftp（BSD）、jq（MIT）、curl（curl）、bc（GPL-2.0+）、Node.js（MIT）。
+`LICENSES/` 与 `rawfile/licenses/` 已同步；QEMU/HiSH/libslirp 的声明与原文已删。

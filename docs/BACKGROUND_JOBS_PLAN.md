@@ -1,5 +1,10 @@
 # 后台任务（run_in_background / job_*）在鸿蒙版的可行性与方案
 
+> **历史文档**：本文是 7.0.0 时期（`LinuxShellService` + 虚拟机后端）的可行性评估，
+> 其中关于 VM 内存/单核解释执行的论据已不适用。当前 `shell` 走 IEC 原生执行核，
+> 见 [architecture/iec-runtime.md](architecture/iec-runtime.md)；结论“当前不做后台任务”
+> 仍未变。
+>
 > 状态：**当前决定不做**，本文留作技术评估与将来重估的依据。
 > 三端对照见 `docs/ALIGNMENT_STATUS.md` 第八节；不做的理由见本文第二节。
 

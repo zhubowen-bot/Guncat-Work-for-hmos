@@ -4,7 +4,7 @@ Guncat Work 内置的是**真正的 CPython 3.12.15**（aarch64 交叉编译，�
 `run_python` 里能用的东西和桌面 Python 基本一致。这份文档回答两个问题：**能做什么**、
 **边界在哪**。
 
-自检脚本：`bash tooling/python/run-verify-stack.sh`（**22 项**，按真机布局在 qemu 里跑，22/22 通过）。
+自检脚本：`bash tooling/python/run-verify-stack.sh`（**24 项**，按真机布局在 qemu 里跑，24/24 通过）。
 
 ## 1. 标准库
 

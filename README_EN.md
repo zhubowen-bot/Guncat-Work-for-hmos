@@ -28,7 +28,7 @@
 ## What actually runs on the phone
 
 - ⚡ **A native shell, not a simulated one**: every command is a HarmonyOS native `.so` (mksh, toybox, libarchive, git, dropbear, node) forked and executed directly by the IEC runtime — **no VM, no instruction translation, no JIT permission required**. Pipes, redirections, globbing, `sed`, `awk`, `find`, `tar`, `git` and `ssh` are genuine; a command takes 0.2–1.5 s. The working directory is the **same file system** as the conversation workspace: `cat data/a.csv` and `read_file("data/a.csv")` see the same bytes, not a copy.
-- 🐍 **Native CPython 3.12, not emulation**: the interpreter is compiled as a HarmonyOS `.so` and runs inside the app process (no instruction translation — 2–3 orders of magnitude faster than `python3` inside the VM). numpy / pandas / **scipy** / matplotlib / python-docx / python-pptx / reportlab / sympy ship offline, and CJK charts work out of the box.
+- 🐍 **Native CPython 3.12, not emulation**: the interpreter is compiled as a HarmonyOS `.so` and runs inside the app process (no instruction translation — 2–3 orders of magnitude faster than the earlier VM-based execution). numpy / pandas / **scipy** / matplotlib / python-docx / python-pptx / reportlab / sympy ship offline, and CJK charts work out of the box.
 - 🧠 **On-device Agent Loop**: 47 built-in tools + 32 skills, multi-turn tool loop, parallel subagents, schedules / goals / session-log search, three-stage context compaction — long-horizon tasks finish on the phone and land in the sandboxed workspace.
 - 📊 **On-device deliverables**: PPT / Word / Excel / SVG come from local generators on a JSON intermediate layer (losslessly readable, operator-style editable); PDFs and Office files are parsed entirely locally, **consuming no multimodal quota**.
 - ✦ **Intelligent UI**: one sentence in, a draggable / clickable / instantly recomputing native interface out — charts, tables, metric cards, tab sets and form controls all rendered natively.
@@ -64,7 +64,7 @@ Current app version: `7.0.0` · full change history in the [changelog](CHANGELOG
 
 - **Two headline agent forms**: **Interactive Mode** is modelled on GPT's Intelligent UI — one sentence in, an operable interface out, zero tool calls by default, delivered in one turn, with sliders, toggles and dropdowns recomputing instantly; **Work Mode** is a device-side port of DeepSeek Harness — multi-turn tool loop + sandboxed workspace + long-horizon delivery (artifact cards with line-level diffs).
 - **A native shell on the phone**: every `shell` command is a HarmonyOS native `.so` (mksh, toybox, libarchive, git, dropbear, node) forked and executed directly by the IEC runtime — **no VM, no JIT permission required** — so pipes, redirections, globbing, `sed`, `awk`, `find`, `tar`, `git` and `ssh` are genuine; a command takes 0.2–1.5 s with no cold boot. The working directory is the conversation workspace itself (`cat data/a.csv` and `read_file("data/a.csv")` are the same file).
-- **Native CPython, no emulation**: `run_python` runs a real CPython 3.12 compiled as a HarmonyOS `.so` inside the app process (2–3 orders of magnitude faster than `python3` inside the VM); numpy / pandas / scipy / matplotlib / Pillow / lxml / sympy / python-docx / python-pptx / reportlab all ship offline, and CJK charts work out of the box; the VM also ships an `npy` bridge so shell pipelines can call the same interpreter.
+- **Native CPython, no emulation**: `run_python` runs a real CPython 3.12 compiled as a HarmonyOS `.so` inside the app process (2–3 orders of magnitude faster than the earlier VM-based execution); numpy / pandas / scipy / matplotlib / Pillow / lxml / sympy / python-docx / python-pptx / reportlab all ship offline, and CJK charts work out of the box; `python3` in the shell is a separate process on the same bundled interpreter.
 - **On-device Office output**: PPT / Word / Excel / SVG are produced by local generators on a JSON intermediate layer, and documents can be read back losslessly and edited operator-style; PDFs and Office files are parsed entirely locally, consuming no multimodal quota.
 - **47 built-in tools**: file create/read/update/delete plus pattern-matched search, task lists, image viewing, web downloads, PDF parsing, Office read/write, data-pipeline cleaning / transformation / format conversion, the JSVM-API `run_js` code sandbox (no network, no filesystem access, runs on a background thread with a timeout guard), plus the `shell` / `run_python` execution layer described above.
 - **Three protocols**: OpenAI Completions (`/chat/completions`), OpenAI Responses (`/responses`) and Anthropic Messages (`/messages`), all supporting direct image upload; extended thinking and web search are controlled explicitly per protocol.
@@ -102,6 +102,35 @@ Build steps:
 5. Connect a physical HarmonyOS device.
 6. Run the `entry` module, or build the HAP with the command above.
 
+### Shell tool (IEC native runtime) artifacts
+
+The `shell` tool depends on bundled HarmonyOS native `.so` files (checked into the repo and shipped inside the HAP under `libs/arm64-v8a/`). The execution core itself is `libiec_server.so` (exec/tty service, loader, shim); the command → `.so` → entry table matches `IecRuntime.ets`'s `add(...)` calls one-for-one:
+
+| Command | Bundled `.so` | Entry |
+| --- | --- | --- |
+| `sh` / `mksh` | `libmksh.so` | `main` |
+| `toybox` and 70+ applets (`ls/cat/grep/sed/awk/find/xargs/…`) | `libtoybox.so` | `bsh_toybox_main` |
+| `tar` / `bsdtar` | `libbsdtar.so` | `iec_bsdtar_main` |
+| `unzip` | `libbsdunzip.so` | `iec_bsdunzip_main` |
+| `cpio` / `bsdcpio` | `libbsdcpio.so` | `iec_bsdcpio_main` |
+| `zip` | `libzipcmd.so` | `iec_zip_main` |
+| `git` / `git-upload-pack` / `git-receive-pack` / `git-upload-archive` | `libgit.so` | `iec_git_main` |
+| `git-remote-http` / `git-remote-https` | `libgit-remote-http.so` | `iec_git_remote_http_main` |
+| `ssh` / `scp` / `ssh-keygen` / `dbclient` / `dropbearkey` / `dropbearconvert` / `dropbear` | `libdropbear.so` | `iec_dropbear_main` |
+| `sftp` | `libsftpcmd.so` | `iec_sftp_main` |
+| `jq` | `libjqcmd.so` | `iec_jq_main` |
+| `curl` | `libcurlcmd.so` | `iec_curl_main` |
+| `bc` | `libbccmd.so` | `iec_bc_main` |
+| `nc` | `libnc.so` | `iec_nc_main` |
+| `hexdump` / `hd` | `libhexdump.so` | `iec_hexdump_main` |
+| `diff` (backend is the bundled git) | `libdiff.so` | `iec_diff_main` |
+| `node` / `nodejs` | `libnode.so` | `iec_node_main` |
+| `npm` | `libnode.so` | `iec_npm_main` |
+| `npx` | `libnode.so` | `iec_npx_main` |
+| `python3` / `python` | `libpycmd.so` + `libpython3.12.so` | `iec_python_main` |
+
+`libnode.so` is node 22.19; npm's pure-JS tree lives in `rawfile/tools/npm.tar.gz` and is unpacked into the resource root on first launch. `python3` / `python` share `libpython3.12.so` with `run_python`, but run in a dedicated python-runner process (`libpycmd.so` is only a UDS client).
+
 ### First-time configuration
 
 The app settings let you save and switch between multiple API configurations:
@@ -124,7 +153,7 @@ Multimodal pre-parsing can be configured separately with its own model, endpoint
 
 ### Verification
 
-- Pure-logic regression (currently **521 tests**, all green): `cd test/guncat-harness && node setup.mjs && node test-core.mjs`
+- Pure-logic regression (currently **683 tests**, all green): `cd test/guncat-harness && node setup.mjs && node test-core.mjs`
 - Service-layer type check: `cd test/guncat-harness && node check-setup.mjs && npx tsc -p check/tsconfig.json`
 - PPT / Word / Excel offline verification environments: `test/pptx-harness`, `test/docx-harness`, `test/xlsx-harness`
 - Real ArkTS compilation (requires DevEco locally): `powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`

@@ -2141,7 +2141,7 @@ console.log('[组件库与提示词]');
     'glob', 'grep', 'edit', 'str_replace_editor', 'web_fetch', 'ask_user_question',
     'schedule_create', 'schedule_list', 'schedule_delete',
     'goal_create', 'goal_get', 'goal_update', 'subagent', 'session_search', 'run_js',
-    // shell: 设备内真 Linux(QEMU TCI)。属于「长程/重」工具, 故意不进交互模式白名单
+    // shell: 设备内 IEC 原生执行核。属于「长程/重」工具, 故意不进交互模式白名单
     // run_python: 原生 CPython 解释器, 同样是工作模式的重活工具; 交互模式的轻计算仍用 run_js
     'shell', 'run_python'
   ];

@@ -1,5 +1,10 @@
 # 性能问题分析与方案（Python / shell 工具）
 
+> **历史文档**：本文记录 7.0.0 时期（QEMU 虚拟机 + TCI 解释执行）的性能测量与方案
+> 论证。7.0.1 起 `shell` 已改为 IEC 原生执行核、Python 解释器直接在进程内原生运行，
+> 文中的 QEMU/TCI 数据与 `tooling/linux-vm/` 脚本（已删除）仅作归档。
+> 当前实现见 [iec-runtime.md](iec-runtime.md) 与 [native-python.md](native-python.md)。
+
 > 触发：实机自检发现 VM 内 Python/awk/sh 比原生慢 2–3 个数量级（详见第 1 节）。
 > 结论：**这不是"缺 CPython JIT"的问题，而是"CPU 指令被逐条仿真"的问题**；
 > 在拿不到 TCG JIT 权限的前提下，唯一能把 Python 拉回可用区间的手段是
@@ -38,7 +43,7 @@
 
 ### 1.2 TCI vs JIT 对照（本次新增，同一台 x86 主机、同一镜像、同一套参数）
 
-用 [`tooling/linux-vm/bench.sh`](../../tooling/linux-vm/bench.sh) 跑：
+用 `tooling/linux-vm/bench.sh`（已随虚拟机方案删除）跑：
 `LABEL=jit`（宿主 Debian QEMU 10.2.1，TCG JIT）与 `NET=0 QEMU=…/build-tci/qemu-system-aarch64 LABEL=tci`
 （上游 QEMU 10.2.0 + `--enable-tcg-interpreter`）。计时在**客人内部**用 `/proc/uptime` 完成，
 不含宿主轮询开销。

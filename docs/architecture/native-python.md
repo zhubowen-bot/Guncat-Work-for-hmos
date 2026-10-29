@@ -5,7 +5,7 @@
 > 直接指向同一个 `libpython3.12.so`。当前架构见 [iec-runtime.md](iec-runtime.md)。
 
 > 起因：实机测量发现，VM（QEMU TCI 解释执行）里的 Python / awk / sh 比原生慢 **2~3 个数量级**。
-> 同一台机器上的对照实验（[`bench.sh`](../../tooling/linux-vm/bench.sh)）显示 TCI 比 JIT 慢 5–23×，
+> 同一台机器上的对照实验（`tooling/linux-vm/bench.sh`，已随虚拟机方案删除）显示 TCI 比 JIT 慢 5–23×，
 > 说明惩罚在**指令仿真层**，与语言无关。既然 JIT 权限拿不到，就换一条路：**把解释器编译成
 > HarmonyOS 原生 `.so`，在应用进程内直接跑**（AOT），彻底绕开仿真。
 
@@ -275,8 +275,8 @@ mini import _json=FAIL ModuleNotFoundError("No module named '_json'")
 | [`verify-python-stack.py`](../../tooling/python/verify-python-stack.py) | **21 项**技术栈自检: 标准库(sqlite3/ssl/压缩/hash)、ctypes、numpy、pandas、Pillow、matplotlib、**中文渲染**、qrcode、lxml、regex、bs4、PyCryptodome、docx/pptx/xlsxwriter、sympy、psutil、requests+certifi、openpyxl/yaml/jinja2、reportlab、watchdog | 21/21 通过 |
 | [`run-verify-stack.sh`](../../tooling/python/run-verify-stack.sh) | **按真机布局**组装环境(qemu): extras 解压到临时目录、libs 只给 `.so`、`PYTHONPATH=stdlib:site-packages:extras:libs` | 同上 |
 | [`build-python-stack.sh`](../../tooling/python/build-python-stack.sh) | 12 个阶段全量重建(幂等) | 可一键重建 |
-| [`npy-test.sh`](../../tooling/linux-vm/npy-test.sh) | guest 脚本: 安装、数值、stdin、argv、管道进 jq、退出码、相对路径、子目录、异常、往返开销 | 12 项全过 |
-| [`smoke-test.sh`](../../tooling/linux-vm/smoke-test.sh) | VM 引导、9p 一致性、cwd、超时、Python/pip/jq、npy 存在 | 18 项全过 |
+| `npy-test.sh`（`tooling/linux-vm/`，已删除） | guest 脚本: 安装、数值、stdin、argv、管道进 jq、退出码、相对路径、子目录、异常、往返开销 | 12 项全过 |
+| `smoke-test.sh`（`tooling/linux-vm/`，已删除） | VM 引导、9p 一致性、cwd、超时、Python/pip/jq、npy 存在 | 18 项全过 |
 | `test/guncat-harness` | 工具目录、交互模式、超时/熔断、卡片路由、缺库提示等源码级守卫 | **543 项全过** |
 
 **打包门槛**: `tools/build-check.ps1` 在调 hvigor 之前先跑 21 项自检，失败即中止(exit 3)，

@@ -15,7 +15,7 @@ description: 专门设计、生成和修改可直接在浏览器中打开的 HTM
 
 ## 关键步骤
 
-> 本环境**有 `shell`（设备内 Alpine Linux，可 `apk add`）与 `run_python`（原生 CPython 3.12），但没有浏览器/截图能力**：素材与环境层面的活可以做，页面渲染效果只能人工核对，不假装跑过浏览器自检。产物一律用 `write_file` 直接写出。
+> 本环境**有 `shell`（设备内 IEC 原生命令：mksh + toybox/libarchive/git 等，无包管理器、不能 `apk add`）与 `run_python`（原生 CPython 3.12），但没有浏览器/截图能力**：素材与环境层面的活可以做，页面渲染效果只能人工核对，不假装跑过浏览器自检。产物一律用 `write_file` 直接写出。
 
 **建目录**：每个任务在工作区根目录下新建语义化目录（如 `sales-dashboard/`），HTML 放在目录里，图片素材放进 `assets/`。迭代已有任务时进原目录改，不另起。
 

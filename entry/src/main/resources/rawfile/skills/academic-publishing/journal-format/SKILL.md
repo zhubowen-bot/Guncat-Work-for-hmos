@@ -4,7 +4,7 @@ description: 用于对学术论文类 Word/DOCX 文档进行期刊、学校、�
 Version: 1.1.0
 ---
 
-> 本项目适配（不替代原文）：原技能通过 `python3 scripts/*.py` 直接编辑 OpenXML，这些脚本与 LibreOffice/soffice 都未随移植打包。本环境有 `run_python`（原生 CPython 3.12，内置 python-docx / lxml）与 `shell`（Alpine），需要模板级细节时可按本文规则写 Python 直接改 OpenXML。移植后保留原格式规范、边界、路由与自检清单作为知识层；默认执行层仍走 `load_skill("docx")` + `read_docx`/`edit_docx`/`write_docx`，详见 `SKILL-5.md` 的“Command（本项目执行说明）”。文中残留命令/参数仅为原规范上下文，不要臆造参数运行。
+> 本项目适配（不替代原文）：原技能通过 `python3 scripts/*.py` 直接编辑 OpenXML，这些脚本与 LibreOffice/soffice 都未随移植打包。本环境有 `run_python`（原生 CPython 3.12，内置 python-docx / lxml）与 `shell`（设备内 IEC 原生命令：mksh + toybox/libarchive/git 等，无包管理器、不能 `apk add`），需要模板级细节时可按本文规则写 Python 直接改 OpenXML。移植后保留原格式规范、边界、路由与自检清单作为知识层；默认执行层仍走 `load_skill("docx")` + `read_docx`/`edit_docx`/`write_docx`，详见 `SKILL-5.md` 的“Command（本项目执行说明）”。文中残留命令/参数仅为原规范上下文，不要臆造参数运行。
 
 # DOCX Journal Format
 
