@@ -63,15 +63,21 @@ node 因宿主工具链（GCC 15）编不过，单独列为已知缺口。
 
 ## 4. 没完成的：node
 
-`libnode.so` **没有产出**。卡在宿主工具链，不是脚本问题：
+`libnode.so` **没有产出**。两个独立的坑，都不是应用代码问题：
 
-- node v22.19.0 的宿主侧 V8 torque 在 **GCC 15** 下编译失败
-  （`std::formatter<subrange>` / `ranges::input_range` 不满足），`node2.log` 里有 20 个错误；
-- node 的 `configure` 只接受 Python 3.8–3.13，系统只有 3.14（已临时放宽并通过 configure），
-  真正的构建仍死在 GCC 15。
+1. **宿主工具链**：node 的宿主工具（torque/gyp 自带工具）要 C++20。机器上只有 GCC 15；
+   SDK 的 clang-15 读不懂 GCC 15 的 `<format>`（`consteval` 取地址报错），
+   直接用 g++ 15 又会被 node 的 clang 专属参数（`-Wno-nullability-completeness`）拒绝。
+   后来用 apt 下载了 **clang-19**（解包在 `/home/a1519/clang19`，不动系统）作为宿主
+   `cc_host`/`cxx_host`，`<format>/<chrono>` 能编译。
+2. **node-ohos 的 gyp 生成重复规则**：换成 clang-19 后，`configure` 能过，但 ninja 报
+   `multiple rules generate gen/.../js_protocol.stamp`（v22 与 v24 都一样），
+   `obj/` 与 `obj.host/` 为同一批生成文件各写了一条规则。清空 `out/Release` 重配仍复现，
+   逐个删重复边会继续冒出 `gen/torque-generated/bit-fields.h` 等，属于生成器层面问题。
 
-要编出来需要 GCC ≤13（或换 node 24 的 V8）。当前 `node/npm/npx` 不注册 launcher，
-shell 里执行会干净地报 `command not found`；`run_js` 仍是可用的 JS 通道。
+结论：要出 `libnode.so`，需要修 `node-ohos` 的 gyp 配置（让 host/target 只生成一份
+inspector/torque 产物），或用 node 官方支持的宿主组合（较新的 clang + 对应 libstdc++）。
+当前 `node/npm/npx` 不注册 launcher，shell 里是干净的 `command not found`；`run_js` 仍可用。
 
 ## 5. 待真机验证（由用户执行，不再自动连设备）
 
