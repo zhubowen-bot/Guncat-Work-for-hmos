@@ -480,6 +480,54 @@ def t09_client_sigkill(ctx):
 
 
 @test
+def t12_client_gone_reaps_interpreter(ctx):
+    """客户端被 SIGKILL 后，runner 必须把那个解释器孙进程一起收掉。
+
+    解释器是 runner 的孙进程，不在调用者（shell 作业）的进程组里，job 级 SIGKILL
+    打不到它。handler 如果只等 stdout/stderr 的 EOF，调用者死后就会留下一个没人
+    能停、一直跑的解释器 —— 设备上表现为超时/取消过的 python3 永远占着 CPU。
+    """
+    before = set(pids_matching(ctx.runner))
+    p = subprocess.Popen(
+        [ctx.client] + pycode("import time\ntime.sleep(60)"),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=client_env(ctx),
+    )
+    try:
+        # 等到 handler 与解释器都起来：runner 家族应多出两个进程。
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if len(set(pids_matching(ctx.runner)) - before) >= 2:
+                break
+            time.sleep(0.02)
+        check(len(set(pids_matching(ctx.runner)) - before) >= 2,
+              "解释器/处理器没起来：runner 家族只多了 %d 个进程"
+              % len(set(pids_matching(ctx.runner)) - before))
+
+        p.kill()
+        p.wait(timeout=5)
+
+        # 调用者没了之后，handler 与解释器都应在几秒内消失。
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if not (set(pids_matching(ctx.runner)) - before):
+                break
+            time.sleep(0.05)
+        left = set(pids_matching(ctx.runner)) - before
+        check(not left,
+              "调用者死后 runner 仍留着 %d 个后代进程（解释器没被收掉）" % len(left))
+    finally:
+        if p.poll() is None:
+            p.kill()
+            p.wait(timeout=5)
+        # 只收本次新长出来的 handler/解释器：before 里有 runner 本体，按 ctx.runner
+        # 全杀会把常驻 runner 一起杀掉，后面的用例就都连不上它了。
+        kill_pids(set(pids_matching(ctx.runner)) - before)
+
+
+@test
 def t10_streaming_stdin_stdout(ctx):
     """边读 stdin 边写 stdout（各 1MB）→ 不能因为两根管道互相等而死锁。
 

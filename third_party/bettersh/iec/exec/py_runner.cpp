@@ -162,6 +162,9 @@ void HandleClient(int fd) {
     }
     if (pid == 0) {
         // 孙进程：这里才第一次加载 libpython，解释器状态是全新的。
+        // 自己开一个进程组：调用者消失后 handler 用 kill(-pid) 才能把它起的子进程
+        // 一并收掉（解释器自己没 setsid，子进程默认继承这个组）。
+        setpgid(0, 0);
         dup2(in_pipe[0], STDIN_FILENO);
         dup2(out_pipe[1], STDOUT_FILENO);
         dup2(err_pipe[1], STDERR_FILENO);
@@ -229,18 +232,47 @@ void HandleClient(int fd) {
     char buf[65536];
     // 同时读 stdout/stderr，避免任一管道写满把孙进程卡住。
     int open_fds = 2;
+    // 客户端连上后不会再发一个字节，所以它一旦可读，读到的只可能是 EOF：调用者
+    // 已经没了（shell 工具超时按 job 杀进程、用户取消、或应用进程退出）。必须盯着
+    // 它：解释器是 runner 的孙进程，不在调用者的作业里，job 级 SIGKILL 打不到，
+    // 不在这里收掉就会留下一个没人等、也没人能停的解释器一直跑。
+    int client_watch = fd;
+    bool client_gone = false;
+    auto kill_descendant = [&]() {
+        if (pid <= 0) return;
+        // 组在的时候先收全组（解释器自己起的子进程也在组里），再补一发单 pid：
+        // fork 与 setpgid 之间有窗口，早到的请求只杀得到根进程。
+        if (getpgid(pid) == pid) kill(-pid, SIGKILL);
+        kill(pid, SIGKILL);
+    };
     while (open_fds > 0 || in_pipe[1] >= 0) {
-        struct pollfd pfd[3];
+        struct pollfd pfd[4];
         pfd[0].fd = out_pipe[0]; pfd[0].events = POLLIN;
         pfd[1].fd = err_pipe[0]; pfd[1].events = POLLIN;
         pfd[2].fd = in_pipe[1];  pfd[2].events = POLLOUT;
-        const int nfds = in_pipe[1] >= 0 ? 3 : 2;
-        const int rc = poll(pfd, nfds, -1);
+        pfd[3].fd = client_watch; pfd[3].events = POLLIN;
+        // 负的 fd 会被 poll() 忽略，所以 4 个槽位固定给出，不必再按条件缩短。
+        const int rc = poll(pfd, 4, -1);
         if (rc < 0) {
             if (errno == EINTR) continue;
             break;
         }
         if (rc == 0) continue;
+
+        if (pfd[3].fd >= 0 && (pfd[3].revents & (POLLIN | POLLHUP | POLLERR)) != 0) {
+            char probe = 0;
+            const ssize_t n = recv(pfd[3].fd, &probe, 1, MSG_PEEK | MSG_DONTWAIT);
+            if (n == 0 || (n < 0 && errno != EINTR && errno != EAGAIN &&
+                           errno != EWOULDBLOCK)) {
+                client_gone = true;
+                client_watch = -1;
+                kill_descendant();
+            } else if (n > 0) {
+                // 协议里请求之后没有客户端数据；真收到了就读掉，免得下一轮
+                // poll 立刻又返回同一个 POLLIN 空转。
+                if (recv(pfd[3].fd, &probe, 1, MSG_DONTWAIT) < 0) {}
+            }
+        }
 
         // stdin：写到 EAGAIN 为止，下一轮 POLLOUT 继续；全部写完就关闭，
         // 让孙进程看到 EOF。对端先退出时 write 给 EPIPE（SIGPIPE 已忽略）。
@@ -306,17 +338,20 @@ void HandleClient(int fd) {
         err += "\n";
     }
 
-    char resp[8];
-    const uint32_t ucode = static_cast<uint32_t>(code);
-    const uint32_t out_len = static_cast<uint32_t>(out.size());
-    std::memcpy(resp + 0, &ucode, 4);
-    std::memcpy(resp + 4, &out_len, 4);
-    WriteFull(fd, resp, sizeof resp);
-    WriteFull(fd, out.data(), out.size());
-    const uint32_t err_len = static_cast<uint32_t>(err.size());
-    std::memcpy(resp, &err_len, 4);
-    WriteFull(fd, resp, 4);
-    WriteFull(fd, err.data(), err.size());
+    // 客户端已经没了就不写：反正只会拿到 EPIPE，而这段响应也没有人再看。
+    if (!client_gone) {
+        char resp[8];
+        const uint32_t ucode = static_cast<uint32_t>(code);
+        const uint32_t out_len = static_cast<uint32_t>(out.size());
+        std::memcpy(resp + 0, &ucode, 4);
+        std::memcpy(resp + 4, &out_len, 4);
+        WriteFull(fd, resp, sizeof resp);
+        WriteFull(fd, out.data(), out.size());
+        const uint32_t err_len = static_cast<uint32_t>(err.size());
+        std::memcpy(resp, &err_len, 4);
+        WriteFull(fd, resp, 4);
+        WriteFull(fd, err.data(), err.size());
+    }
     close(fd);
 }
 

@@ -47,12 +47,14 @@ bash third_party/bettersh/scripts/test_py_runner_host.sh
 | 协议 argc=0 | runner 拒绝并关连接、不崩溃，之后仍能服务；客户端 127 + stderr 提示 |
 | 4MB stdout | 完整收到（长度与内容都校验） |
 | 客户端被 SIGKILL | runner 存活，随后新请求退出码/输出正确 |
+| 客户端消失后收掉解释器 | runner 家族多出的 handler/解释器在调用者死后几秒内消失 |
 | 流式 stdin→stdout（各 1MB） | 不发生 stdin 写、stdout 读互相等待的死锁 |
 | 4MB stdin + 解释器立刻退出 | 仍拿到真实退出码，不被 SIGPIPE 打断 |
 
 后两项是回归用例：它们对应 `py_runner.cpp` 里“先把 stdin 整块写完、再开始读
 stdout/stderr”的旧实现会暴露的两个真实缺陷（死锁、SIGPIPE 打死 handler），修复
-后保留下来防止回退。
+后保留下来防止回退。“客户端消失后收掉解释器”是另一条同类回归：解释器不在调用者
+的作业里，handler 只看管道 EOF 就会留下一个没人能停的进程。
 
 ## 文件
 

@@ -71,7 +71,9 @@ libpython3.12.so` 并跑 `Py_BytesMain`。
   遗留的命令进程。
 - **launcher 目录**：每次启动先清空再按实际存在的 `.so` 重建，旧 launcher 不会残留。
 - **npm 解包**：`rawfile/tools/npm.tar.gz` 首次启动解到 `<sysroot>/npm`，之后按
-  `npm/bin/npm-cli.js` 是否存在跳过。
+  `<sysroot>/npm/.unpack-complete` 完成标记跳过。不能只看 `npm/bin/npm-cli.js`：
+  它是 tar 里第 12 个条目（共 2697 个），首次解包被强停会留下半棵树，只按入口
+  判断就会永久跳过解包。
 
 ## 4. 体积
 

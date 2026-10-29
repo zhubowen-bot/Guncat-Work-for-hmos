@@ -309,15 +309,22 @@ export class IecRuntime {
     return '';
   }
 
-  // 解 npm 的 JS 树。只在 libnode 随包、且目标还不存在时做：npm-cli.js 已经在了
-  // 就跳过，避免每次冷启动都重解 2.6MB 的 tar.gz。
+  // 解 npm 的 JS 树。只在 libnode 随包、且目标还不存在时做。
+  //
+  // "装好了"必须看**完成标记**，不能只看入口文件：npm.tar.gz 里 npm-cli.js 是第 12 个
+  // 条目（共 2697 个），首次解包中途被强停/崩溃会留下"入口在、其余两千多个文件不在"
+  // 的半棵树；只按 access(npm-cli.js) 判断，之后每次启动都会跳过解包，npm 就永久坏在
+  // 这里（报 MODULE_NOT_FOUND，看起来像包本身有问题）。标记只在整包解完后写。
+  private static readonly NPM_CLI: string = SYSROOT + '/npm/bin/npm-cli.js';
+  private static readonly NPM_DIR: string = SYSROOT + '/npm';
+  private static readonly NPM_MARKER: string = SYSROOT + '/npm/.unpack-complete';
+
   private static unpackNpm(): void {
     if (!IecRuntime.hasSo('libnode.so')) {
       return;
     }
-    const cli: string = SYSROOT + '/npm/bin/npm-cli.js';
     try {
-      if (fileIo.accessSync(cli)) {
+      if (fileIo.accessSync(IecRuntime.NPM_MARKER) && fileIo.accessSync(IecRuntime.NPM_CLI)) {
         return;
       }
     } catch (e) {
@@ -327,23 +334,33 @@ export class IecRuntime {
       const rc: number = unpackResource('tools/npm.tar.gz', SYSROOT);
       if (rc !== 0) {
         hilog.warn(DOMAIN, TAG, 'unpack npm.tar.gz failed: rc=%{public}d', rc);
-        IecRuntime.dropIncompleteNpm(cli);
+        IecRuntime.dropIncompleteNpm();
+        return;
+      }
+      // writeTxtFile 要求父目录已存在；空包/异常情况下 npm 目录可能还没建出来。
+      ensureDir(IecRuntime.NPM_DIR);
+      if (writeTxtFile(IecRuntime.NPM_MARKER, 'ok\n') !== 0) {
+        hilog.warn(DOMAIN, TAG, 'cannot write npm completion marker');
       }
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'unpack npm.tar.gz failed: %{public}s', JSON.stringify(e));
-      IecRuntime.dropIncompleteNpm(cli);
+      IecRuntime.dropIncompleteNpm();
     }
   }
 
-  // 解包失败时删掉入口文件，让下次启动重试。tar 里的顺序不保证 npm-cli.js 最后，
-  // 半棵树里只要有它，"cli 存在就跳过"的判断就会永远认为已安装，npm 却缺文件。
-  private static dropIncompleteNpm(cli: string): void {
-    try {
-      if (fileIo.accessSync(cli)) {
-        fileIo.unlinkSync(cli);
+  // 解包失败时删掉完成标记与入口文件，让下次启动重试。先删标记：只要标记不在，
+  // 下次启动就一定重解；入口文件顺带删掉，避免半棵树被别的进程当成品用。
+  private static dropIncompleteNpm(): void {
+    const paths: string[] = [IecRuntime.NPM_MARKER, IecRuntime.NPM_CLI];
+    for (const path of paths) {
+      try {
+        if (fileIo.accessSync(path)) {
+          fileIo.unlinkSync(path);
+        }
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, 'cannot remove partial npm artifact %{public}s: %{public}s',
+          path, JSON.stringify(e));
       }
-    } catch (e) {
-      hilog.warn(DOMAIN, TAG, 'cannot remove partial npm entry: %{public}s', JSON.stringify(e));
     }
   }
 
