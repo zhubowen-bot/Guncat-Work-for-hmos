@@ -219,6 +219,10 @@ export class IecRuntime {
     if (IecRuntime.hasSo('libdiff.so')) {
       add('diff', 'libdiff.so', 'iec_diff_main');
     }
+    // jq 1.7.1 + 静态 oniguruma：JSON 处理。
+    if (IecRuntime.hasSo('libjqcmd.so')) {
+      add('jq', 'libjqcmd.so', 'iec_jq_main');
+    }
     if (IecRuntime.hasSo('libnode.so')) {
       add('node', 'libnode.so', 'iec_node_main');
       add('nodejs', 'libnode.so', 'iec_node_main');
