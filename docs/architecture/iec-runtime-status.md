@@ -77,7 +77,7 @@ libpython3.12.so` 并跑 `Py_BytesMain`。
 
 ## 4. 体积
 
-当前签名 HAP 452,695,999 字节（约 432 MiB）。主要构成：`libnode.so`（约 108MB）、CPython + numpy/scipy/
+当前签名 HAP 约 452.7 MB（452,695,999 字节左右，约 432 MiB）。主要构成：`libnode.so`（约 108MB）、CPython + numpy/scipy/
 pandas/matplotlib 等运行库、命令 so 与技能资源。`libnode.so` 是可选能力，但当前
 **默认随包**；若要瘦身，可在构建时排除它，`node`/`npm`/`npx` 会干净地报
 `command not found`，其余命令不受影响。

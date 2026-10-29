@@ -4,6 +4,7 @@ name: CI
 #
 #   ✅ guncat-harness 纯逻辑单测 + 服务层 tsc 类型检查
 #   ✅ 交互界面文字可复制护栏（源码级扫描，见 check-ui-copy.mjs）
+#   ✅ 文档相对链接 + 随包第三方许可（docs-check / license-check）
 #   ✅ docx / pptx / xlsx 三个 Office 生成器离线验证（Node 构建 + Python 结构校验）
 #   ✅ py_runner 宿主侧协议测试（x86_64 Linux，不需要设备）
 #   ✅ IEC 随包 .so 静态一致性（launcher 映射、blob、入口符号、NEEDED、源码新鲜度、HAP）
@@ -42,10 +43,17 @@ jobs:
           # 会被误报成"没有提交记录"。
           fetch-depth: 0
 
+      # 纯 Python、秒级，且都是发布门槛：坏链会让文档指向不存在的文件，
+      # 许可不同步会让 HAP 带旧声明/漏原文。放在最便宜的 job 里先失败。
+      - name: 文档相对链接 + 随包许可
+        run: |
+          python3 tooling/docs-check.py --strict
+          python3 tooling/license-check.py --strict
+
       # 不需要设备/SDK：解析 ETS 的 launcher 映射，校验随包 .so 的 blob 与
       # 工作区字节一致、入口符号、NEEDED 白名单，比较源码与产物的最后提交时间，
-      # 并在本机存在 HAP 时检查 libs/arm64-v8a 是否缺库。llvm-nm 不可用时入口
-      # 符号检查 SKIP；映射/新鲜度/blob 检查始终执行。
+      # 并在本机存在 HAP 时检查 libs/arm64-v8a 是否缺库。llvm-nm 缺失时回退
+      # GNU nm，两者都没有才 SKIP；映射/新鲜度/blob 检查始终执行。
       - name: IEC 随包 .so 一致性
         run: python3 tools/check-iec-libs.py
 

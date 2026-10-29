@@ -1,6 +1,6 @@
 # 参与贡献
 
-感谢你有兴趣参与。Guncat Work 是一个**端侧优先**的 HarmonyOS AI 客户端：模块化 Agent Loop 内核、三协议流式对话、45 个内置工具、32 个技能，以及在设备本地直出 PPT / Word / Excel 的生成器。
+感谢你有兴趣参与。Guncat Work 是一个**端侧优先**的 HarmonyOS AI 客户端：模块化 Agent Loop 内核、三协议流式对话、47 个内置工具、32 个技能，以及在设备本地直出 PPT / Word / Excel 的生成器。
 
 这个仓库对"改动是否可靠"的要求比较高——它做的事情（Agent 循环、文档生成、界面渲染）出错时很难靠肉眼发现，所以下面这套验证流程不是形式主义，**每一层都在拦真实发生过的事故**。
 
@@ -58,9 +58,10 @@ bash scripts/check-all.sh --fast   # 跳过 soname / py_runner / IEC 命令集
 bash scripts/check-all.sh --list   # 只看检查项清单
 ```
 
-按顺序执行 10 项：纯逻辑单测（730 项）、服务层 `tsc`、界面文案可复制护栏、
+按顺序执行 11 项：纯逻辑单测（730 项）、服务层 `tsc`、界面文案可复制护栏、
 Markdown 相对链接、随包许可、共享库 soname、`py_runner` 宿主协议、
-IEC 命令集宿主测试、IEC 原生代码宿主回归，以及存在时才跑的 `tools/check-iec-libs.py`。
+IEC 命令集宿主测试、IEC 原生代码宿主回归、IEC exec 会话压测，以及存在时才跑的
+`tools/check-iec-libs.py`。
 
 - IEC 原生代码宿主回归对应
   `third_party/bettersh/iec/scripts/test_iec_native_host.sh`：在宿主编出

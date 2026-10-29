@@ -16,7 +16,7 @@
 | 项 | 值 |
 | --- | --- |
 | 签名包 | `entry/build/default/outputs/default/entry-default-signed.hap` |
-| 大小 | 452,695,999 字节（约 432 MiB，本机当前构建） |
+| 大小 | 约 452.7 MB（452,695,999 字节左右，约 432 MiB，本机当前构建） |
 | 包名 | `com.bowenapp.guncataibeta` |
 | Ability | `EntryAbility` |
 

@@ -9,7 +9,8 @@
   1. 从 IecRuntime.ets 解析 (命令 -> so -> 入口符号) 的期望映射；
   2. 每个被引用的 .so 存在、非空、不是符号链接，且工作区字节与 git index 一致
      （防 autocrlf / 过滤器把二进制改坏）；
-  3. 用 llvm-nm 校验 .so 确实导出了对应入口（无 llvm 时 SKIP）；
+  3. 用 llvm-nm 校验 .so 确实导出了对应入口（缺 llvm-nm 时回退 GNU nm -D）；
+    两者都没有时 SKIP；
   4. 用 python 解析 ELF 动态段，校验 NEEDED 白名单；
   5. 用 blob 内容比较"源码 -> 产物"的新鲜度：产物那次提交里的源码哈希与工作区
      不同即失败（能抓到"改了源码还没重编"，不会被只改文件模式的提交误报）；
@@ -675,15 +676,18 @@ def find_llvm_tool(name):
         if found:
             candidates.append(Path(found))
 
-    # DevEco Studio 默认安装位置（Windows / Linux）。
+    # DevEco Studio / OpenHarmony 命令行工具的默认安装位置（Windows / Linux / WSL）。
     for root in (
+        Path("/opt/ohos-cmdline/command-line-tools/sdk/default/openharmony"),
+        Path.home() / "command-line-tools/sdk/default/openharmony",
+        Path("/opt/DevEcoStudio"),
+        Path("/opt/huawei/DevEcoStudio"),
         Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Huawei" / "DevEco Studio",
         Path(os.environ.get("LOCALAPPDATA", "")) / "Huawei" / "DevEco Studio",
         Path.home() / "DevEcoStudio",
-        Path("/opt/DevEcoStudio"),
-        Path("/opt/huawei/DevEcoStudio"),
     ):
         for sub in (
+            "native/llvm/bin",
             "sdk/default/openharmony/native/llvm/bin",
             "sdk/default/hms/native/BiSheng/bin",
         ):
@@ -706,11 +710,27 @@ def find_llvm_tool(name):
     return None
 
 
-def check_entries(required_sos, mappings, reporter):
+def find_symbol_tool():
+    """返回 (可执行文件, 参数, 显示名)；优先 llvm-nm，缺失时回退 GNU nm。
+
+    GNU nm 的 `-D --defined-only` 与 `llvm-nm --dynamic --defined-only` 输出格式
+    对入口符号检查等价（每行末列是符号名），因此在没有 LLVM 的 WSL/CI 上不必
+    把入口符号检查降级成 SKIP。
+    """
     nm = find_llvm_tool("llvm-nm")
+    if nm is not None:
+        return nm, ["--dynamic", "--defined-only"], "llvm-nm"
+    nm = shutil.which("nm")
+    if nm:
+        return Path(nm), ["-D", "--defined-only"], "nm"
+    return None, [], ""
+
+
+def check_entries(required_sos, mappings, reporter):
+    nm, nm_args, nm_name = find_symbol_tool()
     if nm is None:
-        reporter.skip("未找到 llvm-nm，跳过入口符号校验；"
-                      "设置 GUNCAT_LLVM_BIN 或安装 DevEco SDK / llvm 后启用")
+        reporter.skip("未找到 llvm-nm / GNU nm，跳过入口符号校验；"
+                      "设置 GUNCAT_LLVM_BIN 或安装 DevEco SDK / llvm / binutils 后启用")
         return None
     expected = {}
     for item in mappings:
@@ -721,10 +741,10 @@ def check_entries(required_sos, mappings, reporter):
         if not entries:
             continue
         path = REPO_ROOT / LIBS_REL / so
-        code, out, err = run_bytes([str(nm), "--dynamic", "--defined-only", str(path)])
+        code, out, err = run_bytes([str(nm), *nm_args, str(path)])
         if code != 0:
-            reporter.fail("llvm-nm 读取 %s 失败：%s"
-                          % (so, err.decode("utf-8", "replace").strip()))
+            reporter.fail("%s 读取 %s 失败：%s"
+                          % (nm_name, so, err.decode("utf-8", "replace").strip()))
             continue
         symbols = set()
         for line in out.decode("utf-8", "replace").splitlines():
@@ -737,7 +757,7 @@ def check_entries(required_sos, mappings, reporter):
                               "找不到符号）" % (so, entry))
             else:
                 checked += 1
-    return "%s，%d 个入口" % (nm.name, checked)
+    return "%s，%d 个入口" % (nm_name, checked)
 
 
 # ---------------------------------------------------------------------------
