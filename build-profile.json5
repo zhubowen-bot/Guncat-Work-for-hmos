@@ -5,13 +5,13 @@
         "name": "default",
         "type": "HarmonyOS",
         "material": {
-          "storeFile": "C:/Users/a1519/Desktop/AI文本转换/aitransformer.p12",
-          "storePassword": "00000019598D338AAF7A97E7A239EC820D4F59EE241CB12F9EA0EC78FC0C4E2635B9C1C57FBE2A9E99",
-          "keyAlias": "aitransformer",
-          "keyPassword": "00000019FECDC5E13329F7AB1E9E4E704DC391A107857983D91CDC4C42EB1D1FD417FE9AFCF084EF2E",
+          "certpath": "C:\\Users\\a1519\\.ohos\\config\\default_Guncat-Work-for-hmos_80z6WuF6FeKF_cT36SFINBTntF-8o4Jml1A8D_xDZ0U=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001AF3941DBC759C94903C137BC5ADBE462BE81D5F69F11942421F6C0C2CF101E5BEB3516ADFC09D",
+          "profile": "C:\\Users\\a1519\\.ohos\\config\\default_Guncat-Work-for-hmos_80z6WuF6FeKF_cT36SFINBTntF-8o4Jml1A8D_xDZ0U=.p7b",
           "signAlg": "SHA256withECDSA",
-          "profile": "C:/Users/a1519/Desktop/AI文本转换/guncataiRelease.p7b",
-          "certpath": "C:/Users/a1519/Desktop/AI文本转换/aitransformer.cer"
+          "storeFile": "C:\\Users\\a1519\\.ohos\\config\\default_Guncat-Work-for-hmos_80z6WuF6FeKF_cT36SFINBTntF-8o4Jml1A8D_xDZ0U=.p12",
+          "storePassword": "0000001A64CB2C5452C3319E0E589A490941A98E1638414227BBFA53F37D96BFB2D0C9FD8A75C43F8E79"
         }
       }
     ],

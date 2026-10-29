@@ -44,6 +44,17 @@ export default class EntryAbility extends UIAbility {
     HarnessTools.shellBackendHook =
       (context: common.UIAbilityContext, convId: string, args: Record<string, Object>):
         Promise<ToolExecResult> => IecShellService.run(context, convId, args);
+
+    // 验收钩子：`aa start ... --ps iecSelfTest 1` 时跑一条命令，把结果写 hilog。
+    const params: Record<string, Object> | undefined = want.parameters;
+    if (params !== undefined && params['iecSelfTest'] !== undefined) {
+      hilog.info(DOMAIN, 'IecSelfTest', 'starting');
+      IecShellService.selfTest(this.context).then((text: string): void => {
+        hilog.info(DOMAIN, 'IecSelfTest', 'RESULT\n%{public}s', text);
+      }).catch((e: Error): void => {
+        hilog.error(DOMAIN, 'IecSelfTest', 'FAILED %{public}s', e.message);
+      });
+    }
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
   }
 

@@ -219,4 +219,14 @@ export class IecShellService {
     result.output = text;
     return result;
   }
+
+  // 真机自检：`aa start ... --ps iecSelfTest 1` 时由 EntryAbility 调一次，结果进 hilog。
+  // 只用于验收/排障，正常使用不会走到这里。
+  static async selfTest(context: common.UIAbilityContext): Promise<string> {
+    const command: string = 'echo IEC_OK; echo "--- uname"; uname -a; ' +
+      'echo "--- ls"; ls /; echo "--- python"; python3 -c "import sys; print(sys.version.split()[0])"';
+    let args: Record<string, Object> = { 'command': command };
+    const result: ToolExecResult = await IecShellService.run(context, '__iec_selftest', args);
+    return result.output;
+  }
 }

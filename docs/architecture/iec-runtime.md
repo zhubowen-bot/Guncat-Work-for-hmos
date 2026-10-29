@@ -77,6 +77,19 @@ so 不在时只是那条命令失败，不影响其它命令。
 * 作业级取消：每个会话的命令带 `IEC_JOB`，取消时按 job 杀整棵树（管道里的每个
   进程、后台子进程都在内），不会留孤儿。
 
+## 验收
+
+设备在线时，用 Want 参数触发一次自检（不需要模型、不需要 UI 操作）：
+
+```bash
+hdc shell aa start -a EntryAbility -b com.bowenapp.guncataibeta --ps iecSelfTest 1
+hdc shell hilog -x | grep -A 20 IecSelfTest
+```
+
+会依次执行 `uname -a`、`ls /`、`python3 -c "print(sys.version...)"`，把整段输出打到
+`IecSelfTest` 标签下。返回里带 `[exit 0 · …s · cwd …]` 就说明 shell → mksh → toybox →
+exec 服务整条链是通的；`python` 段有版本号说明解释器 launcher 与 `PYTHONHOME` 也对。
+
 ## 回退
 
 把 `EntryAbility.onCreate` 里的 `HarnessTools.shellBackendHook = ...` 一行去掉
