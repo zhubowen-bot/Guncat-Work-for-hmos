@@ -326,10 +326,48 @@ def split_args(text, open_pos):
     return args, len(text)
 
 
-def iter_calls(text, func_name):
-    """迭代 func_name(...) 调用，返回 (行号, 起始位置, 实参列表)。"""
+def mask_strings(text):
+    """把字符串/模板字面量的内容替换成空格（保留长度与换行）。
+
+    strip_js_comments() 只去注释、保留字符串；如果直接在这种文本上找 add(，就会把
+    报错文案里的 "add('x', 'libnope.so', ...)" 当成真实映射。调用扫描用掩码文本，
+    切分实参仍用原文。
+    """
+    out = list(text)
+    i, n = 0, len(text)
+    state = "normal"
+    quote = ""
+    while i < n:
+        ch = text[i]
+        if state == "normal":
+            if ch in ("'", '"', "`"):
+                quote = ch
+                state = "string"
+                out[i] = " "
+            i += 1
+            continue
+        if ch == "\\" and i + 1 < n:
+            out[i] = " "
+            out[i + 1] = "\n" if text[i + 1] == "\n" else " "
+            i += 2
+            continue
+        if ch == quote:
+            out[i] = " "
+            state = "normal"
+        else:
+            out[i] = "\n" if ch == "\n" else " "
+        i += 1
+    return "".join(out)
+
+
+def iter_calls(text, func_name, scan_text=None):
+    """迭代 func_name(...) 调用，返回 (行号, 起始位置, 实参列表)。
+
+    scan_text 用于在掩掉字符串的副本上定位调用；实参始终从原文切。
+    """
+    scan = scan_text if scan_text is not None else text
     pattern = re.compile(r"(?<![.\w$])" + re.escape(func_name) + r"\s*\(")
-    for match in pattern.finditer(text):
+    for match in pattern.finditer(scan):
         args, _ = split_args(text, match.end() - 1)
         line = text.count("\n", 0, match.start()) + 1
         yield line, match.start(), args
@@ -412,14 +450,35 @@ def find_matching(text, open_pos, open_ch, close_ch):
     return None
 
 
+def is_inside_add_helper(text, pos):
+    """pos 是否位于 `const add = (...) => { ... }` 的函数体里。
+
+    add() 辅助函数内部的 writeSoLauncher(BIN_DIR + name, BUNDLE_LIBS + so, entry)
+    用的是形参，本来就无法静态校验；除它以外的 writeSoLauncher 若 so 不是字面量，
+    必须报错而不是静默跳过（否则把 'libnc.so' 抽成常量就能绕过检查）。
+    """
+    pattern = re.compile(
+        r"\b(?:function\s+add\s*\(|(?:const|let|var)\s+add\s*=\s*(?:function\s*)?\()")
+    for match in pattern.finditer(text, 0, pos):
+        brace = text.find("{", match.end())
+        if brace < 0 or brace >= pos:
+            continue
+        close = find_matching(text, brace, "{", "}")
+        if close is not None and brace < pos < close:
+            return True
+    return False
+
+
 def parse_launchers(ets_text, reporter):
     """解析 add(...) 与直接 writeSoLauncher(...)，返回 (mappings, add数, 直接调用数)。"""
     text = strip_js_comments(ets_text)
+    # 只在代码区找调用：注释已去掉，字符串字面量再掩掉，避免把文案里的 add( 当真。
+    code = mask_strings(text)
     mappings = []
     add_count = 0
     direct_count = 0
 
-    for line, start, args in iter_calls(text, "add"):
+    for line, start, args in iter_calls(text, "add", code):
         if len(args) < 3:
             continue  # explicitNames.add(...) 之类的单参数调用；方法调用已被正则排除
         so = so_literal(args[1])
@@ -453,7 +512,7 @@ def parse_launchers(ets_text, reporter):
         for name in names:
             mappings.append({"name": name, "so": so, "entry": entry, "line": line})
 
-    for line, start, args in iter_calls(text, "writeSoLauncher"):
+    for line, start, args in iter_calls(text, "writeSoLauncher", code):
         if len(args) < 3:
             continue
         so = so_literal(args[1])
@@ -464,6 +523,10 @@ def parse_launchers(ets_text, reporter):
             if bad:
                 reporter.fail("%s:%d writeSoLauncher(...) 的 so 参数 %s 不是"
                               "libs/arm64-v8a 下的纯文件名" % (ETS_REL, line, bad[0]))
+            elif not is_inside_add_helper(text, start):
+                reporter.fail("%s:%d writeSoLauncher(...) 的 so 参数不是字符串字面量，"
+                              "无法静态校验（只有 add 辅助函数内部的通用形参可以跳过）"
+                              % (ETS_REL, line))
             continue
         entry = symbol_literal(args[2])
         if entry is None:
@@ -580,9 +643,20 @@ def check_lib_files(required_sos, reporter):
 # 3. 入口符号（llvm-nm）
 # ---------------------------------------------------------------------------
 
+def tool_names(name):
+    """当前平台可执行的 llvm 工具文件名。
+
+    WSL / Linux 下不要选 llvm-nm.exe：它能启动却读不了 /mnt/... 路径，会把每个
+    .so 都误报成"读取失败"。check-all.sh 的 llvm_nm_dir 也按同样规则过滤。
+    """
+    if os.name == "nt":
+        return [name, name + ".exe"]
+    return [name]
+
+
 def find_llvm_tool(name):
     """在环境变量、PATH、DevEco SDK 与 Linux llvm 目录里找 llvm 工具。"""
-    names = [name, name + ".exe"]
+    names = tool_names(name)
     candidates = []
 
     env_dir = os.environ.get("GUNCAT_LLVM_BIN", "").strip()
@@ -754,6 +828,15 @@ def check_needed(required_sos, reporter):
 # 5. 源码新鲜度
 # ---------------------------------------------------------------------------
 
+def tree_changed(commit, rel):
+    """目录型源码相对产物提交是否有变化（含工作区里已跟踪文件的改动）。"""
+    head_tree = git_text("rev-parse", "HEAD:" + rel).strip()
+    old_tree = git_text("rev-parse", "%s:%s" % (commit, rel)).strip()
+    dirty = git_text("status", "--porcelain", "--untracked-files=no",
+                     "--", rel).strip()
+    return (not head_tree) or head_tree != old_tree or bool(dirty)
+
+
 def check_freshness(reporter):
     # 浅克隆里 git log 看不到完整历史，会把正常产物误报成"没有提交记录"。
     # CI 用 fetch-depth: 0 取全历史；本地浅克隆请先 git fetch --unshallow。
@@ -777,16 +860,27 @@ def check_freshness(reporter):
         # “源码改了还没提交/没重编”，也不会被只改文件模式的提交误报。
         stale = []
         for src in item["sources"]:
+            src_path = REPO_ROOT / src
+            if not src_path.exists():
+                # 源文件被删掉时不能当"无从比较"跳过：产物和 launcher 还在，
+                # 说明源码/产物已经不一致，必须报出来。
+                stale.append(src + "（源文件已不存在）")
+                continue
+            if src_path.is_dir():
+                if tree_changed(product_commit, src):
+                    stale.append(src)
+                continue
             current = worktree_blob(src)
             if current is None:
-                continue  # 源文件已被删除，无从比较
+                stale.append(src + "（无法计算工作区 blob）")
+                continue
             if git_blob(product_commit, src) != current:
                 stale.append(src)
         checked += 1
         if not stale:
             continue
         source_ts = git_ts(item["sources"])
-        message = ("%s 落后于源码（%s 内容有改动%s）；请运行 %s"
+        message = ("%s 落后于源码（%s%s）；请运行 %s"
                    % (product, "、".join(stale),
                       "，源码最后提交 %s" % fmt_ts(source_ts) if source_ts else "",
                       item["hint"]))
@@ -805,14 +899,17 @@ def check_hap(required_sos, reporter):
     hap = REPO_ROOT / HAP_REL
     if not hap.is_file():
         return None  # 由调用方显示 N/A；CI 不构建 HAP，不能算失败
+    prefix = "libs/arm64-v8a/"
+    infos = {}
     try:
         with zipfile.ZipFile(hap) as archive:
-            names = set(archive.namelist())
+            for name in archive.namelist():
+                if name.startswith(prefix) and not name.endswith("/"):
+                    infos[name[len(prefix):]] = archive.getinfo(name)
     except (OSError, zipfile.BadZipFile) as exc:
         reporter.fail("%s 无法作为 HAP（zip）读取：%s" % (HAP_REL, exc))
         return ""
-    prefix = "libs/arm64-v8a/"
-    present = {name[len(prefix):] for name in names if name.startswith(prefix)}
+    present = set(infos)
     if not present:
         reporter.fail("%s 里没有 %s 目录（HAP 可能是旧包或没有打进命令 so）"
                       % (HAP_REL, prefix))
@@ -821,6 +918,12 @@ def check_hap(required_sos, reporter):
     if missing:
         reporter.fail("%s 缺少 %d 个随包 .so：%s；HAP 已过期，请重新打包"
                       % (HAP_REL, len(missing), "、".join(missing)))
+    # 只要了文件名还不够：伪造/半截 HAP 常把条目写成 0 字节，设备上 dlopen 必失败。
+    empty = sorted(so for so in required_sos
+                   if so in infos and infos[so].file_size == 0)
+    if empty:
+        reporter.fail("%s 里有 %d 个 0 字节的随包 .so：%s；HAP 内容不完整"
+                      % (HAP_REL, len(empty), "、".join(empty)))
     return "%d 个必需 so" % len(required_sos)
 
 
