@@ -176,6 +176,10 @@ export class IecRuntime {
   // 返回空串表示最小可用集（toybox + sh/mksh）都写成功了；否则是失败原因。
   // 只检查这三个：缺一个可选命令是 "command not found" 的正常降级，缺 shell
   // 本体却继续启动，只会让之后每条命令都报一个看不出根因的 "cannot start"。
+  // 显式注册过的命令名。toybox 里也有 nc 之类的 applet，枚举时不能让它把
+  // 我们自己编的 launcher（libnc/hexdump/diff…）覆盖掉。
+  private static explicitNames: Set<string> = new Set<string>();
+
   private static writeLaunchers(): string {
     ensureDir(BIN_DIR);
     ensureDir(SYSROOT + '/home');
@@ -202,6 +206,7 @@ export class IecRuntime {
       // primary=0 交给 IEC 按设备能力选 fork / native child process；写死 fork 会在
       // 没有 fork 的渠道上整片失效。
       fails += writeSoLauncher(BIN_DIR + name, BUNDLE_LIBS + so, entry, 2, 0);
+      IecRuntime.explicitNames.add(name);
     };
 
     // toybox 本体的 launcher；具体 applet 在服务起来后按 `toybox` 的输出枚举。
@@ -211,6 +216,9 @@ export class IecRuntime {
     // sh 是 shell 工具的唯一入口：没有它，IecShellService 直接报"运行核未就绪"。
     essentialFails += writeSoLauncher(BIN_DIR + 'sh', BUNDLE_LIBS + 'libmksh.so', 'main', 2, 0);
     essentialFails += writeSoLauncher(BIN_DIR + 'mksh', BUNDLE_LIBS + 'libmksh.so', 'main', 2, 0);
+    IecRuntime.explicitNames.add('toybox');
+    IecRuntime.explicitNames.add('sh');
+    IecRuntime.explicitNames.add('mksh');
 
     // 可选命令按 **实际随包的 so** 注册。指向一个没打进来的 so，报错会是
     // "dlopen /libbsdtar.so: No such file"，看起来像工具坏了；不注册则是干净的
@@ -392,6 +400,10 @@ export class IecRuntime {
     let wrote: number = 0;
     for (const name of names) {
       if (name === '' || name === 'toybox') {
+        continue;
+      }
+      // 显式注册的命令优先：toybox 也有 nc，别把 libnc 的 launcher 覆盖掉。
+      if (IecRuntime.explicitNames.has(name)) {
         continue;
       }
       wrote += writeSoLauncher(BIN_DIR + name, BUNDLE_LIBS + 'libtoybox.so',
