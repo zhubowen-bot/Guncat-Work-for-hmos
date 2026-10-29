@@ -122,6 +122,9 @@ GitHub 直连在 WSL 里通常不通（`codeload.github.com` 可以）：`pcre2`
 
 ## 验收
 
+> 逐项安装、自检、补充检查与故障对照见 [真机验收清单](../guides/device-verification.md)。
+> 本节保留自检脚本的逐段说明。
+
 ### 真机自检 `iecSelfTest`
 
 设备在线时，用 Want 参数触发一次自检（不需要模型、不需要 UI 操作；**由你执行**）：

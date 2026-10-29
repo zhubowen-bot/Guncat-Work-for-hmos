@@ -183,6 +183,7 @@ HAP 约 430MB（原生命令集 + CPython + 运行库）。某个 `.so` 缺失�
 - 纯逻辑回归（当前 **683 项**全绿）：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`
 - 服务层类型检查：`cd test/guncat-harness && node check-setup.mjs && npx -y -p typescript@5.5.4 tsc -p check/tsconfig.json`
 - PPT / Word / Excel 离线验证环境：`test/pptx-harness`、`test/docx-harness`、`test/xlsx-harness`
+- **真机验收**（装一次 HAP，逐项确认 shell / IEC）：[真机验收清单](docs/guides/device-verification.md)
 - 真实 ArkTS 编译（需本机 DevEco）：`powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`
 
 最后一层不能省：ArkUI 有一批**只有编译器才知道**的规则（`@Builder` 方法体内不允许声明局部变量、自定义组件属性名不能与内置属性同名、`@Prop` 的 null 需要显式联合类型），而 node 侧 harness 只覆盖 `common/**` 与 `service/**` 的纯 TS，不解析 `.ets`。
