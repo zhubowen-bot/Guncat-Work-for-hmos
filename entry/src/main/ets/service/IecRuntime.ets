@@ -22,7 +22,8 @@ import {
   initIecResourceManager,
   probeCaps,
   startIecServer,
-  writeSoLauncher
+  writeSoLauncher,
+  writeTxtFile
 } from 'iec';
 
 const DOMAIN: number = 0x0000;
@@ -87,7 +88,7 @@ export class IecRuntime {
   }
 
   // 启动 exec/tty 服务并铺好 launcher。返回空串表示可用，否则是原因。
-  static ensure(context: common.UIAbilityContext): string {
+  static async ensure(context: common.UIAbilityContext): Promise<string> {
     if (IecRuntime.started) {
       return '';
     }
@@ -120,6 +121,12 @@ export class IecRuntime {
       } catch (e) {
         hilog.warn(DOMAIN, TAG, 'stale sweep failed: %{public}s', JSON.stringify(e));
       }
+
+      // toybox 到底有哪些 applet，以**这个库自己的回答**为准，不抄静态清单：
+      // 抄清单的后果是 diff/bc/hexdump 这类没编进去的 applet 也留一个 launcher，
+      // 执行时报 "Unknown command"；反过来 dd/md5sum/od 这些编进去的又没注册。
+      await IecRuntime.writeToyboxApplets();
+
       IecRuntime.started = true;
       hilog.info(DOMAIN, TAG, 'IEC runtime ready');
       return '';
@@ -150,24 +157,8 @@ export class IecRuntime {
       fails += writeSoLauncher(BIN_DIR + name, BUNDLE_LIBS + so, entry, 2, 0);
     };
 
-    const toybox: string[] = [
-      'ls', 'cat', 'echo', 'grep', 'egrep', 'fgrep', 'sed', 'awk', 'cp', 'mv',
-      'rm', 'mkdir', 'rmdir', 'touch', 'ln', 'chmod', 'chown', 'head', 'tail',
-      'wc', 'sort', 'uniq', 'tr', 'cut', 'tee', 'xargs', 'find', 'which',
-      'env', 'printenv', 'pwd', 'true', 'false', 'yes', 'sleep', 'date',
-      'uname', 'id', 'whoami', 'ps', 'kill', 'free', 'df', 'du', 'clear',
-      'reset', 'stty', 'readlink', 'dirname', 'basename', 'realpath', 'printf',
-      'timeout', 'mount', 'umount', 'gzip', 'gunzip', 'zcat', 'wget', 'ping',
-      'netstat', 'ifconfig', 'toybox',
-      // tar 先按 toybox 注册：没有 libbsdtar 时它仍然能打包（见下面的覆盖）。
-      'tar',
-      // seq/stat/cmp/diff 都在玩具箱里；不注册它们就是 "not found"，
-      // 而不是"这个环境不提供"。
-      'seq', 'stat', 'cmp', 'diff', 'split', 'sha256sum', 'base64', 'xxd'
-    ];
-    for (const name of toybox) {
-      add(name, 'libtoybox.so', 'bsh_toybox_main');
-    }
+    // toybox 本体的 launcher；具体 applet 在服务起来后按 `toybox` 的输出枚举。
+    add('toybox', 'libtoybox.so', 'bsh_toybox_main');
 
     // sh 是 shell 工具的唯一入口：没有它，IecShellService 直接报"运行核未就绪"。
     add('sh', 'libmksh.so', 'main');
@@ -245,6 +236,90 @@ export class IecRuntime {
     }
   }
 
+  private static readonly APPLET_CACHE: string = SYSROOT + '/.toybox-applets';
+
+  // 按 `toybox` 自己的输出注册 applet。缓存到资源根，重启后不再跑一次。
+  private static async writeToyboxApplets(): Promise<void> {
+    let names: string[] = IecRuntime.readAppletCache();
+    if (names.length === 0) {
+      names = await IecRuntime.listToyboxApplets();
+      if (names.length > 0) {
+        try {
+          writeTxtFile(IecRuntime.APPLET_CACHE, names.join('\n'));
+        } catch (e) {
+          hilog.warn(DOMAIN, TAG, 'cannot cache applet list: %{public}s', JSON.stringify(e));
+        }
+      }
+    }
+    if (names.length === 0) {
+      hilog.warn(DOMAIN, TAG, 'toybox applet list unavailable');
+      return;
+    }
+    let wrote: number = 0;
+    for (const name of names) {
+      if (name === '' || name === 'toybox') {
+        continue;
+      }
+      wrote += writeSoLauncher(BIN_DIR + name, BUNDLE_LIBS + 'libtoybox.so',
+        'bsh_toybox_main', 2, 0);
+    }
+    hilog.info(DOMAIN, TAG, 'toybox applets: %{public}d registered', wrote);
+  }
+
+  private static readAppletCache(): string[] {
+    try {
+      if (!fileIo.accessSync(IecRuntime.APPLET_CACHE)) {
+        return [];
+      }
+      const text: string = fileIo.readTextSync(IecRuntime.APPLET_CACHE);
+      return text.split('\n')
+        .map((s: string): string => s.trim())
+        .filter((s: string): boolean => s !== '');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // 跑一次 `toybox`（无参数会打印 applet 清单，多列排版）。
+  private static async listToyboxApplets(): Promise<string[]> {
+    let out: string = '';
+    try {
+      const handle = execStart({
+        cmd: 'toybox',
+        args: [],
+        cwd: SYSROOT,
+        env: { 'PATH': BIN_DIR },
+        stdin: '',
+        timeoutMs: 5000,
+        maxOutputBytes: 512 * 1024
+      });
+      const id: number = handle.id;
+      for (let i: number = 0; i < 500; i++) {
+        const poll = execPoll(id, 64 * 1024, 64 * 1024);
+        out += poll.out;
+        if (poll.exited) {
+          break;
+        }
+        await new Promise<void>((resolve: () => void): void => {
+          setTimeout(resolve, 10);
+        });
+      }
+      execRelease(id);
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'list toybox applets failed: %{public}s', JSON.stringify(e));
+      return [];
+    }
+    const cleaned: string = out.replace(/[\[\]]/g, ' ');
+    const parts: string[] = cleaned.split(/\s+/);
+    const names: string[] = [];
+    for (const part of parts) {
+      if (part.length > 0 && part.length < 32 && /^[a-z0-9_]+$/.test(part)) {
+        names.push(part);
+      }
+    }
+    return names;
+  }
+
   // bundle libs 里有没有这个 so。launcher 只在存在时写，避免"命令在、库不在"
   // 这种最误导人的失败形态。
   private static hasSo(name: string): boolean {
@@ -264,7 +339,7 @@ export class IecRuntime {
       outDropped: 0, errDropped: 0, elapsedMs: 0
     };
 
-    const ready: string = IecRuntime.ensure(context);
+    const ready: string = await IecRuntime.ensure(context);
     if (ready !== '') {
       result.err = ready;
       return result;
