@@ -1,13 +1,19 @@
 # 行尾约定
 #
-# 仓库开启了 core.autocrlf=true(Windows 上检出会转 CRLF)。但下面这些文件是在
-# Linux / WSL / 虚拟机内部执行、或被 make 解析的, CRLF 会让 shebang 与命令解析直接报错
-# (典型症状: `bash: $'\r': command not found`), 所以显式钉死 LF。
+# 仓库开启了 core.autocrlf=true（Windows 上检出会转 CRLF）。下面这些文件是在
+# Linux / WSL / 虚拟机内部执行、或被 make 解析的，CRLF 会让 shebang 与命令解析
+# 直接报错（典型症状：ash: $'\r': command not found），所以显式钉死 LF。
 
-# Linux VM 构建链 + 客人侧脚本(进 Alpine 镜像执行)
-tooling/linux-vm/**  text eol=lf
-# guest 侧脚本会装进 Linux 执行, CRLF 会让 shebang 失效
+# Linux VM 构建链 + 客人侧脚本（进 Alpine 镜像执行）
+tooling/linux-vm/** text eol=lf
+# guest 侧脚本会装进 Linux 执行，CRLF 会让 shebang 失效
 entry/src/main/resources/rawfile/vm/guest/** text eol=lf
 
-# vendored �� BetterSH/IEC: Դ�롢�ű���CMake ���� LF ����(Windows ������/�ű���ִ��)
+# vendored 的 BetterSH/IEC：源码、脚本、CMake 都按 LF 保存
 third_party/bettersh/** text eol=lf
+# 但其中的交叉编译产物是二进制，绝不能被当作文本做行尾转换
+third_party/bettersh/**/*.so binary
+third_party/bettersh/**/*.so.* binary
+third_party/bettersh/**/*.a binary
+third_party/bettersh/**/*.png binary
+third_party/bettersh/**/*.woff2 binary

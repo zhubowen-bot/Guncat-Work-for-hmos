@@ -36,22 +36,25 @@ hvigorw --no-daemon assembleHap --mode module -p product=default
 `entry/oh-package.json5` 用 `file:` 依赖它的 ArkTS 入口。HAP 里会带上
 `libs/arm64-v8a/libiec_server.so`。
 
-## 运行前提：命令 so
+## 随包的命令 so
 
-IEC 只负责"起进程"，**命令本身是 `.so`**。仓库里没有这些产物（它们是交叉编译的
-二进制），需要先构建：
+`libmksh.so`（sh）与 `libtoybox.so`（60+ applet）已经构建并随 HAR 打进 HAP，位置是
+`third_party/bettersh/iec/platform/ohos/har/libs/arm64-v8a/`（hvigor 会把 HAR 的
+`libs/<abi>` 合进 HAP 的 `libs/arm64-v8a/`）。
+
+构建命令（需要 Linux 版 OHOS SDK；本机在 WSL 的 `/opt/ohos-cmdline/...`）：
 
 ```bash
-cd third_party/bettersh
-git submodule update --init thirdparty/toybox thirdparty/mksh   # 需要时
-./scripts/build_toybox.sh     # feature/bsh_main/libs/arm64-v8a/libtoybox.so
-./scripts/build_mksh.sh       # .../libmksh.so
-# 可选：build_dropbear.sh / build_git.sh / build_zip.sh / build_node.sh …
+cd third_party/bettersh/iec
+export OHOS_SDK=/opt/ohos-cmdline/command-line-tools/sdk/default/openharmony
+./scripts/build_mksh.sh      # → platform/ohos/har/libs/arm64-v8a/libmksh.so
+./scripts/build_toybox.sh    # → .../libtoybox.so
 ```
 
-把产物拷到 `entry/libs/arm64-v8a/` 再重装 HAP。`IecRuntime.writeLaunchers()` 会在
-首次启动时把 `bin/<命令>` 的启动器写进资源根（`/data/storage/el2/base/files/bin`），
-指向 `libs/arm64/<so>`；**so 不在时只是那条命令失败**，不影响其它命令。
+其余命令（git / node / dropbear / zip / libarchive 系列）不是 shell 工具必需的，按需用
+`iec/scripts/optional/build_*.sh` 或 `third_party/bettersh/scripts/build_*.sh` 产出，
+同样放进上面的 `libs/arm64-v8a/`。`IecRuntime.writeLaunchers()` 已经写好了对应启动器，
+so 不在时只是那条命令失败，不影响其它命令。
 
 `python3` / `python` 的 launcher 指向 Guncat 自带的 `libpython3.12.so`
 （入口 `Py_BytesMain`，已确认导出）。所以只要那个 `.so` 在包里，shell 里就能起
