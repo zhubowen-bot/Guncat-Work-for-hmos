@@ -31,3 +31,6 @@ __pycache__/
 entry/libs/arm64-v8a/libqemu-system-aarch64.so
 entry/libs/arm64-v8a/libqemu-img.so
 
+
+# 本机签名配置（含密码与证书路径），只入库 build-profile.json5.example
+/build-profile.json5

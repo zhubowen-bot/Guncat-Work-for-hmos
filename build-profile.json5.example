@@ -1,20 +1,11 @@
 {
+  // 模板：真实 build-profile.json5 不入库（含签名密码与本机证书路径）。
+  // 首次构建前：
+  //   cp build-profile.json5.example build-profile.json5
+  // 再用 DevEco Studio 的 Project Structure → Signing Configs 生成调试签名，
+  // 或手工把 signingConfigs 填成自己的证书。留空也能构建，只是产物未签名。
   "app": {
-    "signingConfigs": [
-      {
-        "name": "default",
-        "type": "HarmonyOS",
-        "material": {
-          "certpath": "C:\\Users\\a1519\\.ohos\\config\\default_Guncat-Work-for-hmos_80z6WuF6FeKF_cT36SFINBTntF-8o4Jml1A8D_xDZ0U=.cer",
-          "keyAlias": "debugKey",
-          "keyPassword": "0000001AF3941DBC759C94903C137BC5ADBE462BE81D5F69F11942421F6C0C2CF101E5BEB3516ADFC09D",
-          "profile": "C:\\Users\\a1519\\.ohos\\config\\default_Guncat-Work-for-hmos_80z6WuF6FeKF_cT36SFINBTntF-8o4Jml1A8D_xDZ0U=.p7b",
-          "signAlg": "SHA256withECDSA",
-          "storeFile": "C:\\Users\\a1519\\.ohos\\config\\default_Guncat-Work-for-hmos_80z6WuF6FeKF_cT36SFINBTntF-8o4Jml1A8D_xDZ0U=.p12",
-          "storePassword": "0000001A64CB2C5452C3319E0E589A490941A98E1638414227BBFA53F37D96BFB2D0C9FD8A75C43F8E79"
-        }
-      }
-    ],
+    "signingConfigs": [],
     "products": [
       {
         "name": "default",
