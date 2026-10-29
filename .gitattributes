@@ -20,3 +20,33 @@ third_party/bettersh/**/*.woff2 binary
 # 随包资源里的 tar / tar.gz（npm 的 JS 树）：CRLF 归一化会直接把 gzip 弄坏
 third_party/bettersh/**/*.tar binary
 third_party/bettersh/**/*.tar.gz binary
+
+# 全局二进制扩展：仓库里任何位置的下列文件都不是文本，autocrlf=true 下绝不能
+# 参与行尾/编码转换。此前只有 third_party/bettersh/ 内的 so/png/tar 被显式标记，
+# entry/libs/arm64-v8a/ 的 300+ 个 CPython 扩展 so、rawfile 里的字体/zip/图片只能
+# 靠 git 的 NUL 探测兜底；一旦某个文件被误判成文本，blob 就与工作区字节不一致
+# （表现是设备上 dlopen 失败或字体/压缩包损坏）。
+*.so binary
+*.so.[0-9]* binary
+*.a binary
+*.o binary
+*.tar binary
+*.tar.gz binary
+*.tgz binary
+*.gz binary
+*.xz binary
+*.bz2 binary
+*.zip binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.otf binary
+*.ttf binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+*.jar binary
+*.hap binary
