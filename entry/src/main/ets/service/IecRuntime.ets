@@ -228,6 +228,10 @@ export class IecRuntime {
     if (IecRuntime.hasSo('libcurlcmd.so')) {
       add('curl', 'libcurlcmd.so', 'iec_curl_main');
     }
+    // GNU bc 1.07.1（--with-readline 未启用）：任意精度计算。
+    if (IecRuntime.hasSo('libbccmd.so')) {
+      add('bc', 'libbccmd.so', 'iec_bc_main');
+    }
     if (IecRuntime.hasSo('libnode.so')) {
       add('node', 'libnode.so', 'iec_node_main');
       add('nodejs', 'libnode.so', 'iec_node_main');
