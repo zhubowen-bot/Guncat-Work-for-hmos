@@ -27,7 +27,8 @@ int iec_python_main(int argc, char** argv) {
     if (Py_IsInitialized()) {
         // fork 之后当前线程没有 tstate。先挂一个，FinalizeEx 才不会在
         // 解锁未持有的 mutex 时 abort。
-        void* tstate = PyThreadState_New(PyInterpreterState_Main());
+        void* interp = PyInterpreterState_Main();
+        void* tstate = interp != NULL ? PyThreadState_New(interp) : NULL;
         if (tstate != NULL) {
             PyThreadState_Swap(tstate);
         }
