@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# 生成 hexdump 期望输出（golden）。只在有系统 hexdump 的机器上跑一次，产物入库。
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
+G="$HERE/golden"
+D="$(mktemp -d)"
+trap 'rm -rf "$D"' EXIT
+
+printf 'AB' > "$D/ab"
+python3 -c 'import sys;sys.stdout.buffer.write(bytes(range(256)))' > "$D/all256"
+python3 -c 'import sys;sys.stdout.buffer.write(bytes(range(16)))' > "$D/b16"
+printf '0123456789abcdefg' > "$D/s17"
+printf '0123456789' > "$D/s10"
+printf '0123456789abcdef' > "$D/f1"
+printf 'XYZ' > "$D/f2"
+head -c 32 /dev/zero > "$D/zeros32"
+: > "$D/empty"
+
+mkdir -p "$G"
+hexdump -C < "$D/ab" > "$G/ab_C.golden"
+hexdump -C < "$D/all256" > "$G/all256_C.golden"
+hexdump -b < "$D/ab" > "$G/ab_b.golden"
+hexdump -c < "$D/b16" > "$G/b16_c.golden"
+hexdump -x < "$D/ab" > "$G/ab_x.golden"
+hexdump -d < "$D/ab" > "$G/ab_d.golden"
+hexdump -o < "$D/ab" > "$G/ab_o.golden"
+hexdump -C -s 3 -n 5 < "$D/s17" > "$G/s17_C_s3n5.golden"
+hexdump -C < "$D/s17" > "$G/s17_C.golden"
+hexdump -x < "$D/s17" > "$G/s17_x.golden"
+hexdump -C "$D/f1" "$D/f2" > "$G/multi_C.golden"
+hexdump -C -n 17 "$D/f1" "$D/f2" > "$G/multi_n17_C.golden"
+hexdump -C < "$D/zeros32" > "$G/zeros32_C.golden"
+hexdump -C -s 5 < "$D/s10" > "$G/s10_C_s5.golden"
+hexdump -C < "$D/empty" > "$G/empty_C.golden"
+hexdump -C -v < "$D/zeros32" > "$G/zeros32_C_v.golden"
+echo "golden 生成完成: $G"
