@@ -90,14 +90,19 @@ hdc shell aa start -a EntryAbility -b com.bowenapp.guncataibeta --ps iecSelfTest
 hdc shell hilog -x | grep -A 30 IecSelfTest
 ```
 
-自检会依次跑 `uname -s`、`pwd`、`seq`、`tar`、`git --version`、`ssh -V`、`node -v`、
-`python3 -c`。重点看：
+自检分 8 组，互不阻断（每段先打印 `--- 名称`，失败只追加 `[FAIL]`，末行
+`SELFTEST DONE`）：PATH 枚举（19 个命令）、mksh 64 位算术、`/tmp` 与 `id`、
+CA/git https、python3 退出码、jq/curl/bc/nc/hexdump/diff/sftp、node/npm、清理。
 
-1. `--- python` 段应输出 `3.12.15 <cwd>`，不出现 `Fatal Python error`；
-2. `--- tar` 应有 `t.tar` 的 `ls -l` 行；
-3. `--- git` 应有 `git version 2.56.0`；
-4. `--- ssh` 应有 Dropbear 版本行；
-5. `--- node` 应输出 `v22.19.x`，`npm -v` / `npx -v` 也应可用。
+重点看：
+
+1. 每段不应出现 `[FAIL]`；PATH 段应逐个打印 `ok`；
+2. `--- mksh` 的 `$((2000000000+2000000000))` 应为 `4000000000`；
+3. `--- python` 的 `sys.exit(7)` 之后应打印 `rc=7`，且不出现 `Fatal Python error`；
+4. `--- jq` 应为 `1`，`--- bc` 应为 `2`，`--- diff` 的 `rc` 应为 `1`；
+5. `--- node` 应输出 `v22.19.x`，`npm -v` 应输出 `10.9.x`。
+
+完整清单、期望输出与故障对照见 [真机验收清单](../guides/device-verification.md)。
 
 ## 6. 许可
 
