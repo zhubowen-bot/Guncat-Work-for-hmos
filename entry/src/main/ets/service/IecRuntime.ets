@@ -428,6 +428,10 @@ export class IecRuntime {
     let id: number = -1;
     let exited: boolean = false;
     let code: number = -1;
+    // 只有真正读到两条管道 EOF 才算"清单完整"：exited 只说明直接子进程结束，
+    // 而 EOF 要到读线程把管道搬空才会置位；没有它，1s 等不到 EOF 时会缓存一份
+    // 可能被截断的清单。
+    let sawEof: boolean = false;
     try {
       const handle = execStart({
         cmd: 'toybox',
@@ -459,7 +463,9 @@ export class IecRuntime {
         while (Date.now() < eofDeadline) {
           const tail = execPoll(id, 64 * 1024, 64 * 1024);
           out += tail.out;
-          if (tail.outEof && tail.errEof) {
+          // 同样要"EOF 且本次没数据"：先见到 EOF 就退出会把缓冲里的清单尾部丢掉。
+          if (tail.outEof && tail.errEof && tail.out === '' && tail.err === '') {
+            sawEof = true;
             break;
           }
           await new Promise<void>((resolve: () => void): void => {
@@ -494,7 +500,7 @@ export class IecRuntime {
         names.push(part);
       }
     }
-    return { names: names, complete: exited && code === 0 };
+    return { names: names, complete: exited && code === 0 && sawEof };
   }
 
   private static readUidGid(): string[] {
@@ -681,20 +687,38 @@ export class IecRuntime {
     return util.TextDecoder.create('utf-8', { ignoreBOM: true }).decodeToString(merged);
   }
 
-  // 等到两条管道都 EOF。execPoll().exited 只表示**直接子进程**结束了，管道
-  // 读线程可能还没交出最后一批字节；只看一次 poll 是否为空会丢掉输出尾部。
-  // 后台进程继承着管道时 EOF 可能一直不来，所以有 waitMs 上限。
+  // 等到两条管道都 EOF **且会话缓冲取空**。execPoll().exited 只表示**直接
+  // 子进程**结束了，管道读线程可能还没交出最后一批字节；只看一次 poll 是否
+  // 为空会丢掉输出尾部。
+  //
+  // 注意 EOF 的语义：读线程把管道的字节整段搬进会话缓冲后立刻置 outEof/errEof，
+  // 所以 EOF 只说明"不会再有新字节"，**不代表缓冲已经空了**。退出瞬间缓冲里
+  // 可能还压着几 MB（上限 8MB），每次 poll 只取 64KB：若一见到 EOF 就返回，
+  // 只能多取一块，其余全部随 release 丢掉。必须"EOF 且本次没取到字节"才算
+  // 收完；有字节时连续取（每约 1MB 让出一次事件循环），不再每轮 sleep(10)，
+  // 否则 1s 上限内只能搬约 6.4MB。
+  // 后台进程继承着管道时 EOF 可能一直不来，所以仍有 waitMs 上限。
   private static async drainToEof(id: number, outChunks: Uint8Array[],
     errChunks: Uint8Array[], waitMs: number): Promise<void> {
     const until: number = Date.now() + waitMs;
+    let polls: number = 0;
     while (Date.now() < until) {
       const poll = execPoll(id, 64 * 1024, 64 * 1024, 'base64');
+      const gotData: boolean = poll.out !== '' || poll.err !== '';
       IecRuntime.collect(outChunks, poll.out);
       IecRuntime.collect(errChunks, poll.err);
-      if (poll.outEof && poll.errEof) {
+      if (poll.outEof && poll.errEof && !gotData) {
         return;
       }
-      await IecRuntime.sleep(10);
+      polls++;
+      if (!gotData) {
+        await IecRuntime.sleep(10);
+      } else if (polls % 16 === 0) {
+        // 有数据就连续取，但不能一直不让出事件循环：命令留下的后台进程持续
+        // 输出时，这个循环会整整忙 waitMs（1s），把 JS 线程占住。每 16 块
+        // （约 1MB）让一次。
+        await IecRuntime.sleep(0);
+      }
     }
   }
 
