@@ -237,15 +237,72 @@ export class IecShellService {
 
   // 真机自检：`aa start ... --ps iecSelfTest 1` 时由 EntryAbility 调一次，结果进 hilog。
   // 只用于验收/排障，正常使用不会走到这里。
+  //
+  // 设计：所有段互不阻断——每段先 `echo '--- 名称'`，失败只追加 `[FAIL] ...`，后面照跑；
+  // 每个可能卡住的命令套 `timeout 10`，整体由 60s 工具超时兜底。最后一行固定
+  // `SELFTEST DONE`：看到它就说明整组命令确实跑完了（是否有 [FAIL] 再逐行看）。
+  // 覆盖清单与期望值见 docs/architecture/iec-runtime.md 的"验收"一节。
   static async selfTest(context: common.UIAbilityContext): Promise<string> {
-    const command: string = 'echo IEC_OK; uname -s; pwd; ' +
-      'echo "--- seq"; seq 1 3; ' +
-      'echo "--- tar"; echo hi > t.txt && tar -cf t.tar t.txt && ls -l t.tar; rm -f t.txt t.tar; ' +
-      'echo "--- git"; git --version 2>&1 | head -1; ' +
-      'echo "--- ssh"; ssh -V 2>&1 | head -1; ' +
-      'echo "--- node"; node -v 2>&1 | head -1; ' +
-      'echo "--- python"; python3 -c "import os,sys; print(sys.version.split()[0], os.getcwd())"';
-    let args: Record<string, Object> = { 'command': command };
+    const tools: string = 'dd md5sum od nproc jq curl bc nc hexdump diff sftp node npm ' +
+      'tar unzip zip git ssh python3';
+    const lines: string[] = [
+      'echo IEC_OK',
+      'uname -s',
+      'pwd',
+      // 1. PATH：launcher 是否真的注册进了 <sysroot>/bin（缺一个就单独报一行）。
+      "echo '--- PATH'",
+      'for c in ' + tools + '; do ' +
+        'if command -v "$c" >/dev/null 2>&1; then echo "ok   $c"; ' +
+        'else echo "[FAIL] $c not found"; fi; done',
+      // 2. mksh 的算术是 64 位还是 32 位：后者会溢出成负数。
+      "echo '--- mksh 64-bit arithmetic'",
+      'v=$((2000000000+2000000000)); echo "2000000000+2000000000=$v"; ' +
+        '[ "$v" = 4000000000 ] || echo "[FAIL] arithmetic (expect 4000000000)"',
+      // 3. /tmp 真可写；id 能读到 /etc/passwd 里的真实 uid。
+      "echo '--- /tmp + id'",
+      'echo x > /tmp/_t && cat /tmp/_t && rm -f /tmp/_t || echo "[FAIL] /tmp write"',
+      'id; id 2>/dev/null | grep -q "uid=" || echo "[FAIL] id (no uid)"',
+      // 4. CA 注入；git 走 https。网络失败只记录 rc，不算自检失败。
+      "echo '--- CA + git remote'",
+      'echo "GIT_SSL_CAINFO=${GIT_SSL_CAINFO:-<empty>}"',
+      '[ -n "$GIT_SSL_CAINFO" ] && [ -f "$GIT_SSL_CAINFO" ] || echo "[FAIL] CA bundle"',
+      'out=$(GIT_TERMINAL_PROMPT=0 timeout 10 git ls-remote ' +
+        'https://github.com/git/git.git HEAD 2>&1); rc=$?; ' +
+        'echo "$out" | head -3; echo "git ls-remote rc=$rc (网络失败不算自检失败)"',
+      // 5. python3：退出码要原样透传（7），标准库也要能 import。
+      "echo '--- python3'",
+      'timeout 10 python3 -c "import sys; sys.exit(7)"; echo "rc=$? (expect 7)"',
+      'timeout 10 python3 -c "print(1+1)"',
+      // 6. 各补充命令的最小可用性用例。
+      "echo '--- jq'",
+      "printf '{\"a\":1}\\n' | timeout 10 jq -r .a",
+      "echo '--- curl'",
+      'timeout 10 curl --version 2>&1 | head -1',
+      "echo '--- bc'",
+      "echo '1+1' | timeout 10 bc",
+      "echo '--- nc'",
+      // 自编 nc 没有 -h 时走 usage；无参也打印 usage，两条都试，取第一行。
+      "timeout 10 sh -c '{ nc -h 2>&1; nc 2>&1; } | head -1'",
+      "echo '--- hexdump'",
+      'printf AB | timeout 10 hexdump -C',
+      "echo '--- diff'",
+      "printf 'a\\n' > /tmp/_d1; printf 'b\\n' > /tmp/_d2; " +
+        'timeout 10 diff -u /tmp/_d1 /tmp/_d2; echo "diff rc=$? (expect 1)"',
+      "echo '--- sftp'",
+      // OpenSSH 的 sftp 没有 -V：-h / 无参至少能打出 usage 首行。
+      "timeout 10 sh -c '{ sftp -V 2>&1; sftp -h 2>&1; sftp 2>&1; } | head -1'",
+      // 7. node/npm（npm 是解出来的 JS 树，验证 npm-cli.js 路径没拼错）。
+      "echo '--- node/npm'",
+      'timeout 10 node -v',
+      'timeout 10 npm -v',
+      // 8. 清理临时文件，别把验收垃圾留在资源根/工作区。
+      'rm -f /tmp/_t /tmp/_d1 /tmp/_d2 t.txt t.tar',
+      "echo 'SELFTEST DONE'"
+    ];
+    let args: Record<string, Object> = {
+      'command': lines.join('\n'),
+      'timeout_ms': 60000
+    };
     const result: ToolExecResult = await IecShellService.run(context, '__iec_selftest', args);
     return result.output;
   }
