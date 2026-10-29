@@ -52,12 +52,13 @@ hvigorw --no-daemon assembleHap --mode module -p product=default
 | `node/npm/npx` | `libnode.so` | `iec_node_main` / `iec_npm_main` / `iec_npx_main` |
 | `python3` / `python` | `libpycmd.so`（Guncat 自带） | `iec_python_main` |
 
-`libpycmd.so` 是 13KB 的包装层：shell 命令是 fork 出来的，子进程会继承应用进程里
-**已经初始化过**的 CPython（`run_python` 的那份），直接调 `Py_BytesMain` 会在
-`pyinit_core_reconfigure` 崩溃。包装层先给当前线程挂一个 tstate
-（`PyThreadState_New(PyInterpreterState_Main())` + `PyThreadState_Swap`），再
-`Py_FinalizeEx()` 把继承的运行时归零；收尾失败时返回 1 并打到 stderr，不再硬闯。
-父进程不受影响（写时复制）。
+`python3` 走独立解释器进程：应用启动时 `startPyRunner()`（NAPI）在 **CPython 尚未初始化**
+的进程里 fork 一个常驻 runner，runner 自己从不加载 libpython；每个请求再由它 fork 一个
+孙进程，孙进程才 `dlopen libpython3.12.so` 并跑 `Py_BytesMain`。`libpycmd.so` 只是 UDS
+客户端（`NEEDED` 只有 libc），负责把 argv/stdin/env 发过去、把 stdout/stderr/退出码收回来。
+
+这样：被 SIGKILL 只影响那一次请求，runner 不受影响；`sys.exit(n)` 的退出码原样回传；
+子进程的 CPython 永远是干净的，不继承 `run_python` 的解释器状态。
 
 重建（需要 Linux 版 OHOS SDK；本机在 WSL 的 `/opt/ohos-cmdline/...`）：
 
