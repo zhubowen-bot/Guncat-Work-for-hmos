@@ -62,15 +62,62 @@ PCRE2 / libcurl。
 **用途**：`libnode.so`，`node` / `npm` / `npx`。上游 <https://nodejs.org>（v22.19.0），
 构建脚本 `iec/scripts/optional/build_node.sh`（静态 ICU、OpenSSL、zlib）。
 
-### 1.8 上述二进制的静态依赖
+### 1.8 jq 1.7.1 — MIT
+
+**用途**：`libjqcmd.so`，`jq`（入口 `iec_jq_main`）。上游 <https://github.com/jqlang/jq>
+tag `jq-1.7.1`，构建脚本 `iec/scripts/optional/build_jq.sh`，正则引擎静态链接 oniguruma。
+原文见 [`LICENSES/jq-MIT.txt`](LICENSES/jq-MIT.txt)。
+
+### 1.9 oniguruma 6.9.9 — BSD-2-Clause
+
+**用途**：jq 的正则引擎，静态链接进 `libjqcmd.so`（不单独随包）。上游
+<https://github.com/kkos/oniguruma> tag `v6.9.9`。
+原文见 [`LICENSES/oniguruma-BSD-2-Clause.txt`](LICENSES/oniguruma-BSD-2-Clause.txt)。
+
+### 1.10 curl 8.22.0 — curl licence
+
+**用途**：`libcurlcmd.so`，`curl`（入口 `iec_curl_main`），静态链接 OpenSSL 与 zlib；
+git 的 https 传输（`libgit-remote-http.so`）也静态链接同一份 libcurl。
+上游 <https://curl.se/download/curl-8.22.0.tar.gz>，构建脚本
+`iec/scripts/optional/build_curl.sh` 与 `build_curlcmd.sh`。
+原文见 [`LICENSES/curl-LICENSE.txt`](LICENSES/curl-LICENSE.txt)。
+
+### 1.11 GNU bc 1.07.1 — GPL-2.0-or-later
+
+**用途**：`libbccmd.so`，`bc`（入口 `iec_bc_main`），未启用 readline。上游
+<https://ftp.gnu.org/gnu/bc/bc-1.07.1.tar.gz>，构建脚本
+`iec/scripts/optional/build_bc.sh`。
+
+> **GPL 声明**：bc 以 GPL-2.0-or-later 分发。本项目**未修改** bc 源码，只做交叉编译
+> 与入口改名；二进制以独立 `.so`（`libbccmd.so`）随包，不与主程序静态合并。
+> 对应源码为上游客 tarball 加本仓库的构建脚本，二者均可公开获取。
+> GPL-2.0 全文见 [`LICENSES/GPL-2.0.txt`](LICENSES/GPL-2.0.txt)。
+
+### 1.12 OpenSSH sftp 9.9p2 — BSD（ISC 风格）
+
+**用途**：`libsftpcmd.so`，`sftp`（入口 `iec_sftp_main`），静态链接 OpenSSL 与 zlib；
+只取 portable 发行版里的 sftp 客户端，不含 sshd/ssh 服务端。
+上游 <https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-9.9p2.tar.gz>，
+构建脚本 `iec/scripts/optional/build_sftp.sh`。
+原文见 [`LICENSES/openssh-BSD.txt`](LICENSES/openssh-BSD.txt)。
+
+### 1.13 自写补充命令：nc / hexdump / diff
+
+- `nc`（`libnc.so`）与 `hexdump`（`libhexdump.so`）是**本项目自己编写**的命令，
+  源码在 `iec/scripts/optional/cmd_nc.c`、`cmd_hexdump.c`，按主仓库的 Apache-2.0 分发；
+- `diff`（`libdiff.so`）是同样自写的薄包装，实际比较由随包的 git（GPL-2.0，见 §1.5）
+  完成。
+
+### 1.14 上述二进制的静态依赖
 
 | 组件 | 版本 | 许可 | 被谁使用 |
 | --- | --- | --- | --- |
-| zlib | 1.3.1 | zlib License | libarchive / git / node |
-| OpenSSL | 3.0.22 | Apache-2.0（原文 [`LICENSES/Apache-2.0-OpenSSL.txt`](LICENSES/Apache-2.0-OpenSSL.txt)） | git（https）/ node |
+| zlib | 1.3.1 | zlib License | libarchive / git / node / curl / sftp |
+| OpenSSL | 3.0.22 | Apache-2.0（原文 [`LICENSES/Apache-2.0-OpenSSL.txt`](LICENSES/Apache-2.0-OpenSSL.txt)） | git（https）/ node / curl / sftp |
 | PCRE2 | 10.x | BSD-3-Clause | git |
-| libcurl | 8.x | curl licence（MIT 风格） | git（https） |
+| libcurl | 8.22.0 | curl licence（MIT 风格） | git（https）/ curl |
 | ICU | 随 Node 源码 | Unicode-3.0 | node |
+| oniguruma | 6.9.9 | BSD-2-Clause | jq |
 
 ---
 

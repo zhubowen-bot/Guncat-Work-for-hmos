@@ -49,7 +49,14 @@ hvigorw --no-daemon assembleHap --mode module -p product=default
 | `tar/bsdtar`、`unzip`、`cpio`、`zip` | `libbsdtar.so` / `libbsdunzip.so` / `libbsdcpio.so` / `libzipcmd.so` | `iec_bsdtar_main` 等 |
 | `git`（含 https） | `libgit.so` / `libgit-remote-http.so` | `iec_git_main` / `iec_git_remote_http_main` |
 | `ssh/scp/ssh-keygen/…` | `libdropbear.so` | `iec_dropbear_main` |
-| `node/npm/npx` | `libnode.so` | `iec_node_main` / `iec_npm_main` / `iec_npx_main` |
+| `sftp` | `libsftpcmd.so` | `iec_sftp_main` |
+| `nc` | `libnc.so` | `iec_nc_main` |
+| `hexdump` / `hd` | `libhexdump.so` | `iec_hexdump_main` |
+| `diff`（后端是随包 git） | `libdiff.so` | `iec_diff_main` |
+| `jq` | `libjqcmd.so` | `iec_jq_main` |
+| `curl` | `libcurlcmd.so` | `iec_curl_main` |
+| `bc` | `libbccmd.so` | `iec_bc_main` |
+| `node/npm/npx`（条件产物） | `libnode.so` | `iec_node_main` / `iec_npm_main` / `iec_npx_main` |
 | `python3` / `python` | `libpycmd.so`（Guncat 自带） | `iec_python_main` |
 
 `python3` 走独立解释器进程：应用启动时 `startPyRunner()`（NAPI）在 **CPython 尚未初始化**
@@ -65,6 +72,7 @@ hvigorw --no-daemon assembleHap --mode module -p product=default
 ```bash
 export OHOS_SDK=/opt/ohos-cmdline/command-line-tools/sdk/default/openharmony
 tools/build-iec-runtime.sh          # zlib → openssl → pcre2 → curl → libarchive → git → dropbear
+                                    # 再编 nc/hexdump/diff、jq、curl、bc、sftp
 tools/build-iec-runtime.sh node     # V8，最久
 ```
 
