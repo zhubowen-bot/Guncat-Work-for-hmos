@@ -57,6 +57,17 @@ import { GuncatUiParts, GuncatUiSegType } from './gen/GuncatUiParts.ts';
 import { readFileSync } from 'node:fs';
 import { UiChartGeom, UiBox, UiNum, UiPalette, UiPoint, UiScale } from './gen/GuncatUiPaint.ts';
 import { GuncatUiPrompt } from './gen/GuncatUiPrompt.ts';
+import {
+  composeShellResult,
+  formatBinaryCaveat,
+  formatBinaryNote,
+  formatDropped,
+  formatStatusLine,
+  formatStreamBody,
+  formatTruncationNote,
+  signalName
+} from './gen/ShellResultFormat.ts';
+import { filterExplicit, isSafeRelPath, parseAppletList } from './gen/IecParsing.ts';
 
 let passed = 0;
 let failed = 0;
@@ -2141,7 +2152,7 @@ console.log('[组件库与提示词]');
     'glob', 'grep', 'edit', 'str_replace_editor', 'web_fetch', 'ask_user_question',
     'schedule_create', 'schedule_list', 'schedule_delete',
     'goal_create', 'goal_get', 'goal_update', 'subagent', 'session_search', 'run_js',
-    // shell: 设备内真 Linux(QEMU TCI)。属于「长程/重」工具, 故意不进交互模式白名单
+    // shell: 设备内 IEC 原生执行核。属于「长程/重」工具, 故意不进交互模式白名单
     // run_python: 原生 CPython 解释器, 同样是工作模式的重活工具; 交互模式的轻计算仍用 run_js
     'shell', 'run_python'
   ];
@@ -2429,6 +2440,272 @@ console.log('[组件库与提示词]');
     OrphanSweep.orphans(['x', 'x'], []).length === 1);
   check('孤儿: 大小写不同视为不同条目',
     OrphanSweep.orphans(['Conv_1'], ['conv_1']).length === 1);
+}
+
+// ===== shell 工具结果拼装（ShellResultFormat）：脱离设备回归超时/信号/丢字节/二进制 =====
+// IecShellService 里原本内联在 run() 尾部的正文拼装。设备上不好复现的语义（被杀、
+// 超时、引擎 cap 丢字节、二进制提示、spill 成功/失败）在这里逐字断言。
+{
+  const FAIL_NOTE = '\n\n[...输出已截断; 落盘失败, 建议把输出重定向到文件后用 read_file 读]';
+  const spillNote = (rel) =>
+    '\n\n[...输出已截断: 已收到的内容在工作区 ' + rel + '；需要时用 read_file 读回]';
+  const BIN_CAVEAT = '其中非 UTF-8 字节已替换为 �，落盘的是解码后的文本，不能当原始二进制用';
+  const BIN_NOTE = '[...输出含二进制字节(非 UTF-8 或含 NUL)，文本视图里非法字节显示为 �' +
+    '；二进制请重定向到文件（如 `cmd > out.bin`）再用 download_file 取，' +
+    '或用 `base64` 转成文本]';
+  const droppedNote = (streams) =>
+    '[引擎输出上限已丢弃 ' + streams +
+    '，这部分不在上面的文本/ .spill 文件里；要完整输出请重定向到文件后用 read_file 读回]';
+  const compose = (head, body, err, binary, dropped) => composeShellResult({
+    head: head,
+    body: body,
+    err: err,
+    notes: { binary: binary, dropped: dropped }
+  });
+
+  // —— 状态行：正常 / 非 0 / 信号 / 超时 / 状态丢失 / 启动失败 ——
+  check('shell格式: 正常退出 0',
+    formatStatusLine(0, 0, false, false, 1234, '.') === '[exit 0 · 1.23s · cwd .]');
+  check('shell格式: 非 0 退出码原样写',
+    formatStatusLine(1, 0, false, false, 1234, '.') === '[exit 1 · 1.23s · cwd .]');
+  check('shell格式: SIGKILL 写信号名而不是裸 137',
+    formatStatusLine(137, 9, false, false, 1234, '.') ===
+      '[exit 137 · 被信号 SIGKILL(9) 终止 · 1.23s · cwd .]');
+  check('shell格式: SIGTERM 写信号名',
+    formatStatusLine(143, 15, false, false, 1234, '.') ===
+      '[exit 143 · 被信号 SIGTERM(15) 终止 · 1.23s · cwd .]');
+  check('shell格式: 超时终止标记',
+    formatStatusLine(137, 0, true, false, 1234, '.') ===
+      '[exit 137 · 超时终止 · 1.23s · cwd .]');
+  check('shell格式: 超时且有信号时两个标记都在，超时在前',
+    formatStatusLine(137, 9, true, false, 1234, '.') ===
+      '[exit 137 · 超时终止 · 被信号 SIGKILL(9) 终止 · 1.23s · cwd .]');
+  check('shell格式: 未观测到状态(-1) 写会话丢失',
+    formatStatusLine(-1, 0, false, false, 1234, '.') ===
+      '[exit -1 · 未观测到退出状态(会话丢失) · 1.23s · cwd .]');
+  check('shell格式: 超时的 -1 不写会话丢失',
+    formatStatusLine(-1, 0, true, false, 1234, '.') ===
+      '[exit -1 · 超时终止 · 1.23s · cwd .]');
+  check('shell格式: 启动失败不产生状态行（正文只有错误信息）',
+    formatStatusLine(-1, 0, false, true, 1234, '.') === '');
+  check('shell格式: 耗时固定两位小数',
+    formatStatusLine(0, 0, false, false, 65432, 'sub/dir') ===
+      '[exit 0 · 65.43s · cwd sub/dir]');
+  check('shell格式: 未列出的信号按编号输出', signalName(99) === 'signal 99');
+  check('shell格式: 常见信号表', signalName(1) === 'SIGHUP(1)' &&
+    signalName(2) === 'SIGINT(2)' && signalName(11) === 'SIGSEGV(11)' &&
+    signalName(15) === 'SIGTERM(15)' && signalName(31) === 'SIGSYS(31)');
+
+  // —— dropped：只 stdout / 只 stderr / 两者 / 无 ——
+  check('shell格式: 无丢弃返回空串', formatDropped(0, 0) === '');
+  check('shell格式: 只丢 stdout', formatDropped(123, 0) === droppedNote('stdout 123 字节'));
+  check('shell格式: 只丢 stderr', formatDropped(0, 45) === droppedNote('stderr 45 字节'));
+  check('shell格式: 两个流都丢时按 stdout、stderr 顺序',
+    formatDropped(12, 34) === droppedNote('stdout 12 字节、stderr 34 字节'));
+
+  // —— 二进制说明与截断时的附加警告 ——
+  check('shell格式: 非二进制无说明', formatBinaryNote(false) === '');
+  check('shell格式: 二进制说明逐字一致', formatBinaryNote(true) === BIN_NOTE);
+  check('shell格式: 非二进制无 caveat', formatBinaryCaveat(false) === '');
+  check('shell格式: 二进制 caveat 逐字一致', formatBinaryCaveat(true) === BIN_CAVEAT);
+
+  // —— 截断说明：spill 成功 / 失败（各自带不带 caveat）——
+  check('shell格式: 落盘失败的截断说明', formatTruncationNote('', '') === FAIL_NOTE);
+  check('shell格式: spill 成功的截断说明',
+    formatTruncationNote('.spill/iec-1-stdout.log', '') ===
+      spillNote('.spill/iec-1-stdout.log'));
+  check('shell格式: spill 成功 + 二进制 caveat',
+    formatTruncationNote('.spill/a.log', BIN_CAVEAT) ===
+      '\n\n[...输出已截断: 已收到的内容在工作区 .spill/a.log；' + BIN_CAVEAT +
+      '；需要时用 read_file 读回]');
+  check('shell格式: 落盘失败 + 二进制 caveat',
+    formatTruncationNote('', BIN_CAVEAT) ===
+      '\n\n[...输出已截断; 落盘失败, 建议把输出重定向到文件后用 read_file 读；' +
+      BIN_CAVEAT + ']');
+
+  // —— 单条流正文：短输出原样、恰好上限不加说明、超限截断、spill 优先 ——
+  check('shell格式: 未截断的正文原样返回', formatStreamBody('hello', '', 5, '') === 'hello');
+  check('shell格式: 恰好等于上限不算截断', formatStreamBody('abcde', '', 5, '') === 'abcde');
+  check('shell格式: 超过上限截到前 N 字符并附失败说明',
+    formatStreamBody('abcdef', '', 5, '') === 'abcde' + FAIL_NOTE);
+  check('shell格式: 有 spill 时即使正文很短也标记已截断',
+    formatStreamBody('abc', '.spill/a.log', 5, '') === 'abc' + spillNote('.spill/a.log'));
+  check('shell格式: 超限 + spill + caveat 一起出现',
+    formatStreamBody('abcdef', '.spill/a.log', 5, BIN_CAVEAT) ===
+      'abcde' + '\n\n[...输出已截断: 已收到的内容在工作区 .spill/a.log；' +
+      BIN_CAVEAT + '；需要时用 read_file 读回]');
+  check('shell格式: 空正文返回空串', formatStreamBody('', '', 5, '') === '');
+
+  // —— compose：空行规则与段序 ——
+  check('shell格式: 全空时输出空串', compose('', '', '', '', '') === '');
+  check('shell格式: 只有状态行', compose('[exit 0]', '', '', '', '') === '[exit 0]');
+  check('shell格式: 只有 stdout 时没有前导空行', compose('', 'out', '', '', '') === 'out');
+  check('shell格式: 只有 stderr 时补段头', compose('', '', 'err', '', '') ===
+    '--- stderr ---\nerr');
+  check('shell格式: 空白 stderr 也保留（不 trim）',
+    compose('[exit 0]', '', ' \r', '', '') === '[exit 0]\n--- stderr ---\n \r');
+  check('shell格式: 二进制说明在状态行与正文之间',
+    compose('[exit 0]', 'out', '', BIN_NOTE, '') === '[exit 0]\n' + BIN_NOTE + '\nout');
+  check('shell格式: dropped 说明在整段末尾',
+    compose('[exit 0]', 'out', '', '', droppedNote('stdout 5 字节')) ===
+      '[exit 0]\nout\n' + droppedNote('stdout 5 字节'));
+  check('shell格式: 标准顺序 = 状态行/二进制/正文/stderr/dropped',
+    compose('[exit 1]', 'out', 'err', BIN_NOTE, droppedNote('stderr 7 字节')) ===
+      '[exit 1]\n' + BIN_NOTE + '\nout\n--- stderr ---\nerr\n' +
+      droppedNote('stderr 7 字节'));
+
+  // —— 组合场景：空输出不多空行、超时文案不自相矛盾 ——
+  {
+    const timeoutLine = formatStatusLine(137, 9, true, false, 2500, '.');
+    const text = compose(timeoutLine, '', '', '', '');
+    check('shell格式: 超时+信号组合只有一行状态行',
+      text === '[exit 137 · 超时终止 · 被信号 SIGKILL(9) 终止 · 2.50s · cwd .]');
+    check('shell格式: 超时场景不出现 exit 0', text.indexOf('exit 0') < 0);
+    check('shell格式: 空输出场景没有多余空行', text.indexOf('\n') < 0);
+  }
+  {
+    const text = compose('[exit 0]', 'o', '', '', '');
+    check('shell格式: 只有 stdout 时 stdout 与状态行间恰好一个换行',
+      text === '[exit 0]\no' && text.indexOf('\n\n') < 0);
+  }
+  {
+    const text = compose('[exit 0]', 'x'.repeat(10) + spillNote('.spill/a.log'), '', '',
+      '');
+    check('shell格式: 截断说明前只有一个空行', text.split('\n\n').length === 2);
+    check('shell格式: 截断说明后没有多余空行', text.indexOf('\n\n\n') < 0);
+    check('shell格式: 整段没有首尾空白行', !text.startsWith('\n') && !text.endsWith('\n'));
+  }
+  {
+    const text = compose(formatStatusLine(-1, 0, false, false, 0, '.'),
+      '', '', '', '');
+    check('shell格式: 会话丢失标记只出现一次',
+      text.split('未观测到退出状态(会话丢失)').length === 2);
+    check('shell格式: 会话丢失场景不含超时标记', text.indexOf('超时终止') < 0);
+  }
+}
+
+// ===== IEC 解析/校验纯模块（IecParsing）：Node 直接跑真机同一份规则 =====
+// 样本取自宿主 x86_64 `toybox`（third_party/bettersh/iec/thirdparty/toybox，
+// defconfig，0.8.15）的无参输出，原样贴入：多列排版、`[` 本身就是 applet 名、
+// nbd-client / nbd-server 带连字符。真机 IecRuntime 现在调用同一个 parseAppletList，
+// 因此这里的断言就是设备上 applet 注册规则的回归。
+{
+  const TOYBOX_PLAIN = `[ acpi arch ascii base32 base64 basename blkdiscard blkid blockdev
+bunzip2 bzcat cal cat chattr chgrp chmod chown chroot chrt chvt cksum
+clear cmp comm count cp cpio crc32 cut date dd deallocvt devmem df
+dirname dmesg dnsdomainname dos2unix du echo egrep eject env expand
+factor fallocate false fgrep file find flock fmt fold free freeramdisk
+fsfreeze fstype fsync ftpget ftpput getconf getopt gpiodetect gpiofind
+gpioget gpioinfo gpioset grep groups gunzip halt hd head help hexedit
+host hostname httpd hwclock i2cdetect i2cdump i2cget i2cset i2ctransfer
+iconv id ifconfig inotifyd insmod install ionice iorenice iotop kill
+killall killall5 link linux32 ln logger login logname losetup ls lsattr
+lsmod lspci lsusb makedevs mcookie md5sum memeater microcom mix mkdir
+mkfifo mknod mkpasswd mkswap mktemp modinfo mount mountpoint mv nbd-client
+nbd-server nc netcat netstat nice nl nohup nologin nproc nsenter od
+oneit openvt partprobe paste patch pgrep pidof ping ping6 pivot_root
+pkill pmap poweroff printenv printf prlimit ps pwd pwdx pwgen readahead
+readelf readlink realpath reboot renice reset rev rfkill rm rmdir
+rmmod rtcwake sed seq setfattr setsid sha1sum sha224sum sha256sum
+sha384sum sha3sum sha512sum shred shuf sleep sntp sort split stat
+strings su swapoff swapon switch_root sync sysctl tac tail tar taskset
+tee test time timeout top touch true truncate ts tsort tty tunctl
+uclampset ucsicontrol ulimit umount uname unicode uniq unix2dos unlink
+unshare uptime usleep uudecode uuencode uuidgen vconfig vmstat w watch
+watchdog wc wget which who whoami xargs xxd yes zcat `;
+  const EXPECTED = [
+    'acpi', 'arch', 'ascii', 'base32', 'base64', 'basename', 'blkdiscard', 'blkid', 'blockdev', 'bunzip2',
+    'bzcat', 'cal', 'cat', 'chattr', 'chgrp', 'chmod', 'chown', 'chroot', 'chrt', 'chvt',
+    'cksum', 'clear', 'cmp', 'comm', 'count', 'cp', 'cpio', 'crc32', 'cut', 'date',
+    'dd', 'deallocvt', 'devmem', 'df', 'dirname', 'dmesg', 'dnsdomainname', 'dos2unix', 'du', 'echo',
+    'egrep', 'eject', 'env', 'expand', 'factor', 'fallocate', 'false', 'fgrep', 'file', 'find',
+    'flock', 'fmt', 'fold', 'free', 'freeramdisk', 'fsfreeze', 'fstype', 'fsync', 'ftpget', 'ftpput',
+    'getconf', 'getopt', 'gpiodetect', 'gpiofind', 'gpioget', 'gpioinfo', 'gpioset', 'grep', 'groups', 'gunzip',
+    'halt', 'hd', 'head', 'help', 'hexedit', 'host', 'hostname', 'httpd', 'hwclock', 'i2cdetect',
+    'i2cdump', 'i2cget', 'i2cset', 'i2ctransfer', 'iconv', 'id', 'ifconfig', 'inotifyd', 'insmod', 'install',
+    'ionice', 'iorenice', 'iotop', 'kill', 'killall', 'killall5', 'link', 'linux32', 'ln', 'logger',
+    'login', 'logname', 'losetup', 'ls', 'lsattr', 'lsmod', 'lspci', 'lsusb', 'makedevs', 'mcookie',
+    'md5sum', 'memeater', 'microcom', 'mix', 'mkdir', 'mkfifo', 'mknod', 'mkpasswd', 'mkswap', 'mktemp',
+    'modinfo', 'mount', 'mountpoint', 'mv', 'nc', 'netcat', 'netstat', 'nice', 'nl', 'nohup',
+    'nologin', 'nproc', 'nsenter', 'od', 'oneit', 'openvt', 'partprobe', 'paste', 'patch', 'pgrep',
+    'pidof', 'ping', 'ping6', 'pivot_root', 'pkill', 'pmap', 'poweroff', 'printenv', 'printf', 'prlimit',
+    'ps', 'pwd', 'pwdx', 'pwgen', 'readahead', 'readelf', 'readlink', 'realpath', 'reboot', 'renice',
+    'reset', 'rev', 'rfkill', 'rm', 'rmdir', 'rmmod', 'rtcwake', 'sed', 'seq', 'setfattr',
+    'setsid', 'sha1sum', 'sha224sum', 'sha256sum', 'sha384sum', 'sha3sum', 'sha512sum', 'shred', 'shuf', 'sleep',
+    'sntp', 'sort', 'split', 'stat', 'strings', 'su', 'swapoff', 'swapon', 'switch_root', 'sync',
+    'sysctl', 'tac', 'tail', 'tar', 'taskset', 'tee', 'test', 'time', 'timeout', 'top',
+    'touch', 'true', 'truncate', 'ts', 'tsort', 'tty', 'tunctl', 'uclampset', 'ucsicontrol', 'ulimit',
+    'umount', 'uname', 'unicode', 'uniq', 'unix2dos', 'unlink', 'unshare', 'uptime', 'usleep', 'uudecode',
+    'uuencode', 'uuidgen', 'vconfig', 'vmstat', 'w', 'watch', 'watchdog', 'wc', 'wget', 'which',
+    'who', 'whoami', 'xargs', 'xxd', 'yes', 'zcat'
+  ];
+
+  const parsed = parseAppletList(TOYBOX_PLAIN);
+  console.log('[IecParsing]');
+  check('IecParsing: 真实 toybox 样本解析出 236 个 applet', parsed.length === 236);
+  check('IecParsing: 真实样本逐项与固定清单精确一致（含顺序）',
+    JSON.stringify(parsed) === JSON.stringify(EXPECTED));
+  check('IecParsing: 真实样本无重复 applet', new Set(parsed).size === parsed.length);
+  check('IecParsing: 丢弃 `[`（方括号替换后为空）', parsed.indexOf('[') < 0 && parsed.indexOf('') < 0);
+  check('IecParsing: 丢弃带连字符的 nbd-client / nbd-server',
+    parsed.indexOf('nbd-client') < 0 && parsed.indexOf('nbd-server') < 0);
+  check('IecParsing: 保序（首个 acpi、末个 zcat）',
+    parsed[0] === 'acpi' && parsed[parsed.length - 1] === 'zcat');
+
+  // 合成样本：覆盖真实输出里没有的边界（重复、非法字符、长度上限、toybox 本体）。
+  check('IecParsing: 方括号与多列空白归一',
+    JSON.stringify(parseAppletList('[ [[ acpi ]]   ls\n\tcat ]')) ===
+      JSON.stringify(['acpi', 'ls', 'cat']));
+  check('IecParsing: 非法字符过滤（大写/连字符/点/斜杠）',
+    JSON.stringify(parseAppletList('LS a-b a.b a/b _ok 9lives')) ===
+      JSON.stringify(['_ok', '9lives']));
+  check('IecParsing: token 长度 31 保留、32 丢弃',
+    JSON.stringify(parseAppletList('a'.repeat(31) + ' ' + 'b'.repeat(32))) ===
+      JSON.stringify(['a'.repeat(31)]));
+  check('IecParsing: 去重且保序',
+    JSON.stringify(parseAppletList('ls cat ls ls cat dd')) ===
+      JSON.stringify(['ls', 'cat', 'dd']));
+  check('IecParsing: 剔除 toybox 本体',
+    JSON.stringify(parseAppletList('toybox ls toybox cat')) ===
+      JSON.stringify(['ls', 'cat']));
+  check('IecParsing: 空输入得到空数组', parseAppletList('').length === 0);
+  check('IecParsing: 只有方括号/空白得到空数组',
+    parseAppletList('[ ] [[ ]] \n\t').length === 0);
+
+  // filterExplicit：显式注册名（nc/hexdump/diff/jq/sh/mksh/toybox）绝不能写回
+  // libtoybox.so；空串与 toybox 无条件跳过。
+  const explicit = new Set(['nc', 'hexdump', 'diff', 'jq', 'sh', 'mksh', 'toybox']);
+  const mixed = ['nc', 'dd', 'hexdump', 'diff', 'jq', 'sh', 'mksh', 'toybox', 'md5sum'];
+  const mixedCopy = mixed.slice();
+  const kept = filterExplicit(mixed, explicit);
+  check('IecParsing: filterExplicit 剔除全部 7 个显式名',
+    ['nc', 'hexdump', 'diff', 'jq', 'sh', 'mksh', 'toybox'].every((n) => kept.indexOf(n) < 0));
+  check('IecParsing: filterExplicit 保留未显式注册的命令且保序',
+    JSON.stringify(kept) === JSON.stringify(['dd', 'md5sum']));
+  check('IecParsing: filterExplicit 不修改入参数组',
+    JSON.stringify(mixed) === JSON.stringify(mixedCopy));
+  check('IecParsing: filterExplicit 无条件跳过空串',
+    JSON.stringify(filterExplicit(['', 'ls'], new Set())) === JSON.stringify(['ls']));
+  check('IecParsing: filterExplicit 无条件跳过 toybox（即便不在 explicit 里）',
+    JSON.stringify(filterExplicit(['toybox', 'ls'], new Set())) === JSON.stringify(['ls']));
+  check('IecParsing: filterExplicit 空 explicit 时除空串/toybox 全保留',
+    JSON.stringify(filterExplicit(['dd', '', 'toybox', 'nc'], new Set())) ===
+      JSON.stringify(['dd', 'nc']));
+
+  // isSafeRelPath：逐字复刻 IecShellService 抽取前的 cwd 校验。
+  const allowed = ['', '.', 'a', 'a/b', 'a/b/c', '.hidden', 'a b', 'a.b', 'a\\b'];
+  const rejected = ['/', '/abs', '/abs/x', '..', '../a', 'a/../b', 'a..b', '...',
+    ':', 'a:b', 'C:\\tmp', 'a/b:c'];
+  check('IecParsing: isSafeRelPath 允许普通相对路径（含空串）',
+    allowed.every((p) => isSafeRelPath(p)));
+  check('IecParsing: isSafeRelPath 拒绝以 / 开头的绝对路径',
+    rejected.filter((p) => p.startsWith('/')).every((p) => !isSafeRelPath(p)));
+  check('IecParsing: isSafeRelPath 拒绝任何含 .. 的路径',
+    ['..', '../a', 'a/../b', 'a..b', '...', '..\\a'].every((p) => !isSafeRelPath(p)));
+  check('IecParsing: isSafeRelPath 拒绝含 : 的路径（含 Windows 盘符）',
+    [':', 'a:b', 'C:\\tmp', 'a/b:c'].every((p) => !isSafeRelPath(p)));
+  check('IecParsing: isSafeRelPath 对反斜杠保持既有语义（设备侧不是分隔符）',
+    isSafeRelPath('a\\b') && !isSafeRelPath('..\\a'));
 }
 
 console.log('');

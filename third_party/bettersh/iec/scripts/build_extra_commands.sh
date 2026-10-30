@@ -18,6 +18,10 @@ source "$ENV_FILE"
 # shellcheck disable=SC1091
 source "$IEC_ROOT/scripts/lib/common.sh"
 
+[ -x "$CLANG" ] || command -v "$CLANG" >/dev/null 2>&1 \
+	|| iec_err "clang not found: $CLANG（检查 scripts/env.sh 的 OHOS_SDK）"
+[ -d "$SYSROOT" ] || iec_err "OHOS sysroot not found: $SYSROOT（检查 scripts/env.sh 的 OHOS_SDK）"
+
 BUILD="$IEC_ROOT/build/extra-cmds"
 OUT_DIR="$IEC_ROOT/platform/ohos/har/libs/arm64-v8a"
 CC_TARGET="$CLANG --target=$TARGET --sysroot=$SYSROOT -fuse-ld=lld"

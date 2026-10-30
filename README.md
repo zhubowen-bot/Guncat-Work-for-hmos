@@ -32,7 +32,7 @@
 ## 手机上真的能跑什么
 
 - ⚡ **原生 shell，不是"模拟一个 shell"**：`shell` 工具的命令都是 HarmonyOS 原生 `.so`（mksh、toybox、libarchive、git、dropbear、node），由 IEC 执行核 fork 后直接跑——**没有虚拟机、没有指令翻译、不需要 JIT 权限**；管道 / 重定向 / 通配符 / `sed` / `awk` / `find` / `tar` / `git` / `ssh` 全是真的，单条命令 0.2~1.5 秒。工作目录与本会话工作区是**同一份文件系统**：`cat data/a.csv` 与 `read_file("data/a.csv")` 读的是同一份内容，不是副本。
-- 🐍 **原生 CPython 3.12，不是仿真**：解释器编成 HarmonyOS 原生 `.so`，在应用进程内直接跑（不经指令翻译，比 VM 里的 `python3` 快 2~3 个数量级）；numpy / pandas / **scipy** / matplotlib / python-docx / python-pptx / reportlab / sympy 等随包离线可用，中文开箱能画。
+- 🐍 **原生 CPython 3.12，不是仿真**：解释器编成 HarmonyOS 原生 `.so`，在应用进程内直接跑（不经指令翻译，比早期的虚拟机解释执行快 2~3 个数量级）；numpy / pandas / **scipy** / matplotlib / python-docx / python-pptx / reportlab / sympy 等随包离线可用，中文开箱能画。
 - 🧠 **端侧 AgentLoop**：47 个内置工具 + 32 个技能，多轮工具循环、子代理并行派发、定时提醒 / 自主目标 / 会话事件检索、上下文三级压缩——长程任务在手机上自己跑完，产物落在沙箱工作区。
 - 📊 **端侧直出交付物**：PPT / Word / Excel / SVG 由本地生成器产出（JSON 中间层，可无损读回、算子式编辑）；PDF 与 Office 全部本地解析，**不消耗多模态配额**。
 - ✦ **Intelligent UI**：一句话进来，一张能拖、能点、改参数即时重算的原生界面出去——图表、表格、指标卡、选项卡、表单控件全部原生渲染。
@@ -100,29 +100,47 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 构建步骤：
 
 1. 克隆或下载项目。
-2. 使用 DevEco Studio 打开**仓库根目录**。
-3. 安装并选择 HarmonyOS SDK API 24。
-4. 配置调试或发布签名。
-5. 连接 HarmonyOS 真机。
-6. 运行 `entry` 模块，或使用上述命令构建 HAP。
+2. 还原大体积随包库：`bash scripts/prepare-big-libs.sh`（仓库里 `libnode.so` 存为
+   `libnode.so.xz`，约 23MB；GitHub 拒绝 >100MB 单文件。跑过 `build_node.sh` 的
+   可跳过，已存在的 `.so` 不会被覆盖）。
+3. 使用 DevEco Studio 打开**仓库根目录**。
+4. 安装并选择 HarmonyOS SDK API 24。
+5. 配置调试或发布签名。
+6. 连接 HarmonyOS 真机。
+7. 运行 `entry` 模块，或使用上述命令构建 HAP。
 
 ### Shell 工具（IEC 原生执行核）的额外产物
 
-`shell` 工具依赖随包的 HarmonyOS 原生 `.so`（已入库，随 HAP 的 `libs/arm64-v8a/` 分发）：
+`shell` 工具依赖随包的 HarmonyOS 原生 `.so`（已入库，随 HAP 的 `libs/arm64-v8a/` 分发）。
+执行核本身是 `libiec_server.so`（exec/tty 服务、loader、shim）；命令 → `.so` → 入口与
+`IecRuntime.ets` 的 `add(...)` 一一对应：
 
-- `libiec_server.so`（IEC 执行核：exec/tty 服务、loader、shim）
-- `libmksh.so`（sh/mksh）
-- `libtoybox.so`（70+ 常用命令）
-- `libarchive` 系列：`libbsdtar.so` / `libbsdunzip.so` / `libbsdcpio.so` / `libzipcmd.so`
-- `libgit.so` / `libgit-remote-http.so`（git，含 https）
-- `libdropbear.so`（ssh / scp / key 工具）
-- `libsftpcmd.so`（OpenSSH sftp 客户端）
-- `libjqcmd.so`（jq 1.7.1，静态 oniguruma）
-- `libcurlcmd.so`（curl 8.22.0，静态 OpenSSL/zlib）
-- `libbccmd.so`（GNU bc 1.07.1）
-- `libnc.so` / `libhexdump.so` / `libdiff.so`（nc、hexdump、diff；diff 后端是随包 git）
-- `libnode.so`（node / npm / npx）
-- `libpython3.12.so`（shell 里的 `python3` 与 `run_python` 共用）
+| 命令 | 随包 `.so` | 入口 |
+| --- | --- | --- |
+| `sh` / `mksh` | `libmksh.so` | `main` |
+| `toybox` 及 70+ applet（`ls/cat/grep/sed/awk/find/xargs/…`） | `libtoybox.so` | `bsh_toybox_main` |
+| `tar` / `bsdtar` | `libbsdtar.so` | `iec_bsdtar_main` |
+| `unzip` | `libbsdunzip.so` | `iec_bsdunzip_main` |
+| `cpio` / `bsdcpio` | `libbsdcpio.so` | `iec_bsdcpio_main` |
+| `zip` | `libzipcmd.so` | `iec_zip_main` |
+| `git` / `git-upload-pack` / `git-receive-pack` / `git-upload-archive` | `libgit.so` | `iec_git_main` |
+| `git-remote-http` / `git-remote-https` | `libgit-remote-http.so` | `iec_git_remote_http_main` |
+| `ssh` / `scp` / `ssh-keygen` / `dbclient` / `dropbearkey` / `dropbearconvert` / `dropbear` | `libdropbear.so` | `iec_dropbear_main` |
+| `sftp` | `libsftpcmd.so` | `iec_sftp_main` |
+| `jq` | `libjqcmd.so` | `iec_jq_main` |
+| `curl` | `libcurlcmd.so` | `iec_curl_main` |
+| `bc` | `libbccmd.so` | `iec_bc_main` |
+| `nc` | `libnc.so` | `iec_nc_main` |
+| `hexdump` / `hd` | `libhexdump.so` | `iec_hexdump_main` |
+| `diff`（后端是随包 git） | `libdiff.so` | `iec_diff_main` |
+| `node` / `nodejs` | `libnode.so` | `iec_node_main` |
+| `npm` | `libnode.so` | `iec_npm_main` |
+| `npx` | `libnode.so` | `iec_npx_main` |
+| `python3` / `python` | `libpycmd.so` + `libpython3.12.so` | `iec_python_main` |
+
+`libnode.so` 是 node 22.19；npm 的纯 JS 树在 `rawfile/tools/npm.tar.gz`，首次启动解到资源根。
+`python3` / `python` 与 `run_python` 共用同一个 `libpython3.12.so`，但由独立的 python runner
+进程承载（`libpycmd.so` 只是 UDS 客户端）。
 
 在 WSL2 + Linux 版 HarmonyOS SDK 下重建（脚本会按需拉取源码、交叉编译并直接放进 HAR 的 `libs/`）：
 
@@ -137,9 +155,9 @@ Windows 侧 `git clone` 到 `third_party/bettersh/iec/thirdparty/` 下。
 
 `node` 另有两个宿主前提：Python 3.8–3.13（3.14 可临时放宽 `configure` 的版本表）和
 **GCC ≤13**——node 22 的 V8 在 GCC 15 下编不过（`std::formatter<subrange>`/ranges 报错）。
-没有满足条件的宿主时 `libnode.so` 不产出，shell 里 `node` 不注册 launcher。
+当前仓库已随包 `libnode.so`（node 22.19）；只有重建时才需要满足上述宿主条件。
 
-HAP 约 320MB（原生命令集 + CPython + 运行库）。某个 `.so` 缺失时，对应的 launcher 不会注册，
+HAP 约 452.7 MB（约 432 MiB；精确字节数随构建与签名变化；原生命令集 + CPython + 运行库）。某个 `.so` 缺失时，对应的 launcher 不会注册，
 命令会干净地报 `command not found`，不影响其它命令。
 
 ### 首次配置
@@ -164,9 +182,20 @@ HAP 约 320MB（原生命令集 + CPython + 运行库）。某个 `.so` 缺失�
 
 ### 验证
 
-- 纯逻辑回归（当前 **521 项**全绿）：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`
-- 服务层类型检查：`cd test/guncat-harness && node check-setup.mjs && npx tsc -p check/tsconfig.json`
+- **一键本地检查（推荐）**：`bash scripts/check-all.sh`（`--fast` 跳过较慢/依赖环境的项，`--list` 查看 18 项清单）
+- **IEC hexdump 属性对拍**：`bash third_party/bettersh/iec/tests/hexdump_fuzz/run.sh`（200 组随机输入 × `-C/-b/-c/-x/-d/-o` × `-n/-s/-v`，与系统 `hexdump` 逐字节比较；已接入 `check-all.sh`，没有系统 `hexdump` 时 SKIP）
+- **IEC nc 属性/边界**：`bash third_party/bettersh/iec/tests/nc_fuzz/run.sh`（10MB 双向、两个方向半关闭、并发、端口复用、SIGTERM、二进制安全）
+- **IEC diff 属性/边界**：`bash third_party/bettersh/iec/tests/diff_fuzz/run.sh`（100 对随机文件与 `git diff --no-index` 逐字节对拍，加选项/路径/权限/8MB）
+- **mksh 64 位算术回归**：`bash third_party/bettersh/iec/tests/mksh_arith/run.sh`（同一份源码编 64/32 位对照 + Python 大整数对拍；已接入 `check-all.sh`）
+- **toybox 解析交叉验证**：`bash third_party/bettersh/iec/tests/toybox_parse/run.sh`（宿主编 toybox 拿真实 applet 输出，验证显式命令不被覆盖）
+- **CA bundle 可用性**：`bash third_party/bettersh/iec/tests/ca_bundle/run.sh`（121 张根证书、CMake/ArkTS 接线，curl/python/git 用空 capath 做真握手；无网 SKIP）
+- **npm 解包宿主回归**：`bash third_party/bettersh/iec/tests/npm_unpack/run.sh`（2697 条目与 bsdtar 参考树逐文件比对，截断/只读失败路径）
+- **IEC 原生代码宿主回归**：`bash third_party/bettersh/iec/scripts/test_iec_native_host.sh`（exec 路由 / cwd 校验 / NCP 拒绝分类 / fs shim 路径映射；已接入 `check-all.sh`，不需要设备或 OHOS SDK）
+- **IEC exec 会话压测**：`bash third_party/bettersh/iec/scripts/stress_exec_session.sh`（8 路并发整条流上限 / 中途终止 / 50 轮 fd 与 RSS / 200 次短会话 / 0-1-50ms 超时；已接入 `check-all.sh`，`--fast` 跳过，不需要设备或 OHOS SDK）
+- 纯逻辑回归（当前 **754 项**全绿）：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`
+- 服务层类型检查：`cd test/guncat-harness && node check-setup.mjs && npx -y -p typescript@5.5.4 tsc -p check/tsconfig.json`
 - PPT / Word / Excel 离线验证环境：`test/pptx-harness`、`test/docx-harness`、`test/xlsx-harness`
+- **真机验收**（装一次 HAP，逐项确认 shell / IEC）：[真机验收清单](docs/guides/device-verification.md)
 - 真实 ArkTS 编译（需本机 DevEco）：`powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`
 
 最后一层不能省：ArkUI 有一批**只有编译器才知道**的规则（`@Builder` 方法体内不允许声明局部变量、自定义组件属性名不能与内置属性同名、`@Prop` 的 null 需要显式联合类型），而 node 侧 harness 只覆盖 `common/**` 与 `service/**` 的纯 TS，不解析 `.ets`。
@@ -180,7 +209,7 @@ HAP 约 320MB（原生命令集 + CPython + 运行库）。某个 `.so` 缺失�
 | [主要功能](docs/features.md)                                             | 全部客户端功能与工程约定                                                  |
 | [工作模式架构与维护指南](docs/architecture/work-mode.md)                        | Agent Loop、47 个工具、PPT / Word 生成链路、技能系统、`run_js` 沙箱、ArkTS 落地约束 |
 | [Shell 工具：IEC 原生执行核](docs/architecture/iec-runtime.md)              | 命令 so 的 fork 执行、exec 会话 API、工作区一致性、并发与生命周期、构建链      |
-| [原生 Python 与跨域桥](docs/architecture/native-python.md)                 | CPython 交叉编译、`run_python` 执行模型、`npy` 桥协议与性能数据、能力边界            |
+| [原生 Python 与跨域桥（历史）](docs/architecture/native-python.md)       | CPython 交叉编译、`run_python` 执行模型、`npy` 桥协议与性能数据（虚拟机方案已删除） |
 | [交互模式架构（Intelligent UI）](docs/architecture/interactive-mode.md)      | 提示词分叉、`guncat-ui lang` 契约、流式成形、交互闭环、扩展入口                      |
 | [项目结构](docs/architecture/project-structure.md)                       | 目录布局、数据流、核心组件                                                 |
 | [使用指南](docs/guides/usage.md)                                         | 分场景操作步骤                                                       |

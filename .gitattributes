@@ -1,13 +1,8 @@
 # 行尾约定
 #
 # 仓库开启了 core.autocrlf=true（Windows 上检出会转 CRLF）。下面这些文件是在
-# Linux / WSL / 虚拟机内部执行、或被 make 解析的，CRLF 会让 shebang 与命令解析
-# 直接报错（典型症状：ash: $'\r': command not found），所以显式钉死 LF。
-
-# Linux VM 构建链 + 客人侧脚本（进 Alpine 镜像执行）
-tooling/linux-vm/** text eol=lf
-# guest 侧脚本会装进 Linux 执行，CRLF 会让 shebang 失效
-entry/src/main/resources/rawfile/vm/guest/** text eol=lf
+# Linux / WSL / 容器内部执行、或被 make 解析的，CRLF 会让 shebang 与命令解析
+# 直接报错（典型症状：bash: $'\r': command not found），所以显式钉死 LF。
 
 # vendored 的 BetterSH/IEC：源码、脚本、CMake 都按 LF 保存
 third_party/bettersh/** text eol=lf
@@ -17,3 +12,39 @@ third_party/bettersh/**/*.so.* binary
 third_party/bettersh/**/*.a binary
 third_party/bettersh/**/*.png binary
 third_party/bettersh/**/*.woff2 binary
+# 随包资源里的 tar / tar.gz（npm 的 JS 树）：CRLF 归一化会直接把 gzip 弄坏
+third_party/bettersh/**/*.tar binary
+third_party/bettersh/**/*.tar.gz binary
+
+# 全局二进制扩展：仓库里任何位置的下列文件都不是文本，autocrlf=true 下绝不能
+# 参与行尾/编码转换。此前只有 third_party/bettersh/ 内的 so/png/tar 被显式标记，
+# entry/libs/arm64-v8a/ 的 300+ 个 CPython 扩展 so、rawfile 里的字体/zip/图片只能
+# 靠 git 的 NUL 探测兜底；一旦某个文件被误判成文本，blob 就与工作区字节不一致
+# （表现是设备上 dlopen 失败或字体/压缩包损坏）。
+*.so binary
+*.so.[0-9]* binary
+*.a binary
+*.o binary
+*.tar binary
+*.tar.gz binary
+*.tgz binary
+*.gz binary
+*.xz binary
+*.bz2 binary
+*.zip binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.otf binary
+*.ttf binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+*.jar binary
+*.hap binary
+
+# 本地/CI 复用的一键检查脚本：在 WSL/Linux 下直接 bash 执行，必须保持 LF
+scripts/** text eol=lf

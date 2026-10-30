@@ -141,11 +141,13 @@ for (const [relSrc, relDst, replaces] of [
   ['service/ToolCallStream.ts', 'ToolCallStream.ts', []],
   ['service/LocalWebSearch.ts', 'LocalWebSearch.ts', []],
   ['service/JsCodeService.ts', 'JsCodeService.ts', [["from 'libguncatjs.so'", "from './jsvm-shim'"]]],
-  // LinuxShellService（QEMU TCI 的 Linux VM）已随 shell/IEC 改造删除，shell 现在走
-  // IecShellService + IEC 运行时，不再有 libguncatvm.so 这个原生依赖。
+  // 早期虚拟机后端（LinuxShellService / libguncatvm.so）已随 shell/IEC 改造删除，
+  // shell 现在走 IecShellService + IEC 运行时，Node 侧不再需要 vm-shim。
   ['service/RawAsset.ts', 'RawAsset.ts', []],
   ['service/PythonService.ts', 'PythonService.ts', [["from 'libguncatpy.so'", "from './py-shim'"]]],
   ['service/WorkToolRunner.ets', 'WorkToolRunner.ts', []],
+  ['service/ShellResultFormat.ts', 'ShellResultFormat.ts', []],
+  ['service/IecParsing.ts', 'IecParsing.ts', []],
 ]) {
   port(relSrc, relDst, replaces);
 }
@@ -183,22 +185,6 @@ writeFileSync(join(allDir, 'jsvm-shim.ts'),
   `export function runJs(code: string, options?: JsRunOptions): Promise<JsRunResult> {\n` +
   `  return Promise.reject(new Error('jsvm-shim: 原生模块仅在设备侧可用'));\n}\n` +
   `export function engineStatus(): string { return 'jsvm-shim'; }\n`);
-// shell 的原生模块(libguncatvm.so, QEMU TCI)同理: Node 侧只有类型
-writeFileSync(join(allDir, 'vm-shim.ts'),
-  `export interface VmStartOptions { argsLines: string; serialSocket: string; }\n` +
-  `export interface VmStartResult { ok: boolean; error: string; lib: string; }\n` +
-  `export interface VmStatus {\n  running: boolean;\n  starting: boolean;\n  lib: string;\n  loadError: string;\n  exitCode: number;\n}\n` +
-  `export function isAvailable(): string { return 'vm-shim: 原生模块仅在设备侧可用'; }\n` +
-  `export function startVM(options: VmStartOptions): VmStartResult {\n` +
-  `  return { ok: false, error: 'vm-shim', lib: '' };\n}\n` +
-  `export function status(): VmStatus {\n` +
-  `  return { running: false, starting: false, lib: '', loadError: 'vm-shim', exitCode: 0 };\n}\n` +
-  `export function serialTail(maxChars: number): string { return ''; }\n` +
-  `export function onData(cb: (data: ArrayBuffer) => void): void {}\n` +
-  `export function onExit(cb: () => void): void {}\n` +
-  `export function sendInput(data: ArrayBuffer): boolean { return false; }\n` +
-  `export function requestShutdown(): boolean { return false; }\n`);
-
 // 原生 Python(libguncatpy.so)同理: Node 侧只有类型, 调用一律拒绝
 writeFileSync(join(allDir, 'py-shim.ts'),
   `export interface PyRunOptions {\n` +

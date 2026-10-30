@@ -32,6 +32,21 @@ static int write_full(int fd, const void* buf, size_t len) {
     return 0;
 }
 
+// 写 runner 的连接必须用 send(MSG_NOSIGNAL)：runner 拒绝请求（如 argc=0）
+// 或中途退出时会先关掉这一端，随后 write() 触发的 SIGPIPE 会按默认处置直接
+// 杀掉本进程，连下面那些 "python3: ..." 的错误提示都来不及打。
+static int send_full(int fd, const void* buf, size_t len) {
+    const char* p = (const char*)buf;
+    while (len > 0) {
+        ssize_t n = send(fd, p, len, MSG_NOSIGNAL);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return -1;
+        p += n;
+        len -= (size_t)n;
+    }
+    return 0;
+}
+
 static int read_full(int fd, void* buf, size_t len) {
     char* p = (char*)buf;
     while (len > 0) {
@@ -44,7 +59,7 @@ static int read_full(int fd, void* buf, size_t len) {
 }
 
 static int send_string(int fd, const char* s) {
-    return write_full(fd, s, strlen(s) + 1);
+    return send_full(fd, s, strlen(s) + 1);
 }
 
 static int fail(const char* what) {
@@ -98,7 +113,7 @@ int iec_python_main(int argc, char** argv) {
     head[0] = (uint32_t)argc;
     head[1] = envc;
     head[2] = (uint32_t)input_len;
-    if (write_full(fd, head, sizeof head) != 0) { free(input); close(fd); return fail("write failed"); }
+    if (send_full(fd, head, sizeof head) != 0) { free(input); close(fd); return fail("write failed"); }
     for (int i = 0; i < argc; i++) {
         if (send_string(fd, argv[i]) != 0) { free(input); close(fd); return fail("write failed"); }
     }
@@ -108,7 +123,7 @@ int iec_python_main(int argc, char** argv) {
     char cwd[4096];
     if (getcwd(cwd, sizeof cwd) == NULL) cwd[0] = '\0';
     if (send_string(fd, cwd) != 0) { free(input); close(fd); return fail("write failed"); }
-    if (input_len > 0 && write_full(fd, input, input_len) != 0) {
+    if (input_len > 0 && send_full(fd, input, input_len) != 0) {
         free(input);
         close(fd);
         return fail("write failed");

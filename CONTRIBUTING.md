@@ -1,6 +1,6 @@
 # 参与贡献
 
-感谢你有兴趣参与。Guncat Work 是一个**端侧优先**的 HarmonyOS AI 客户端：模块化 Agent Loop 内核、三协议流式对话、45 个内置工具、32 个技能，以及在设备本地直出 PPT / Word / Excel 的生成器。
+感谢你有兴趣参与。Guncat Work 是一个**端侧优先**的 HarmonyOS AI 客户端：模块化 Agent Loop 内核、三协议流式对话、47 个内置工具、32 个技能，以及在设备本地直出 PPT / Word / Excel 的生成器。
 
 这个仓库对"改动是否可靠"的要求比较高——它做的事情（Agent 循环、文档生成、界面渲染）出错时很难靠肉眼发现，所以下面这套验证流程不是形式主义，**每一层都在拦真实发生过的事故**。
 
@@ -25,10 +25,10 @@
 ```bash
 cd test/guncat-harness
 node setup.mjs        # 把 entry/src/main/ets 下的纯逻辑模块移植为 Node 可运行的 .ts
-node test-core.mjs    # 当前 521 项
+node test-core.mjs    # 当前 754 项
 ```
 
-覆盖 `PathMatcher` / `DiffUtil` / `EditCore` / `FileSearchCore` / `ToolRegistry` / `PromptBuilder` / `LoopDecisions` / `SSEProtocolAdapter` / `GuncatUiLang` 等纯逻辑，以及**大量提示词断言**。
+覆盖 `PathMatcher` / `DiffUtil` / `EditCore` / `FileSearchCore` / `ToolRegistry` / `PromptBuilder` / `LoopDecisions` / `SSEProtocolAdapter` / `GuncatUiLang` 等纯逻辑，以及**大量提示词断言**；shell 工具结果正文拼装（`ShellResultFormat`：状态行/超时/信号/dropped/二进制/截断）也在这一层逐字回归。
 
 ### 第 2 层 · 服务层类型检查
 
@@ -47,6 +47,39 @@ node test/guncat-harness/check-ui-copy.mjs
 有些界面纪律**编译得过、单测也测不到**，漏了只表现为"真机上某块字没反应"。这类纪律用源码扫描守住：
 
 - **`check-ui-copy.mjs`**：交互界面（`GuncatUiView.ets`）里每个**内容型** `Text` 都必须挂 `.copyOption(CopyOptions.LocalDevice)`（长按弹出文本选择菜单，可选中复制/全选），否则报错。**交互控件标签**（按钮 / 选项卡 / 单选多选药丸 / 下拉项 / 标签选项 / 折叠触发器 / 追问胶囊 / 行内动作 / 序号圆点）**必须豁免**——它们的整块区域就是点击热区，挂上选择能力会跟自己的点击事件抢手势——豁免的写法是行尾 `// copy-off: 原因`（原因不能为空）。新增组件时漏挂 `copyOption`，这条会立刻变红。
+
+### 一键检查（本地 / CI 复用）
+
+上面各层分散成多条命令，提交前建议直接跑一键入口：
+
+```bash
+bash scripts/check-all.sh          # 全量
+bash scripts/check-all.sh --fast   # 跳过 soname / py_runner / IEC 命令集 / hexdump 属性对拍 / IEC exec 压测
+bash scripts/check-all.sh --list   # 只看检查项清单
+```
+
+按顺序执行 18 项：纯逻辑单测（754 项）、服务层 `tsc`、界面文案可复制护栏、
+Markdown 相对链接、随包许可、共享库 soname、`py_runner` 宿主协议、
+IEC 命令集宿主测试、IEC hexdump 属性对拍（200 组随机输入）、IEC nc 属性/边界、
+IEC diff 属性/边界对拍、mksh 64 位算术回归、toybox applet 解析交叉验证、
+IEC 原生代码宿主回归、IEC exec 会话压测、存在时才跑的 `tools/check-iec-libs.py`、
+CA bundle 可用性（curl/python/git 真握手），以及 npm 解包宿主回归。
+
+- IEC 原生代码宿主回归对应
+  `third_party/bettersh/iec/scripts/test_iec_native_host.sh`：在宿主编出
+  `iec_server`，直接钉住 `ResolveKind` 的路由分类、cwd 无搜索权限必须拒绝、
+  NCP 平台级拒绝分类，以及 fs shim 的绝对路径映射；不需要设备或 OHOS SDK。
+
+- 单项失败不会中断后续项；每项打印 `==> 名称` 与耗时，末尾给出
+  `SUMMARY: PASS=n FAIL=n SKIP=n`，有 FAIL 时整体非零退出。
+- `--fast` 跳过的项计入 `SKIP`（不是失败）。
+- 缺 Node / Python / 编译器、找不到 DevEco SDK 等环境依赖时会明确打印
+  `跳过: 原因` 并继续，不会因缺依赖崩掉。
+- soname 检查默认自动探测 DevEco / OHOS SDK 的 `native/llvm/bin`；也可手动指定
+  `GUNCAT_LLVM_BIN=/path/to/native/llvm/bin`。WSL 里若只装了 Windows 版 DevEco，
+  脚本会改用 GNU readelf 读取 ELF（Windows 的 `llvm-readelf.exe` 读不了 `/mnt` 路径）。
+
+> 一键入口只覆盖宿主侧检查；第 3 层真实 ArkTS 编译仍需本机 DevEco，见下节。
 
 ### 第 3 层 · 真实 ArkTS 编译（**只有编译器才知道的规则**）
 

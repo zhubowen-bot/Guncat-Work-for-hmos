@@ -22,8 +22,10 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -47,21 +49,25 @@ LLVM_CANDIDATES = [
 ]
 
 
-def _readelf_bin() -> str:
-    import os
+def _readelf_bin() -> str | None:
+    """找 llvm-readelf。Windows 的 SDK 里带 .exe 后缀，不能只拼无后缀名。"""
     env = os.environ.get("GUNCAT_LLVM_BIN")
-    if env:
-        candidate = os.path.join(env, "llvm-readelf")
-        if os.path.isfile(candidate):
-            return candidate
-    for candidate in LLVM_CANDIDATES:
-        if os.path.isfile(candidate):
-            return candidate
-    return "llvm-readelf"  # 交给 PATH
+    search = ([env] if env else []) + [
+        os.path.dirname(p) for p in LLVM_CANDIDATES if os.path.dirname(p)
+    ]
+    for directory in search:
+        for name in ("llvm-readelf", "llvm-readelf.exe"):
+            candidate = os.path.join(directory, name)
+            if os.path.isfile(candidate):
+                return candidate
+    return shutil.which("llvm-readelf") or shutil.which("llvm-readelf.exe")
 
 
 def readelf(path: pathlib.Path, dyn: bool = True) -> str:
-    cmd = [_readelf_bin()]
+    binary = _readelf_bin()
+    if binary is None:
+        return ""
+    cmd = [binary]
     if dyn:
         cmd.append("-d")
     cmd.append(str(path))
@@ -89,6 +95,10 @@ def main() -> int:
     if not LIBS.is_dir():
         print("找不到 %s" % LIBS)
         return 2 if strict else 0
+    if _readelf_bin() is None:
+        print("找不到 llvm-readelf：请把它加入 PATH，或设 GUNCAT_LLVM_BIN 指向其目录")
+        print("（Windows 的 DevEco SDK 里是 ...\\native\\llvm\\bin\\llvm-readelf.exe）")
+        return 2
 
     shipped = {p.name for p in LIBS.iterdir() if p.is_file()}
     problems = []

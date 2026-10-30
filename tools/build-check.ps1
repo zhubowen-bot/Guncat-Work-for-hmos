@@ -1,4 +1,4 @@
-﻿# ArkTS 真实编译校验(使用 DevEco 自带 hvigor 工具链)
+# ArkTS 真实编译校验(使用 DevEco 自带 hvigor 工具链)
 #
 # 为什么需要它: 项目里的 node 侧 harness(test/guncat-harness)只能验证纯逻辑模块,
 # 覆盖不到 .ets 视图/页面/视图模型。ArkUI 有一批"只有编译器才知道"的规则, 例如:
@@ -72,7 +72,7 @@ $hvigor = Join-Path $ohosDir 'hvigor\bin\hvigor.js'
 # 只做静态检查: 文档坏链 / 随包 .so 依赖闭合 / 许可覆盖。
 # 这三项不需要设备、不需要 qemu, 却能拦住真机上最致命的两类问题(soname 缺失、缺 DT_NEEDED)。
 #
-# 慢的"23 项运行库自检"要 qemu 跑一遍完整 Python 栈(约 10 分钟), 只在需要时手动跑:
+# 慢的"24 项运行库自检"要 qemu 跑一遍完整 Python 栈(约 10 分钟), 只在需要时手动跑:
 #     bash tooling/python/run-verify-stack.sh          (或本脚本加 -Full)
 # 约定: **不要在每次打包时无脑跑它** —— 改个标题也等 10 分钟是不可接受的。
 $full = ($args -contains '-Full') -or ($args -contains '-WithPythonStack')
@@ -138,7 +138,7 @@ if ($hasRootfs) {
       exit 3
     }
   } else {
-    Write-Host '== 已跳过 23 项运行库自检(需要时用 -Full) =='
+    Write-Host '== 已跳过 24 项运行库自检(需要时用 -Full) =='
   }
 } else {
   Write-Host '== 跳过静态检查(未找到 WSL rootfs) =='

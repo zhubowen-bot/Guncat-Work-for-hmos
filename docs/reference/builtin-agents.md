@@ -19,4 +19,4 @@
 | 检索专家-筛滤  | 检索智能体 | 基于 Guncat Srch-Sift：官方溯源与 AI 内容过滤                          |
 | 评估专家-LLM | 评估智能体 | 基于 Guncat Eval-LLM：最大减少幻觉地评估 LLM 模型的性能                     |
 | 交互模式（虚拟） | Agent 模式 | Intelligent UI：同一套 Agent Loop，但回答交付为可操作的原生界面（图表 / 表格 / 卡片 / 表单），调参即时重算、点按钮让助手重算（**侧边栏第一项，也是应用启动落点**） |
-| 工作模式（虚拟） | Agent 模式 | Guncat Harness：本地沙箱工作区 + 45 个工具 + 多轮 Agent Loop，自主完成长程任务并产出文件 |
+| 工作模式（虚拟） | Agent 模式 | Guncat Harness：本地沙箱工作区 + 47 个工具 + 多轮 Agent Loop，自主完成长程任务并产出文件 |

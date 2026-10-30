@@ -74,8 +74,10 @@ export interface ExecStartOptions {
   /** Wall-clock deadline enforced by the engine, even if nobody is polling.
    *  0 or absent = none. On expiry the job is terminated and timedOut is set. */
   timeoutMs?: number;
-  /** Bytes kept per stream (default 4 MiB, clamped to 64 KiB..64 MiB). Output
-   *  beyond it is drained and dropped; the dropped count is reported. */
+  /** Total bytes the caller may receive per stream over the session's life
+   *  (default 4 MiB, clamped to 64 KiB..64 MiB). Output beyond it is drained and
+   *  dropped; the dropped count is reported. Draining early with execPoll does
+   *  not restore the budget. */
   maxOutputBytes?: number;
   /** Job id shared by every process of the tree. Generated when absent. */
   job?: string;

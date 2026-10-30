@@ -3,7 +3,7 @@
 > [← 返回 README](../../README.md)
 
 
-交互模式不是第二套循环，而是**同一套 Agent Loop 的第二种交付形态**。维护时先记住这条边界：**循环、沙箱工作区、上下文压缩全部复用；按模式分叉的只有「系统提示词」「下发到请求里的工具面」与「正文渲染」三处。** 而分叉的重点是**纪律**（不是措辞微调）：工作模式是「多轮工具循环 + 长程交付」，交互模式是「默认零工具、一轮直出界面」—— 纪律既写进提示词，也**物理落实在下发的工具定义上**（见 [2.1](#21-工具面物理裁剪45--27)）。
+交互模式不是第二套循环，而是**同一套 Agent Loop 的第二种交付形态**。维护时先记住这条边界：**循环、沙箱工作区、上下文压缩全部复用；按模式分叉的只有「系统提示词」「下发到请求里的工具面」与「正文渲染」三处。** 而分叉的重点是**纪律**（不是措辞微调）：工作模式是「多轮工具循环 + 长程交付」，交互模式是「默认零工具、一轮直出界面」—— 纪律既写进提示词，也**物理落实在下发的工具定义上**（见 [2.1](#21-工具面物理裁剪47--27)）。
 
 ## 1. 身份与会话模型
 
@@ -90,7 +90,7 @@ ChatViewModel.executeWorkLoop(conv)
 
 体量：21361 → **21287** 字符（移除 identity 1044、新增 prime 1171、DUTY 650 → 449）。本轮**不追求变小**，追求的是"纪律在模型读到语言契约之前就已经立下"。
 
-### 2.1 工具面物理裁剪（45 → 27）
+### 2.1 工具面物理裁剪（47 → 27）
 
 **纪律挡不住"工具就摆在那儿"。** R69 那一轮只改了提示词——工具定义照旧 45 个全量下发，靠一句"默认零工具"约束模型。真机反馈是：模型仍然会顺手调 `todo_write` 建清单、`load_skill` 加载技能、甚至 `subagent` 派子代理——因为这些 schema 就摆在它的可用工具列表里，提示词里的"请不要用"和眼前的工具清单打的是对手仗。所以这一轮改成**物理裁剪**：`AgentLoopService.interactiveToolDefs()` 在下发前把工具定义过一遍 `ToolRegistry.filterInteractive()`，白名单**只留四类场景**（`common/ToolRegistry.ts` 的 `INTERACTIVE_TOOL_WHITELIST`）：
 
@@ -101,7 +101,7 @@ ChatViewModel.executeWorkLoop(conv)
 | 核实外部事实 | `web_fetch` `local_web_search` |
 | 出文件（用户明确要导出） | `write_file` `append_file` `create_dir` `write_csv` `write_svg` `write_docx` `write_xlsx` `write_pptx` `download_file` `list_skills` `load_skill` |
 
-被裁掉的 18 个：`todo_write`、`goal_create` / `goal_get` / `goal_update`、`schedule_create` / `schedule_list` / `schedule_delete`、`subagent`、`session_search`、`ask_user_question`、`edit`、`str_replace_editor`、`delete_file`、`move_file`、`edit_docx` / `edit_xlsx` / `edit_ppt`、`record_search`。
+被裁掉的 20 个：`todo_write`、`goal_create` / `goal_get` / `goal_update`、`schedule_create` / `schedule_list` / `schedule_delete`、`subagent`、`session_search`、`ask_user_question`、`edit`、`str_replace_editor`、`delete_file`、`move_file`、`edit_docx` / `edit_xlsx` / `edit_ppt`、`record_search`、`shell`、`run_python`。
 
 维护这条边界要注意三件事：
 
@@ -114,7 +114,7 @@ ChatViewModel.executeWorkLoop(conv)
 **回归护栏**（两组，`test/guncat-harness/test-core.mjs`）：
 
 - **提示词纪律**："快车道底座不复用工作模式的行为纪律"——谁把 `# 工作流程` / `四步法` / `交付前自检清单` / `# 输出丰富性原则` 拼回交互模式，测试立刻变红；
-- **工具面裁剪**："45 个工具只下发 27 个""保留四类场景""裁掉长程/维护/改稿/问询类""裁剪保持原有顺序""白名单里的工具都是真实工具名""技能段只列格式技能"——谁把长程工具放回白名单，同样立刻变红。
+- **工具面裁剪**："47 个工具只下发 27 个""保留四类场景""裁掉长程/维护/改稿/问询类""裁剪保持原有顺序""白名单里的工具都是真实工具名""技能段只列格式技能"——谁把长程工具放回白名单，同样立刻变红。
 
 **「丰富度」一节（`GuncatUiPrompt.RICHNESS`，约 3.3k 字符）是引导模型产出复杂界面的主要抓手**：只写"一段文字 + 一张表格"在语法上完全合法、但在体验上等于退回普通聊天，而这是模型最容易偷懒的地方，所以单独成段并给了强对照。它包含四块：
 
@@ -302,13 +302,13 @@ B. 回传助手（发一条消息, 触发新一轮回答）
 | 新增图标 | `views/GuncatUiIcons.ets` 的 `glyph()` 映射表（**用 Unicode 字形而不是 SymbolGlyph**：SymbolGlyph 的名字在不同 ROM 上可用集合不一致，缺失时渲染成空白且静默失败）。唯一的例外是折叠箭头 `GuncatUiChevron`：`⌃`/`⌄` 这类字符在不同字体下大小与基线差异极大，真机上是"右下角一个小小的尖、又没对齐"，所以那里特意改用 `sys.symbol.chevron_up/down` |
 | 交互模式专属文案 | `ChatViewModel` 的 `loopModeTitle` / `loopModeHint` / `loopInputPlaceholder` / `loopEmptyDescription` / `loopToolLabel` |
 | 模式常量 | `Constants.INTERACTIVE_AGENT_ID` / `MODE_*` / `UI_BLOCK_LANG` / `UI_CONTINUE_MESSAGE` / `UI_CONTINUE_MAX_ROUNDS` |
-| 交互模式能用哪些工具 | `common/ToolRegistry.ts` 的 `INTERACTIVE_TOOL_WHITELIST`（**正表**，新工具默认不进；改完同步本节 2.1 的表格与 `test-core.mjs` 的 45→27 断言） |
+| 交互模式能用哪些工具 | `common/ToolRegistry.ts` 的 `INTERACTIVE_TOOL_WHITELIST`（**正表**，新工具默认不进；改完同步本节 2.1 的表格与 `test-core.mjs` 的 47→27 断言） |
 | 交互模式能用哪些技能 | `common/SkillDirectoryFormatter.ts` 的 `INTERACTIVE_SKILL_IDS` |
 | 想加一条提示词约束 | 先看本节 2.2 的"家"表 —— **加在它唯一的家里**，不要为了强调再铺一遍到其他段落（重复表述会变成模型的思考负担） |
 | 想改"快"的纪律 | 只改 `PromptBuilder.interactivePrime()`（它固定在第 0 段）；**不要**把纪律再抄进底座或职责段 —— 顺序与唯一性都有断言钉住（见 2.3） |
 
 > **回归护栏（三层，缺一不可）**
-> 1. 纯逻辑单测：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`（521 项，含 guncat-ui lang 的词法/语法/前向引用/流式补齐/绑定重算/`@Each`/内置函数/`Action`/片段切分/状态序列化/图表几何/组件库与提示词，以及交互模式提示词的**段序**（快在最前）、快车道纪律、思考纪律、单一家规则与工具面 45→27 的裁剪断言）。
+> 1. 纯逻辑单测：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`（730 项，含 guncat-ui lang 的词法/语法/前向引用/流式补齐/绑定重算/`@Each`/内置函数/`Action`/片段切分/状态序列化/图表几何/组件库与提示词，以及交互模式提示词的**段序**（快在最前）、快车道纪律、思考纪律、单一家规则与工具面 47→27 的裁剪断言）。
 > 2. 服务层类型检查：`node check-setup.mjs && npx tsc -p check/tsconfig.json`。
 > 3. **真实 ArkTS 编译**：`powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`（调用 DevEco 自带的 hvigor）。
 > 第 3 层不能省：ArkUI 有一批**只有编译器才知道**的规则——`@Builder` 方法体内不允许声明局部变量、自定义组件属性名不能与内置属性同名（`size` / `scale`）、`@Prop` 的 null 需要显式联合类型。这些在 node 侧 harness 里全都测不出来（harness 只覆盖 `common/**` 与 `service/**` 的纯 TS，不解析 `.ets`）。

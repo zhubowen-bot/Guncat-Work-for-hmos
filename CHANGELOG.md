@@ -2,6 +2,11 @@
 
 > [← 返回 README](README.md)
 
+> **历史说明**：7.0.0 及以前的小节是发布时的记录。7.0.1 起 `shell` 已从
+> QEMU/Alpine 改为 IEC 原生执行核（命令是 HarmonyOS `.so`，无虚拟机），文中
+> 关于 QEMU / Alpine / `npy` / `tooling/linux-vm` 的描述仅代表当时状态；当前实现见
+> [docs/architecture/iec-runtime.md](docs/architecture/iec-runtime.md)。
+
 ## 7.0.0（手机上的完整 Linux · 原生 CPython · 三端对齐）
 
 > 一句话：手机第一次真正拿到"能跑程序的电脑"那套能力——完整 Linux（`shell`）与原生

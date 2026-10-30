@@ -1,7 +1,7 @@
 # Guncat Work 原生模块
 #   1) guncatjs: run_js 工具(JSVM-API 沙箱), 内嵌标准 JS 引擎执行动态代码
 #   2) guncatpy: run_python 工具, dlopen libpython3.12.so
-# shell 工具已改为 IEC 原生执行核（third_party/bettersh/iec 的 HAR），不再有 QEMU 桥。
+# shell 工具已改为 IEC 原生执行核（third_party/bettersh/iec 的 HAR），不再有虚拟机桥。
 cmake_minimum_required(VERSION 3.5.0)
 project(guncat_native)
 

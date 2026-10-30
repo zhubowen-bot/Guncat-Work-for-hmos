@@ -45,10 +45,14 @@ hvigorw --no-daemon assembleHap --mode module -p product=default
 | 命令 | so | 入口 |
 | --- | --- | --- |
 | `sh` / `mksh` | `libmksh.so` | `main` |
-| `ls/cat/grep/sed/awk/find/xargs/…`（70+） | `libtoybox.so` | `bsh_toybox_main` |
-| `tar/bsdtar`、`unzip`、`cpio`、`zip` | `libbsdtar.so` / `libbsdunzip.so` / `libbsdcpio.so` / `libzipcmd.so` | `iec_bsdtar_main` 等 |
-| `git`（含 https） | `libgit.so` / `libgit-remote-http.so` | `iec_git_main` / `iec_git_remote_http_main` |
-| `ssh/scp/ssh-keygen/…` | `libdropbear.so` | `iec_dropbear_main` |
+| `toybox` 及 70+ applet（`ls/cat/grep/sed/awk/find/xargs/…`） | `libtoybox.so` | `bsh_toybox_main` |
+| `tar` / `bsdtar` | `libbsdtar.so` | `iec_bsdtar_main` |
+| `unzip` | `libbsdunzip.so` | `iec_bsdunzip_main` |
+| `cpio` / `bsdcpio` | `libbsdcpio.so` | `iec_bsdcpio_main` |
+| `zip` | `libzipcmd.so` | `iec_zip_main` |
+| `git` / `git-upload-pack` / `git-receive-pack` / `git-upload-archive` | `libgit.so` | `iec_git_main` |
+| `git-remote-http` / `git-remote-https` | `libgit-remote-http.so` | `iec_git_remote_http_main` |
+| `ssh` / `scp` / `ssh-keygen` / `dbclient` / `dropbearkey` / `dropbearconvert` / `dropbear` | `libdropbear.so` | `iec_dropbear_main` |
 | `sftp` | `libsftpcmd.so` | `iec_sftp_main` |
 | `nc` | `libnc.so` | `iec_nc_main` |
 | `hexdump` / `hd` | `libhexdump.so` | `iec_hexdump_main` |
@@ -56,13 +60,23 @@ hvigorw --no-daemon assembleHap --mode module -p product=default
 | `jq` | `libjqcmd.so` | `iec_jq_main` |
 | `curl` | `libcurlcmd.so` | `iec_curl_main` |
 | `bc` | `libbccmd.so` | `iec_bc_main` |
-| `node/npm/npx`（条件产物） | `libnode.so` | `iec_node_main` / `iec_npm_main` / `iec_npx_main` |
-| `python3` / `python` | `libpycmd.so`（Guncat 自带） | `iec_python_main` |
+| `node` / `nodejs` | `libnode.so` | `iec_node_main` |
+| `npm` | `libnode.so` | `iec_npm_main` |
+| `npx` | `libnode.so` | `iec_npx_main` |
+| `python3` / `python` | `libpycmd.so` + `libpython3.12.so` | `iec_python_main` |
+
+上表与 `IecRuntime.writeLaunchers()` 的 `add(...)` 完全一致；每个命令只在对应 `.so` 存在时注册
+（`hasSo()`），所以不会出现“命令在、库不在”的误导性 dlopen 错误。
 
 `python3` 走独立解释器进程：应用启动时 `startPyRunner()`（NAPI）在 **CPython 尚未初始化**
 的进程里 fork 一个常驻 runner，runner 自己从不加载 libpython；每个请求再由它 fork 一个
 孙进程，孙进程才 `dlopen libpython3.12.so` 并跑 `Py_BytesMain`。`libpycmd.so` 只是 UDS
 客户端（`NEEDED` 只有 libc），负责把 argv/stdin/env 发过去、把 stdout/stderr/退出码收回来。
+
+`node` 的 `npm` / `npx` 需要 npm 的纯 JS 树：`deps/npm` 打成 `rawfile/tools/npm.tar.gz`
+（约 2.6MB），首次启动由 `unpackResource()`（HAR 里的 `libarchive.so.13`）解到
+`<sysroot>/npm`；`iec_npm_main` 拼出的命令行是 `<sysroot>/npm/bin/npm-cli.js`。
+`libnode.so` 本身 NEEDED `libc.so` 与 `libc++_shared.so`。
 
 这样：被 SIGKILL 只影响那一次请求，runner 不受影响；`sys.exit(n)` 的退出码原样回传；
 子进程的 CPython 永远是干净的，不继承 `run_python` 的解释器状态。
@@ -79,8 +93,9 @@ tools/build-iec-runtime.sh node     # V8，最久
 GitHub 直连在 WSL 里通常不通（`codeload.github.com` 可以）：`pcre2` / `git` / `dropbear`
 源码要先在 Windows 侧 clone 到 `third_party/bettersh/iec/thirdparty/`。
 
-`python3` / `python` 的 launcher 指向 Guncat 自带的 `libpython3.12.so`
-（入口 `Py_BytesMain`）。所以只要那个 `.so` 在包里，shell 里就能起同一个解释器；
+`python3` / `python` 的 launcher 指向 Guncat 自带的 `libpycmd.so`（入口 `iec_python_main`），
+后者把请求转给常驻 python runner；runner 再 fork 的孙进程才 `dlopen libpython3.12.so` 并跑
+`Py_BytesMain`。所以只要 `libpython3.12.so` 在包里，shell 里就能起同一个解释器；
 `PYTHONHOME`/`PYTHONPATH` 由 `IecShellService` 传入。
 
 ## 语义
@@ -90,33 +105,64 @@ GitHub 直连在 WSL 里通常不通（`codeload.github.com` 可以）：`pcre2`
 * 环境：`IecShellService` 显式给 `PATH=<sysroot>/bin:<sysroot>/usr/bin:/usr/bin:/bin`、
   `HOME=<sysroot>/home`、`TMPDIR=<sysroot>/tmp`。**PATH 必须给**——IEC 起进程不会替
   我们拼 PATH，而应用进程自己的环境里没有 launcher 目录，不给就是 `command not found`。
-* Python：launcher `python3`/`python` 指向 Guncat 的 `libpython3.12.so`（`Py_BytesMain`），
-  并在每次调用前把 `PYTHONHOME`/`PYTHONPATH`（stdlib zip + site-packages + extras +
-  bundle libs）传进去，所以 shell 里的 `python3 script.py` 与 `run_python` 是同一份解释器、
-  同一份标准库。首次调用会等 `PythonService.ensureRuntime()` 把 stdlib 解出来。
+* Python：launcher `python3`/`python` 指向 `libpycmd.so`（`iec_python_main`），由常驻
+  python runner 的子进程 `dlopen libpython3.12.so` 并跑 `Py_BytesMain`；每次调用前把
+  `PYTHONHOME`/`PYTHONPATH`（stdlib zip + site-packages + extras + bundle libs）传进去，
+  所以 shell 里的 `python3 script.py` 与 `run_python` 是同一份解释器、同一份标准库。
+  首次调用会等 `PythonService.ensureRuntime()` 把 stdlib 解出来。
 * 超时由引擎线程强制（先 TERM 后 KILL），不依赖 ArkTS 轮询；`timeout_ms`
   上限沿用 `Constants.WORK_SHELL_MAX_TIMEOUT_MS`。
 * 输出超过 `WORK_SHELL_MAX_OUTPUT_BYTES` 时整段落 `.spill/`，返回里给相对路径。
-* 输出含非法 UTF-8（图片/压缩包）时返回 `binary=true`，工具结果会明确提示改用
+* 输出含非法 UTF-8 或 NUL 字节（图片/压缩包）时返回 `binary=true`，工具结果会明确提示改用
   "重定向到文件"或 `base64`，不把乱码当内容。
-* 并发：最多 8 条命令同时跑（`IecRuntime.MAX_RUNS`），超出的排队；每条命令独占
-  4 个管道线程与 8MB 输出缓冲，所以必须有上限。
+* 并发：最多 8 条命令同时跑（`IecRuntime.MAX_RUNS`），超出的排队；每条命令最多占
+  5 个线程（stdin feeder、两条 reader、waiter、watchdog）与 8MB 输出缓冲，所以必须有上限。
 * 作业级取消：每个会话的命令带 `IEC_JOB`，取消时按 job 杀整棵树（管道里的每个
   进程、后台子进程都在内），不会留孤儿。
 
 ## 验收
 
+> 逐项安装、自检、补充检查与故障对照见 [真机验收清单](../guides/device-verification.md)。
+> 本节保留自检脚本的逐段说明。
+
+### 真机自检 `iecSelfTest`
+
 设备在线时，用 Want 参数触发一次自检（不需要模型、不需要 UI 操作；**由你执行**）：
 
 ```bash
+hdc shell aa force-stop com.bowenapp.guncataibeta
 hdc shell aa start -a EntryAbility -b com.bowenapp.guncataibeta --ps iecSelfTest 1
-hdc shell hilog -x | grep -A 20 IecSelfTest
+hdc shell hilog -x | grep -A 120 IecSelfTest
 ```
 
-会依次执行 `uname -s`、`pwd`、`seq 1 3`、`tar -cf`、`python3 -c "print(sys.version...)"`，
-把整段输出打到 `IecSelfTest` 标签下。返回里带 `[exit 0 · …s · cwd …]` 就说明
-shell → mksh → toybox → exec 服务整条链是通的；`python` 段有版本号说明解释器
-launcher 与 `PYTHONHOME` 也对。
+> `onNewWant()` 不处理 `iecSelfTest`，必须在应用未运行时冷启动；否则自检不会执行。
+
+自检由一组**互不阻断**的段组成：每段先打印 `--- 名称`，某项失败只追加一行
+`[FAIL] ...`，后面的段照常执行；每个可能阻塞的命令都套 `timeout 10`，整组以
+60s 工具超时兜底。末行固定为 `SELFTEST DONE`——看到它才说明整组确实跑完了
+（是否有失败再逐行看 `[FAIL]`）。因为最后一条是 `echo`，工具返回头应是
+`[exit 0 · …s · cwd .]`，这不代表所有段都通过。
+
+| 段 | 执行内容 | 期望值 |
+| --- | --- | --- |
+| 基线 | `uname -s`、`pwd` | `Linux`；工作区绝对路径（`<filesDir>/workspaces/__iec_selftest` 一类） |
+| PATH | `command -v` 枚举 `dd md5sum od nproc jq curl bc nc hexdump diff sftp node npm tar unzip zip git ssh python3` | 每个都打 `ok   <名字>`（`ok` 后 3 个空格）；缺失时单独一行 `[FAIL] <名字> not found`，不中断后续段 |
+| mksh 64 位算术 | `v=$((2000000000+2000000000)); echo "2000000000+2000000000=$v"` | `2000000000+2000000000=4000000000`（32 位会溢出成负数，并追加 `[FAIL] arithmetic`） |
+| `/tmp` + `id` | `echo x > /tmp/_t && cat /tmp/_t && rm -f /tmp/_t \|\| echo "[FAIL] /tmp write"`；`id; id 2>/dev/null \| grep -q "uid=" \|\| echo "[FAIL] id (no uid)"` | 打印 `x`；`id` 输出含 `uid=<真实 uid>`，没有 `[FAIL]` |
+| CA + git 网络 | `echo "GIT_SSL_CAINFO=${GIT_SSL_CAINFO:-<empty>}"`；`[ -n "$GIT_SSL_CAINFO" ] && [ -f "$GIT_SSL_CAINFO" ]`；`GIT_TERMINAL_PROMPT=0 git ls-remote https://github.com/git/git.git HEAD` | `GIT_SSL_CAINFO=` 指向存在的 `…/etc/ssl/certs/cacert.pem`；git 输出前 3 行含 40 位 commit，末行 `git ls-remote rc=0 (网络失败不算自检失败)`（网络不通时 `rc=124/128` 只记录，**不判自检失败**） |
+| python3 | `python3 -c "import sys; sys.exit(7)"`；`python3 -c "print(1+1)"` | `rc=7 (expect 7)`（退出码原样透传）；`2` |
+| jq | `printf '{"a":1}\n' \| jq -r .a` | `1` |
+| curl | `curl --version \| head -1` | 以 `curl 8.22.0` 开头 |
+| bc | `echo '1+1' \| bc` | `2` |
+| nc | `nc -h` / 无参，取 usage 首行 | 含 `usage: nc`（自编 nc 没有 `-h` 也走 usage） |
+| hexdump | `printf AB \| hexdump -C` | 首行 `00000000  41 42` + 补齐空格 + `\|AB\|`（`\|` 在第 60 列），第二行 `00000002`（最终偏移） |
+| diff | `/tmp/_d1`=a、`/tmp/_d2`=b，`diff -u` | git 前缀 + unified diff（`-a` / `+b`），末行 `diff rc=1 (expect 1)`（有差异是正确结果） |
+| sftp | `sftp -V` / `sftp -h` / 无参，取首行 | OpenSSH sftp 的 `unknown option -- V` 或 `usage: sftp ...`（没有 `-V` 属正常） |
+| node/npm | `node -v`、`npm -v` | `v22.19.0` 与 `10.9.3`（npm 有版本号说明 `npm-cli.js` 解包与 launcher 都对） |
+| 清理 | `rm -f /tmp/_t /tmp/_d1 /tmp/_d2 t.txt t.tar` | 无输出；随后 `SELFTEST DONE` |
+
+`SELFTEST DONE` 之前的任一行 `[FAIL]` 都对应上表某一项；PATH 段的 `ok   <名字>` 行数应为 19。
+自检只读/临时写 `/tmp` 与工作区内的 `t.txt`/`t.tar`（跑完即删），不碰用户数据。
 
 ## 回退
 

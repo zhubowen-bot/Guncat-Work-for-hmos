@@ -1,8 +1,8 @@
 # 三端实现对照与对齐现状
 
-> 注：7.0.1 起 `shell` 已从 QEMU/Alpine 改为 IEC 原生执行核（命令是 HarmonyOS `.so`，
-> 无虚拟机）。本文中关于 shell 后端的对照记录的是 7.0.0 的状态，当前实现见
-> [architecture/iec-runtime.md](architecture/iec-runtime.md)。
+> **历史文档**：7.0.1 起 `shell` 已从 QEMU/Alpine 改为 IEC 原生执行核（命令是
+> HarmonyOS `.so`，无虚拟机）。本文中关于 shell 后端的对照记录的是 7.0.0 的状态，
+> 当前实现见 [architecture/iec-runtime.md](architecture/iec-runtime.md)。
 
 > 日期：2026-10-28 ｜ 对照：`Guncat-Work-for-pc`(0.2.1)、`Guncat-Work-for-android`(0.2.1)、
 > `Guncat-Work-for-hmos`(7.0.0)
@@ -149,7 +149,7 @@
 
 | 端 | 自动化 | 结果 |
 | --- | --- | --- |
-| 鸿蒙版 | `test/guncat-harness`（纯逻辑 683 项）+ `tsc -p check/tsconfig.json` + `assembleHap` | 683 项全绿、tsc exit 0、BUILD SUCCESSFUL |
+| 鸿蒙版 | `test/guncat-harness`（纯逻辑 730 项）+ `tsc -p check/tsconfig.json` + `assembleHap` | 730 项全绿、tsc exit 0、BUILD SUCCESSFUL |
 | 电脑版 | `scripts/ipc-check.mjs` 等（判定层 + 集成层），CI | 未在本轮重跑 |
 | 安卓版 | 浏览器冒烟（无原生桥，走 JS 回退）+ `typecheck` | 未在本轮重跑 |
 

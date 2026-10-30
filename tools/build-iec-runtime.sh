@@ -25,26 +25,28 @@ export IEC_ZLIB_URL="${IEC_ZLIB_URL:-https://codeload.github.com/madler/zlib/tar
 cd "$IEC"
 
 build_deps() {
-	./scripts/optional/build_zlib.sh
-	./scripts/optional/build_openssl.sh
-	./scripts/optional/build_pcre2.sh
-	./scripts/optional/build_curl.sh
-	./scripts/build_libarchive.sh
-	./scripts/optional/build_git.sh
-	./scripts/optional/build_dropbear.sh
+	bash ./scripts/optional/build_zlib.sh
+	bash ./scripts/optional/build_openssl.sh
+	bash ./scripts/optional/build_pcre2.sh
+	bash ./scripts/optional/build_curl.sh
+	bash ./scripts/build_libarchive.sh
+	bash ./scripts/optional/build_git.sh
+	bash ./scripts/optional/build_dropbear.sh
 }
 
 # 自写/依赖 shim 的补充命令：nc、hexdump、diff 先产出 shim 对象，后面的命令复用。
+# 统一用 `bash <脚本>` 调用：iec 下的脚本在仓库里没有可执行位（Windows 检出也没有），
+# 直接 ./xxx 会 permission denied。
 build_commands() {
-	./scripts/build_extra_commands.sh
-	./scripts/optional/build_jq.sh
-	./scripts/optional/build_curlcmd.sh
-	./scripts/optional/build_bc.sh
-	./scripts/optional/build_sftp.sh
+	bash ./scripts/build_extra_commands.sh
+	bash ./scripts/optional/build_jq.sh
+	bash ./scripts/optional/build_curlcmd.sh
+	bash ./scripts/optional/build_bc.sh
+	bash ./scripts/optional/build_sftp.sh
 }
 
 build_node() {
-	./scripts/optional/build_node.sh all
+	bash ./scripts/optional/build_node.sh all
 }
 
 case "${1:-deps}" in

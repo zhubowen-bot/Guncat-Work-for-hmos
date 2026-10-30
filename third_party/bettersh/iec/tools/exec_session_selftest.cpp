@@ -50,6 +50,8 @@ struct Result {
     int         code = -1;
     bool        exited = false;
     bool        timed_out = false;
+    size_t      out_dropped = 0;
+    size_t      err_dropped = 0;
     std::string error;
 };
 
@@ -89,6 +91,9 @@ Result Run(const iec::ExecOptions& options, int wait_ms) {
             break;
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
+
+    result.out_dropped = state.out_dropped;
+    result.err_dropped = state.err_dropped;
 
     if (!iec::Release(id) && state.exited)
         std::printf("note: release refused for %d\n", id);
@@ -259,6 +264,28 @@ int main(int argc, char** argv) {
         Check(r.out.size() == 64 * 1024,
               "output is capped at the requested size (got " +
                   std::to_string(r.out.size()) + " bytes)");
+    }
+
+    // 7b. The cap is a budget for the whole stream, not a high-water mark on the
+    // buffer. Every burst is a full cap and the 100 ms gap makes the poll loop
+    // drain in between, so a per-buffer cap would hand the caller four caps'
+    // worth. This is the deterministic form of the fast-writer case above, whose
+    // timing only sometimes lands between two fills of the buffer.
+    {
+        iec::ExecOptions options;
+        options.cmd = "sh";
+        options.args = {
+            "-c",
+            "for i in 1 2 3 4; do head -c 65536 /dev/zero; sleep 0.1; done"};
+        options.max_output_bytes = 64 * 1024;
+        const Result r = Run(options, 10000);
+        Check(r.exited && r.code == 0, "burst writer exits 0");
+        Check(r.out.size() == 64 * 1024,
+              "draining between polls does not refill the cap (got " +
+                  std::to_string(r.out.size()) + " bytes)");
+        Check(r.out_dropped == 3 * 64 * 1024,
+              "output beyond the cap is drained and counted (dropped " +
+                  std::to_string(r.out_dropped) + " bytes)");
     }
 
     // 8. a missing program is a refusal, not a hang or a silent success.

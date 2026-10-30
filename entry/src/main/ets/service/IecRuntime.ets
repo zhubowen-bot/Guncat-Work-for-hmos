@@ -1,17 +1,19 @@
 // IecRuntime: 设备内原生执行核（IEC）的接入层。
 //
 // 为什么有它：
-//   * Guncat 原来的 shell 工具是 QEMU TCI 解释执行的完整 Linux（Alpine），
+//   * Guncat 早期的 shell 工具跑在应用进程内的虚拟机里，
 //     一条命令动辄几秒；IEC 把命令编成 HarmonyOS 原生 .so，dlopen 后直接跑，
 //     不需要 JIT 权限，也不需要虚拟机。
 //   * IEC 的 exec 服务是按"替换调用者"设计的（execve shim）；这个文件把它包成
 //     ArkTS 能用的"起一个进程、给三条管道、带超时"的接口。
 //
-// 生命周期：进程内只启动一次；launcher 只在版本戳变化时重写。
+// 生命周期：进程内只启动一次；每次进程启动都会清空并重建 launcher
+// （toybox applet 清单另有一份带 size+mtime 头的缓存，见 APPLET_CACHE）。
 import { common } from '@kit.AbilityKit';
-import { deviceInfo } from '@kit.BasicServicesKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { util } from '@kit.ArkTS';
+import { filterExplicit, parseAppletList } from './IecParsing';
 import {
   ensureDir,
   execKillStale,
@@ -23,6 +25,7 @@ import {
   installCaBundle,
   probeCaps,
   startIecServer,
+  unpackResource,
   writeSoLauncher,
   writeTxtFile
 } from 'iec';
@@ -51,20 +54,46 @@ export interface IecRunResult {
   out: string;
   err: string;
   timedOut: boolean;
-  // 输出里出现了非法 UTF-8（解码成 U+FFFD）。二进制内容应重定向到文件，
-  // 不要当文本用。
+  // 结束程序的信号（0 = 正常退出）。引擎在 Finish() 里同时给 code=128+signal，
+  // 只把 code 交出去会让"被 SIGKILL"与"自己 exit 137"分不开，所以单独带一份。
+  signal: number;
+  // 输出里出现了非法 UTF-8（解码成 U+FFFD）或 NUL 字节。二进制内容应重定向到
+  // 文件，不要当文本用。NUL 单独判是因为它是合法 UTF-8（U+0000），只看替换字符
+  // 会把"全 NUL 的二进制"当文本放过。
   binary: boolean;
   outDropped: number;
   errDropped: number;
-  elapsedMs: number;
+  // 命令根本没起来（execStart 拒绝 / 运行核未就绪），而不是起来了才拿不到状态。
+  // 调用方要靠它区分"启动失败"与"超时后主动终止"，两者都可能是 code<0。
+  startFailed: boolean;
+}
+
+// 两条流"被引擎上限读掉丢弃"的累计字节。主循环、超时后的收尾、drainToEof 都会
+// 更新它：进程退出后读线程仍会从管道里搬出尾巴，那一段同样可能被上限丢掉，只记
+// 主循环最后一次的值会少报，正文提示的字节数就和实际丢弃量对不上。
+class ExecDropped {
+  out: number = 0;
+  err: number = 0;
+}
+
+// `toybox` 无参输出的解析结果。complete=false 表示进程没正常退出（超时/被杀）、
+// 或输出可能在退出瞬间被截断，这份清单不能写进缓存长期沿用。
+interface IecToyboxApplets {
+  names: string[];
+  complete: boolean;
 }
 
 export class IecRuntime {
   private static started: boolean = false;
   private static startError: string = '';
+  // 首调单飞：ensure() 内部有 await（toybox applet 枚举），只用 started 标记挡不住
+  // 并发首调 —— 两条命令同时进来会各自清空/重写 launcher、各自调 execKillStale、
+  // 各自把 npm.tar.gz 解到同一个目录。这里缓存的是同一个 Promise，后来者只等待。
+  private static ensureTask: Promise<string> | undefined = undefined;
 
-  // 并发上限。每次运行占 4 个读/写线程与最多 8MB 缓冲；没有上限时，模型并行
-  // 发十几条命令就能把内存和线程数推上去。超出的排队，不丢请求。
+  // 并发上限。每次运行最多占 5 个线程（stdin feeder、两条 reader、waiter、watchdog）
+  // 与 8MB 缓冲；没有上限时，模型并行发十几条命令就能把内存和线程数推上去。
+  // 超出的排队，不丢请求。
   private static readonly MAX_RUNS: number = 8;
   private static activeRuns: number = 0;
   private static waiters: Array<() => void> = [];
@@ -74,28 +103,38 @@ export class IecRuntime {
       IecRuntime.activeRuns++;
       return;
     }
+    // 等待者不在被唤醒后自增：槽位由 releaseSlot() 直接转交。否则 release 先
+    // activeRuns-- 再唤醒等待者，中间的空档会被新调用者抢走，上限实际变成 9 条。
     await new Promise<void>((resolve: () => void): void => {
       IecRuntime.waiters.push(resolve);
     });
-    IecRuntime.activeRuns++;
   }
 
   private static releaseSlot(): void {
-    IecRuntime.activeRuns--;
     const next: (() => void) | undefined = IecRuntime.waiters.shift();
     if (next !== undefined) {
+      // 槽位原样交给队首，activeRuns 不变。
       next();
+      return;
     }
+    IecRuntime.activeRuns--;
   }
 
   // 启动 exec/tty 服务并铺好 launcher。返回空串表示可用，否则是原因。
-  static async ensure(context: common.UIAbilityContext): Promise<string> {
+  static ensure(context: common.UIAbilityContext): Promise<string> {
     if (IecRuntime.started) {
-      return '';
+      return Promise.resolve('');
     }
     if (IecRuntime.startError !== '') {
-      return IecRuntime.startError;
+      return Promise.resolve(IecRuntime.startError);
     }
+    if (IecRuntime.ensureTask === undefined) {
+      IecRuntime.ensureTask = IecRuntime.doEnsure(context);
+    }
+    return IecRuntime.ensureTask;
+  }
+
+  private static async doEnsure(context: common.UIAbilityContext): Promise<string> {
     try {
       initIecResourceManager(context.resourceManager);
 
@@ -106,7 +145,11 @@ export class IecRuntime {
         'caps packed=0x%{public}s chmod=%{public}d fork=%{public}d exec=%{public}d jit=%{public}d path=%{public}d',
         caps.packed.toString(16), caps.chmod, caps.fork, caps.exec, caps.jit, caps.path);
 
-      IecRuntime.writeLaunchers();
+      const launcherErr: string = IecRuntime.writeLaunchers();
+      if (launcherErr !== '') {
+        IecRuntime.startError = launcherErr;
+        return IecRuntime.startError;
+      }
 
       if (!startIecServer()) {
         IecRuntime.startError = 'IEC 服务启动失败（socket 建不出来）';
@@ -128,6 +171,11 @@ export class IecRuntime {
       // 执行时报 "Unknown command"；反过来 dd/md5sum/od 这些编进去的又没注册。
       await IecRuntime.writeToyboxApplets();
 
+      // npm 是纯 JS 树（node 源码里的 deps/npm），随包成 rawfile/tools/npm.tar.gz，
+      // 首次启动解到 <sysroot>/npm —— iec_npm_main 拼的命令行就是
+      // <sysroot>/npm/bin/npm-cli.js。解包靠 libarchive（HAR 里的 libarchive.so.13）。
+      IecRuntime.unpackNpm();
+
       IecRuntime.started = true;
       hilog.info(DOMAIN, TAG, 'IEC runtime ready');
       return '';
@@ -138,9 +186,17 @@ export class IecRuntime {
     }
   }
 
+  // 显式注册过的命令名。toybox 里也有 nc 之类的 applet，枚举时不能让它把
+  // 我们自己编的 launcher（libnc/hexdump/diff…）覆盖掉。
+  private static explicitNames: Set<string> = new Set<string>();
+
   // 命令 so 的 launcher。写不存在的 so 不会报错（执行到它才失败），这样
   // "构建了哪些命令"不必和这里耦合。
-  private static writeLaunchers(): void {
+  //
+  // 返回空串表示最小可用集（toybox + sh/mksh）都写成功了；否则是失败原因。
+  // 只检查这三个：缺一个可选命令是 "command not found" 的正常降级，缺 shell
+  // 本体却继续启动，只会让之后每条命令都报一个看不出根因的 "cannot start"。
+  private static writeLaunchers(): string {
     ensureDir(BIN_DIR);
     ensureDir(SYSROOT + '/home');
     ensureDir(SYSROOT + '/tmp');
@@ -161,18 +217,24 @@ export class IecRuntime {
     IecRuntime.clearLaunchers();
 
     let fails: number = 0;
+    let essentialFails: number = 0;
     const add = (name: string, so: string, entry: string): void => {
       // primary=0 交给 IEC 按设备能力选 fork / native child process；写死 fork 会在
       // 没有 fork 的渠道上整片失效。
       fails += writeSoLauncher(BIN_DIR + name, BUNDLE_LIBS + so, entry, 2, 0);
+      IecRuntime.explicitNames.add(name);
     };
 
     // toybox 本体的 launcher；具体 applet 在服务起来后按 `toybox` 的输出枚举。
-    add('toybox', 'libtoybox.so', 'bsh_toybox_main');
+    essentialFails += writeSoLauncher(BIN_DIR + 'toybox', BUNDLE_LIBS + 'libtoybox.so',
+      'bsh_toybox_main', 2, 0);
 
     // sh 是 shell 工具的唯一入口：没有它，IecShellService 直接报"运行核未就绪"。
-    add('sh', 'libmksh.so', 'main');
-    add('mksh', 'libmksh.so', 'main');
+    essentialFails += writeSoLauncher(BIN_DIR + 'sh', BUNDLE_LIBS + 'libmksh.so', 'main', 2, 0);
+    essentialFails += writeSoLauncher(BIN_DIR + 'mksh', BUNDLE_LIBS + 'libmksh.so', 'main', 2, 0);
+    IecRuntime.explicitNames.add('toybox');
+    IecRuntime.explicitNames.add('sh');
+    IecRuntime.explicitNames.add('mksh');
 
     // 可选命令按 **实际随包的 so** 注册。指向一个没打进来的 so，报错会是
     // "dlopen /libbsdtar.so: No such file"，看起来像工具坏了；不注册则是干净的
@@ -256,6 +318,66 @@ export class IecRuntime {
     }
 
     hilog.info(DOMAIN, TAG, 'launchers written, failures=%{public}d', fails);
+    if (essentialFails > 0) {
+      return 'IEC launcher 写入失败（toybox/sh/mksh 共 ' + essentialFails.toString() +
+        ' 个），检查 ' + BIN_DIR + ' 是否可写';
+    }
+    return '';
+  }
+
+  // 解 npm 的 JS 树。只在 libnode 随包、且目标还不存在时做。
+  //
+  // "装好了"必须看**完成标记**，不能只看入口文件：npm.tar.gz 里 npm-cli.js 是第 12 个
+  // 条目（共 2697 个），首次解包中途被强停/崩溃会留下"入口在、其余两千多个文件不在"
+  // 的半棵树；只按 access(npm-cli.js) 判断，之后每次启动都会跳过解包，npm 就永久坏在
+  // 这里（报 MODULE_NOT_FOUND，看起来像包本身有问题）。标记只在整包解完后写。
+  private static readonly NPM_CLI: string = SYSROOT + '/npm/bin/npm-cli.js';
+  private static readonly NPM_DIR: string = SYSROOT + '/npm';
+  private static readonly NPM_MARKER: string = SYSROOT + '/npm/.unpack-complete';
+
+  private static unpackNpm(): void {
+    if (!IecRuntime.hasSo('libnode.so')) {
+      return;
+    }
+    try {
+      if (fileIo.accessSync(IecRuntime.NPM_MARKER) && fileIo.accessSync(IecRuntime.NPM_CLI)) {
+        return;
+      }
+    } catch (e) {
+      // accessSync 在文件不存在时抛异常，等同于"还没有"，继续解包。
+    }
+    try {
+      const rc: number = unpackResource('tools/npm.tar.gz', SYSROOT);
+      if (rc !== 0) {
+        hilog.warn(DOMAIN, TAG, 'unpack npm.tar.gz failed: rc=%{public}d', rc);
+        IecRuntime.dropIncompleteNpm();
+        return;
+      }
+      // writeTxtFile 要求父目录已存在；空包/异常情况下 npm 目录可能还没建出来。
+      ensureDir(IecRuntime.NPM_DIR);
+      if (writeTxtFile(IecRuntime.NPM_MARKER, 'ok\n') !== 0) {
+        hilog.warn(DOMAIN, TAG, 'cannot write npm completion marker');
+      }
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'unpack npm.tar.gz failed: %{public}s', JSON.stringify(e));
+      IecRuntime.dropIncompleteNpm();
+    }
+  }
+
+  // 解包失败时删掉完成标记与入口文件，让下次启动重试。先删标记：只要标记不在，
+  // 下次启动就一定重解；入口文件顺带删掉，避免半棵树被别的进程当成品用。
+  private static dropIncompleteNpm(): void {
+    const paths: string[] = [IecRuntime.NPM_MARKER, IecRuntime.NPM_CLI];
+    for (const path of paths) {
+      try {
+        if (fileIo.accessSync(path)) {
+          fileIo.unlinkSync(path);
+        }
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, 'cannot remove partial npm artifact %{public}s: %{public}s',
+          path, JSON.stringify(e));
+      }
+    }
   }
 
   // 清空 launcher 目录。只删文件，不递归；这里的每一项都是 writeSoLauncher 写的。
@@ -276,14 +398,29 @@ export class IecRuntime {
 
   private static readonly APPLET_CACHE: string = SYSROOT + '/.toybox-applets';
 
+  // 缓存头里带上 libtoybox.so 的 size+mtime。升级替换 toybox 之后，旧缓存里的
+  // applet 清单会被当成新库的回答，新增的 applet 永远注册不上（不删缓存就一直缺）。
+  private static appletCacheHeader(): string {
+    try {
+      const st = fileIo.statSync(BUNDLE_LIBS + 'libtoybox.so');
+      return '#toybox ' + st.size.toString() + ' ' + Math.floor(st.mtime).toString();
+    } catch (e) {
+      return '#toybox unknown';
+    }
+  }
+
   // 按 `toybox` 自己的输出注册 applet。缓存到资源根，重启后不再跑一次。
   private static async writeToyboxApplets(): Promise<void> {
-    let names: string[] = IecRuntime.readAppletCache();
+    const header: string = IecRuntime.appletCacheHeader();
+    let names: string[] = IecRuntime.readAppletCache(header);
     if (names.length === 0) {
-      names = await IecRuntime.listToyboxApplets();
-      if (names.length > 0) {
+      const listed: IecToyboxApplets = await IecRuntime.listToyboxApplets();
+      names = listed.names;
+      // 只缓存**完整**的清单：把超时/半截输出写进缓存，之后每次启动都会沿用
+      // 这份残缺清单，缺掉的命令看起来就像 toybox 没编进去。
+      if (names.length > 0 && listed.complete) {
         try {
-          writeTxtFile(IecRuntime.APPLET_CACHE, names.join('\n'));
+          writeTxtFile(IecRuntime.APPLET_CACHE, header + '\n' + names.join('\n'));
         } catch (e) {
           hilog.warn(DOMAIN, TAG, 'cannot cache applet list: %{public}s', JSON.stringify(e));
         }
@@ -293,24 +430,28 @@ export class IecRuntime {
       hilog.warn(DOMAIN, TAG, 'toybox applet list unavailable');
       return;
     }
+    // 显式注册的命令优先：toybox 也有 nc，别把 libnc 的 launcher 覆盖掉。
+    // 跳过空串 / `toybox` / explicitNames 的规则在 IecParsing.filterExplicit 里，
+    // 与 Node 单测共用同一份实现。
+    const writable: string[] = filterExplicit(names, IecRuntime.explicitNames);
     let wrote: number = 0;
-    for (const name of names) {
-      if (name === '' || name === 'toybox') {
-        continue;
-      }
+    for (const name of writable) {
       wrote += writeSoLauncher(BIN_DIR + name, BUNDLE_LIBS + 'libtoybox.so',
         'bsh_toybox_main', 2, 0);
     }
     hilog.info(DOMAIN, TAG, 'toybox applets: %{public}d registered', wrote);
   }
 
-  private static readAppletCache(): string[] {
+  private static readAppletCache(header: string): string[] {
     try {
       if (!fileIo.accessSync(IecRuntime.APPLET_CACHE)) {
         return [];
       }
-      const text: string = fileIo.readTextSync(IecRuntime.APPLET_CACHE);
-      return text.split('\n')
+      const lines: string[] = fileIo.readTextSync(IecRuntime.APPLET_CACHE).split('\n');
+      if (lines.length === 0 || lines[0].trim() !== header) {
+        return [];
+      }
+      return lines.slice(1)
         .map((s: string): string => s.trim())
         .filter((s: string): boolean => s !== '');
     } catch (e) {
@@ -319,8 +460,20 @@ export class IecRuntime {
   }
 
   // 跑一次 `toybox`（无参数会打印 applet 清单，多列排版）。
-  private static async listToyboxApplets(): Promise<string[]> {
+  //
+  // complete 表示拿到的是不是完整清单：引擎在**直接子进程**退出时就置 exited，
+  // 此时两条管道的读取线程可能还没把最后一批字节交出来；只凭一次 poll 就
+  // 返回会把清单截断。这里等到两条管道 EOF（最多 1s，兼顾 continue 后台进程
+  // 占着管道的场景）再解析，并且只有正常退出（code 0）才算完整。
+  private static async listToyboxApplets(): Promise<IecToyboxApplets> {
     let out: string = '';
+    let id: number = -1;
+    let exited: boolean = false;
+    let code: number = -1;
+    // 只有真正读到两条管道 EOF 才算"清单完整"：exited 只说明直接子进程结束，
+    // 而 EOF 要到读线程把管道搬空才会置位；没有它，1s 等不到 EOF 时会缓存一份
+    // 可能被截断的清单。
+    let sawEof: boolean = false;
     try {
       const handle = execStart({
         cmd: 'toybox',
@@ -331,31 +484,59 @@ export class IecRuntime {
         timeoutMs: 5000,
         maxOutputBytes: 512 * 1024
       });
-      const id: number = handle.id;
-      for (let i: number = 0; i < 500; i++) {
+      id = handle.id;
+      // 引擎 5s 超时之外再留 3s 余量；到点仍未退出就主动终止，交给
+      // releaseSession 回收，绝不把运行中的会话直接 Release。
+      const deadline: number = Date.now() + 8000;
+      while (Date.now() < deadline) {
         const poll = execPoll(id, 64 * 1024, 64 * 1024);
         out += poll.out;
         if (poll.exited) {
+          exited = true;
+          code = poll.code;
           break;
         }
         await new Promise<void>((resolve: () => void): void => {
           setTimeout(resolve, 10);
         });
       }
-      execRelease(id);
+      if (exited) {
+        const eofDeadline: number = Date.now() + 1000;
+        while (Date.now() < eofDeadline) {
+          const tail = execPoll(id, 64 * 1024, 64 * 1024);
+          out += tail.out;
+          // 同样要"EOF 且本次没数据"：先见到 EOF 就退出会把缓冲里的清单尾部丢掉。
+          if (tail.outEof && tail.errEof && tail.out === '' && tail.err === '') {
+            sawEof = true;
+            break;
+          }
+          await new Promise<void>((resolve: () => void): void => {
+            setTimeout(resolve, 10);
+          });
+        }
+      } else {
+        hilog.warn(DOMAIN, TAG, 'toybox applet probe did not exit in time; terminating');
+        try {
+          execTerminate(id, 0);
+        } catch (e) {
+          hilog.warn(DOMAIN, TAG, 'terminate toybox probe failed: %{public}s', JSON.stringify(e));
+        }
+      }
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'list toybox applets failed: %{public}s', JSON.stringify(e));
-      return [];
-    }
-    const cleaned: string = out.replace(/[\[\]]/g, ' ');
-    const parts: string[] = cleaned.split(/\s+/);
-    const names: string[] = [];
-    for (const part of parts) {
-      if (part.length > 0 && part.length < 32 && /^[a-z0-9_]+$/.test(part)) {
-        names.push(part);
+      return { names: [], complete: false };
+    } finally {
+      if (id >= 0) {
+        IecRuntime.releaseSession(id);
       }
     }
-    return names;
+    if (!exited || code !== 0) {
+      hilog.warn(DOMAIN, TAG, 'toybox applet probe ended abnormally: exited=%{public}d code=%{public}d',
+        exited ? 1 : 0, code);
+    }
+    // 分词/过滤/去重规则与 Node 单测共用 IecParsing.parseAppletList。
+    const names: string[] = parseAppletList(out);
+    return { names: names, complete: exited && code === 0 && sawEof };
   }
 
   private static readUidGid(): string[] {
@@ -381,7 +562,14 @@ export class IecRuntime {
 
   // 把 IEC 内置的 CA 证书铺到 <sysroot>/etc/ssl/certs，git/openssl 系工具就能
   // 按标准路径找到 CA，不依赖 Python 是否已经解包、也不用每次手写 GIT_SSL_CAINFO。
+  // 每条命令都会问一次，所以成功结果缓存下来：installCaBundle() 每次都会重写
+  // 整份证书，放在这么热的路径上没有必要。
+  private static caPath: string = '';
+
   static installShellCaBundle(): string {
+    if (IecRuntime.caPath !== '') {
+      return IecRuntime.caPath;
+    }
     const dir: string = SYSROOT + '/etc/ssl/certs';
     const dst: string = dir + '/cacert.pem';
     try {
@@ -389,6 +577,7 @@ export class IecRuntime {
       if (!installCaBundle(dir)) {
         return '';
       }
+      IecRuntime.caPath = dst;
       return dst;
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'ca bundle install failed: %{public}s', JSON.stringify(e));
@@ -406,13 +595,14 @@ export class IecRuntime {
     }
   }
 
-  // 跑一条命令。返回的 out/err 是原始字节（UTF-8 解码由调用方决定）。
+  // 跑一条命令。out/err 是整条流按 UTF-8 解码一次后的文本。
   static async run(context: common.UIAbilityContext, command: string,
     options: IecRunOptions): Promise<IecRunResult> {
-    const startedAt: number = Date.now();
+    // startFailed 先给 true：运行核没起来（下面 ready !== ''）也是"命令没跑"，
+    // 和 execStart 抛错同一种，调用方要按失败处理。
     let result: IecRunResult = {
-      code: -1, out: '', err: '', timedOut: false, binary: false,
-      outDropped: 0, errDropped: 0, elapsedMs: 0
+      code: -1, out: '', err: '', timedOut: false, signal: 0, binary: false,
+      outDropped: 0, errDropped: 0, startFailed: true
     };
 
     const ready: string = await IecRuntime.ensure(context);
@@ -422,7 +612,15 @@ export class IecRuntime {
     }
 
     await IecRuntime.acquireSlot();
+    const outChunks: Uint8Array[] = [];
+    const errChunks: Uint8Array[] = [];
+    const dropped: ExecDropped = new ExecDropped();
     let handleId: number = -1;
+    let code: number = -1;
+    let signal: number = 0;
+    let timedOut: boolean = false;
+    let failure: string = '';
+    let graceful: boolean = false;
     try {
       const handle = execStart({
         cmd: 'sh',
@@ -437,78 +635,234 @@ export class IecRuntime {
 
       const id: number = handleId;
       const deadline: number = Date.now() + options.timeoutMs + 5000;
-      let exited: boolean = false;
-
-      while (!exited) {
-        const poll = execPoll(id, 64 * 1024, 64 * 1024);
-        result.out += poll.out;
-        result.err += poll.err;
-        result.outDropped = poll.outDropped;
-        result.errDropped = poll.errDropped;
+      while (true) {
+        const poll = execPoll(id, 64 * 1024, 64 * 1024, 'base64');
+        IecRuntime.collect(outChunks, poll.out);
+        IecRuntime.collect(errChunks, poll.err);
+        IecRuntime.observeDropped(dropped, poll.outDropped, poll.errDropped);
         if (poll.exited) {
-          result.code = poll.code;
-          result.timedOut = poll.timedOut;
-          exited = true;
+          code = poll.code;
+          signal = poll.signal;
+          timedOut = poll.timedOut;
+          // 引擎 watchdog 可能在“子进程已正常退出、WaitLoop 还没 Finish”的窗口里
+          // 误标超时。exit 0 且无信号说明命令是自己结束的，不能显示“超时终止”。
+          if (code === 0 && signal === 0) {
+            timedOut = false;
+          }
+          graceful = true;
           break;
         }
         if (Date.now() > deadline) {
           // 引擎自己的 timeoutMs 应该已经动手了；这里再兜一层，防止
-          // "服务还活着但命令卡在不可中断的调用里"。
-          execTerminate(id, 200);
-          result.timedOut = true;
-          result.code = -1;
-          // 必须等它真的退出再 release：Release 对运行中的会话会拒绝，
-          // 那一次拒绝就是一条泄漏的会话（4 个线程 + 输出缓冲）。
-          const until: number = Date.now() + 3000;
-          while (Date.now() < until) {
-            const p = execPoll(id, 64 * 1024, 64 * 1024);
-            result.out += p.out;
-            result.err += p.err;
-            if (p.exited) {
-              result.code = p.code;
+          // "服务还活着但命令卡在不可中断的调用里"。原来那条路是发完 SIGKILL
+          // 立刻走人，代价是结果里只剩一个 -1：模型分不清"超时被杀"和"根本没
+          // 起来"。这里改成终止后再收最多 500ms（不是原来否掉的 3 秒），拿到
+          // 引擎记的 128+signal 就报真值，同时把终止前最后一刻的输出与 dropped
+          // 计数一并收进来；500ms 内还是没结束才退回 -1。
+          try {
+            execTerminate(id, 0);
+          } catch (e) {
+            hilog.warn(DOMAIN, TAG, 'terminate %{public}d failed: %{public}s',
+              id, JSON.stringify(e));
+          }
+          timedOut = true;
+          const reclaimUntil: number = Date.now() + 500;
+          while (Date.now() < reclaimUntil) {
+            const tail = execPoll(id, 64 * 1024, 64 * 1024, 'base64');
+            IecRuntime.collect(outChunks, tail.out);
+            IecRuntime.collect(errChunks, tail.err);
+            IecRuntime.observeDropped(dropped, tail.outDropped, tail.errDropped);
+            if (tail.exited) {
+              code = tail.code;
+              signal = tail.signal;
+              // execTerminate(id, 0) 发的是 SIGKILL，它拦不住也处理不了：退出码
+              // 是 0 且没有信号，说明命令在这一轮 poll 之前就自己正常结束了，
+              // 只是没被赶上。那就不该报"超时终止"（会和 exit 0 自相矛盾）。
+              if (code === 0 && signal === 0) {
+                timedOut = false;
+              }
               break;
             }
-            await new Promise<void>((resolve: () => void): void => {
-              setTimeout(resolve, 20);
-            });
+            await IecRuntime.sleep(10);
           }
-          exited = true;
           break;
         }
-        await new Promise<void>((resolve: () => void): void => {
-          setTimeout(resolve, 10);
-        });
+        await IecRuntime.sleep(10);
       }
 
-      // 收尾：把退出瞬间还在管道里的字节读干净。
-      for (let i: number = 0; i < 20; i++) {
-        const tail = execPoll(id, 64 * 1024, 64 * 1024);
-        if (tail.out === '' && tail.err === '') {
-          break;
-        }
-        result.out += tail.out;
-        result.err += tail.err;
+      // 子进程退出不等于管道读干净了：把退出瞬间还在管道里的字节收完。
+      if (graceful && failure === '') {
+        await IecRuntime.drainToEof(id, outChunks, errChunks, dropped, 1000);
       }
     } catch (e) {
-      result.err = IecRuntime.describeFailure(e);
-      hilog.error(DOMAIN, TAG, 'exec failed: %{public}s', result.err);
+      failure = IecRuntime.describeFailure(e);
+      hilog.error(DOMAIN, TAG, 'exec failed: %{public}s', failure);
     } finally {
       if (handleId >= 0) {
-        try {
-          execRelease(handleId);
-        } catch (e) {
-          hilog.warn(DOMAIN, TAG, 'release %{public}d failed: %{public}s',
-            handleId, JSON.stringify(e));
-        }
+        IecRuntime.releaseSession(handleId);
       }
       IecRuntime.releaseSlot();
     }
 
-    // 非 UTF-8 字节在解码时变成 U+FFFD。这里把"输出已损坏"变成显式标记，
-    // 而不是让调用方把乱码当内容用（二进制请重定向到文件，或用 base64）。
-    result.binary = result.out.indexOf('\uFFFD') !== -1 || result.err.indexOf('\uFFFD') !== -1;
-    result.elapsedMs = Date.now() - startedAt;
+    result.code = code;
+    result.signal = signal;
+    result.timedOut = timedOut;
+    result.startFailed = failure !== '';
+    result.outDropped = dropped.out;
+    result.errDropped = dropped.err;
+    result.out = IecRuntime.decodeChunks(outChunks);
+    result.err = IecRuntime.decodeChunks(errChunks);
+    if (failure !== '') {
+      result.err = result.err === '' ? failure : result.err + '\n' + failure;
+    }
+    // 非 UTF-8 字节在解码时变成 U+FFFD；NUL 是合法 UTF-8，解码看不出来，得看
+    // 原始字节。两者任一命中就把"输出已损坏"变成显式标记，而不是让调用方把乱码
+    // 当内容用（二进制请重定向到文件，或用 base64）。
+    result.binary = IecRuntime.hasNulByte(outChunks) || IecRuntime.hasNulByte(errChunks) ||
+      result.out.indexOf('\uFFFD') !== -1 || result.err.indexOf('\uFFFD') !== -1;
     return result;
+  }
+
+  // 记一次 poll 的两条流 dropped 计数。dropped 是累计值且单调不回头，每轮都覆盖
+  // 即可；漏掉某一轮（例如只记主循环、不记收尾）就会少报，正文里的字节数就和
+  // 实际丢弃量对不上。
+  private static observeDropped(dropped: ExecDropped, outDropped: number,
+    errDropped: number): void {
+    dropped.out = outDropped;
+    dropped.err = errDropped;
+  }
+
+  // 原始字节里有没有 NUL。只靠解码后的 U+FFFD 判二进制会漏掉"全是 NUL 或
+  // ASCII+NUL"的内容，那种输出在使用者眼里仍是二进制，当文本交给模型就是乱码。
+  private static hasNulByte(chunks: Uint8Array[]): boolean {
+    for (const chunk of chunks) {
+      for (let i: number = 0; i < chunk.length; i++) {
+        if (chunk[i] === 0) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // 收一次 poll 的字节块。走 base64 而不是让 NAPI 直接把每个 64KB 块解成
+  // UTF-8：块边界落在多字节字符中间时两边都会变成 U+FFFD，超过 64KB 的中文
+  // 输出会被误判成"二进制"，而且落盘内容也坏了。整条流只在最后解码一次。
+  private static collect(chunks: Uint8Array[], encoded: string): void {
+    if (encoded === '') {
+      return;
+    }
+    chunks.push(new util.Base64Helper().decodeSync(encoded));
+  }
+
+  private static decodeChunks(chunks: Uint8Array[]): string {
+    if (chunks.length === 0) {
+      return '';
+    }
+    let total: number = 0;
+    for (const chunk of chunks) {
+      total += chunk.byteLength;
+    }
+    const merged: Uint8Array = new Uint8Array(total);
+    let off: number = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, off);
+      off += chunk.byteLength;
+    }
+    return util.TextDecoder.create('utf-8', { ignoreBOM: true }).decodeToString(merged);
+  }
+
+  // 等到两条管道都 EOF **且会话缓冲取空**。execPoll().exited 只表示**直接
+  // 子进程**结束了，管道读线程可能还没交出最后一批字节；只看一次 poll 是否
+  // 为空会丢掉输出尾部。
+  //
+  // 注意 EOF 的语义：读线程把管道的字节整段搬进会话缓冲后立刻置 outEof/errEof，
+  // 所以 EOF 只说明"不会再有新字节"，**不代表缓冲已经空了**。退出瞬间缓冲里
+  // 可能还压着几 MB（上限 8MB），每次 poll 只取 64KB：若一见到 EOF 就返回，
+  // 只能多取一块，其余全部随 release 丢掉。必须"EOF 且本次没取到字节"才算
+  // 收完；有字节时连续取（每约 1MB 让出一次事件循环），不再每轮 sleep(10)，
+  // 否则 1s 上限内只能搬约 6.4MB。
+  // 后台进程继承着管道时 EOF 可能一直不来，所以仍有 waitMs 上限。
+  //
+  // dropped 也要在这里更新：退出瞬间读线程可能还在把管道里的尾巴搬进会话缓冲，
+  // 上限已经用光时那部分同样算"读掉丢弃"。只在主循环记最后一次值会少报，正文
+  // 里"丢弃 N 字节"就和实际丢弃量对不上。
+  private static async drainToEof(id: number, outChunks: Uint8Array[],
+    errChunks: Uint8Array[], dropped: ExecDropped, waitMs: number): Promise<void> {
+    const until: number = Date.now() + waitMs;
+    let polls: number = 0;
+    while (Date.now() < until) {
+      const poll = execPoll(id, 64 * 1024, 64 * 1024, 'base64');
+      const gotData: boolean = poll.out !== '' || poll.err !== '';
+      IecRuntime.collect(outChunks, poll.out);
+      IecRuntime.collect(errChunks, poll.err);
+      IecRuntime.observeDropped(dropped, poll.outDropped, poll.errDropped);
+      if (poll.outEof && poll.errEof && !gotData) {
+        return;
+      }
+      polls++;
+      if (!gotData) {
+        await IecRuntime.sleep(10);
+      } else if (polls % 16 === 0) {
+        // 有数据就连续取，但不能一直不让出事件循环：命令留下的后台进程持续
+        // 输出时，这个循环会整整忙 waitMs（1s），把 JS 线程占住。每 16 块
+        // （约 1MB）让一次。
+        await IecRuntime.sleep(0);
+      }
+    }
+  }
+
+  private static sleep(ms: number): Promise<void> {
+    return new Promise<void>((resolve: () => void): void => {
+      setTimeout(resolve, ms);
+    });
+  }
+
+  // 释放会话。Release 对运行中的会话会拒绝；拒绝后如果直接放弃，会话的
+  // 线程与输出缓冲会永久留下（每次超时/异常漏一条）。先按 job 发 SIGKILL，
+  // 再在后台重试 Release，直到引擎确认会话结束。Release 抛异常也不能当成
+  // "已释放"直接返回——它同样意味着会话可能还在，要走同一条终止/重试路径。
+  private static releaseSession(id: number): void {
+    try {
+      if (execRelease(id)) {
+        return;
+      }
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'release %{public}d failed: %{public}s',
+        id, JSON.stringify(e));
+    }
+    try {
+      execTerminate(id, 0);
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'terminate %{public}d failed: %{public}s',
+        id, JSON.stringify(e));
+    }
+    IecRuntime.retryRelease(id, 1);
+  }
+
+  private static retryRelease(id: number, attempt: number): void {
+    if (attempt > 30) {
+      hilog.warn(DOMAIN, TAG, 'session %{public}d still running after release retries', id);
+      return;
+    }
+    setTimeout((): void => {
+      let released: boolean = false;
+      try {
+        released = execRelease(id);
+      } catch (e) {
+        released = false;
+      }
+      if (released) {
+        return;
+      }
+      try {
+        execTerminate(id, 0);
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, 'terminate %{public}d failed: %{public}s',
+          id, JSON.stringify(e));
+      }
+      IecRuntime.retryRelease(id, attempt + 1);
+    }, 500);
   }
 
   // 资源根 / 命令目录：给需要拼 PATH 的调用方（IecShellService）用。
@@ -530,11 +884,5 @@ export class IecRuntime {
         '若缺，按 docs/architecture/iec-runtime.md 重新构建。';
     }
     return '命令启动失败: ' + text;
-  }
-
-  // 给状态面板/排障用：当前设备类型与是否已就绪。
-  static status(): string {
-    return 'iec=' + (IecRuntime.started ? 'ready' : 'not-started') +
-      ' device=' + deviceInfo.deviceType;
   }
 }

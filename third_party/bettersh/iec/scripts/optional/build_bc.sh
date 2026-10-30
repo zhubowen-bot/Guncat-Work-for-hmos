@@ -13,13 +13,17 @@
 # Output: platform/ohos/har/libs/arm64-v8a/libbccmd.so
 set -euo pipefail
 
-IEC_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+IEC_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="$IEC_ROOT/scripts/env.sh"
 [ -f "$ENV_FILE" ] || ENV_FILE="$IEC_ROOT/scripts/env.sh.example"
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 # shellcheck disable=SC1091
 source "$IEC_ROOT/scripts/lib/common.sh"
+
+[ -x "$CLANG" ] || command -v "$CLANG" >/dev/null 2>&1 \
+	|| iec_err "clang not found: $CLANG（检查 scripts/env.sh 的 OHOS_SDK）"
+[ -d "$SYSROOT" ] || iec_err "OHOS sysroot not found: $SYSROOT（检查 scripts/env.sh 的 OHOS_SDK）"
 
 VER="1.07.1"
 TAR="$IEC_THIRDPARTY/bc-$VER.tar.gz"
@@ -62,7 +66,11 @@ fi
 [ -s bc/libmath.h ] || iec_err "bc libmath.h was not generated"
 
 # 3) bc 本体
-make -C bc CFLAGS="-O2 -fPIC" > "$WORK/bc.log" 2>&1 \
+# `-o libmath.h`：上面已用宿主 bc 生成好 libmath.h，但 Makefile 把 libmath.h 的
+# 依赖写成 $(fbcOBJ)（目标文件），目标文件在本次构建里比 libmath.h 新，make 会
+# 再次触发 “编 aarch64 fbc 并在本机运行” 的规则而失败（干净树上必现）。用 -o
+# 把 libmath.h 标记为旧文件，禁止该规则，直接用它编译/链接 bc。
+make -C bc -o libmath.h CFLAGS="-O2 -fPIC" > "$WORK/bc.log" 2>&1 \
 	|| { tail -30 "$WORK/bc.log" >&2; iec_err "bc build failed"; }
 
 # 4) 链接成命令 so

@@ -67,15 +67,19 @@ execRelease(handle.id);
 * **env.** Overlaid on this process's environment by default (`envReplace: true`
   makes it the whole environment). `PATH` and `HOME` are filled in when absent.
   `IEC_JOB` is always set by the engine and cannot be overridden.
-* **stdin.** `stdin` is written before `execStart` returns control, then stdin is
-  closed unless `keepStdinOpen` is set. Later writes go through `execWrite`.
+* **stdin.** `stdin` is fed by a detached thread, so `execStart` can return while
+  a large payload is still being written; when `keepStdinOpen` is not set the
+  write end is closed after the payload. Later writes go through `execWrite`.
 * **timeout.** Enforced by a thread inside the engine, not by the caller. A
   command that outlives its deadline is terminated and `timedOut` is set — even
   if the app stopped polling, which is exactly the case the caller cannot cover.
 * **output cap.** `maxOutputBytes` (default 4 MiB, clamped to 64 KiB..64 MiB) is
-  kept per stream. Beyond it the bytes are still read and dropped — a pipe that
-  is not drained would block the program — and `outDropped`/`errDropped` say how
-  much was lost. For larger output, redirect to a file and read it.
+  the total the caller may receive per stream over the session's life. Beyond it
+  the bytes are still read and dropped — a pipe that is not drained would block
+  the program — and `outDropped`/`errDropped` say how much was lost. Draining the
+  buffer early with `execPoll` does not restore the budget: a command that keeps
+  writing still stops at the cap. For larger output, redirect to a file and read
+  it.
 * **exit status.** `code` is 0..255, or 128 + signal with `signal` set. `-1`
   means the status was lost (the service went away), which is distinct from every
   status a program can produce.
@@ -90,8 +94,9 @@ execRelease(handle.id);
 
 ### Concurrency
 
-Each session owns three pipes and four small threads (two readers, one waiter,
-one deadline thread). Sessions are independent; `execStart` from several ArkTS
+Each session owns three pipes and up to five small threads (one stdin feeder when
+input is supplied, two readers, one waiter, one deadline thread when a timeout is
+set). Sessions are independent; `execStart` from several ArkTS
 tasks at once is safe. `execCount()` reports how many are alive, and an app that
 runs many commands should release finished ones — the buffers are per session and
 are only freed on release.

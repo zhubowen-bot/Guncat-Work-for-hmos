@@ -7,13 +7,17 @@
 # Output: platform/ohos/har/libs/arm64-v8a/libjqcmd.so
 set -euo pipefail
 
-IEC_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+IEC_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="$IEC_ROOT/scripts/env.sh"
 [ -f "$ENV_FILE" ] || ENV_FILE="$IEC_ROOT/scripts/env.sh.example"
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 # shellcheck disable=SC1091
 source "$IEC_ROOT/scripts/lib/common.sh"
+
+[ -x "$CLANG" ] || command -v "$CLANG" >/dev/null 2>&1 \
+	|| iec_err "clang not found: $CLANG（检查 scripts/env.sh 的 OHOS_SDK）"
+[ -d "$SYSROOT" ] || iec_err "OHOS sysroot not found: $SYSROOT（检查 scripts/env.sh 的 OHOS_SDK）"
 
 JQ_VER="1.7.1"
 ONIG_VER="6.9.9"
@@ -24,7 +28,7 @@ OUT="$IEC_ROOT/platform/ohos/har/libs/arm64-v8a"
 SHIM_B="$IEC_ROOT/build/extra-cmds"
 CC_TARGET="$CLANG --target=$TARGET --sysroot=$SYSROOT -fuse-ld=lld"
 
-mkdir -p "$WORK"
+mkdir -p "$WORK" "$OUT"
 cd "$WORK"
 
 [ -f jq.tar.gz ] || curl -L --retry 3 -m 600 -o jq.tar.gz \
@@ -37,30 +41,38 @@ cd "$WORK"
 # 1) oniguruma（静态、PIC）
 if [ ! -f "$PREFIX/lib/libonig.a" ]; then
 	cd "$WORK/onig-src"
-	[ -f configure ] || autoreconf -fi > "$WORK/onig-autoreconf.log" 2>&1
+	[ -f configure ] || autoreconf -fi > "$WORK/onig-autoreconf.log" 2>&1 \
+		|| { tail -20 "$WORK/onig-autoreconf.log" >&2; iec_err "oniguruma autoreconf failed"; }
 	./configure --host=aarch64-linux-gnu --build=x86_64-linux-gnu \
 		--prefix="$PREFIX" --disable-shared --enable-static \
-		CC="$CC_TARGET" CFLAGS="-O2 -fPIC" > "$WORK/onig-configure.log" 2>&1
-	make -j"${JOBS:-8}" > "$WORK/onig-make.log" 2>&1
-	make install > "$WORK/onig-install.log" 2>&1
+		CC="$CC_TARGET" CFLAGS="-O2 -fPIC" > "$WORK/onig-configure.log" 2>&1 \
+		|| { tail -20 "$WORK/onig-configure.log" >&2; iec_err "oniguruma configure failed"; }
+	make -j"${JOBS:-8}" > "$WORK/onig-make.log" 2>&1 \
+		|| { tail -20 "$WORK/onig-make.log" >&2; iec_err "oniguruma make failed"; }
+	make install > "$WORK/onig-install.log" 2>&1 \
+		|| { tail -20 "$WORK/onig-install.log" >&2; iec_err "oniguruma install failed"; }
 fi
 [ -f "$PREFIX/lib/libonig.a" ] || iec_err "oniguruma build failed"
 
 # 2) jq 的 libjq.a（PIC）
 cd "$SRC"
-[ -f configure ] || autoreconf -fi > "$WORK/jq-autoreconf.log" 2>&1
+[ -f configure ] || autoreconf -fi > "$WORK/jq-autoreconf.log" 2>&1 \
+	|| { tail -20 "$WORK/jq-autoreconf.log" >&2; iec_err "jq autoreconf failed"; }
 if [ ! -f Makefile ]; then
 	./configure --host=aarch64-linux-gnu --build=x86_64-linux-gnu \
 		--prefix="$PREFIX" --with-oniguruma="$PREFIX" \
 		--disable-docs --disable-maintainer-mode --enable-static --disable-shared \
-		CC="$CC_TARGET" CFLAGS="-O2 -fPIC" > "$WORK/jq-configure.log" 2>&1
+		CC="$CC_TARGET" CFLAGS="-O2 -fPIC" > "$WORK/jq-configure.log" 2>&1 \
+		|| { tail -20 "$WORK/jq-configure.log" >&2; iec_err "jq configure failed"; }
 fi
 # builtin.inc 只是 sed；version.h/config_opts.inc 由 make 规则生成。
 [ -f src/builtin.inc ] || sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"/' -e 's/$/\\n"/' \
 	src/builtin.jq > src/builtin.inc
-make src/version.h src/config_opts.inc > "$WORK/jq-gen.log" 2>&1
+make src/version.h src/config_opts.inc > "$WORK/jq-gen.log" 2>&1 \
+	|| { tail -20 "$WORK/jq-gen.log" >&2; iec_err "jq generated headers failed"; }
 printf '#define JQ_VERSION "%s"\n' "$JQ_VER" > src/version.h
-make -j"${JOBS:-8}" libjq.la > "$WORK/jq-make.log" 2>&1
+make -j"${JOBS:-8}" libjq.la > "$WORK/jq-make.log" 2>&1 \
+	|| { tail -20 "$WORK/jq-make.log" >&2; iec_err "libjq build failed"; }
 [ -f .libs/libjq.a ] || iec_err "libjq build failed"
 
 # 3) 链接成命令 so（复用 extra-cmds 的 shim 对象）

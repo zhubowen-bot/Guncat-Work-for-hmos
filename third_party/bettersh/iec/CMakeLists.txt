@@ -58,6 +58,7 @@ add_executable(iec_server
     main.cpp
     tty/tty_server.cpp
     exec/exec_server.cpp
+    exec/exec_route.cpp
     exec/exec_ncp.cpp
     exec/path_resolver.cpp
     fs/resolver.c

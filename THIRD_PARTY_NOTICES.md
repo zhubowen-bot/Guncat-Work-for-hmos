@@ -39,6 +39,8 @@
 **用途**：`libbsdtar.so` / `libbsdunzip.so` / `libbsdcpio.so` / `libzipcmd.so`
 （`tar`/`unzip`/`cpio`/`zip`），静态链接 zlib。上游 <https://libarchive.org>（3.7.7），
 构建脚本 `iec/scripts/build_libarchive.sh`。
+原文见 [`LICENSES/libarchive-BSD-2-Clause.txt`](LICENSES/libarchive-BSD-2-Clause.txt)
+（libarchive 的 `COPYING`：整体 BSD-2-Clause，各源文件另带自己的版权声明）。
 
 ### 1.5 git — GPL-2.0
 
@@ -62,6 +64,11 @@ PCRE2 / libcurl。
 **用途**：`libnode.so`，`node` / `npm` / `npx`。上游 <https://nodejs.org>（v22.19.0），
 构建脚本 `iec/scripts/optional/build_node.sh`（静态 ICU、OpenSSL、zlib）。
 
+| 项 | 值 |
+| --- | --- |
+| 许可 | Node.js 本体 MIT；随包的 npm 10.9.3 为 Artistic-2.0，ICU 为 Unicode-3.0，OpenSSL 为 Apache-2.0，其余内嵌组件见 Node 源码 `LICENSE` 的 bundled 清单 |
+| 原文 | [`LICENSES/node-LICENSE.txt`](LICENSES/node-LICENSE.txt)（Node 22.19.0 的 `LICENSE`，含上述内嵌组件声明） |
+
 ### 1.8 jq 1.7.1 — MIT
 
 **用途**：`libjqcmd.so`，`jq`（入口 `iec_jq_main`）。上游 <https://github.com/jqlang/jq>
@@ -82,16 +89,18 @@ git 的 https 传输（`libgit-remote-http.so`）也静态链接同一份 libcur
 `iec/scripts/optional/build_curl.sh` 与 `build_curlcmd.sh`。
 原文见 [`LICENSES/curl-LICENSE.txt`](LICENSES/curl-LICENSE.txt)。
 
-### 1.11 GNU bc 1.07.1 — GPL-2.0-or-later
+### 1.11 GNU bc 1.07.1 — GPL-3.0-or-later
 
 **用途**：`libbccmd.so`，`bc`（入口 `iec_bc_main`），未启用 readline。上游
 <https://ftp.gnu.org/gnu/bc/bc-1.07.1.tar.gz>，构建脚本
 `iec/scripts/optional/build_bc.sh`。
 
-> **GPL 声明**：bc 以 GPL-2.0-or-later 分发。本项目**未修改** bc 源码，只做交叉编译
+> **GPL 声明**：bc 1.07.1 以 GPL-3.0-or-later 分发（二进制内嵌的声明为
+> "either version 3 of the License, or (at your option) any later version"）。
+> 本项目**未修改** bc 源码，只做交叉编译
 > 与入口改名；二进制以独立 `.so`（`libbccmd.so`）随包，不与主程序静态合并。
 > 对应源码为上游客 tarball 加本仓库的构建脚本，二者均可公开获取。
-> GPL-2.0 全文见 [`LICENSES/GPL-2.0.txt`](LICENSES/GPL-2.0.txt)。
+> GPL-3.0 全文见 [`LICENSES/GPL-3.0.txt`](LICENSES/GPL-3.0.txt)。
 
 ### 1.12 OpenSSH sftp 9.9p2 — BSD（ISC 风格）
 

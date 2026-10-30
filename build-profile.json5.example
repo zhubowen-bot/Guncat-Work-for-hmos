@@ -1,0 +1,53 @@
+{
+  // 模板：真实 build-profile.json5 不入库（含签名密码与本机证书路径）。
+  // 首次构建前：
+  //   cp build-profile.json5.example build-profile.json5
+  // 再用 DevEco Studio 的 Project Structure → Signing Configs 生成调试签名，
+  // 或手工把 signingConfigs 填成自己的证书。留空也能构建，只是产物未签名。
+  "app": {
+    "signingConfigs": [],
+    "products": [
+      {
+        "name": "default",
+        "signingConfig": "default",
+        "targetSdkVersion": "6.1.1(24)",
+        "compatibleSdkVersion": "6.1.1(24)",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        }
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug",
+      },
+      {
+        "name": "release"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    },
+    {
+      // 设备内原生执行核（IEC）。vendored 在 third_party/bettersh 下，作为本地
+      // 模块参与构建；entry 通过 oh-package 的 file: 依赖使用它的 ArkTS 入口。
+      "name": "iec",
+      "srcPath": "./third_party/bettersh/iec/platform/ohos/har"
+    }
+  ]
+}

@@ -66,10 +66,13 @@ struct ExecOptions {
     // in the caller.
     int timeout_ms = 0;
 
-    // Bytes kept per stream. Output beyond it is read and dropped (a pipe that is
-    // not drained would block the program), and the state reports how much was
-    // dropped. 0 selects the default; the cap exists because a command that
-    // prints for an hour must not become an hour of memory.
+    // Bytes the caller may receive per stream over the session's whole life.
+    // Output beyond it is read and dropped (a pipe that is not drained would
+    // block the program), and the state reports how much was dropped. 0 selects
+    // the default; the cap exists because a command that prints for an hour must
+    // not become an hour of memory. Draining the buffer with Poll() does not
+    // restore the budget: a caller that polls while the program runs still sees
+    // at most this many bytes.
     size_t max_output_bytes = 0;
 
     // The job id. Empty means this module generates one. Every process of the

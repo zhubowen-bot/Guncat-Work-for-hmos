@@ -27,6 +27,7 @@
 #include "elf.h"
 #include "exec_loader.h"
 #include "exec_ncp.h"
+#include "exec_ncp_refusal.h"
 #include "exec_qemu.h"
 #include "exec_route.h"
 #include "exec_shebang.h"
@@ -115,30 +116,9 @@ static bool ResolveSelfPath(std::string* path, pid_t caller) {
 /* ------------------------------------------------------------------ */
 /* Resolver                                                           */
 /* ------------------------------------------------------------------ */
-
-LaunchKind ResolveKind(const std::string& path) {
-    const HostCapabilities& caps = Caps();
-
-    if (caps.fork == 1 && ReadShebang(path))  return LaunchKind::kShebang;
-    if (caps.fork == 1 && IsSoLauncher(path)) return LaunchKind::kSo;
-
-    const uint16_t machine = ElfMachine(path);
-    const bool host_arch = machine == HOST_ARCH;
-
-    // An executable bit that exists only in <path>.IEC_CHMOD is not visible to
-    // execve(): the kernel will still see the old mode and fail. Route such a
-    // file through a loader that does not ask the kernel about the bit.
-    const bool emulated_exec = EmulatedExecutable(path);
-
-    if (host_arch && caps.fork == 1) {
-        if (caps.exec == 2 && !emulated_exec) return LaunchKind::kExec;
-        if (caps.jit > 0) return LaunchKind::kLoader;
-    }
-
-    if (machine == EM_AARCH64) return LaunchKind::kQemu_aarch64;
-    if (machine == EM_X86_64) return LaunchKind::kQemu_x86_64;
-    return LaunchKind::kUnexecutable;
-}
+/* ResolveKind() itself lives in exec_route.cpp: it is a pure question about a path
+ * and the capability word, and keeping it in a file of its own is what lets a host
+ * test link it without dragging in the whole server. */
 
 static bool SearchesPath(CallMethod method) {
     switch (method) {
@@ -335,7 +315,14 @@ void ResetSignalDispositions() {
 
     for (int sig = 1; sig < NSIG; sig++) {
         if (sigaction(sig, nullptr, &old) != 0) continue;
-        if (old.sa_handler == SIG_IGN || old.sa_handler == SIG_DFL) continue;
+        // SIGPIPE 是例外：会话的 stdin feeder 在应用进程里把 SIGPIPE 设成
+        // SIG_IGN（写无读者管道时不要让整个应用被杀）。execve 不会复位被忽略
+        // 的信号，若不在这里显式恢复，所有 shell 命令都会继承“忽略 SIGPIPE”，
+        // `yes | head -1` 这类管道的语义就变了。命令进程必须拿回默认处置。
+        if (sig != SIGPIPE &&
+            (old.sa_handler == SIG_IGN || old.sa_handler == SIG_DFL)) {
+            continue;
+        }
         memset(&dfl, 0, sizeof dfl);
         dfl.sa_handler = SIG_DFL;
         sigemptyset(&dfl.sa_mask);
@@ -405,7 +392,11 @@ void ApplyRequestEnvironment(const SpawnRequest& req) {
  * The probe only proves the API is present; an application can still be told
  * "not allowed" (a code like 16010004) on every attempt. Remembering that turns
  * a per-command delay and a per-command warning into one line at startup, and it
- * is what makes the fork fallback cheap rather than merely correct. */
+ * is what makes the fork fallback cheap rather than merely correct.
+ *
+ * It is latched only for failures that say something about the device. A request
+ * the NCP route cannot carry (a non-.so launch kind, a malformed launcher) must
+ * not be remembered, or the next perfectly startable command pays for it. */
 static std::atomic<bool> g_ncp_refused{false};
 
 static pid_t StartChild(SpawnRequest* req, LaunchKind kind, std::string* why) {
@@ -431,7 +422,13 @@ static pid_t StartChild(SpawnRequest* req, LaunchKind kind, std::string* why) {
         }
         Logger::GetInstance()->LogW("[exec] native child process refused: %s",
                                     ncp_error.c_str());
-        g_ncp_refused.store(true);
+        // Only a refusal by the platform itself is worth remembering. A message
+        // such as "only so file for now!" or "bad launcher ..." describes *this
+        // request* rather than the device, and latching on it would disable a
+        // working NCP route for every later launcher -- on a device without fork,
+        // for every command after the first non-.so one. The prefix list lives in
+        // exec_ncp_refusal.h so a host test can pin it.
+        if (IsNcpPlatformRefusal(ncp_error)) g_ncp_refused.store(true);
         // A launcher that asked for "auto" must not lose the route that works:
         // the probe only proves the library exports the entry point, not that this
         // application is allowed to start a child with it. Fall through to fork --
@@ -839,9 +836,24 @@ bool ExecServer::onExecute(const Packet& req, Reply& reply) {
     // is collecting. Refusing turns that into an error the caller can see.
     if (!sr.cwd.empty()) {
         struct stat st {};
-        if (stat(sr.cwd.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) {
-            Logger::GetInstance()->LogW("[exec] cwd %s is not a directory: %s",
-                                        sr.cwd.c_str(), strerror(errno));
+        // Existing is not the same as enterable: chdir() also needs search
+        // permission, and the launch routes treat a failed chdir() as "stay in the
+        // server's directory", which is exactly the silent wrong-cwd this refusal
+        // exists to prevent. Keep the failing errno from the check that failed:
+        // reading it afterwards can report an unrelated stale errno (for a regular
+        // file that was "No child processes", which sent the reader down the wrong
+        // path).
+        int why = 0;
+        if (stat(sr.cwd.c_str(), &st) != 0) {
+            why = errno;
+        } else if (!S_ISDIR(st.st_mode)) {
+            why = ENOTDIR;
+        } else if (access(sr.cwd.c_str(), X_OK) != 0) {
+            why = errno;
+        }
+        if (why != 0) {
+            Logger::GetInstance()->LogW("[exec] cwd %s is not an enterable directory: %s",
+                                        sr.cwd.c_str(), strerror(why));
             put32(reply.body, 0);
             put32(reply.body, static_cast<uint32_t>(ENOENT));
             return true;

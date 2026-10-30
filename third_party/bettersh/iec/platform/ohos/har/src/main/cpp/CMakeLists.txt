@@ -41,10 +41,12 @@ add_custom_command(
 add_library(iec_har SHARED
     napi_init.cpp
     exec_napi.cpp
+    "${IEC_ROOT}/common/archive_extract.cpp"
     "${IEC_ROOT}/common/ca_bundle.cpp"
     "${IEC_CA_HEADER}"
     "${IEC_ROOT}/tty/tty_server.cpp"
     "${IEC_ROOT}/exec/exec_server.cpp"
+    "${IEC_ROOT}/exec/exec_route.cpp"
     "${IEC_ROOT}/exec/exec_session.cpp"
     "${IEC_ROOT}/exec/py_runner.cpp"
     "${IEC_ROOT}/exec/exec_ncp.cpp"

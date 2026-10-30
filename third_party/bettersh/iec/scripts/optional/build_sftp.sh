@@ -16,13 +16,17 @@
 # Output: platform/ohos/har/libs/arm64-v8a/libsftpcmd.so
 set -euo pipefail
 
-IEC_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+IEC_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="$IEC_ROOT/scripts/env.sh"
 [ -f "$ENV_FILE" ] || ENV_FILE="$IEC_ROOT/scripts/env.sh.example"
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 # shellcheck disable=SC1091
 source "$IEC_ROOT/scripts/lib/common.sh"
+
+[ -x "$CLANG" ] || command -v "$CLANG" >/dev/null 2>&1 \
+	|| iec_err "clang not found: $CLANG（检查 scripts/env.sh 的 OHOS_SDK）"
+[ -d "$SYSROOT" ] || iec_err "OHOS sysroot not found: $SYSROOT（检查 scripts/env.sh 的 OHOS_SDK）"
 
 VER="9.9p2"
 TAR="$IEC_THIRDPARTY/openssh-$VER.tar.gz"
