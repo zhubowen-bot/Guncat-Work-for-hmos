@@ -2,10 +2,145 @@
 
 > [← 返回 README](README.md)
 
-> **历史说明**：7.0.0 及以前的小节是发布时的记录。7.0.1 起 `shell` 已从
-> QEMU/Alpine 改为 IEC 原生执行核（命令是 HarmonyOS `.so`，无虚拟机），文中
+> **历史说明**：7.0.0 及以前的小节是发布时的记录。7.0.0-alpha 起 `shell` 已从
+> QEMU/Alpine 改为 IEC 原生执行核（命令是 HarmonyOS `.so`，无虚拟机），旧小节中
 > 关于 QEMU / Alpine / `npy` / `tooling/linux-vm` 的描述仅代表当时状态；当前实现见
 > [docs/architecture/iec-runtime.md](docs/architecture/iec-runtime.md)。
+
+## 7.0.0-alpha（IEC 原生执行核 · 无虚拟机 shell）
+
+> 一句话：`shell` 从“在应用里跑一台 QEMU 虚拟机”换成 IEC 原生执行核。命令是随包的
+> HarmonyOS `.so`，由执行服务 `fork` 后直接跑；没有虚拟机、没有指令翻译、没有镜像冷启动，
+> shell、`python3`、git 等与 `read_file` / `write_file` 共享同一个文件系统。
+
+本版重点：
+
+- **执行核换血**：`shell` 后端由 QEMU TCI + Alpine 改为 IEC，命令以 HarmonyOS 原生 `.so`
+  分发，不再需要 JIT 或可执行内存权限。
+- **命令集补齐**：mksh、toybox 70+ applet、libarchive 四件套、git、ssh/scp/sftp、jq、curl、
+  bc、nc、hexdump、diff、node/npm/npx 与 `python3` 全部随包。
+- **同一个 Python 3.12**：shell 里的 `python3` 与 `run_python` 共用解释器和标准库，但由独立
+  runner 承载，退出码原样回传，单次崩溃不影响后续命令。
+- **旧实现彻底移除**：QEMU 桥、内核、rootfs、`libqemu` / `libslirp`、`LinuxShellService`、
+  `tooling/linux-vm` 均已删除，不保留慢速回退；后端缺失时直接报配置错误。
+
+### 执行核：从 QEMU/Alpine 换成 IEC
+
+- **不再模拟一台电脑**：旧实现用 QEMU 在应用进程内跑 Alpine，虽不需要 JIT 权限，但每条命令
+  都在逐条解释，重命令动辄数秒到数十秒，而且和原生 CPython 分属两个文件系统、两套进程模型。
+  现在 `shell` 命令都是 HarmonyOS 原生 `.so`，由 IEC 的 exec 服务加载并 `fork` 执行，常见命令
+  的耗时回到 0.2~1.5 秒量级。
+- **分层刻意保持简单**：`IecRuntime.ets` 负责启动执行服务、生成 launcher、按 exec 会话跑命令；
+  `IecShellService.ets` 负责工具参数校验、结果格式化与 `.spill` 落盘；`HarnessTools` 只调用
+  `EntryAbility` 注入的 `shellBackendHook`。ArkTS 与 TS 的边界因此不依赖 ArkTS 模块。
+- **launcher 按实际 `.so` 生成**：启动时清空旧 launcher，再按 HAR `libs/arm64-v8a/` 里真实存在的
+  命令库重建。缺一个 `.so` 时对应命令干净地报 `command not found`，不会留下“命令在、库不在”的
+  误导性 dlopen 错误。显式注册的命令优先于 toybox 同名 applet，避免自编 `nc` / `hexdump` /
+  `diff` 被 toybox 覆盖。
+- **同一份文件系统**：不再有 virtio-9p 与宿主机/客人两份视图。`cwd` 就是会话工作区，`cat
+  data/a.csv` 与 `read_file("data/a.csv")` 读取同一批文件；`shell` 写出的文件立刻能被其它工具
+  看到，其它工具写入的脚本也能直接执行。
+- **环境补齐到“像一个系统”**：显式注入 `PATH` / `HOME` / `TMPDIR`，并把 `/etc`、`/tmp` 映射到
+  sysroot；启动时按真实 uid/gid 生成 `passwd` / `group`，让 `id`、`whoami` 等命令有正确结果。
+  `/usr/bin` 下补齐 `env` / `sh` / `awk` / `sed` / `grep` / `cat` / `python3` / `node` 等入口，
+  `#!/usr/bin/env sh` 这类 shebang 可以直接工作。
+- **mksh 走真语义**：管道、重定向、通配符、命令替换、here-doc、`case` / `for` / `while` 都由
+  mksh 执行；算术宽度按 64 位重编，`$((2000000000+2000000000))` 不再溢出成负数。
+- **CA 与网络开箱可用**：IEC 内置证书铺到 `<sysroot>/etc/ssl/certs`，并统一导出
+  `GIT_SSL_CAINFO` / `SSL_CERT_FILE` / `CURL_CA_BUNDLE`；`git clone https://…`、`curl` 与
+  Python 的 `ssl` 都能直接校验证书。
+- **旧栈移除与体积**：QEMU 桥、内核、rootfs、EFI ROM、`libqemu` / `libslirp` 与旧构建链全部
+  删除，约 94MB；当前 HAP 约 452.7MB，主要由 `libnode.so`（约 108MB）、CPython 与科学计算
+  运行库、命令 `.so` 和技能资源构成。`libnode.so` 以 xz 入库，克隆后由脚本还原。
+
+### 随包命令集
+
+| 类别 | 命令 |
+| --- | --- |
+| shell 与基础工具 | `sh` / `mksh`；`toybox` 及 70+ applet（`ls` / `cat` / `grep` / `sed` / `awk` / `find` / `xargs` / `dd` / `md5sum` / `od` / `nproc` 等） |
+| 压缩与归档 | `tar` / `bsdtar`、`unzip`、`zip`、`cpio` / `bsdcpio` |
+| 网络与传输 | `git`（含 HTTPS 与 upload/receive/archive）、`ssh` / `scp` / key 工具（dropbear）、`sftp`、`curl`、`nc` |
+| 数据与文本 | `jq`、`bc`、`hexdump` / `hd`、`diff`（后端为随包 git） |
+| 语言运行时 | `node` / `nodejs` 22.19、`npm` / `npx`、`python3` / `python` |
+
+- 所有命令都以独立 `.so` 分发，入口统一由 IEC 的 exec 服务调用；不再有“先 `apk add` 再装包”
+  这一步，也不依赖镜像预装，能力边界由随包命令集决定。
+- `npm` 的纯 JS 树（约 2.6MB）随包放在 `rawfile/tools/npm.tar.gz`，首次启动解到 `<sysroot>/npm`；
+  以“整包解完”的完成标记判断是否安装，避免半截目录被误当成可用。
+- 命令集中包含自编的 `nc` / `hexdump` / `diff`，语义分别对齐 BSD / util-linux 与
+  `git diff --no-index`，并有宿主侧逐字节对拍。
+
+### shell 里的 `python3`：同一个解释器，独立进程
+
+- **不再经过虚拟机**：旧版要在 VM 里放一个 `npy` 桥，把 Python 请求转给宿主；现在 shell 与
+  `run_python` 直接使用同一份 `libpython3.12.so`、同一套标准库和 site-packages，`npy` 与 9p
+  命令通道随 VM 一起消失。
+- **常驻 runner + 每次请求一个孙进程**：应用启动时在 CPython 尚未初始化的进程里 `fork` 一个
+  runner，runner 自己从不加载 libpython；每个 shell 请求再由它 `fork` 一个孙进程，孙进程才
+  `dlopen libpython3.12.so` 并跑 `Py_BytesMain`。`libpycmd.so` 只是 UDS 客户端，`NEEDED` 只有
+  libc。
+- **退出码与崩溃隔离**：`sys.exit(7)` 原样回传 7；单次请求被 `SIGKILL` 只影响那一次，runner
+  继续服务，后续调用不会继承上一次的解释器状态。Python 的 `Py_Exit()` 走 libc `exit()` 会被
+  ArkTS 运行时的 `atexit` 处理成 `_exit(0)`，这里在孙进程加载 libpython 后改写其 GOT，
+  把 `exit` 指到 `flush + _exit`，只影响 libpython 自身。
+- **超时与取消能收干净**：调用方消失或作业被取消时，runner 把孙进程连同它自己开的进程组一起
+  收掉；不会再留下没人能停的解释器。
+- **边界**：shell 里的 `python3` 不能 `subprocess` 起 `sh`（`/bin/sh` 是文本 launcher，会报
+  `Exec format error`），需要管道时写在外层 shell；解释器环境、随包库与 `run_python` 完全一致。
+
+### shell 语义与资源治理
+
+- **超时由执行核强制**：默认 60 秒、上限 240 秒；到点先 `TERM` 后 `KILL`，不依赖 ArkTS 轮询。
+- **输出有界且可追溯**：stdout / stderr 各自截断到 60KB，完整内容落 `.spill/` 并在结果中给出
+  相对路径；同时区分“引擎因上限丢弃的字节”和“壳层截断”，不再让两者混为一谈。
+- **二进制不装作文本**：输出含非法 UTF-8 或 NUL 字节时标记 `binary=true`，提示改用重定向到
+  文件或 `base64`，避免把图片、压缩包当乱码正文送进上下文。
+- **状态行说人话**：区分 `exit 0`、非零退出码、超时终止、被信号终止、启动失败与“未观测到退出
+  状态”；被信号杀死不再只剩一个裸 `137`。
+- **并发有上限**：同一时刻最多 8 条命令，超出的排队；每条命令有固定的线程与输出缓冲预算。
+- **作业级取消**：每条命令带 `IEC_JOB`，取消时按 job 杀整棵进程树，管道里的每个进程与后台
+  子进程都在内；启动时再按 job 扫描 `/proc`，清掉上次运行遗留的孤儿进程。
+- **stdin 不会挂住**：带数据的 `stdin` 先落成普通文件再重定向，`cat` / `wc` / `read` / `python3`
+  都能等到 EOF；没有 `stdin` 时显式接 `/dev/null`，不会因为等输入而超时。
+- **路径与 shebang 兼容**：`cwd` 必须是工作区内的相对路径，不存在或没有执行权限时明确拒绝；
+  相对路径脚本、`#!/usr/bin/env sh` 与没有 shebang 的文本脚本都有可预期的回落，不再直接
+  `127`。
+- **后台进程会回收**：命令正常结束后按 job 收掉残留的 `&` 后台进程，不会跨调用泄漏。
+- **软链跨工具可见**：文件工具统一解析 `.IEC_SYMLINK`，删除/移动作用于链接本身，父目录软链可
+  穿透；越界与环境变量保护仍在。
+
+### 稳定性、工具链与验证
+
+- **修掉一整批执行核边角**：初始化竞态、并发槽位交接、输出截断、会话泄漏、超时后的
+  `Release` 重试、fd 复用竞态、SIGPIPE 处置、正常退出被误标超时、runner 的 stdin/stdout
+  死锁与错误路径，都在这一轮收口。
+- **静态一致性检查**：新增 `tools/check-iec-libs.py`，核对 launcher 映射、随包 `.so` 是否存在、
+  入口符号、`NEEDED` 白名单、工作区与 index blob 是否一致，以及“源码改了但产物没重编”的
+  新鲜度问题；CI 与本地检查都接入。
+- **本地一键检查**：`scripts/check-all.sh`（`--fast` 跳过慢项）覆盖纯逻辑单测、服务层 `tsc`、
+  文档链接、随包许可、soname、py_runner、IEC 一致性，以及 nc / hexdump / diff 属性对拍、
+  mksh 64 位算术、toybox applet 解析、CA bundle、npm 解包、exec 会话压测等 18 项。
+- **宿主回归不依赖设备**：新增 exec 会话并发/生命周期压测、原生代码 exec 路由 / cwd / NCP /
+  fs shim 回归、py_runner 协议与并发测试，以及 npm 解包、CA 可用性、hexdump / nc / diff 的
+  逐字节对拍；真机侧保留 `iecSelfTest`，8 组共 13 段覆盖 19 个命令、mksh 算术、`/tmp`、CA、
+  `python3` 退出码与 node/npm。
+- **发布前口径统一**：HAP 体积、`.so` 数量、命令表、许可声明（IEC / mksh / toybox / libarchive /
+  git / dropbear / OpenSSH sftp / jq / curl / bc / Node.js）与 `check-all` 项数都按当前产物
+  更新，避免文档继续描述已经删除的 QEMU 时代。
+
+### 升级与已知边界
+
+- **升级不需要迁移镜像**：工作区路径与会话数据结构不变；首次使用 `shell` 不再释放镜像或冷启动。
+  旧版本可能仍在应用私有目录留下 QEMU 镜像，但新版本不再读取，也不会再触发释放；仓库与安装包里
+  已没有这些产物。
+- **没有 QEMU 回退**：执行核没接上时，`shell` 会明确报“shell 后端未初始化”或“运行核加载失败”，
+  不会静默换回一个慢速实现。
+- **仅 arm64-v8a**：命令 `.so` 只构建了 arm64；x86_64 模拟器上 IEC 的 NAPI 会加载失败，`shell`
+  不可用。
+- **没有真 pty 与 job control**：依赖终端的交互式 TUI 不适用；`&` 可以起后台进程，但没有
+  `Ctrl+Z` / `fg` / `bg`。`shell` 工具本来就是非交互执行，这些边界已在工具说明里写明。
+- **不再提供包管理器式扩展**：`apk add` / `pkg install` 那一套已随 VM 一起移除；需要新命令时
+  通过 IEC 构建链编成 `.so` 随包，而不是在设备上现场安装。
 
 ## 7.0.0（手机上的完整 Linux · 原生 CPython · 三端对齐）
 
