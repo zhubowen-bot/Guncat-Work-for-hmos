@@ -25,20 +25,57 @@ import { AbortSignal } from '../common/Types';
 
 // ===== 设备侧 FsAdapter(fileIo 实现) =====
 
+// glob/grep 走这里读工作区。shell 的软链是 `<名字>.IEC_SYMLINK` 标记文件：
+// 列表要还原成逻辑名，读取要跟到目标，否则 `sl.txt` 在 glob/grep 里等同于不存在。
 class DeviceFsAdapter implements FsAdapter {
+  private root: string = '';
+
+  constructor(root: string) {
+    this.root = root;
+  }
+
   list(dirPath: string): string[] {
     try {
-      if (!fileIo.accessSync(dirPath) || !fileIo.statSync(dirPath).isDirectory()) {
+      let real: string | null = WorkFileService.followIecLinksPublic(this.root, dirPath);
+      if (real === null || !fileIo.accessSync(real) || !fileIo.statSync(real).isDirectory()) {
         return [];
       }
-      return fileIo.listFileSync(dirPath);
+      let names: string[] = fileIo.listFileSync(real);
+      let out: string[] = [];
+      let links: string[] = [];
+      for (let i: number = 0; i < names.length; i++) {
+        let name: string = names[i];
+        if (name.endsWith(WorkFileService.IEC_LINK_SUFFIX) &&
+          name.length > WorkFileService.IEC_LINK_SUFFIX.length) {
+          try {
+            let st: fileIo.Stat = fileIo.statSync(real + '/' + name);
+            if (st.isFile() && st.size > 0 && st.size <= 4096) {
+              links.push(name.substring(0, name.length - WorkFileService.IEC_LINK_SUFFIX.length));
+              continue;
+            }
+          } catch (e) {
+            // 读不到就按普通文件列出来
+          }
+        }
+        out.push(name);
+      }
+      for (let i: number = 0; i < links.length; i++) {
+        if (out.indexOf(links[i]) < 0) {
+          out.push(links[i]);
+        }
+      }
+      return out;
     } catch (e) {
       return [];
     }
   }
 
   isDir(path: string): boolean {
+    // 目录软链不递归：成环时 glob/grep 会无限展开。文件链接仍按文件处理。
     try {
+      if (fileIo.accessSync(path + WorkFileService.IEC_LINK_SUFFIX)) {
+        return false;
+      }
       return fileIo.accessSync(path) && fileIo.statSync(path).isDirectory();
     } catch (e) {
       return false;
@@ -47,19 +84,20 @@ class DeviceFsAdapter implements FsAdapter {
 
   readText(path: string, maxBytes: number): string {
     try {
-      if (!fileIo.accessSync(path)) {
+      let real: string | null = WorkFileService.followIecLinksPublic(this.root, path);
+      if (real === null || !fileIo.accessSync(real)) {
         return '';
       }
-      let stat: fileIo.Stat = fileIo.statSync(path);
+      let stat: fileIo.Stat = fileIo.statSync(real);
       if (stat.isDirectory() || stat.size === 0 || stat.size > maxBytes) {
         return '';
       }
-      if (!HarnessTools.isTextFileName(path)) {
+      if (!HarnessTools.isTextFileName(real)) {
         return '';
       }
       let readLen: number = stat.size < maxBytes ? stat.size : maxBytes;
       let buffer: ArrayBuffer = new ArrayBuffer(readLen);
-      let file: fileIo.File = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
+      let file: fileIo.File = fileIo.openSync(real, fileIo.OpenMode.READ_ONLY);
       try {
         fileIo.readSync(file.fd, buffer, { offset: 0 });
       } finally {
@@ -212,7 +250,7 @@ export class HarnessTools {
       return HarnessTools.fail('缺少参数 pattern, 如 "**/*.csv" 或 "assets/*.svg"');
     }
     let baseRel: string = HarnessTools.strArg(args, 'path', '').replace(/^\/+|\/+$/g, '');
-    let adapter: FsAdapter = new DeviceFsAdapter();
+    let adapter: FsAdapter = new DeviceFsAdapter(root);
     let skip: string[] = [Constants.WORK_SPILL_DIR];
     let hits: GlobHit[] = FileSearchCore.globSearch(adapter, root, pattern, baseRel, skip);
     if (hits.length === 0) {
@@ -259,7 +297,7 @@ export class HarnessTools {
     options.maxMatches = maxArg > 0 ? Math.min(maxArg, Constants.WORK_GREP_MAX_MATCHES) :
       Constants.WORK_GREP_MAX_MATCHES;
     let baseRel: string = HarnessTools.strArg(args, 'path', '').replace(/^\/+|\/+$/g, '');
-    let adapter: FsAdapter = new DeviceFsAdapter();
+    let adapter: FsAdapter = new DeviceFsAdapter(root);
     let skip: string[] = [Constants.WORK_SPILL_DIR];
     let hits: GrepHit[] = FileSearchCore.grepSearch(adapter, root, options, baseRel, skip);
     if (hits.length === 0) {
@@ -678,13 +716,16 @@ export class HarnessTools {
       '适用: 批量重命名/批量转换、sed/awk/grep/find/xargs 流水线、tar/zip/gzip 打包、git 版本管理、ssh/scp、跨文件统计与比对、需要真程序的活(随包命令: mksh、toybox 工具集、tar/unzip/zip/cpio、git、ssh/scp)。' +
       '**不要**用它做 read_file/write_file/search_files/glob/grep/transform_file 已经能做好的事(每次调用都有开销); 也不要逐条 `ls`/`cat` 摸索目录 —— 用 list_files/glob 更快。' +
       '语法: 标准 sh(管道、重定向、通配符、变量、&&/||、for/while、函数)。相对路径以工作区根为基准, cwd 可切到子目录。' +
-      '开销: 不需要引导虚拟机; 每条命令的进程创建是毫秒级, CPU 密集任务接近原生速度。' +
+      '**它是 mksh 不是 bash**: `[[ =~ ]]`、`for ((;;))`、`<()`/`>()`、`**` 都不支持, 且 `[[ =~ ]]` 与 `$((x**2))` 是**解析期**致命错误 —— 整条脚本直接 exit 1, `set +e` 拦不住, 只有放进子 shell `( ... )` 才能捕获; 正则改用 `grep -E`, 幂改用 `bc`/`awk` 或连乘, C 风格循环改 while。另外 `^` 在 mksh 里是**异或不是幂**(`$((2^10))` = 8), 求幂不要写 `^`。' +
+      '**工具差异(实测)**: `diff` 后端是 git(输出带 `diff --git`/`index` 头, 按 GNU diff 逐行解析会多出两行, 要简洁比对用 `cmp`); toybox 的 `xargs` 不支持 `-I`(用 `-n1` 或 sh -c)、`grep` 不支持 `-P`(用 `-E`)、`gzip` 不支持 `-l`、`zip` 的组合选项要分开写(`zip -q -r`, 不要 `-qr`); `time` 是 mksh 风格(`0m0.21s real ...`, 时间在前), 取值用 `$1` 不是 `$2`; 每条外部命令有约 0.2 秒的进程创建开销, 批量处理用一条 awk/sed, 不要把外部命令放进 shell 循环; 沙箱不支持硬链接(`ln a b` 会 Permission denied, 用 `cp` 或 `ln -s`); 没有 `expr`(用 `$(( ))`/bc); `mktemp` 用 `mktemp ./t.XXXXXX`(不带参数会落到工作区外, `-p .` 有模板缺陷)。shell 里 `ln -s` 建的软链现在对 read_file/list_files/glob/grep 也可见(按链接目标解析), 删除/移动作用于链接本身。' +
+      '**stdin**: 不传 `stdin` 时命令的 fd0 固定为 /dev/null(读到 EOF); 传了 `stdin` 时工具会先落成普通文件再重定向, `cat`/`wc`/`read`/`python3` 都能正常看到 EOF 而不是挂到超时; Python 计算仍优先 run_python, `python3` 每次启动约 0.6–0.9 秒。' +
+      '开销: 不需要引导虚拟机; 外部命令有约 0.2 秒的固定进程创建成本(内建命令/参数展开只有微秒级), CPU 密集任务接近原生速度。' +
       '限制: 只能访问本会话工作区(/workspace, 隔离于其它会话); 单条命令默认 60 秒超时(可用 timeout_ms 放宽到 240 秒); 输出超过 60KB 会截断, 全文自动存到工作区 .spill/ 目录供 read_file 读回; 退出码非 0 不算工具失败(如 grep 无匹配返回 1), 请按退出码与 stderr 自行判断。',
       HarnessTools.props4(
         'command', HarnessTools.strProp('要执行的 shell 命令(可多行脚本; 引号/管道/重定向按 sh 语义)'),
         'cwd', HarnessTools.strProp('可选: 工作区内的子目录(相对路径, 如 "data"), 默认工作区根'),
         'timeout_ms', HarnessTools.strProp('可选: 超时毫秒数, 默认 60000, 范围 1000~240000'),
-        'stdin', HarnessTools.strProp('可选: 传给命令的标准输入文本')),
+        'stdin', HarnessTools.strProp('可选: 传给命令的标准输入文本; 不传时 fd0 为 /dev/null(读到 EOF)')),
       ['command']));
     defs.push(HarnessTools.makeTool(PythonService.TOOL_NAME,
       '在设备上的**原生 CPython 3.12** 解释器里执行一段 Python(应用进程内, 不经虚拟机、无仿真), 速度接近手机原生 —— 算数/统计/正则/JSON/CSV 处理首选它。' +

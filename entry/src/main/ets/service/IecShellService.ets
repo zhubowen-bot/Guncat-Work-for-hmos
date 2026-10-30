@@ -266,6 +266,10 @@ export class IecShellService {
       "echo '--- python3'",
       'timeout 10 python3 -c "import sys; sys.exit(7)"; echo "rc=$? (expect 7)"',
       'timeout 10 python3 -c "print(1+1)"',
+      // 没有 stdin 的工具调用必须读到 EOF，而不是等一个不会关的管道写端。
+      // cat 无参读 fd0：正常应立即退出 0；挂起则 5 秒后 rc=124，能直接看出回归。
+      "echo '--- stdin EOF'",
+      'timeout 5 cat; echo "cat rc=$? (expect 0, 不能是 124)"',
       // 6. 各补充命令的最小可用性用例。
       "echo '--- jq'",
       "printf '{\"a\":1}\\n' | timeout 10 jq -r .a",
@@ -297,6 +301,16 @@ export class IecShellService {
       'timeout_ms': 60000
     };
     const result: ToolExecResult = await IecShellService.run(context, '__iec_selftest', args);
-    return result.output;
+    // 带 stdin 的独立调用：`cat` 必须读完 4 行后看到 EOF 正常退出。设备上会话
+    // stdin 管道曾经在数据写完后不关写端，cat/wc/read 会挂到超时；这条能把
+    // 回归直接暴露成 rc=124 或超时。
+    let stdinArgs: Record<string, Object> = {
+      'command': 'cat',
+      'stdin': 'L1\nL2\nL3\nL4\n',
+      'timeout_ms': 15000
+    };
+    const stdinProbe: ToolExecResult = await IecShellService.run(context, '__iec_selftest',
+      stdinArgs);
+    return result.output + '\n--- stdin data\n' + stdinProbe.output;
   }
 }

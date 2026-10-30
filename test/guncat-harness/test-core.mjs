@@ -67,7 +67,12 @@ import {
   formatTruncationNote,
   signalName
 } from './gen/ShellResultFormat.ts';
-import { filterExplicit, isSafeRelPath, parseAppletList } from './gen/IecParsing.ts';
+import {
+  filterExplicit,
+  isSafeRelPath,
+  parseAppletList,
+  withStdinClosed
+} from './gen/IecParsing.ts';
 
 let passed = 0;
 let failed = 0;
@@ -2706,6 +2711,19 @@ watchdog wc wget which who whoami xargs xxd yes zcat `;
     [':', 'a:b', 'C:\\tmp', 'a/b:c'].every((p) => !isSafeRelPath(p)));
   check('IecParsing: isSafeRelPath 对反斜杠保持既有语义（设备侧不是分隔符）',
     isSafeRelPath('a\\b') && !isSafeRelPath('..\\a'));
+
+  // withStdinClosed：没有 stdin 时先接 /dev/null 再跑命令，防止 cat/head/python3
+  // 等一个永远不会关的管道写端（真机报告里的"命令不启动"）。
+  const closed = withStdinClosed('cat', '');
+  check('IecParsing: 无 stdin 时在命令前接 /dev/null', closed.endsWith('\ncat'));
+  check('IecParsing: 无 stdin 时使用带存在性判断的 exec 重定向',
+    closed.indexOf('if [ -r /dev/null ]; then exec 0</dev/null; fi') === 0);
+  check('IecParsing: 有 stdin 时命令原样执行（不抢走管道数据）',
+    withStdinClosed('cat', 'hello\n') === 'cat');
+  check('IecParsing: 有 stdin 时多行脚本也不加前缀',
+    withStdinClosed('read x\nprintf "%s" "$x"', 'a\n') === 'read x\nprintf "%s" "$x"');
+  check('IecParsing: 空命令同样只加前缀',
+    withStdinClosed('', '') === 'if [ -r /dev/null ]; then exec 0</dev/null; fi\n');
 }
 
 console.log('');

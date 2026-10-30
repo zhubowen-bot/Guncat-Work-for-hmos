@@ -13,7 +13,7 @@ import { common } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { util } from '@kit.ArkTS';
-import { filterExplicit, parseAppletList } from './IecParsing';
+import { filterExplicit, parseAppletList, withStdinClosed } from './IecParsing';
 import {
   ensureDir,
   execKillStale,
@@ -595,6 +595,39 @@ export class IecRuntime {
     }
   }
 
+  // 工具 stdin 落盘的进程内序号：同毫秒并发两条命令时文件名不能撞。
+  private static stdinSeq: number = 0;
+
+  // 把工具 stdin 写成资源根 tmp 下的普通文件，返回绝对路径；失败返回空串。
+  //
+  // 为什么不直接走 execStart 的 stdin 管道：设备上（NCP 启动路径）数据写完后
+  // 管道写端没有及时关闭，`cat`/`wc`/`read` 读完数据仍等不到 EOF，只能等到工具
+  // 超时；`head -n 2` 因为读够就退出才看起来正常。普通文件读到文件尾天然是 EOF，
+  // 不依赖任何一端的关闭时机。
+  private static writeStdinFile(stdin: string): string {
+    if (stdin === '') {
+      return '';
+    }
+    try {
+      const dir: string = SYSROOT + '/tmp';
+      ensureDir(dir);
+      IecRuntime.stdinSeq++;
+      const path: string = dir + '/.iec-stdin-' + Date.now().toString() + '-' +
+        IecRuntime.stdinSeq.toString();
+      const file = fileIo.openSync(path, fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY |
+        fileIo.OpenMode.TRUNC);
+      try {
+        fileIo.writeSync(file.fd, stdin);
+      } finally {
+        fileIo.closeSync(file);
+      }
+      return path;
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'cannot stage stdin: %{public}s', JSON.stringify(e));
+      return '';
+    }
+  }
+
   // 跑一条命令。out/err 是整条流按 UTF-8 解码一次后的文本。
   static async run(context: common.UIAbilityContext, command: string,
     options: IecRunOptions): Promise<IecRunResult> {
@@ -621,13 +654,25 @@ export class IecRuntime {
     let timedOut: boolean = false;
     let failure: string = '';
     let graceful: boolean = false;
+    // 非空 stdin 先落成普通文件：设备上的会话 stdin 管道在数据写完后没有 EOF，
+    // 读流命令会一直挂到超时。文件路径在 finally 里删掉。
+    let stdinFile: string = IecRuntime.writeStdinFile(options.stdin);
     try {
+      // 有 stdin 时从普通文件重定向；没有时把 fd0 固定到 /dev/null。两条路径都
+      // 保证命令读到 EOF，不依赖管道写端是否关闭。详见 IecParsing.withStdinClosed。
+      const script: string = stdinFile !== ''
+        ? 'exec 0<"' + stdinFile + '"\n' + command
+        : withStdinClosed(command, options.stdin);
       const handle = execStart({
         cmd: 'sh',
-        args: ['-c', command],
+        args: ['-c', script],
         cwd: options.cwd,
         env: options.env,
-        stdin: options.stdin,
+        // 已经走文件重定向时不再让引擎喂管道，避免留下一个永不关闭的写端。
+        stdin: stdinFile !== '' ? '' : options.stdin,
+        // 显式要求写完后关闭 stdin：不能依赖默认值，设备上曾出现过数据写完
+        // 管道写端仍开着、读流命令等不到 EOF 的情况。
+        keepStdinOpen: false,
         timeoutMs: options.timeoutMs,
         maxOutputBytes: options.maxOutputBytes
       });
@@ -702,6 +747,13 @@ export class IecRuntime {
         IecRuntime.releaseSession(handleId);
       }
       IecRuntime.releaseSlot();
+      if (stdinFile !== '') {
+        try {
+          fileIo.unlinkSync(stdinFile);
+        } catch (e) {
+          hilog.warn(DOMAIN, TAG, 'cannot remove staged stdin: %{public}s', JSON.stringify(e));
+        }
+      }
     }
 
     result.code = code;
