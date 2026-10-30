@@ -3443,7 +3443,13 @@ if (this.abortSignal.aborted) {
     call.schemaError = exec.schemaError;
     if (exec.output.length > Constants.WORK_RESULT_MAX_CHARS) {
       let root: string = WorkFileService.workspaceRoot(ctx, convId);
-      let spillRel: string = SpillStore.save(root, call.name, exec.output);
+      // shell 工具可能已经在 .spill/iec-*.log 落了**完整**输出（exec.spillRel）。
+      // 这时不能再把 exec.output（本身已是截断后的头段）存成"完整结果"——那会
+      // 生成一个更小、且缺少尾部 END MARKER 的 shell_*.txt，把模型引向残缺文件。
+      let spillRel: string = exec.spillRel;
+      if (spillRel === '') {
+        spillRel = SpillStore.save(root, call.name, exec.output);
+      }
       let headLen: number = Constants.WORK_SPILL_HEAD_CHARS;
       let tailLen: number = Math.min(Constants.WORK_SPILL_TAIL_CHARS,
         Math.max(0, exec.output.length - headLen));

@@ -216,6 +216,24 @@ export class IecRuntime {
     // launcher，清掉是安全的。
     IecRuntime.clearLaunchers();
 
+    // <sysroot>/usr/bin 在 PATH 里，却一直是空目录：`#!/usr/bin/env sh` 这类
+    // shebang 因此必然 127（内核先 exec /usr/bin/env，找不到就结束，根本轮不到
+    // PATH 搜索）。把最常见的解释器/工具补进 /usr/bin，脚本 shebang 才可用。
+    const usrBin: string = SYSROOT + '/usr/bin';
+    writeSoLauncher(usrBin + '/env', BUNDLE_LIBS + 'libtoybox.so', 'bsh_toybox_main', 2, 0);
+    writeSoLauncher(usrBin + '/sh', BUNDLE_LIBS + 'libmksh.so', 'main', 2, 0);
+    for (const name of ['awk', 'sed', 'grep', 'cat']) {
+      writeSoLauncher(usrBin + '/' + name, BUNDLE_LIBS + 'libtoybox.so',
+        'bsh_toybox_main', 2, 0);
+    }
+    if (IecRuntime.hasSo('libpycmd.so')) {
+      writeSoLauncher(usrBin + '/python3', BUNDLE_LIBS + 'libpycmd.so',
+        'iec_python_main', 2, 0);
+    }
+    if (IecRuntime.hasSo('libnode.so')) {
+      writeSoLauncher(usrBin + '/node', BUNDLE_LIBS + 'libnode.so', 'iec_node_main', 2, 0);
+    }
+
     let fails: number = 0;
     let essentialFails: number = 0;
     const add = (name: string, so: string, entry: string): void => {
@@ -744,6 +762,17 @@ export class IecRuntime {
       hilog.error(DOMAIN, TAG, 'exec failed: %{public}s', failure);
     } finally {
       if (handleId >= 0) {
+        // 命令正常退出后，它用 `&` 留下的后台进程仍挂在同一个 IEC job 上；不主动
+        // 收掉就会在调用返回后继续存活（报告里的 sleep 240 泄漏）。这里按 job 发
+        // 一轮 SIGTERM/SIGKILL；超时路径本来就会 terminate，交给 releaseSession。
+        if (graceful) {
+          try {
+            execTerminate(handleId, 0);
+          } catch (e) {
+            hilog.warn(DOMAIN, TAG, 'terminate leftovers failed: %{public}s',
+              JSON.stringify(e));
+          }
+        }
         IecRuntime.releaseSession(handleId);
       }
       IecRuntime.releaseSlot();

@@ -718,7 +718,8 @@ export class HarnessTools {
       '语法: 标准 sh(管道、重定向、通配符、变量、&&/||、for/while、函数)。相对路径以工作区根为基准, cwd 可切到子目录。' +
       '**它是 mksh 不是 bash**: `[[ =~ ]]`、`for ((;;))`、`<()`/`>()`、`**` 都不支持, 且 `[[ =~ ]]` 与 `$((x**2))` 是**解析期**致命错误 —— 整条脚本直接 exit 1, `set +e` 拦不住, 只有放进子 shell `( ... )` 才能捕获; 正则改用 `grep -E`, 幂改用 `bc`/`awk` 或连乘, C 风格循环改 while。另外 `^` 在 mksh 里是**异或不是幂**(`$((2^10))` = 8), 求幂不要写 `^`。' +
       '**工具差异(实测)**: `diff` 后端是 git(输出带 `diff --git`/`index` 头, 按 GNU diff 逐行解析会多出两行, 要简洁比对用 `cmp`); toybox 的 `xargs` 不支持 `-I`(用 `-n1` 或 sh -c)、`grep` 不支持 `-P`(用 `-E`)、`gzip` 不支持 `-l`、`zip` 的组合选项要分开写(`zip -q -r`, 不要 `-qr`); `time` 是 mksh 风格(`0m0.21s real ...`, 时间在前), 取值用 `$1` 不是 `$2`; 每条外部命令有约 0.2 秒的进程创建开销, 批量处理用一条 awk/sed, 不要把外部命令放进 shell 循环; 沙箱不支持硬链接(`ln a b` 会 Permission denied, 用 `cp` 或 `ln -s`); 没有 `expr`(用 `$(( ))`/bc); `mktemp` 用 `mktemp ./t.XXXXXX`(不带参数会落到工作区外, `-p .` 有模板缺陷)。shell 里 `ln -s` 建的软链现在对 read_file/list_files/glob/grep 也可见(按链接目标解析), 删除/移动作用于链接本身。' +
-      '**stdin**: 不传 `stdin` 时命令的 fd0 固定为 /dev/null(读到 EOF); 传了 `stdin` 时工具会先落成普通文件再重定向, `cat`/`wc`/`read`/`python3` 都能正常看到 EOF 而不是挂到超时; Python 计算仍优先 run_python, `python3` 每次启动约 0.6–0.9 秒。' +
+      '**mksh 其它坑**: fd 只认 0–9, `exec 10>f` 会把 10 当命令(整条脚本 exit 127)、`echo hi 10>f` 更阴(文件里是 `hi 10`); 更多 fd 用 `mkfifo`。`echo` 是内建且默认解释反斜杠转义(单引号也转), 写数据一律 `printf \'%s\\n\'`。花括号只展开词首逗号形式, `{1..5}`、`pre{1,2}post` 不展开。`xargs -n1` 每项起一个进程(约 0.2 秒/项), 批量请用默认合并或单进程 awk。调用返回时会回收该次调用留下的后台进程, `&` 不能跨调用保活。' +
+      '**stdin**: 不传 `stdin` 时命令的 fd0 固定为 /dev/null(读到 EOF); 传了 `stdin` 时工具会先落成普通文件再重定向, `cat`/`wc`/`read`/`python3` 都能正常看到 EOF 而不是挂到超时; Python 计算仍优先 run_python, `python3` 每次启动约 0.6–0.9 秒。shell 里的 `python3` 也不能 `subprocess.run(["sh", ...])`: `/bin/sh` 是文本 launcher, 会 `Exec format error`; 管道/重定向写在外层 shell, 需要 Python 计算时用 `python3 -c` 接管道。' +
       '开销: 不需要引导虚拟机; 外部命令有约 0.2 秒的固定进程创建成本(内建命令/参数展开只有微秒级), CPU 密集任务接近原生速度。' +
       '限制: 只能访问本会话工作区(/workspace, 隔离于其它会话); 单条命令默认 60 秒超时(可用 timeout_ms 放宽到 240 秒); 输出超过 60KB 会截断, 全文自动存到工作区 .spill/ 目录供 read_file 读回; 退出码非 0 不算工具失败(如 grep 无匹配返回 1), 请按退出码与 stderr 自行判断。',
       HarnessTools.props4(
@@ -733,7 +734,7 @@ export class HarnessTools {
       '与 shell 的分工: 这是原生解释器, 标准库完整(sqlite3/ssl/zlib/bz2/lzma/zipfile/csv/json/re/asyncio/threading)。' +
       '**随包三方库(全部离线可用, 直接用 import)**: ' +
       '数值数据 numpy(矩阵/FFT/linalg)、pandas(DataFrame/groupby/read_csv/时间序列)、**scipy**(linalg/optimize/sparse/integrate/signal/interpolate/stats/special); ' +
-      '图像绘图 matplotlib(**必须先 `matplotlib.use("Agg")`**, fig.savefig 出 PNG; **中文开箱可用**, 随包思源黑体已自动注册)、Pillow(Image.open/save/resize; 中文用 `guncat_fonts.pillow_font(size)`); ' +
+      '图像绘图 matplotlib(**必须先 `matplotlib.use("Agg")`**, fig.savefig 出 PNG; **中文开箱可用**, 随包思源黑体已自动注册, 字体族名是 `Source Han Sans SC`——写成 `Source Han Sans CN` 会退回 DejaVu, 中文全变方块)、Pillow(Image.open/save/resize; 中文用 `guncat_fonts.pillow_font(size)`); ' +
       '解析 lxml(etree.fromstring + `.xpath()`, lxml.html + `.cssselect()`)、regex(支持 `\\p{Han}`/`\\p{Emoji}` 等 Unicode 属性, 标准库 re 不支持)、bs4; ' +
       '文档 python-docx、python-pptx、XlsxWriter(带格式/公式/图表)、reportlab(PDF)、pypdf; ' +
       '加密 PyCryptodome(Crypto.Cipher.AES / Crypto.PublicKey.RSA / ECC / SHA3); 数学 sympy; ' +

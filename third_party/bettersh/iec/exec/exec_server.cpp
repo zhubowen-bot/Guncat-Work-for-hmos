@@ -481,9 +481,21 @@ static pid_t StartChild(SpawnRequest* req, LaunchKind kind, std::string* why) {
     return -1;
 }
 
+// Relative paths are relative to the **caller's** cwd, which travels in req.cwd;
+// the server's own cwd is unrelated. Classify against the caller's directory, or
+// `./script.sh` becomes "no such file" in ReadShebang()/ElfMachine() and resolves
+// to kUnexecutable ("[exec] launch kind unsupported"). The child still chdir()s to
+// req.cwd, so an absolute path changes nothing for it.
+static std::string ResolveAgainstCwd(const std::string& path, const std::string& cwd) {
+    if (path.empty() || path[0] == '/' || cwd.empty()) return path;
+    if (cwd.back() == '/') return cwd + path;
+    return cwd + "/" + path;
+}
+
 SpawnResult Spawn(SpawnRequest req) {
     SpawnResult res;
     if (req.path.empty()) { res.error = "path is empty"; return res; }
+    req.path = ResolveAgainstCwd(req.path, req.cwd);
 
     // kAuto means the caller left the decision to us. It is settled before the
     // fork so that both sides agree on what is being started.
@@ -935,7 +947,18 @@ bool ExecServer::onExecute(const Packet& req, Reply& reply) {
     } else {
         sr.path = file;
     }
+    // 相对路径按调用者 cwd 归一化后再判定 launch kind（见 ResolveAgainstCwd）。
+    sr.path = ResolveAgainstCwd(sr.path, sr.cwd);
     sr.kind_hint = ResolveKind(sr.path);
+
+    // 不是 ELF、不是 launcher、也没有 shebang 的文本文件：execve(2) 会返回
+    // ENOEXEC，POSIX shell 收到后会改用 sh 重试（`./v.sh` 没有 shebang 也能跑）。
+    // 若在这里起一个"成功启动但 exit 127"的替身，调用方永远等不到那个 errno。
+    if (sr.kind_hint == LaunchKind::kUnexecutable) {
+        put32(reply.body, 0);
+        put32(reply.body, static_cast<uint32_t>(ENOEXEC));
+        return true;
+    }
 
     // A request turns into a real process whose stdio is the caller's: the fds
     // that came with the request are dup2'd onto the targets the request named, in

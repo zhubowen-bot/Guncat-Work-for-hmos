@@ -20,9 +20,12 @@
 
 #include <arpa/inet.h>
 #include <dlfcn.h>
+#include <elf.h>
 #include <fcntl.h>
+#include <link.h>
 #include <poll.h>
 #include <signal.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -45,6 +48,121 @@ namespace {
 #define IEC_PY_LIBPYTHON "/data/storage/el1/bundle/libs/arm64/libpython3.12.so"
 #endif
 constexpr const char* kLibPython = IEC_PY_LIBPYTHON;
+
+// CPython 的 Py_Exit() 调 libc 的 exit()：sys.exit(n) 和未捕获的 SystemExit
+// 都从这里结束。孙进程是从应用进程一路 fork 下来的，继承了 ArkTS 运行时的
+// atexit 处理器；其中一个会直接 _exit(0)，于是 `python3 -c "sys.exit(3)"`
+// 实测退出码是 0（普通 return 结束的脚本不受影响）。命令 so 用
+// -Wl,--wrap=exit 解决同类问题，但 libpython 是 dlopen 进来的，链接期包不住。
+// 这里在孙进程里把 libpython 的 exit GOT 槽改指向 iec_py_exit()，让结束码
+// 原样落到 _exit()，不运行任何继承来的 atexit 处理器。
+#if defined(__aarch64__)
+extern "C" void iec_py_exit(int status) {
+    fflush(nullptr);
+    _exit(status & 0xff);
+}
+
+struct ExitPatch {
+    const char* library;   // 要匹配的 so 文件名（basename）
+    bool patched;
+};
+
+void RedirectExitSlot(ExitPatch* state, void** slot) {
+    long page = sysconf(_SC_PAGESIZE);
+    if (page <= 0) page = 4096;
+    const uintptr_t addr = reinterpret_cast<uintptr_t>(slot);
+    void* page_addr = reinterpret_cast<void*>(addr & ~static_cast<uintptr_t>(page - 1));
+    // 全 RELRO 时 GOT 页是只读的；先放开写权限（进程私有 COW 页，安全）。
+    if (mprotect(page_addr, static_cast<size_t>(page), PROT_READ | PROT_WRITE) != 0) {
+        return;
+    }
+    *slot = reinterpret_cast<void*>(&iec_py_exit);
+    state->patched = true;
+}
+
+int PatchExitCallback(struct dl_phdr_info* info, size_t, void* data) {
+    ExitPatch* state = static_cast<ExitPatch*>(data);
+    if (info->dlpi_name == nullptr ||
+        strstr(info->dlpi_name, state->library) == nullptr) {
+        return 0;
+    }
+    const ElfW(Dyn)* dyn = nullptr;
+    for (int i = 0; i < info->dlpi_phnum; i++) {
+        if (info->dlpi_phdr[i].p_type == PT_DYNAMIC) {
+            dyn = reinterpret_cast<const ElfW(Dyn)*>(
+                info->dlpi_addr + info->dlpi_phdr[i].p_vaddr);
+            break;
+        }
+    }
+    if (dyn == nullptr) return 0;
+
+    const ElfW(Sym)* symtab = nullptr;
+    const char* strtab = nullptr;
+    const ElfW(Rela)* jmprel = nullptr;
+    size_t pltrelsz = 0;
+    const ElfW(Rela)* rela = nullptr;
+    size_t relasz = 0;
+    for (const ElfW(Dyn)* d = dyn; d->d_tag != DT_NULL; d++) {
+        switch (d->d_tag) {
+            case DT_SYMTAB:
+                symtab = reinterpret_cast<const ElfW(Sym)*>(info->dlpi_addr + d->d_un.d_ptr);
+                break;
+            case DT_STRTAB:
+                strtab = reinterpret_cast<const char*>(info->dlpi_addr + d->d_un.d_ptr);
+                break;
+            case DT_JMPREL:
+                jmprel = reinterpret_cast<const ElfW(Rela)*>(info->dlpi_addr + d->d_un.d_ptr);
+                break;
+            case DT_PLTRELSZ:
+                pltrelsz = static_cast<size_t>(d->d_un.d_val);
+                break;
+            case DT_RELA:
+                rela = reinterpret_cast<const ElfW(Rela)*>(info->dlpi_addr + d->d_un.d_ptr);
+                break;
+            case DT_RELASZ:
+                relasz = static_cast<size_t>(d->d_un.d_val);
+                break;
+            default:
+                break;
+        }
+    }
+    if (symtab == nullptr || strtab == nullptr) return 0;
+
+    auto patch_table = [&](const ElfW(Rela)* table, size_t bytes) {
+        if (table == nullptr) return;
+        const size_t n = bytes / sizeof(ElfW(Rela));
+        for (size_t i = 0; i < n; i++) {
+            const unsigned type = ELF64_R_TYPE(table[i].r_info);
+            if (type != R_AARCH64_JUMP_SLOT && type != R_AARCH64_GLOB_DAT) continue;
+            const size_t sym = ELF64_R_SYM(table[i].r_info);
+            const char* name = strtab + symtab[sym].st_name;
+            if (strcmp(name, "exit") != 0) continue;
+            void** slot = reinterpret_cast<void**>(info->dlpi_addr + table[i].r_offset);
+            RedirectExitSlot(state, slot);
+        }
+    };
+    patch_table(jmprel, pltrelsz);
+    patch_table(rela, relasz);
+    return 1;   // 已找到目标库，停止遍历
+}
+
+// 返回是否至少改到一个 exit 槽。失败时调用方只打一条 stderr，不阻断解释器。
+bool PatchPythonExit() {
+    const char* base = strrchr(kLibPython, '/');
+    base = (base == nullptr) ? kLibPython : base + 1;
+    ExitPatch state{base, false};
+    dl_iterate_phdr(PatchExitCallback, &state);
+    return state.patched;
+}
+#endif  // __aarch64__
+
+#if !defined(__aarch64__)
+// 宿主测试进程没有从 ArkTS 继承 atexit 处理器，CPython 的 exit(n) 本来就正确；
+// 且 GOT 重定位类型与设备不同，这里什么也不做，保持宿主断言原样。
+bool PatchPythonExit() {
+    return true;
+}
+#endif
 
 bool g_started = false;
 
@@ -201,6 +319,11 @@ void HandleClient(int fd) {
         if (lib == nullptr) {
             std::fprintf(stderr, "python3: cannot load %s: %s\n", kLibPython, dlerror());
             _exit(127);
+        }
+        // 必须在 Py_BytesMain 之前改：Py_Exit() 的 exit 调用一旦先走 libc，
+        // 继承的 atexit 处理器就会把 sys.exit(n) 的 n 抹成 0。
+        if (!PatchPythonExit()) {
+            std::fprintf(stderr, "python3: warning: cannot redirect libpython exit()\n");
         }
         using PyBytesMain = int (*)(int, char**);
         PyBytesMain entry = reinterpret_cast<PyBytesMain>(dlsym(lib, "Py_BytesMain"));

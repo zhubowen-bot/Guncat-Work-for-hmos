@@ -45,6 +45,9 @@ export class ToolExecResult {
   timeout: boolean = false;
   cancelled: boolean = false;
   schemaError: boolean = false;
+  // shell 工具已把**完整**输出落盘时给出工作区相对路径（.spill/iec-*.log）。
+  // 上层再做截断时必须复用它，不能再把已截断的 output 存成"完整结果"。
+  spillRel: string = '';
 }
 
 export class WorkFileService {

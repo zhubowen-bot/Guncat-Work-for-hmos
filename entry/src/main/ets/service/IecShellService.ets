@@ -141,6 +141,9 @@ export class IecShellService {
     result.timeout = run.timedOut;
     result.output = IecShellService.format(run, elapsed, cwdRel === '' ? '.' : cwdRel,
       spillOut, spillErr);
+    // 完整输出已经落盘（可能是 stdout 或 stderr）。上层再做"截断 + 暂存"时
+    // 必须指向这个文件，否则会把这里已截断的头段当成"完整结果"再存一份。
+    result.spillRel = spillOut !== '' ? spillOut : spillErr;
     return result;
   }
 
@@ -265,6 +268,8 @@ export class IecShellService {
       // 5. python3：退出码要原样透传（7），标准库也要能 import。
       "echo '--- python3'",
       'timeout 10 python3 -c "import sys; sys.exit(7)"; echo "rc=$? (expect 7)"',
+      // 报告里出现过 python3 退出码被吞成 0 的现象，用 3 再钉一遍（外层不能是管道）。
+      'timeout 10 python3 -c "import sys; sys.exit(3)"; echo "rc=$? (expect 3)"',
       'timeout 10 python3 -c "print(1+1)"',
       // 没有 stdin 的工具调用必须读到 EOF，而不是等一个不会关的管道写端。
       // cat 无参读 fd0：正常应立即退出 0；挂起则 5 秒后 rc=124，能直接看出回归。
