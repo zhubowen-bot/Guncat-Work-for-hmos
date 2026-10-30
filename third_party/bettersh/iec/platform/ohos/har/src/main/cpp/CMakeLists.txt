@@ -41,6 +41,7 @@ add_custom_command(
 add_library(iec_har SHARED
     napi_init.cpp
     exec_napi.cpp
+    "${IEC_ROOT}/common/archive_extract.cpp"
     "${IEC_ROOT}/common/ca_bundle.cpp"
     "${IEC_CA_HEADER}"
     "${IEC_ROOT}/tty/tty_server.cpp"
