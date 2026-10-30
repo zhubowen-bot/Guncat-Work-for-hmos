@@ -50,6 +50,11 @@ jobs:
           python3 tooling/docs-check.py --strict
           python3 tooling/license-check.py --strict
 
+      # 大体积随包库（libnode.so）以 .xz 入库（GitHub 100MB 单文件上限），
+      # 这里先还原；xz 在 ubuntu-latest 自带。check-all.sh 本地也会自动做。
+      - name: 还原大体积随包库
+        run: bash scripts/prepare-big-libs.sh
+
       # 不需要设备/SDK：解析 ETS 的 launcher 映射，校验随包 .so 的 blob 与
       # 工作区字节一致、入口符号、NEEDED 白名单，比较源码与产物的最后提交时间，
       # 并在本机存在 HAP 时检查 libs/arm64-v8a 是否缺库。llvm-nm 缺失时回退
