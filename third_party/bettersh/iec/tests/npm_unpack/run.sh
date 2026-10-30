@@ -77,8 +77,36 @@ printf '== npm unpack: %s\n' "$TAR"
 # ---------- 依赖 ----------
 need "$PYTHON" || true
 if ! command -v "$BSDTAR" >/dev/null 2>&1; then
-    MISSING+=("$BSDTAR")
-    skip "找不到 bsdtar（Ubuntu: apt-get install libarchive-tools）"
+    # 没有 bsdtar 时用 Python 的 tarfile 作参考解包（目的只是得到一棵独立解出的树）。
+    if command -v "$PYTHON" >/dev/null 2>&1; then
+        cat > "$TMP/bsdtar-fallback" <<'PY'
+#!/usr/bin/env python3
+import sys
+import tarfile
+
+args = sys.argv[1:]
+archive = dest = None
+i = 0
+while i < len(args):
+    if args[i] == "-C":
+        dest = args[i + 1]
+        i += 2
+        continue
+    if args[i].startswith("-"):
+        i += 1
+        continue
+    archive = args[i]
+    i += 1
+with tarfile.open(archive, "r:*") as tf:
+    tf.extractall(dest)
+PY
+        chmod +x "$TMP/bsdtar-fallback"
+        BSDTAR="$TMP/bsdtar-fallback"
+        echo "    未找到 bsdtar，改用 python3 tarfile 作参考解包"
+    else
+        MISSING+=("$BSDTAR")
+        skip "找不到 bsdtar（Ubuntu: apt-get install libarchive-tools）"
+    fi
 fi
 if command -v "$PYTHON" >/dev/null 2>&1 && ! have_libarchive; then
     MISSING+=("libarchive")

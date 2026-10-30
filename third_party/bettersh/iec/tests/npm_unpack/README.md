@@ -26,12 +26,13 @@ CXX=clang++ bash .../run.sh                   # 指定 C++17 编译器
 IEC_NPM_TEST_VERBOSE=1 bash .../run.sh        # 打开 IecExtractTar 的 stderr 日志
 ```
 
-依赖 `python3`、`bsdtar`、宿主 libarchive 运行库与 C++17 编译器：
+依赖 `python3`、宿主 libarchive 运行库与 C++17 编译器；`bsdtar` 可选：
 
 ```bash
 # Ubuntu
 sudo apt-get install libarchive-tools libarchive13 python3 g++
-# 没有 root 时也可以只取 bsdtar：
+# 没有 bsdtar 时会自动用 python3 的 tarfile 作参考解包（结果等价，只是少一个
+# 独立实现交叉验证）；装了 bsdtar 则优先用它：
 apt-get download libarchive-tools
 dpkg-deb -x libarchive-tools_*.deb /tmp/la-tools
 BSDTAR=/tmp/la-tools/usr/bin/bsdtar bash .../run.sh

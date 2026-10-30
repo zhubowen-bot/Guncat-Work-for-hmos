@@ -30,6 +30,7 @@
 import argparse
 import ast
 import datetime
+import hashlib
 import os
 import re
 import shutil
@@ -589,6 +590,15 @@ def index_entry(rel_path):
     return parts[0], parts[1]
 
 
+def tracked_rel(rel_path):
+    """产物在 index 里的实际路径：普通 .so，或超限大库的 .so.xz。"""
+    if index_entry(rel_path) is not None:
+        return rel_path
+    if index_entry(rel_path + ".xz") is not None:
+        return rel_path + ".xz"
+    return rel_path
+
+
 def check_lib_files(required_sos, reporter):
     ok = 0
     for so in required_sos:
@@ -607,7 +617,37 @@ def check_lib_files(required_sos, reporter):
 
         entry = index_entry(rel)
         if entry is None:
-            reporter.fail("%s 不在 git index 里（无法证明随包字节可复现）" % rel)
+            # 超大库（libnode.so 108MB）超过 GitHub 单文件上限，仓库里存的是
+            # libnode.so.xz。校验 xz 的 blob 一致，并确认工作区 .so 确实由它解压而来。
+            xz_rel = rel + ".xz"
+            xz_entry = index_entry(xz_rel)
+            if xz_entry is None:
+                reporter.fail("%s 不在 git index 里，也没有 %s.xz（无法证明随包字节可复现）"
+                              % (rel, rel))
+                continue
+            xz_mode, xz_blob = xz_entry
+            if xz_mode == "120000":
+                reporter.fail("%s.xz 在 git index 里是符号链接（mode 120000）" % rel)
+                continue
+            xz_path = REPO_ROOT / xz_rel
+            code, out, _ = git("hash-object", "--", xz_rel)
+            if code != 0 or out.decode("ascii", "replace").strip() != xz_blob:
+                reporter.fail("%s.xz 工作区字节与 index 不一致" % rel)
+                continue
+            try:
+                import lzma
+                with lzma.open(str(xz_path), "rb") as fh:
+                    digest = hashlib.sha256(fh.read()).hexdigest()
+                with open(path, "rb") as fh:
+                    actual = hashlib.sha256(fh.read()).hexdigest()
+            except (OSError, lzma.LZMAError) as exc:
+                reporter.fail("%s 无法解压 %s.xz 校验：%s" % (rel, rel, exc))
+                continue
+            if digest != actual:
+                reporter.fail("%s 不是由 %s.xz 解压得到的（先跑 scripts/prepare-big-libs.sh）"
+                              % (rel, rel))
+                continue
+            ok += 1
             continue
         mode, blob_sha = entry
         if mode == "120000":
@@ -870,7 +910,7 @@ def check_freshness(reporter):
     checked = 0
     for item in FRESHNESS:
         product = item["product"]
-        product_rel = (Path(LIBS_REL) / product).as_posix()
+        product_rel = tracked_rel((Path(LIBS_REL) / product).as_posix())
         product_ts = git_ts((product_rel,))
         if product_ts is None:
             reporter.fail("%s 没有提交记录，无法判断源码新鲜度" % product_rel)
