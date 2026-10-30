@@ -6,9 +6,11 @@ launcher。显式注册的命令（`add(...)` / `writeSoLauncher(...)`）优先�
 同名 toybox applet 覆盖 —— 最典型的是 `nc`：toybox 也带 `nc`，但我们要用自己
 编的 `libnc.so`。
 
-这个测试把同一份 toybox 源码在宿主 x86_64 上编出来，拿**真实输出**喂给一份
-Python 复刻的解析器，验证解析规则、显式覆盖和最终 launcher 集合。不连设备、
-不需要 HarmonyOS SDK、不访问网络。
+这个测试把同一份 toybox 源码在宿主 x86_64 上编出来，拿**真实输出**喂给解析器，
+验证解析规则、显式覆盖和最终 launcher 集合。解析器优先直接加载
+`entry/src/main/ets/service/IecParsing.ts` 的**真实现**（`node
+--experimental-strip-types`）；Node 不可用或版本过旧时才退回 Python 复刻，并在
+输出里说明。不连设备、不需要 HarmonyOS SDK、不访问网络。
 
 ## 运行
 

@@ -159,7 +159,7 @@ Multimodal pre-parsing can be configured separately with its own model, endpoint
 - **IEC diff property tests**: `bash third_party/bettersh/iec/tests/diff_fuzz/run.sh` (100 random file pairs compared byte-for-byte with `git diff --no-index`, plus options/paths/permissions/8 MB)
 - **mksh 64-bit arithmetic regression**: `bash third_party/bettersh/iec/tests/mksh_arith/run.sh` (same source built as 64-bit vs 32-bit, cross-checked against Python big integers)
 - **toybox parsing cross-check**: `bash third_party/bettersh/iec/tests/toybox_parse/run.sh` (host-built toybox output fed through the ArkTS parser rules; explicit commands must win)
-- Pure-logic regression (currently **730 tests**, all green): `cd test/guncat-harness && node setup.mjs && node test-core.mjs`
+- Pure-logic regression (currently **754 tests**, all green): `cd test/guncat-harness && node setup.mjs && node test-core.mjs`
 - Service-layer type check: `cd test/guncat-harness && node check-setup.mjs && npx -y -p typescript@5.5.4 tsc -p check/tsconfig.json`
 - PPT / Word / Excel offline verification environments: `test/pptx-harness`, `test/docx-harness`, `test/xlsx-harness`
 - Real ArkTS compilation (requires DevEco locally): `powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`

@@ -187,7 +187,7 @@ HAP 约 452.7 MB（约 432 MiB；精确字节数随构建与签名变化；原�
 - **toybox 解析交叉验证**：`bash third_party/bettersh/iec/tests/toybox_parse/run.sh`（宿主编 toybox 拿真实 applet 输出，验证显式命令不被覆盖）
 - **IEC 原生代码宿主回归**：`bash third_party/bettersh/iec/scripts/test_iec_native_host.sh`（exec 路由 / cwd 校验 / NCP 拒绝分类 / fs shim 路径映射；已接入 `check-all.sh`，不需要设备或 OHOS SDK）
 - **IEC exec 会话压测**：`bash third_party/bettersh/iec/scripts/stress_exec_session.sh`（8 路并发整条流上限 / 中途终止 / 50 轮 fd 与 RSS / 200 次短会话 / 0-1-50ms 超时；已接入 `check-all.sh`，`--fast` 跳过，不需要设备或 OHOS SDK）
-- 纯逻辑回归（当前 **730 项**全绿）：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`
+- 纯逻辑回归（当前 **754 项**全绿）：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`
 - 服务层类型检查：`cd test/guncat-harness && node check-setup.mjs && npx -y -p typescript@5.5.4 tsc -p check/tsconfig.json`
 - PPT / Word / Excel 离线验证环境：`test/pptx-harness`、`test/docx-harness`、`test/xlsx-harness`
 - **真机验收**（装一次 HAP，逐项确认 shell / IEC）：[真机验收清单](docs/guides/device-verification.md)
