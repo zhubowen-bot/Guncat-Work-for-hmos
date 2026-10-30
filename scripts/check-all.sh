@@ -77,6 +77,7 @@ ITEM_IDS=(
     iec-exec-stress
     iec-libs
     ca-bundle
+    npm-unpack
 )
 ITEM_NAMES=(
     "纯逻辑单测（setup.mjs + test-core.mjs，754 项）"
@@ -96,8 +97,9 @@ ITEM_NAMES=(
     "IEC exec 会话并发/生命周期压测（8 路 / 终止 / fd / 超时）"
     "IEC 随包库检查（tools/check-iec-libs.py）"
     "IEC CA bundle 可用性与接线（curl/python/git 真握手）"
+    "IEC npm 解包宿主回归（2697 条目 / bsdtar 逐文件）"
 )
-ITEM_FAST_SKIP=(0 0 0 0 0 1 1 1 1 1 1 0 1 0 1 0 1)
+ITEM_FAST_SKIP=(0 0 0 0 0 1 1 1 1 1 1 0 1 0 1 0 1 1)
 
 print_list() {
     local i
@@ -495,6 +497,18 @@ check_ca_bundle() {
     command -v openssl >/dev/null 2>&1 || { skip_msg "找不到 openssl"; return 77; }
     command -v python3 >/dev/null 2>&1 || { skip_msg "找不到 python3"; return 77; }
     command -v git >/dev/null 2>&1 || { skip_msg "找不到 git"; return 77; }
+    bash "$script"
+}
+
+# npm 解包：把 npm.tar.gz 解到临时目录，与 bsdtar 参考树逐文件比对；截断 tar
+# 与只读目录必须失败且不留 .unpack-complete。缺 bsdtar/c++/python3 时 SKIP。
+check_npm_unpack() {
+    local script="$ROOT/third_party/bettersh/iec/tests/npm_unpack/run.sh"
+    if [[ ! -f "$script" ]]; then
+        skip_msg "third_party/bettersh/iec/tests/npm_unpack/run.sh 不存在"
+        return 77
+    fi
+    command -v bash >/dev/null 2>&1 || { skip_msg "找不到 bash"; return 77; }
     bash "$script"
 }
 
