@@ -717,8 +717,20 @@ export class HarnessTools {
       '**不要**用它做 read_file/write_file/search_files/glob/grep/transform_file 已经能做好的事(每次调用都有开销); 也不要逐条 `ls`/`cat` 摸索目录 —— 用 list_files/glob 更快。' +
       '语法: 标准 sh(管道、重定向、通配符、变量、&&/||、for/while、函数)。相对路径以工作区根为基准, cwd 可切到子目录。' +
       '**它是 mksh 不是 bash**: `[[ =~ ]]`、`for ((;;))`、`<()`/`>()`、`**` 都不支持, 且 `[[ =~ ]]` 与 `$((x**2))` 是**解析期**致命错误 —— 整条脚本直接 exit 1, `set +e` 拦不住, 只有放进子 shell `( ... )` 才能捕获; 正则改用 `grep -E`, 幂改用 `bc`/`awk` 或连乘, C 风格循环改 while。另外 `^` 在 mksh 里是**异或不是幂**(`$((2^10))` = 8), 求幂不要写 `^`。' +
-      '**工具差异(实测)**: `diff` 后端是 git(输出带 `diff --git`/`index` 头, 按 GNU diff 逐行解析会多出两行, 要简洁比对用 `cmp`); toybox 的 `xargs` 不支持 `-I`(用 `-n1` 或 sh -c)、`grep` 不支持 `-P`(用 `-E`)、`gzip` 不支持 `-l`、`zip` 的组合选项要分开写(`zip -q -r`, 不要 `-qr`); `time` 是 mksh 风格(`0m0.21s real ...`, 时间在前), 取值用 `$1` 不是 `$2`; 每条外部命令有约 0.2 秒的进程创建开销, 批量处理用一条 awk/sed, 不要把外部命令放进 shell 循环; 沙箱不支持硬链接(`ln a b` 会 Permission denied, 用 `cp` 或 `ln -s`); 没有 `expr`(用 `$(( ))`/bc); `mktemp` 用 `mktemp ./t.XXXXXX`(不带参数会落到工作区外, `-p .` 有模板缺陷)。shell 里 `ln -s` 建的软链现在对 read_file/list_files/glob/grep 也可见(按链接目标解析), 删除/移动作用于链接本身。' +
-      '**mksh 其它坑**: fd 只认 0–9, `exec 10>f` 会把 10 当命令(整条脚本 exit 127)、`echo hi 10>f` 更阴(文件里是 `hi 10`); 更多 fd 用 `mkfifo`。`echo` 是内建且默认解释反斜杠转义(单引号也转), 写数据一律 `printf \'%s\\n\'`。花括号只展开词首逗号形式, `{1..5}`、`pre{1,2}post` 不展开。`xargs -n1` 每项起一个进程(约 0.2 秒/项), 批量请用默认合并或单进程 awk。调用返回时会回收该次调用留下的后台进程, `&` 不能跨调用保活。' +
+      '**工具差异(实测)**: `diff` 后端是 git(输出带 `diff --git`/`index` 头, 按 GNU diff 逐行解析会多出两行, 要简洁比对用 `cmp`); toybox 的 `xargs` 不支持 `-I`(用 `-n1` 或 sh -c)、`grep` 不支持 `-P`(用 `-E`)、`gzip` 不支持 `-l`、`zip` 的组合选项要分开写(`zip -q -r`, 不要 `-qr`); `tar` 只保证 gzip(`-z`), bzip2/zstd 视随包库而定, 不要假设 `-j`/`--zstd` 可用; `time` 是 mksh 风格(`0m0.21s real ...`, 时间在前), 取值用 `$1` 不是 `$2`; 每条外部命令有约 0.2 秒的进程创建开销, 批量处理用一条 awk/sed, 不要把外部命令放进 shell 循环; `getconf ARG_MAX` 只有 131072(128KB), `rm *` 遇到大量长文件名或 `xargs` 大批量会 E2BIG, 改用 `find ... -exec ... +` 或分组; 沙箱不支持硬链接(`ln a b` 会 Permission denied, 用 `cp` 或 `ln -s`); 没有 `expr`(用 `$(( ))`/bc); 裸 `mktemp` 落在 `$TMPDIR`(工作区外, read_file 看不见), 要回读的临时文件用 `mktemp ./t.XXXXXX`(`-p .` 有模板缺陷)。shell 里 `ln -s` 建的软链现在对 read_file/list_files/glob/grep 也可见(按链接目标解析), 删除/移动作用于链接本身。' +
+      '**mksh 其它坑**: fd 只认 0–9, `exec 10>f` 会把 10 当命令(整条脚本 exit 127)、`echo hi 10>f` 更阴(文件里是 `hi 10`); 更多 fd 用 `mkfifo`。`echo` 是内建且默认解释反斜杠转义(单引号也转), 写数据一律 `printf \'%s\\n\'`。花括号只做逗号枚举(`{a,b}`、`pre{a,b}post` 都会展开), `{1..5}` 这种**范围**不展开, 要序列用 `seq`/while。`xargs -n1` 每项起一个进程(约 0.2 秒/项), 批量请用默认合并或单进程 awk。调用返回时会回收该次调用留下的后台进程, `&` 不能跨调用保活。' +
+      '**沙箱硬边界(实测, 照此写)**: ' +
+      '① `:`/`exec` 的重定向失败会**终止整条脚本**(POSIX 特殊内建语义, `set +e`/`if`/`||`/`for` 全拦不住) —— 探测可写性一律用 `printf \'\' > f 2>/dev/null` 再看 `$?`, 关键清理/落盘段放进函数或子 shell; ' +
+      '② `umask` 被平台忽略(新文件恒 666、新目录 775), 敏感文件落盘后显式 `chmod 600`, 用 `stat -c %a` 复核; ' +
+      '③ `flock` 不可用(锁系统调用被沙箱拒绝, toybox flock 也只收 fd), 互斥用 `mkdir lockdir`(成功即持锁, `rmdir` 释放); ' +
+      '④ `ulimit` 是空实现(恒成功、无输出), 不能用来限流/限内存; ' +
+      '⑤ `id`/`whoami`/`logname` 都走已补好的 `/etc/passwd`(用户 `guncat`), 正常应返回 `guncat`; 取 uid/gid 用 `stat -c %u/%g` 最稳; ' +
+      '⑥ 命令默认已开 UTF-8(`mksh -o utf8-mode`); `/bin/sh` 是统一补 `-U` 的包装器, 所以 `sh -c`、`sh script.sh` 与 `#!/bin/sh` 脚本都按字符处理: `${#中文}`=2、切片按字符。直接 `mksh script.sh` 仍默认按字节, 要字符语义用 `mksh -U` 或脚本开头 `set -U`; 要按字节用 `set +U`。注意 `printf` 是 toybox 外部命令, **字段宽度仍按字节**(`printf \'%5s\' 中文` 不会补空格), 对齐用 awk/python; ' +
+      '⑦ `/tmp` 已**刻意移除**(沙箱的路径映射只覆盖 open/opendir, stat/chdir/mkdir 不覆盖, 留着会变成"test -d 为真、cd 失败"的半挂载); 临时文件一律用 `$TMPDIR`(每会话独立、工作区外)或 `mktemp ./x.XXXXXX`(放工作区, read_file 能看见), 不要用 `/tmp`; ' +
+      '⑧ 管道退出码默认只取最后一条, 要全链路用 `set -o pipefail`; ' +
+      '⑨ `df` 只有容量列可信, "Mounted on" 列是沙箱伪值; 硬链接与 `chown` 都会被拒绝; ' +
+      '⑩ 没有 `declare`、`printf -v`、`%q`; `${!x}` 是"变量名"不是 bash 的间接展开; `${x^^}`/`${x,,}` 不支持; `xargs` 无 `-I`/`-d`, `grep` 无 `-P`; ' +
+      '⑪ 子 shell 里 `$$` 仍是父 PID, 要拿自身 PID 用 `$BASHPID`; `-nt`/`-ot` 只到秒, 同秒内判不出新旧。' +
       '**stdin**: 不传 `stdin` 时命令的 fd0 固定为 /dev/null(读到 EOF); 传了 `stdin` 时工具会先落成普通文件再重定向, `cat`/`wc`/`read`/`python3` 都能正常看到 EOF 而不是挂到超时; Python 计算仍优先 run_python, `python3` 每次启动约 0.6–0.9 秒。shell 里的 `python3` 也不能 `subprocess.run(["sh", ...])`: `/bin/sh` 是文本 launcher, 会 `Exec format error`; 管道/重定向写在外层 shell, 需要 Python 计算时用 `python3 -c` 接管道。' +
       '开销: 不需要引导虚拟机; 外部命令有约 0.2 秒的固定进程创建成本(内建命令/参数展开只有微秒级), CPU 密集任务接近原生速度。' +
       '限制: 只能访问本会话工作区(/workspace, 隔离于其它会话); 单条命令默认 60 秒超时(可用 timeout_ms 放宽到 240 秒); 输出超过 60KB 会截断, 全文自动存到工作区 .spill/ 目录供 read_file 读回; 退出码非 0 不算工具失败(如 grep 无匹配返回 1), 请按退出码与 stderr 自行判断。',

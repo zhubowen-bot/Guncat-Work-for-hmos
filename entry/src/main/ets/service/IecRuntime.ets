@@ -12,8 +12,8 @@
 import { common } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { util } from '@kit.ArkTS';
-import { filterExplicit, parseAppletList, withStdinClosed } from './IecParsing';
+import { process, util } from '@kit.ArkTS';
+import { filterExplicit, isSafeRelPath, parseAppletList, withStdinClosed } from './IecParsing';
 import {
   ensureDir,
   execKillStale,
@@ -86,6 +86,10 @@ interface IecToyboxApplets {
 export class IecRuntime {
   private static started: boolean = false;
   private static startError: string = '';
+  // ResolveKind() 只在有 fork 能力时才走 shebang 路由；/bin/sh 的 UTF-8 包装器
+  // 本身是 shebang 脚本，无 fork 渠道必须退回直接 so launcher，否则 sh 会变成
+  // "不可执行"。
+  private static forkCapable: boolean = false;
   // 首调单飞：ensure() 内部有 await（toybox applet 枚举），只用 started 标记挡不住
   // 并发首调 —— 两条命令同时进来会各自清空/重写 launcher、各自调 execKillStale、
   // 各自把 npm.tar.gz 解到同一个目录。这里缓存的是同一个 Promise，后来者只等待。
@@ -141,6 +145,7 @@ export class IecRuntime {
       // 能力字由 native 侧探（fork / exec / jit / path）。不 pin：探针就是为
       // "不同设备/不同渠道能力不同"设计的，pin 死一个值等于把设备差异藏起来。
       const caps = probeCaps();
+      IecRuntime.forkCapable = caps.fork === 1;
       hilog.info(DOMAIN, TAG,
         'caps packed=0x%{public}s chmod=%{public}d fork=%{public}d exec=%{public}d jit=%{public}d path=%{public}d',
         caps.packed.toString(16), caps.chmod, caps.fork, caps.exec, caps.jit, caps.path);
@@ -170,6 +175,9 @@ export class IecRuntime {
       // 抄清单的后果是 diff/bc/hexdump 这类没编进去的 applet 也留一个 launcher，
       // 执行时报 "Unknown command"；反过来 dd/md5sum/od 这些编进去的又没注册。
       await IecRuntime.writeToyboxApplets();
+      // 放在 applet 枚举之后：writeToyboxApplets 会把 id/whoami/logname 注册成
+      // libtoybox 的 launcher，这里再用带兜底的包装器覆盖它们。
+      IecRuntime.writeIdentityWrappers();
 
       // npm 是纯 JS 树（node 源码里的 deps/npm），随包成 rawfile/tools/npm.tar.gz，
       // 首次启动解到 <sysroot>/npm —— iec_npm_main 拼的命令行就是
@@ -190,6 +198,63 @@ export class IecRuntime {
   // 我们自己编的 launcher（libnc/hexdump/diff…）覆盖掉。
   private static explicitNames: Set<string> = new Set<string>();
 
+  // /bin/sh 的薄包装：mksh 对 `-c` 与脚本模式默认关闭 utf8-mode（只有交互式
+  // shell 才自动探测 locale）。不补这一层，同一个脚本在工具层（`sh -o utf8-mode`）
+  // 与用户自己 `sh script.sh` 下会得到不同的 `${#中文}`，中文截断会静默错位。
+  // 包装器只做一件事：统一补 `-U` 再 exec 真正的 mksh。
+  // 工具自身的外层 shell 直接走 `mksh`（见 run），不经过这里，避免每次调用多一个进程。
+  private static readonly SH_WRAPPER: string = '#!' + SYSROOT + '/bin/mksh\n' +
+    '# 统一 UTF-8：mksh 对脚本/-c 默认关闭 utf8-mode\n' +
+    'exec ' + SYSROOT + '/bin/mksh -U "$@"\n';
+
+  // 返回 0 表示成功；写不了包装器（或无 fork 渠道）时退回直接 launcher：
+  // 脚本仍能跑，只是 UTF-8 不统一。
+  private static writeSh(path: string): number {
+    if (IecRuntime.forkCapable) {
+      const rc: number = writeTxtFile(path, IecRuntime.SH_WRAPPER);
+      if (rc === 0) {
+        return 0;
+      }
+    }
+    return writeSoLauncher(path, BUNDLE_LIBS + 'libmksh.so', 'main', 2, 0);
+  }
+
+  // id/whoami/logname 的兜底包装器：先试 toybox 的真实现（能读到 passwd 就原样
+  // 返回），失败再用 mksh 的 USER_ID/KSHEGID 输出。这样脚本里直接写 `id -u`
+  // 也不依赖 libc 是否真的读了 /etc/passwd。包装器是 shebang 脚本，只在有 fork
+  // 能力的渠道写；无 fork 时保留原来的 toybox launcher。
+  private static writeIdentityWrappers(): void {
+    if (!IecRuntime.forkCapable) {
+      return;
+    }
+    const idScript: string = '#!' + SYSROOT + '/bin/mksh\n' +
+      'toybox id "$@" 2>/dev/null && exit 0\n' +
+      'case "${1:-}" in\n' +
+      '-u|--user) printf "%s\\n" "$USER_ID" ;;\n' +
+      '-ur) printf "%s\\n" "$KSHUID" ;;\n' +
+      '-un|-nu) printf "%s\\n" guncat ;;\n' +
+      '-g|--group) printf "%s\\n" "$KSHEGID" ;;\n' +
+      '-gr) printf "%s\\n" "$KSHGID" ;;\n' +
+      '-gn|-ng) printf "%s\\n" guncat ;;\n' +
+      '-G|-Gn) printf "%s\\n" "$KSHEGID" ;;\n' +
+      '*) printf "uid=%s(guncat) gid=%s(guncat) groups=%s(guncat)\\n" ' +
+      '"$USER_ID" "$KSHEGID" "$KSHEGID" ;;\n' +
+      'esac\n';
+    const whoScript: string = '#!' + SYSROOT + '/bin/mksh\n' +
+      'toybox whoami 2>/dev/null && exit 0\n' +
+      'printf "%s\\n" guncat\n';
+    const names: string[] = ['id', 'whoami', 'logname'];
+    const scripts: string[] = [idScript, whoScript, whoScript];
+    for (let i: number = 0; i < names.length; i++) {
+      if (writeTxtFile(BIN_DIR + names[i], scripts[i]) !== 0) {
+        // 包装器写不完整时恢复 toybox launcher：命令至少还能启动，只是没有兜底。
+        writeSoLauncher(BIN_DIR + names[i], BUNDLE_LIBS + 'libtoybox.so',
+          'bsh_toybox_main', 2, 0);
+        hilog.warn(DOMAIN, TAG, 'cannot write %{public}s fallback wrapper', names[i]);
+      }
+    }
+  }
+
   // 命令 so 的 launcher。写不存在的 so 不会报错（执行到它才失败），这样
   // "构建了哪些命令"不必和这里耦合。
   //
@@ -199,9 +264,15 @@ export class IecRuntime {
   private static writeLaunchers(): string {
     ensureDir(BIN_DIR);
     ensureDir(SYSROOT + '/home');
-    ensureDir(SYSROOT + '/tmp');
+    ensureDir(SYSROOT + '/session-tmp');
     ensureDir(SYSROOT + '/usr/bin');
     ensureDir(SYSROOT + '/etc/ssl/certs');
+
+    // 旧版本把 <sysroot>/tmp 当 /tmp 的映射目标，但沙箱只给 open/opendir 做了
+    // 路径映射，stat/chdir/mkdir 没有 —— /tmp 会变成"test -d 为真、cd 失败"的
+    // 半挂载，比彻底不存在更容易误判。这里删掉旧目录，让 /tmp 一致地不存在；
+    // 临时文件统一走 $TMPDIR。
+    IecRuntime.removeLegacyTmp();
 
     // `id`/`whoami` 读 /etc/passwd；沙箱根里没有，补一份真实的 uid 记录。
     const ids: string[] = IecRuntime.readUidGid();
@@ -209,6 +280,10 @@ export class IecRuntime {
       writeTxtFile(SYSROOT + '/etc/passwd',
         'guncat:x:' + ids[0] + ':' + ids[1] + ':Guncat:/home:/bin/sh\n');
       writeTxtFile(SYSROOT + '/etc/group', 'guncat:x:' + ids[1] + ':\n');
+    } else {
+      // 没写成时 id/whoami/logname 会报 "bad uid"。把原因留在 hilog，
+      // 设备上排查比只看到一条 bad uid 直接得多。
+      hilog.warn(DOMAIN, TAG, 'uid/gid unavailable; /etc/passwd not written');
     }
 
     // 先清空再重建。launcher 是**持久文件**：上一次安装写下的 tar→libbsdtar 不会
@@ -221,7 +296,7 @@ export class IecRuntime {
     // PATH 搜索）。把最常见的解释器/工具补进 /usr/bin，脚本 shebang 才可用。
     const usrBin: string = SYSROOT + '/usr/bin';
     writeSoLauncher(usrBin + '/env', BUNDLE_LIBS + 'libtoybox.so', 'bsh_toybox_main', 2, 0);
-    writeSoLauncher(usrBin + '/sh', BUNDLE_LIBS + 'libmksh.so', 'main', 2, 0);
+    IecRuntime.writeSh(usrBin + '/sh');
     for (const name of ['awk', 'sed', 'grep', 'cat']) {
       writeSoLauncher(usrBin + '/' + name, BUNDLE_LIBS + 'libtoybox.so',
         'bsh_toybox_main', 2, 0);
@@ -248,7 +323,8 @@ export class IecRuntime {
       'bsh_toybox_main', 2, 0);
 
     // sh 是 shell 工具的唯一入口：没有它，IecShellService 直接报"运行核未就绪"。
-    essentialFails += writeSoLauncher(BIN_DIR + 'sh', BUNDLE_LIBS + 'libmksh.so', 'main', 2, 0);
+    // 用包装器而不是直接 launcher，见 SH_WRAPPER 的注释。
+    essentialFails += IecRuntime.writeSh(BIN_DIR + 'sh');
     essentialFails += writeSoLauncher(BIN_DIR + 'mksh', BUNDLE_LIBS + 'libmksh.so', 'main', 2, 0);
     IecRuntime.explicitNames.add('toybox');
     IecRuntime.explicitNames.add('sh');
@@ -575,7 +651,68 @@ export class IecRuntime {
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'cannot read uid: %{public}s', JSON.stringify(e));
     }
+    // /proc/self/status 在部分渠道/版本上读不到（fileIo 被策略拦，或 proc 文件
+    // 的 st_size 为 0 导致 readTextSync 读空）。process.uid 是运行时直接给的
+    // 当前进程 uid，不依赖 proc，优先用它；gid 再取资源根的 st_gid。
+    try {
+      const uid: number = process.uid;
+      if (uid > 0) {
+        let gid: string = '';
+        try {
+          gid = fileIo.statSync(SYSROOT).gid.toString();
+        } catch (e) {
+          gid = '';
+        }
+        if (gid === '') {
+          gid = uid.toString();
+        }
+        return [uid.toString(), gid];
+      }
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'cannot read process uid: %{public}s', JSON.stringify(e));
+    }
+    // 最后退到资源根自己的 st_uid/st_gid：它和应用进程同属一个 uid，足以生成
+    // /etc/passwd，让 id/whoami 不再报 "bad uid"。
+    try {
+      const st = fileIo.statSync(SYSROOT);
+      return [st.uid.toString(), st.gid.toString()];
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'cannot stat sysroot for uid: %{public}s', JSON.stringify(e));
+    }
     return [];
+  }
+
+  // 删掉旧版本留下的 <sysroot>/tmp。只在启动时做一次；失败只记日志，
+  // 不影响启动（最坏情况是 /tmp 继续半挂载，提示词已明确不要用它）。
+  private static removeLegacyTmp(): void {
+    const legacy: string = SYSROOT + '/tmp';
+    try {
+      if (!fileIo.accessSync(legacy)) {
+        return;
+      }
+      IecRuntime.removeTree(legacy);
+      hilog.info(DOMAIN, TAG, 'removed legacy /tmp mirror');
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'cannot remove legacy /tmp: %{public}s', JSON.stringify(e));
+    }
+  }
+
+  private static removeTree(path: string): void {
+    let st: fileIo.Stat;
+    try {
+      st = fileIo.lstatSync(path);
+    } catch (e) {
+      return;
+    }
+    if (!st.isDirectory()) {
+      fileIo.unlinkSync(path);
+      return;
+    }
+    const names: string[] = fileIo.listFileSync(path);
+    for (let i: number = 0; i < names.length; i++) {
+      IecRuntime.removeTree(path + '/' + names[i]);
+    }
+    fileIo.rmdirSync(path);
   }
 
   // 把 IEC 内置的 CA 证书铺到 <sysroot>/etc/ssl/certs，git/openssl 系工具就能
@@ -627,7 +764,7 @@ export class IecRuntime {
       return '';
     }
     try {
-      const dir: string = SYSROOT + '/tmp';
+      const dir: string = SYSROOT + '/session-tmp/.stdin';
       ensureDir(dir);
       IecRuntime.stdinSeq++;
       const path: string = dir + '/.iec-stdin-' + Date.now().toString() + '-' +
@@ -678,12 +815,29 @@ export class IecRuntime {
     try {
       // 有 stdin 时从普通文件重定向；没有时把 fd0 固定到 /dev/null。两条路径都
       // 保证命令读到 EOF，不依赖管道写端是否关闭。详见 IecParsing.withStdinClosed。
-      const script: string = stdinFile !== ''
-        ? 'exec 0<"' + stdinFile + '"\n' + command
-        : withStdinClosed(command, options.stdin);
+      // 外层直接起 mksh，不经过 /bin/sh 包装器：包装器是给用户脚本/shebang 统一
+      // UTF-8 用的，工具自己每次调用都多一个进程没有必要。
+      // NCP 渠道不会应用 exec 请求里的 cwd（实际 cwd 停在 /），所以脚本自己再
+      // cd 一次；fork 渠道 cwd 已对，重复 cd 到同一目录无副作用。cwd 失败就
+      // exit 1，避免命令在错误目录里静默执行。
+      const cwdQuoted: string = IecRuntime.quoteShellPath(options.cwd);
+      const cdLine: string = '[ -d ' + cwdQuoted + ' ] || { ' +
+        'printf "%s\\n" ' + IecRuntime.quoteShellPath('cwd missing: ' + options.cwd) +
+        ' >&2; exit 1; }\n' +
+        'cd ' + cwdQuoted + ' || exit 1\n';
+      const script: string = IecRuntime.SHELL_PRELUDE + cdLine +
+        (stdinFile !== ''
+          ? 'exec 0<"' + stdinFile + '"\n' + command
+          : withStdinClosed(command, options.stdin));
       const handle = execStart({
-        cmd: 'sh',
-        args: ['-c', script],
+        // 外层直接起 mksh，不经过 /bin/sh 包装器：包装器是给用户脚本/shebang 统一
+        // UTF-8 用的，工具自己每次调用都多一个进程没有必要。
+        cmd: 'mksh',
+        // mksh 的 utf8-mode 对 `-c` 默认是**关闭**的（main.c 只对交互式 shell 做
+        // locale 自动探测）。不显式打开的话，`${#中文}` 返回字节数 6、`${x:0:1}`
+        // 只切出半个字符，和 toybox awk / wc -m 的字符口径不一致。放在 `-c`
+        // 之前，让它在解析脚本之前生效；脚本里仍可用 `set +U` 退回字节语义。
+        args: ['-o', 'utf8-mode', '-c', script],
         cwd: options.cwd,
         env: options.env,
         // 已经走文件重定向时不再让引擎喂管道，避免留下一个永不关闭的写端。
@@ -946,9 +1100,71 @@ export class IecRuntime {
     }, 500);
   }
 
+  // 沙箱里的 libc getpwuid 可能绕过 fs shim 直接读宿主 /etc/passwd（不存在），
+  // 于是 /etc/passwd 写得再对，toybox 的 id/whoami/logname 仍可能报 bad uid。
+  // 这里用 mksh 自己的 USER_ID/KSHEGID 做兜底：先跑真命令，成功就原样返回；
+  // 只有失败时才输出。函数在每条命令前定义，不启动额外进程。
+  private static readonly SHELL_PRELUDE: string =
+    'id() { command id "$@" 2>/dev/null && return 0; ' +
+    'case "${1:-}" in ' +
+    '-u|--user) printf "%s\\n" "$USER_ID" ;; ' +
+    '-ur) printf "%s\\n" "$KSHUID" ;; ' +
+    '-un|-nu) printf "%s\\n" guncat ;; ' +
+    '-g|--group) printf "%s\\n" "$KSHEGID" ;; ' +
+    '-gr) printf "%s\\n" "$KSHGID" ;; ' +
+    '-gn|-ng) printf "%s\\n" guncat ;; ' +
+    '-G|-Gn) printf "%s\\n" "$KSHEGID" ;; ' +
+    '*) printf "uid=%s(guncat) gid=%s(guncat) groups=%s(guncat)\\n" ' +
+    '"$USER_ID" "$KSHEGID" "$KSHEGID" ;; ' +
+    'esac; }\n' +
+    'whoami() { command whoami 2>/dev/null || printf "%s\\n" guncat; }\n' +
+    'logname() { command logname 2>/dev/null || printf "%s\\n" guncat; }\n';
+
+  // 把任意路径安全地包成 shell 单引号字面量，供外层 shell 自己 cd 用。
+  private static quoteShellPath(path: string): string {
+    return "'" + path.split("'").join("'\\''") + "'";
+  }
+
   // 资源根 / 命令目录：给需要拼 PATH 的调用方（IecShellService）用。
   static sysroot(): string {
     return SYSROOT;
+  }
+
+  // 每个会话独立的 HOME / TMPDIR。
+  //
+  // 以前 HOME 固定为 <sysroot>/home、TMPDIR 固定为 <sysroot>/tmp：所有会话共用
+  // 同一份 ~/.gitconfig、~/.ssh、临时文件。A 会话写的全局 git 配置会出现在 B
+  // 会话里，既是串味也是泄漏。按 convId 分目录后互不可见；convId 已经在工作区
+  // 路径里用过，这里只额外拒绝 `/`、`..`、`:` 与 `.`，异常值退到 default。
+  private static sessionDir(kind: string, convId: string): string {
+    const safe: string = (convId !== '' && convId !== '.' && isSafeRelPath(convId))
+      ? convId : 'default';
+    const dir: string = SYSROOT + '/' + kind + '/' + safe;
+    try {
+      ensureDir(dir);
+      return dir;
+    } catch (e) {
+      // 目录建不出来时退到资源根：至少让命令能跑，不要让整次 shell 调用失败。
+      hilog.warn(DOMAIN, TAG, 'cannot create session %{public}s dir: %{public}s',
+        kind, JSON.stringify(e));
+      return SYSROOT;
+    }
+  }
+
+  static sessionHome(convId: string): string {
+    return IecRuntime.sessionDir('home', convId);
+  }
+
+  static sessionTmp(convId: string): string {
+    // 不放在 <sysroot>/tmp：/tmp 的路径映射只覆盖 open/opendir，stat/chdir/mkdir
+    // 会落到宿主只读根，形成"test -d 为真、cd 失败"的半挂载。这里用独立目录，
+    // 并让 /tmp 彻底不存在（removeLegacyTmp 负责清掉旧版本留下的目标）。
+    try {
+      ensureDir(SYSROOT + '/session-tmp');
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'cannot create session-tmp: %{public}s', JSON.stringify(e));
+    }
+    return IecRuntime.sessionDir('session-tmp', convId);
   }
 
   static binDir(): string {

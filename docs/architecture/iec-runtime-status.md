@@ -94,7 +94,7 @@ hdc shell hilog -x | grep -A 120 IecSelfTest
 ```
 
 自检分 8 组、共 13 个 `---` 段，互不阻断（每段先打印 `--- 名称`，失败只追加
-`[FAIL]`，末行 `SELFTEST DONE`）：PATH 枚举（19 个命令）、mksh 64 位算术、`/tmp` 与 `id`、
+`[FAIL]`，末行 `SELFTEST DONE`）：PATH 枚举（19 个命令）、mksh 64 位算术、`$TMPDIR` 与 `id`、
 CA/git https、python3 退出码、jq/curl/bc/nc/hexdump/diff/sftp、node/npm、清理。
 
 重点看：

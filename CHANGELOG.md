@@ -24,6 +24,35 @@
 - **旧实现彻底移除**：QEMU 桥、内核、rootfs、`libqemu` / `libslirp`、`LinuxShellService`、
   `tooling/linux-vm` 均已删除，不保留慢速回退；后端缺失时直接报配置错误。
 
+### shell 实测问题修复
+
+> 真机 90 余项 shell 自测后的修正；属于 7.0.0-alpha 的内容。
+
+- **UTF-8 工具层与脚本层统一**：工具以 `mksh -o utf8-mode` 启动；`/bin/sh` 写成
+  `exec <sysroot>/bin/mksh -U "$@"` 的薄包装，所以 `sh -c`、`sh script.sh` 与 `#!/bin/sh`
+  脚本也按字符处理，`${#中文}` 返回 2、切片正确。直接 `mksh script.sh` 仍默认按字节，
+  用 `mksh -U` 或脚本里 `set -U`；`set +U` 可退回字节语义。`printf` 是 toybox 外部
+  命令，字段宽度仍按字节（`printf '%5s' 中文` 不补空格），对齐用 awk/python。
+- **`id`/`whoami`/`logname` 可用**：`/etc/passwd` 的 uid/gid 在 `/proc/self/status`
+  读不到时用 `process.uid` 与 sysroot 的 `st_uid`/`st_gid`，不再出现 `bad uid`；同时注入
+  `USER`/`LOGNAME=guncat`。`/bin/id`、`/bin/whoami`、`/bin/logname` 还带包装器兜底：
+  先试 toybox 真实现，失败时用 mksh 的 `USER_ID`/`KSHEGID` 输出，不依赖 libc 是否读
+  `/etc/passwd`（toybox 的 `whoami`/`logname` 本质都是 `id -un`）。
+- **HOME/TMPDIR 按会话隔离**：`HOME=<sysroot>/home/<会话>`、
+  `TMPDIR=<sysroot>/session-tmp/<会话>`，不再让 A 会话的 `~/.gitconfig`、`~/.ssh`
+  与临时文件串到 B 会话；每个新 HOME 预置最小 `.gitconfig`，git commit 开箱可用。
+- **`/tmp` 彻底移除**：fs shim 的路径映射只覆盖 `open`/`opendir`，`stat`/`chdir`/`mkdir`
+  不覆盖，保留 `<sysroot>/tmp` 会变成“`test -d /tmp` 为真、`cd /tmp` 失败”的半挂载。
+  启动时删除旧目录，提示词改为统一用 `$TMPDIR` 或 `mktemp ./x.XXXXXX`。
+- **NCP 渠道的 cwd 修正**：exec 请求里的 cwd 在 NCP 路由下不会真正应用（shell 会停在
+  `/`），外层脚本现在先 `cd` 到会话工作区并校验目录存在；`pwd`、相对路径写入与
+  `read_file` 重新一致。自检工作区 `__iec_selftest` 也不再被启动清扫误删。
+- **提示词补齐沙箱硬边界**：`:`/`exec` 重定向失败会终止整条脚本、`umask` 无效、
+  `flock` 不可用、`ulimit` 是空实现、`df` 挂载点列不可信、管道退出码、`$$`/`$BASHPID`、
+  `ARG_MAX=128KB`、临时目录位置等，写进 `shell` 工具描述与系统提示，避免按 bash 习惯踩坑。
+- 修正原提示词中两处与实现不符的说法：`pre{a,b}post` 其实会展开（只有 `{1..5}` 范围
+  不展开）；`whoami`/`logname` 走 `/etc/passwd`，不是 utmp。
+
 ### 执行核：从 QEMU/Alpine 换成 IEC
 
 - **不再模拟一台电脑**：旧实现用 QEMU 在应用进程内跑 Alpine，虽不需要 JIT 权限，但每条命令

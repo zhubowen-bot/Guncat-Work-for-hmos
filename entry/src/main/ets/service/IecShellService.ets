@@ -79,12 +79,34 @@ export class IecShellService {
 
     const startedAt: number = Date.now();
 
+    // 先确保运行核与资源根就绪：下面按会话建 HOME/TMPDIR 时目录必须已经存在。
+    // ensure() 内部单飞并缓存结果，IecRuntime.run 随后再调一次不会重复初始化。
+    const ready: string = await IecRuntime.ensure(context);
+    if (ready !== '') {
+      return IecShellService.fail(ready);
+    }
+
     // 子进程环境。PATH 必须显式给：IEC 起进程时不会替我们拼 PATH，而应用进程
     // 自己的环境里没有 <sysroot>/bin（launcher 都在那儿），不给就是 command not found。
+    //
+    // HOME / TMPDIR 按会话分目录：固定在 <sysroot>/home 时所有会话共用一份
+    // ~/.gitconfig / ~/.ssh，A 会话的配置会串到 B 会话；TMPDIR 同理，A 会话的
+    // 临时文件会留在 B 会话能看到的同一个目录里。会话目录在工作区外，故
+    // read_file 仍然看不见，需要回读的临时文件用 `mktemp ./x.XXXXXX`。
+    const home: string = IecRuntime.sessionHome(convId);
+    IecShellService.seedGitConfig(home);
     let env: Record<string, string> = {
       'PATH': IecRuntime.binDir() + ':' + IecRuntime.sysroot() + '/usr/bin:/usr/bin:/bin',
-      'HOME': IecRuntime.sysroot() + '/home',
-      'TMPDIR': IecRuntime.sysroot() + '/tmp',
+      'HOME': home,
+      'TMPDIR': IecRuntime.sessionTmp(convId),
+      // /etc/passwd 里补的是 guncat；把 USER/LOGNAME 也对上，脚本里读 $USER 时
+      // 不会拿到空串。toybox 的 whoami/logname 本质都是 `id -un`，也走这份 passwd。
+      'USER': 'guncat',
+      'LOGNAME': 'guncat',
+      'SHELL': '/bin/sh',
+      // 非交互环境里分页器只会挂到超时；git 也走同一条。
+      'PAGER': 'cat',
+      'GIT_PAGER': 'cat',
       // 沙箱不支持硬链接，但 link() 被 fs shim 用"复制"兜底，git clone 看到
       // inode 不一致会 fatal。打开 strict 后 link() 如实失败，git 自己回退到复制。
       'IEC_SHIM_LINK_STRICT': '1'
@@ -199,6 +221,28 @@ export class IecShellService {
     }
   }
 
+  // 每会话的 HOME 是新建的空目录，git 会因为没有 user.name/user.email 拒绝提交。
+  // 只在缺失时写一份默认身份；用户/模型自己 `git config --global` 改过就不再覆盖。
+  private static seedGitConfig(home: string): void {
+    try {
+      const path: string = home + '/.gitconfig';
+      if (fileIo.accessSync(path)) {
+        return;
+      }
+      const text: string = '[user]\n\tname = Guncat\n\temail = guncat@local\n' +
+        '[init]\n\tdefaultBranch = main\n[core]\n\tpager = cat\n';
+      const file = fileIo.openSync(path, fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY |
+        fileIo.OpenMode.TRUNC);
+      try {
+        fileIo.writeSync(file.fd, text);
+      } finally {
+        fileIo.closeSync(file);
+      }
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'seed gitconfig failed: %{public}s', JSON.stringify(e));
+    }
+  }
+
   private static strArg(args: Record<string, Object>, name: string, fallback: string): string {
     const value: Object | undefined = args[name];
     if (typeof value === 'string') {
@@ -250,14 +294,39 @@ export class IecShellService {
       'for c in ' + tools + '; do ' +
         'if command -v "$c" >/dev/null 2>&1; then echo "ok   $c"; ' +
         'else echo "[FAIL] $c not found"; fi; done',
+      // 1b. 工作目录本身：pwd/getcwd 与相对路径写入。IEC 的 cwd 是会话工作区，
+      //     这里失败通常意味着工作区没建出来，或 getcwd 被沙箱拦了。
+      "echo '--- cwd'",
+      'echo "PWD=$PWD"; pwd; echo "pwd rc=$?"; /bin/pwd 2>&1; ' +
+        'ls -ld . 2>&1; echo "ls rc=$?"; ' +
+        'echo rel > _rel.txt && cat _rel.txt && rm -f _rel.txt; echo "rel rc=$?"',
       // 2. mksh 的算术是 64 位还是 32 位：后者会溢出成负数。
       "echo '--- mksh 64-bit arithmetic'",
       'v=$((2000000000+2000000000)); echo "2000000000+2000000000=$v"; ' +
         '[ "$v" = 4000000000 ] || echo "[FAIL] arithmetic (expect 4000000000)"',
-      // 3. /tmp 真可写；id 能读到 /etc/passwd 里的真实 uid。
-      "echo '--- /tmp + id'",
-      'echo x > /tmp/_t && cat /tmp/_t && rm -f /tmp/_t || echo "[FAIL] /tmp write"',
+      // 3. TMPDIR 真可写；/tmp 必须彻底不存在（半挂载比不存在更危险）；
+      //    id 能读到 /etc/passwd 里的真实 uid；UTF-8 在工具层、sh -c、脚本层一致。
+      "echo '--- TMPDIR + id'",
+      'echo x > "$TMPDIR/_t" && cat "$TMPDIR/_t" && rm -f "$TMPDIR/_t" || ' +
+        'echo "[FAIL] TMPDIR write"',
       'id; id 2>/dev/null | grep -q "uid=" || echo "[FAIL] id (no uid)"',
+      'id -un 2>/dev/null; [ "$(id -un 2>/dev/null)" = guncat ] || ' +
+        'echo "[FAIL] id -un (expect guncat)"',
+      "echo '--- /tmp absent'",
+      'if [ -e /tmp ]; then echo "[FAIL] /tmp should be absent"; ' +
+        'else echo "ok /tmp absent"; fi',
+      "echo '--- utf8-mode'",
+      'x=中文; n=${#x}; echo "len(中文)=$n (expect 2)"; ' +
+        '[ "$n" = 2 ] || echo "[FAIL] utf8-mode (expect 2)"',
+      'v=$(sh -c \'x=中文; echo ${#x}\'); echo "sh -c len=$v (expect 2)"; ' +
+        '[ "$v" = 2 ] || echo "[FAIL] sh -c utf8 (expect 2)"',
+      'printf \'%s\\n\' \'#!/bin/sh\' \'x=中文; echo ${#x}\' > "$TMPDIR/_u.sh"; ' +
+        'chmod +x "$TMPDIR/_u.sh"; v=$("$TMPDIR/_u.sh"); ' +
+        'echo "shebang len=$v (expect 2)"; [ "$v" = 2 ] || ' +
+        'echo "[FAIL] shebang utf8 (expect 2)"; rm -f "$TMPDIR/_u.sh"',
+      "echo '--- HOME/TMPDIR'",
+      'echo "HOME=$HOME"; echo "TMPDIR=$TMPDIR"; ' +
+        '[ -d "$TMPDIR" ] || echo "[FAIL] TMPDIR missing"',
       // 4. CA 注入；git 走 https。网络失败只记录 rc，不算自检失败。
       "echo '--- CA + git remote'",
       'echo "GIT_SSL_CAINFO=${GIT_SSL_CAINFO:-<empty>}"',
@@ -288,8 +357,8 @@ export class IecShellService {
       "echo '--- hexdump'",
       'printf AB | timeout 10 hexdump -C',
       "echo '--- diff'",
-      "printf 'a\\n' > /tmp/_d1; printf 'b\\n' > /tmp/_d2; " +
-        'timeout 10 diff -u /tmp/_d1 /tmp/_d2; echo "diff rc=$? (expect 1)"',
+      "printf 'a\\n' > \"$TMPDIR/_d1\"; printf 'b\\n' > \"$TMPDIR/_d2\"; " +
+        'timeout 10 diff -u "$TMPDIR/_d1" "$TMPDIR/_d2"; echo "diff rc=$? (expect 1)"',
       "echo '--- sftp'",
       // OpenSSH 的 sftp 没有 -V：-h / 无参至少能打出 usage 首行。
       "timeout 10 sh -c '{ sftp -V 2>&1; sftp -h 2>&1; sftp 2>&1; } | head -1'",
@@ -298,7 +367,7 @@ export class IecShellService {
       'timeout 10 node -v',
       'timeout 10 npm -v',
       // 8. 清理临时文件，别把验收垃圾留在资源根/工作区。
-      'rm -f /tmp/_t /tmp/_d1 /tmp/_d2 t.txt t.tar',
+      'rm -f "$TMPDIR/_t" "$TMPDIR/_d1" "$TMPDIR/_d2" "$TMPDIR/_u.sh" t.txt t.tar',
       "echo 'SELFTEST DONE'"
     ];
     let args: Record<string, Object> = {
