@@ -608,7 +608,10 @@ def check_lib_files(required_sos, reporter):
             reporter.fail("%s 是符号链接；随包 .so 必须是普通文件" % rel)
             continue
         if not path.is_file():
-            reporter.fail("%s 不存在" % rel)
+            hint = ""
+            if (REPO_ROOT / (rel + ".xz")).is_file():
+                hint = "（仓库里是 %s.xz，先跑 bash scripts/prepare-big-libs.sh）" % rel
+            reporter.fail("%s 不存在%s" % (rel, hint))
             continue
         size = path.stat().st_size
         if size <= 0:
