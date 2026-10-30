@@ -228,7 +228,7 @@ export class SubagentService {
           calls[i].cancelled = exec.cancelled;
           calls[i].schemaError = exec.schemaError;
           calls[i].result = SubagentService.capResult(context, convId, exec.output,
-            calls[i].name, execStart);
+            calls[i].name, execStart, exec.spillRel);
           if (exec.imageDataUrl !== '') {
             let att: ToolImageAttachment = new ToolImageAttachment();
             att.toolName = calls[i].name;
@@ -293,13 +293,17 @@ export class SubagentService {
 
   // 工具结果截断 + 溢出暂存(与主循环 applyToolResult 同策略, 简化为独立实现)
   private static capResult(context: common.UIAbilityContext, convId: string,
-    output: string, toolName: string, execStart: number): string {
+    output: string, toolName: string, execStart: number, existingSpill: string): string {
     if (output.length <= Constants.WORK_RESULT_MAX_CHARS) {
       return output;
     }
-    let root: string = WorkFileService.workspaceRoot(context, convId);
-    let label: string = 'subagent_' + toolName + '_' + execStart.toString();
-    let spillRel: string = SpillStore.save(root, label, output);
+    // shell 工具已经落了完整输出时直接复用，别再存一份截断后的头段冒充全文。
+    let spillRel: string = existingSpill;
+    if (spillRel === '') {
+      let root: string = WorkFileService.workspaceRoot(context, convId);
+      let label: string = 'subagent_' + toolName + '_' + execStart.toString();
+      spillRel = SpillStore.save(root, label, output);
+    }
     return SpillStore.truncateWithLocator(output, spillRel);
   }
 

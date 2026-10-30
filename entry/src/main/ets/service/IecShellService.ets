@@ -141,6 +141,9 @@ export class IecShellService {
     result.timeout = run.timedOut;
     result.output = IecShellService.format(run, elapsed, cwdRel === '' ? '.' : cwdRel,
       spillOut, spillErr);
+    // 完整输出已经落盘（可能是 stdout 或 stderr）。上层再做"截断 + 暂存"时
+    // 必须指向这个文件，否则会把这里已截断的头段当成"完整结果"再存一份。
+    result.spillRel = spillOut !== '' ? spillOut : spillErr;
     return result;
   }
 
