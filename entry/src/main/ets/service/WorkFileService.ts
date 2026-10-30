@@ -149,8 +149,49 @@ export class WorkFileService {
     return out === '' ? 'empty' : out;
   }
 
-  // 相对路径安全解析: 返回工作区内的绝对路径; 非法(绝对路径/'..'/盘符)返回 null
+  // 相对路径安全解析: 返回工作区内的绝对路径; 非法(绝对路径/'..'/盘符)返回 null。
+  // 在字面路径之上再跟一层 IEC 软链：shell 里 `ln -s` 落盘的是
+  // `<名字>.IEC_SYMLINK` 标记文件，不解析它，read_file/write_file 会看不见链接，
+  // 往链接名写入还会静默生成一个独立普通文件。
   static resolveSafe(root: string, rel: string): string | null {
+    let literal: string | null = WorkFileService.resolveSafeLiteral(root, rel);
+    if (literal === null) {
+      return null;
+    }
+    return WorkFileService.followIecLinks(root, literal, 0);
+  }
+
+  // 跟父目录的软链、但保留最后一段的字面名字：`rm link` 删链接本身，
+  // `rm dlink/x` 则穿过目录链接删到目标目录里的 x（与 shell 语义一致）。
+  static resolveSafeParentFollow(root: string, rel: string): string | null {
+    let clean: string = rel.trim();
+    while (clean.length > 1 && clean.endsWith('/')) {
+      clean = clean.substring(0, clean.length - 1);
+    }
+    if (clean === '' || clean === '.' || clean === './') {
+      return root;
+    }
+    if (clean.startsWith('/') || clean.indexOf(':') !== -1) {
+      return null;
+    }
+    let idx: number = clean.lastIndexOf('/');
+    if (idx < 0) {
+      return WorkFileService.resolveSafeLiteral(root, clean);
+    }
+    let dirRel: string = clean.substring(0, idx);
+    let name: string = clean.substring(idx + 1);
+    if (name === '' || name === '.' || name === '..') {
+      return WorkFileService.resolveSafeLiteral(root, clean);
+    }
+    let dirAbs: string | null = dirRel === '' ? root : WorkFileService.resolveSafe(root, dirRel);
+    if (dirAbs === null) {
+      return null;
+    }
+    return dirAbs + '/' + name;
+  }
+
+  // 只做相对路径校验，不跟软链（删除/移动这类要操作"链接本身"的调用用）
+  static resolveSafeLiteral(root: string, rel: string): string | null {
     let clean: string = rel.trim();
     if (clean === '' || clean === '.' || clean === './') {
       return root;
@@ -173,9 +214,116 @@ export class WorkFileService {
     return out;
   }
 
+  // 公开给 DeviceFsAdapter（glob/grep）判断标记文件名；与 fs shim 的后缀一致。
+  static readonly IEC_LINK_SUFFIX: string = '.IEC_SYMLINK';
+  // 与 fs shim 的 MAX_LINKS 同量级；超过就按"解析失败"处理，避免环。
+  private static readonly IEC_LINK_MAX_HOPS: number = 16;
+
+  // 逐段解析路径：中间目录也可能是软链（`ln -s dtarget dlink` 后
+  // `read_file("dlink/x.txt")` 必须能穿透）。每一段命中标记就换成目标再继续。
+  private static followIecLinks(root: string, abs: string, hops: number): string | null {
+    if (hops > WorkFileService.IEC_LINK_MAX_HOPS) {
+      return null;
+    }
+    if (abs === root) {
+      return abs;
+    }
+    let prefix: string = root + '/';
+    if (!abs.startsWith(prefix)) {
+      return null;
+    }
+    // 路径本身以 .IEC_SYMLINK 结尾时按字面处理（读它=读目标字符串，这是既有行为）。
+    if (abs.endsWith(WorkFileService.IEC_LINK_SUFFIX)) {
+      return abs;
+    }
+    let segs: string[] = abs.substring(prefix.length).split('/');
+    return WorkFileService.resolveSegments(root, root, segs, 0, hops);
+  }
+
+  private static resolveSegments(root: string, cur: string, segs: string[],
+    index: number, hops: number): string | null {
+    if (hops > WorkFileService.IEC_LINK_MAX_HOPS) {
+      return null;
+    }
+    if (index >= segs.length) {
+      return cur;
+    }
+    let seg: string = segs[index];
+    if (seg === '' || seg === '.') {
+      return WorkFileService.resolveSegments(root, cur, segs, index + 1, hops);
+    }
+    let candidate: string = cur + '/' + seg;
+    let marker: string = candidate + WorkFileService.IEC_LINK_SUFFIX;
+    let isMarker: boolean = false;
+    try {
+      // fs shim 的链接目标上限是 4095 字节；超过这个长度的同名普通文件不是标记，
+      // 别把用户的大文件当链接读进内存。
+      let st: fileIo.Stat = fileIo.statSync(marker);
+      isMarker = st.isFile() && st.size > 0 && st.size <= 4096;
+    } catch (e) {
+      isMarker = false;
+    }
+    if (!isMarker) {
+      return WorkFileService.resolveSegments(root, candidate, segs, index + 1, hops);
+    }
+    let target: string = '';
+    try {
+      target = fileIo.readTextSync(marker).trim();
+    } catch (e) {
+      return candidate;   // 标记读不出来：按普通路径继续，交给调用方报错
+    }
+    if (target === '') {
+      return candidate;
+    }
+    let joined: string = target.startsWith('/') ? target : cur + '/' + target;
+    let normalized: string | null = WorkFileService.normalizeInsideRoot(root, joined);
+    if (normalized === null) {
+      return null;
+    }
+    // 目标自身也可能是链接链；解析完再把剩余段接上。
+    let resolved: string | null = WorkFileService.followIecLinks(root, normalized, hops + 1);
+    if (resolved === null) {
+      return null;
+    }
+    return WorkFileService.resolveSegments(root, resolved, segs, index + 1, hops + 1);
+  }
+
+  // 把绝对路径里的 '.'/'..' 折叠掉；结果必须仍在工作区内，否则视为越界。
+  private static normalizeInsideRoot(root: string, p: string): string | null {
+    if (!p.startsWith('/')) {
+      return null;
+    }
+    let segs: string[] = p.split('/');
+    let stack: string[] = [];
+    for (let i: number = 0; i < segs.length; i++) {
+      let seg: string = segs[i];
+      if (seg === '' || seg === '.') {
+        continue;
+      }
+      if (seg === '..') {
+        if (stack.length === 0) {
+          return null;
+        }
+        stack.pop();
+        continue;
+      }
+      stack.push(seg);
+    }
+    let norm: string = '/' + stack.join('/');
+    if (norm === root) {
+      return norm;
+    }
+    return norm.startsWith(root + '/') ? norm : null;
+  }
+
   // 公共包装(HarnessTools / 新工具层使用)
   static resolveSafePublic(root: string, rel: string): string | null {
     return WorkFileService.resolveSafe(root, rel);
+  }
+
+  // 绝对路径版的软链解析（glob/grep 的 FsAdapter 拿到的是拼接后的绝对路径）。
+  static followIecLinksPublic(root: string, abs: string): string | null {
+    return WorkFileService.followIecLinks(root, abs, 0);
   }
 
   // read_file 的公共包装(str_replace_editor 的 view 分支复用行分页逻辑)
@@ -223,11 +371,40 @@ export class WorkFileService {
       return;
     }
     let names: string[] = fileIo.listFileSync(dir);
+    // shell 的 `ln -s` 落地为 `<名字>.IEC_SYMLINK` 标记。对上层要呈现成原来的
+    // 名字（否则 read_file/列表里只有 sl.txt.IEC_SYMLINK，链接名仿佛不存在）。
+    let linkSet: Set<string> = new Set<string>();
+    for (let i: number = 0; i < names.length; i++) {
+      let name: string = names[i];
+      if (!name.endsWith(WorkFileService.IEC_LINK_SUFFIX) ||
+        name.length === WorkFileService.IEC_LINK_SUFFIX.length) {
+        continue;
+      }
+      try {
+        let st: fileIo.Stat = fileIo.statSync(dir + '/' + name);
+        if (st.isFile() && st.size > 0 && st.size <= 4096) {
+          linkSet.add(name.substring(0, name.length - WorkFileService.IEC_LINK_SUFFIX.length));
+        }
+      } catch (e) {
+        continue;
+      }
+    }
     // 目录优先、按名称排序, 输出稳定便于模型与用户对照
     let dirs: string[] = [];
     let files: string[] = [];
     for (let i: number = 0; i < names.length; i++) {
-      let abs: string = dir + '/' + names[i];
+      let name: string = names[i];
+      if (name.endsWith(WorkFileService.IEC_LINK_SUFFIX) &&
+        name.length > WorkFileService.IEC_LINK_SUFFIX.length) {
+        // 合法标记由链接名条目代表；0 字节/超长的同名普通文件按原样列出。
+        if (linkSet.has(name.substring(0, name.length - WorkFileService.IEC_LINK_SUFFIX.length))) {
+          continue;
+        }
+      }
+      if (linkSet.has(name)) {
+        continue;   // 同名真实文件与标记并存时以链接为准（fs shim 同语义）
+      }
+      let abs: string = dir + '/' + name;
       let isDir: boolean = false;
       try {
         isDir = fileIo.statSync(abs).isDirectory();
@@ -235,11 +412,12 @@ export class WorkFileService {
         continue;
       }
       if (isDir) {
-        dirs.push(names[i]);
+        dirs.push(name);
       } else {
-        files.push(names[i]);
+        files.push(name);
       }
     }
+    linkSet.forEach((base: string): void => { files.push(base); });
     dirs.sort();
     files.sort();
     for (let i: number = 0; i < dirs.length; i++) {
@@ -260,10 +438,26 @@ export class WorkFileService {
       }
       let absFile: string = dir + '/' + files[i];
       let size: number = 0;
-      try {
-        size = fileIo.statSync(absFile).size;
-      } catch (e) {
-        continue;
+      if (linkSet.has(files[i])) {
+        // 链接条目显示目标大小，而不是 8 字节的标记文件大小
+        let resolved: string | null = WorkFileService.followIecLinks(root, absFile, 0);
+        if (resolved === null) {
+          continue;
+        }
+        try {
+          let st: fileIo.Stat = fileIo.statSync(resolved);
+          if (!st.isDirectory()) {
+            size = st.size;
+          }
+        } catch (e) {
+          size = 0;   // 悬空链接照样列出
+        }
+      } else {
+        try {
+          size = fileIo.statSync(absFile).size;
+        } catch (e) {
+          continue;
+        }
       }
       let info: WorkspaceFileInfo = new WorkspaceFileInfo();
       info.path = WorkFileService.toRelative(root, absFile);
@@ -1242,23 +1436,41 @@ export class WorkFileService {
       WorkFileService.ensureDir(root);
       return WorkFileService.ok('已清空工作区(' + items.length.toString() + ' 项)');
     }
-    let abs: string | null = WorkFileService.resolveSafe(root, rel);
+    // 删除要作用于"链接本身"：resolveSafe 会跟到目标，直接把目标删掉是错的；
+    // 只跟父目录的链接（`dlink/x` 仍应删到目标目录里的 x）。
+    let abs: string | null = WorkFileService.resolveSafeParentFollow(root, rel);
     if (abs === null) {
       return WorkFileService.fail('非法路径: ' + rel);
     }
     if (abs === root) {
       return WorkFileService.fail('不能删除工作区根目录, 如需清空请传 path 为空字符串');
     }
-    if (!fileIo.accessSync(abs)) {
+    let marker: string = abs + WorkFileService.IEC_LINK_SUFFIX;
+    let hasReal: boolean = fileIo.accessSync(abs);
+    let hasMarker: boolean = fileIo.accessSync(marker);
+    if (!hasReal && !hasMarker) {
       return WorkFileService.fail('路径不存在: ' + rel);
     }
-    WorkFileService.deleteRecursive(abs);
+    if (hasMarker) {
+      // 先删标记，目标文件保留：`rm link` 删的是链接，不是链接指向的内容。
+      fileIo.unlinkSync(marker);
+    }
+    if (hasReal) {
+      WorkFileService.deleteRecursive(abs);
+    }
     return WorkFileService.ok('已删除 ' + rel);
   }
 
   private static toolMkdir(root: string, rel: string): ToolExecResult {
     if (rel === '') {
       return WorkFileService.fail('缺少参数 path');
+    }
+    let literal: string | null = WorkFileService.resolveSafeLiteral(root, rel);
+    if (literal === null) {
+      return WorkFileService.fail('非法路径: ' + rel);
+    }
+    if (fileIo.accessSync(literal + WorkFileService.IEC_LINK_SUFFIX)) {
+      return WorkFileService.fail('同名符号链接已存在, 无法创建目录: ' + rel);
     }
     let abs: string | null = WorkFileService.resolveSafe(root, rel);
     if (abs === null) {
@@ -1277,26 +1489,44 @@ export class WorkFileService {
     if (fromRel === '' || toRel === '') {
       return WorkFileService.fail('缺少参数 from/to');
     }
-    let src: string | null = WorkFileService.resolveSafe(root, fromRel);
-    let dst: string | null = WorkFileService.resolveSafe(root, toRel);
+    // 移动同样针对"链接本身"：移动目标内容会把链接留在原地变成悬空链接；
+    // 父目录是链接时仍要穿过它（`mv dlink/a x`）。
+    let src: string | null = WorkFileService.resolveSafeParentFollow(root, fromRel);
+    let dst: string | null = WorkFileService.resolveSafeParentFollow(root, toRel);
     if (src === null || dst === null) {
       return WorkFileService.fail('非法路径: ' + fromRel + ' / ' + toRel);
     }
     if (src === root) {
       return WorkFileService.fail('不能移动工作区根目录');
     }
-    if (!fileIo.accessSync(src)) {
+    let srcMarker: string = src + WorkFileService.IEC_LINK_SUFFIX;
+    let dstMarker: string = dst + WorkFileService.IEC_LINK_SUFFIX;
+    let srcHasReal: boolean = fileIo.accessSync(src);
+    let srcHasMarker: boolean = fileIo.accessSync(srcMarker);
+    if (!srcHasReal && !srcHasMarker) {
       return WorkFileService.fail('源路径不存在: ' + fromRel);
     }
     if (dst === root) {
       return WorkFileService.fail('目标不能是工作区根目录: ' + toRel);
     }
-    if (fileIo.accessSync(dst)) {
+    if (fileIo.accessSync(dst) || fileIo.accessSync(dstMarker)) {
       return WorkFileService.fail('目标路径已存在: ' + toRel);
     }
     let parentDir: string = dst.substring(0, dst.lastIndexOf('/'));
     if (parentDir !== root) {
       WorkFileService.ensureDir(parentDir);
+    }
+    if (srcHasMarker) {
+      // 软链：移动标记文件即可；若还存在同名的残留普通文件，一并搬走。
+      fileIo.moveFileSync(srcMarker, dstMarker);
+      if (srcHasReal) {
+        if (fileIo.statSync(src).isDirectory()) {
+          fileIo.moveDirSync(src, dst);
+        } else {
+          fileIo.moveFileSync(src, dst);
+        }
+      }
+      return WorkFileService.ok('已移动 ' + fromRel + ' → ' + toRel);
     }
     let srcIsDir: boolean = fileIo.statSync(src).isDirectory();
     if (srcIsDir) {
@@ -1331,7 +1561,7 @@ export class WorkFileService {
     let qLower: string = query.toLowerCase();
     let globs: RegExp[] = WorkFileService.globToRegexes(glob);
     let matches: string[] = [];
-    await WorkFileService.searchWalk(base, basePrefix, qLower, matches, cacheDir, globs);
+    await WorkFileService.searchWalk(root, base, basePrefix, qLower, matches, cacheDir, globs, 0);
     if (matches.length === 0) {
       let msg: string = '未找到匹配 "' + query + '" 的内容';
       if (globs.length > 0) {
@@ -1389,9 +1619,9 @@ export class WorkFileService {
     return false;
   }
 
-  private static async searchWalk(dir: string, prefix: string, qLower: string,
-    matches: string[], cacheDir: string, globs: RegExp[]): Promise<void> {
-    if (matches.length >= Constants.WORK_SEARCH_MAX_MATCHES) {
+  private static async searchWalk(root: string, dir: string, prefix: string, qLower: string,
+    matches: string[], cacheDir: string, globs: RegExp[], depth: number): Promise<void> {
+    if (matches.length >= Constants.WORK_SEARCH_MAX_MATCHES || depth > 32) {
       return;
     }
     let names: string[] = [];
@@ -1400,56 +1630,86 @@ export class WorkFileService {
     } catch (e) {
       return;
     }
-    names.sort();
+    // 软链标记还原成逻辑名，读取时再跟到目标；标记文件本身不参与匹配。
+    let links: string[] = [];
+    let visible: string[] = [];
     for (let i: number = 0; i < names.length; i++) {
+      let name: string = names[i];
+      if (name.endsWith(WorkFileService.IEC_LINK_SUFFIX) &&
+        name.length > WorkFileService.IEC_LINK_SUFFIX.length) {
+        try {
+          let st: fileIo.Stat = fileIo.statSync(dir + '/' + name);
+          if (st.isFile() && st.size > 0 && st.size <= 4096) {
+            links.push(name.substring(0, name.length - WorkFileService.IEC_LINK_SUFFIX.length));
+            continue;
+          }
+        } catch (e) {
+          // 读不到就按普通文件处理
+        }
+      }
+      visible.push(name);
+    }
+    for (let i: number = 0; i < links.length; i++) {
+      if (visible.indexOf(links[i]) < 0) {
+        visible.push(links[i]);
+      }
+    }
+    visible.sort();
+    for (let i: number = 0; i < visible.length; i++) {
       if (matches.length >= Constants.WORK_SEARCH_MAX_MATCHES) {
         return;
       }
-      let abs: string = dir + '/' + names[i];
+      let name: string = visible[i];
+      let logical: string = dir + '/' + name;
+      let realAbs: string | null = WorkFileService.followIecLinksPublic(root, logical);
+      if (realAbs === null) {
+        continue;
+      }
       let size: number = 0;
       let isDir: boolean = false;
       try {
-        let st: fileIo.Stat = fileIo.statSync(abs);
+        let st: fileIo.Stat = fileIo.statSync(realAbs);
         size = st.size;
         isDir = st.isDirectory();
       } catch (e) {
         continue;
       }
       if (isDir) {
-        await WorkFileService.searchWalk(abs, prefix + names[i] + '/', qLower, matches, cacheDir, globs);
+        await WorkFileService.searchWalk(root, realAbs, prefix + name + '/', qLower, matches,
+          cacheDir, globs, depth + 1);
         continue;
       }
       // glob 文件名过滤(仅作用于文件, 目录仍递归进入)
-      if (!WorkFileService.matchGlob(names[i], globs)) {
+      if (!WorkFileService.matchGlob(name, globs)) {
         continue;
       }
       // Office 文档(zip 容器): 抽取文字层后按行匹配(行号与 read_file 分页一致)
-      if (WorkFileService.isOfficeFile(names[i])) {
+      if (WorkFileService.isOfficeFile(name)) {
         if (size === 0 || size > Constants.WORK_SEARCH_OFFICE_MAX_BYTES) {
           continue;
         }
         try {
-          let officeText: string = await WorkFileService.officeFullText(abs, cacheDir);
-          WorkFileService.matchLines(officeText.split('\n'), qLower, prefix + names[i], matches);
+          let officeText: string = await WorkFileService.officeFullText(realAbs, cacheDir);
+          WorkFileService.matchLines(officeText.split('\n'), qLower, prefix + name, matches);
         } catch (e) {
           // 抽取失败跳过该文件
         }
         continue;
       }
-      if (!WorkFileService.isTextFile(names[i])) {
+      if (!WorkFileService.isTextFile(name)) {
         continue;
       }
       try {
         if (size === 0 || size > Constants.WORK_SEARCH_FILE_MAX_BYTES) {
           continue;
         }
-        let bytes: Uint8Array = WorkFileService.readBytes(abs, size);
+        let bytes: Uint8Array = WorkFileService.readBytes(realAbs, size);
         if (WorkFileService.looksBinary(bytes)) {
           continue;
         }
         let decoder: util.TextDecoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
         let text: string = decoder.decodeToString(bytes, { stream: false });
-        WorkFileService.matchLines(text.split('\n'), qLower, prefix + names[i], matches);
+        WorkFileService.matchLines(text.split('\n'), qLower, prefix + name, matches);
       } catch (e) {
         // 单文件失败跳过
       }

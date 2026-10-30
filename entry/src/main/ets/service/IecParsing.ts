@@ -79,3 +79,22 @@ export function isSafeRelPath(p: string): boolean {
   }
   return true;
 }
+
+// 工具没有给 stdin 时，把 fd0 固定到 /dev/null 再执行命令。
+//
+// 为什么需要：IEC 会话的 stdin 是管道，管道读端只有在写端关闭后才看得到 EOF。
+// 工具层本来就会在 stdin 为空时关掉写端，但只要有任意一层（旧运行核、中间
+// 进程、pipeline 里的后台进程）还攥着写端，`cat` / `head` / `python3` 这类
+// "先读完 stdin 再干活"的程序就会一直等，直到工具 60 秒超时——用户看到的是
+// "命令根本不启动"。显式重定向到 /dev/null 后，无论上层有没有关写端，命令
+// 都只会读到 EOF，行为与"没有标准输入"一致。
+//
+// 用 `[ -r /dev/null ]` 兜一层：真机沙箱理论上总有 /dev/null，但万一没有，
+// 也不能让 `exec` 的重定向失败把整条命令带走；条件不成立时保持原状执行。
+// 这段前缀不改变命令本身的退出码/输出，只多一行内建 `test`（mksh 内建，无进程开销）。
+export function withStdinClosed(command: string, stdin: string): string {
+  if (stdin !== '') {
+    return command;
+  }
+  return 'if [ -r /dev/null ]; then exec 0</dev/null; fi\n' + command;
+}

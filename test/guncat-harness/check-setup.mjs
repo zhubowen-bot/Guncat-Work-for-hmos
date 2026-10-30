@@ -208,6 +208,7 @@ writeFileSync(join(stubsDir, '@kit.CoreFileKit.ts'),
   `  function accessSync(path: string): boolean;\n  function statSync(path: string): Stat;\n` +
   `  function mkdirSync(path: string, recursion?: boolean): void;\n  function listFileSync(path: string): string[];\n` +
   `  function openSync(path: string, mode: number): File;\n` +
+  `  function readTextSync(path: string): string;\n` +
   `  function readSync(fd: number, buffer: ArrayBuffer, opts?: { offset?: number; length?: number }): number;\n` +
   `  function writeSync(fd: number, buffer: ArrayBuffer | string, opts?: { offset?: number; length?: number }): number;\n` +
   `  function closeSync(fileOrFd: File | number): void;\n` +
