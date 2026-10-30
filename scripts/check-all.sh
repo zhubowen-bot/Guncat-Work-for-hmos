@@ -71,6 +71,8 @@ ITEM_IDS=(
     hexdump-fuzz
     nc-fuzz
     diff-fuzz
+    mksh-arith
+    toybox-parse
     iec-native-host
     iec-exec-stress
     iec-libs
@@ -87,11 +89,13 @@ ITEM_NAMES=(
     "IEC hexdump 属性对拍（200 组随机输入 × 格式/截断/跳过）"
     "IEC nc 属性/边界测试（10MB / 半关闭 / 并发 / 端口复用 / 信号）"
     "IEC diff 属性/边界对拍（100 对随机文件 + 选项/路径/权限/8MB）"
+    "mksh 64 位算术/语义回归（64/32 对照 + Python 大整数对拍）"
+    "toybox applet 解析交叉验证（宿主真实输出 / 显式覆盖 / launcher 集合）"
     "IEC 原生代码宿主回归（exec 路由 / cwd / NCP / fs shim）"
     "IEC exec 会话并发/生命周期压测（8 路 / 终止 / fd / 超时）"
     "IEC 随包库检查（tools/check-iec-libs.py）"
 )
-ITEM_FAST_SKIP=(0 0 0 0 0 1 1 1 1 1 1 0 1 0)
+ITEM_FAST_SKIP=(0 0 0 0 0 1 1 1 1 1 1 0 1 0 1 0)
 
 print_list() {
     local i
@@ -441,6 +445,35 @@ check_diff_fuzz() {
     command -v python3 >/dev/null 2>&1 || { skip_msg "找不到 python3"; return 77; }
     command -v cc >/dev/null 2>&1 || { skip_msg "找不到 cc"; return 77; }
     command -v git >/dev/null 2>&1 || { skip_msg "找不到 git"; return 77; }
+    bash "$script"
+}
+
+# mksh 算术位宽回归：宿主用同一份源码/同一套 DEFS 编 64 位版（带 -DMKSH_LEGACY_MODE），
+# 并与 32 位版对照；脚本在 /tmp/mksh64 不存在时现场编译，缺 cc 返回 77。
+check_mksh_arith() {
+    local script="$ROOT/third_party/bettersh/iec/tests/mksh_arith/run.sh"
+    if [[ ! -f "$script" ]]; then
+        skip_msg "third_party/bettersh/iec/tests/mksh_arith/run.sh 不存在"
+        return 77
+    fi
+    command -v bash >/dev/null 2>&1 || { skip_msg "找不到 bash"; return 77; }
+    command -v cc >/dev/null 2>&1 || { skip_msg "找不到 cc"; return 77; }
+    bash "$script"
+}
+
+# toybox applet 解析：用仓库里同一份 toybox 源码在宿主 x86_64 上编一份
+# （defconfig），拿真实输出复刻 ArkTS 的解析器，验证显式命令（nc/hexdump/
+# diff/jq/sh/mksh…）不会被同名 toybox applet 覆盖。缺构建工具时 SKIP。
+check_toybox_parse() {
+    local script="$ROOT/third_party/bettersh/iec/tests/toybox_parse/run.sh"
+    if [[ ! -f "$script" ]]; then
+        skip_msg "third_party/bettersh/iec/tests/toybox_parse/run.sh 不存在"
+        return 77
+    fi
+    command -v bash >/dev/null 2>&1 || { skip_msg "找不到 bash"; return 77; }
+    command -v python3 >/dev/null 2>&1 || { skip_msg "找不到 python3"; return 77; }
+    command -v cc >/dev/null 2>&1 || { skip_msg "找不到 cc"; return 77; }
+    command -v make >/dev/null 2>&1 || { skip_msg "找不到 make"; return 77; }
     bash "$script"
 }
 

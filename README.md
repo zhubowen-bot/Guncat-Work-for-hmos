@@ -179,10 +179,12 @@ HAP 约 452.7 MB（约 432 MiB；精确字节数随构建与签名变化；原�
 
 ### 验证
 
-- **一键本地检查（推荐）**：`bash scripts/check-all.sh`（`--fast` 跳过较慢/依赖环境的项，`--list` 查看 14 项清单）
+- **一键本地检查（推荐）**：`bash scripts/check-all.sh`（`--fast` 跳过较慢/依赖环境的项，`--list` 查看 16 项清单）
 - **IEC hexdump 属性对拍**：`bash third_party/bettersh/iec/tests/hexdump_fuzz/run.sh`（200 组随机输入 × `-C/-b/-c/-x/-d/-o` × `-n/-s/-v`，与系统 `hexdump` 逐字节比较；已接入 `check-all.sh`，没有系统 `hexdump` 时 SKIP）
 - **IEC nc 属性/边界**：`bash third_party/bettersh/iec/tests/nc_fuzz/run.sh`（10MB 双向、两个方向半关闭、并发、端口复用、SIGTERM、二进制安全）
 - **IEC diff 属性/边界**：`bash third_party/bettersh/iec/tests/diff_fuzz/run.sh`（100 对随机文件与 `git diff --no-index` 逐字节对拍，加选项/路径/权限/8MB）
+- **mksh 64 位算术回归**：`bash third_party/bettersh/iec/tests/mksh_arith/run.sh`（同一份源码编 64/32 位对照 + Python 大整数对拍；已接入 `check-all.sh`）
+- **toybox 解析交叉验证**：`bash third_party/bettersh/iec/tests/toybox_parse/run.sh`（宿主编 toybox 拿真实 applet 输出，验证显式命令不被覆盖）
 - **IEC 原生代码宿主回归**：`bash third_party/bettersh/iec/scripts/test_iec_native_host.sh`（exec 路由 / cwd 校验 / NCP 拒绝分类 / fs shim 路径映射；已接入 `check-all.sh`，不需要设备或 OHOS SDK）
 - **IEC exec 会话压测**：`bash third_party/bettersh/iec/scripts/stress_exec_session.sh`（8 路并发整条流上限 / 中途终止 / 50 轮 fd 与 RSS / 200 次短会话 / 0-1-50ms 超时；已接入 `check-all.sh`，`--fast` 跳过，不需要设备或 OHOS SDK）
 - 纯逻辑回归（当前 **730 项**全绿）：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`
