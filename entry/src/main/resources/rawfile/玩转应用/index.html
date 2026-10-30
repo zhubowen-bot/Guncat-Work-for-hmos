@@ -60,7 +60,7 @@
           </div>
           <div class="card-body">
             <div class="card-title">探索 Version 7.0 开启的生产力革命</div>
-            <div class="card-text">手机里第一次装下完整的 Linux 与原生 Python：命令行走的是真正的 Alpine，Python 是编译进应用的原生 CPython 3.12，三方库随包离线可用；另外补上 @ 引用文件、编辑前读取校验与项目指令。</div>
+            <div class="card-text">手机里第一次装下完整的命令行环境与原生 Python：mksh 与随包命令开箱即用，Python 是编译进应用的原生 CPython 3.12，三方库随包离线可用；另外补上 @ 引用文件、编辑前读取校验与项目指令。</div>
           </div>
           <div class="card-arrow"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
         </a>
@@ -842,7 +842,7 @@
         <div class="card">
           <div class="card-body">
             <div class="card-title">设备内执行代码（run_js）</div>
-            <div class="card-text">run_js 补上了工作模式最后一块拼图：在没有终端、不能安装软件的环境里，它也能「写几行代码算一下」。典型场景——把格式凌乱的文本按正则清洗、统计一组数据的分布、按规则从已有文件重组出结构化数据、批量生成接下来要成文的表格；凡是「写段代码处理」比「读进对话再写」更划算的活，都可以交给它。</div>
+            <div class="card-text">run_js 补上了工作模式最后一块拼图：不想开一整套命令行的时候，它也能「写几行代码算一下」。典型场景——把格式凌乱的文本按正则清洗、统计一组数据的分布、按规则从已有文件重组出结构化数据、批量生成接下来要成文的表格；凡是「写段代码处理」比「读进对话再写」更划算的活，都可以交给它。</div>
             <div class="card-text">它是设备本机上的独立 JS 引擎沙箱：每次执行都是全新实例，不联网、不能读写文件系统、也不能加载外部模块。文件进出由工作区显式桥接——在 files 参数里列出的工作区文件会以只读方式预载给脚本，脚本里用 write 声明的产出会在执行成功后落入工作区（路径同样受工作区边界校验）。</div>
             <div class="card-text">执行跑在后台线程，界面不会卡住；单次执行有默认 10 秒上限，内存与输出体积也都有上限。唯一无法兜底的是死循环——JS 引擎没有中断接口，遇到这种情况系统会放弃等待、把错误交回，让你改写代码（连续超时后本会话会暂时停用该工具，重启应用即恢复），而不是让界面一直转圈。</div>
             <div class="card-text">与 transform_file 的分工：规则固定、批量清洗转换用 transform_file（内置管道，数据不进对话）；需要现写逻辑、做计算或程序化拼数据时用 run_js。最顺手的接力是 run_js 产出 JSON，再交给 write_docx / write_xlsx / write_pptx 成文。</div>
@@ -1513,7 +1513,7 @@
            011-9 长任务不熄屏      011-10 其他修复 -->
       <div class="gallery">
         <div class="gallery-track">
-          <img src="assets/011-1.png" alt="手机里跑起真正的 Linux">
+          <img src="assets/011-1.png" alt="手机里跑起真正的命令行">
           <img src="assets/011-2.png" alt="原生 Python 3.12">
           <img src="assets/011-3.png" alt="敲一个 @ 点名文件">
           <img src="assets/011-4.png" alt="编辑前先读取">
@@ -1533,11 +1533,11 @@
         <!-- 1 命令执行 shell -->
         <div class="card">
           <div class="card-body">
-            <div class="card-title">手机里跑起真正的 Linux</div>
-            <div class="card-text">工作模式新增 shell 工具。它不是另造一个「模拟命令行」，而是设备内一台真正的 Linux 虚拟机——Alpine 3.22 + Linux 6.12 内核：管道、重定向、通配符，以及 sed / awk / find / xargs / tar / gzip 全部是真语义。虚拟机用 QEMU 的解释模式（TCI）运行，指令逐条解释、不生成机器码，因此不需要 JIT 这类手机上很难拿到的权限，正式上架的包也能用。</div>
-            <div class="card-text">缺什么运行时自己装：apk add python3、apk add nodejs、apk add jq 都行，装包的流量走虚拟机内建的网络栈，不必额外申请权限；镜像里已经预装 python3、pip、jq 与 CA 证书，不用先联网。</div>
-            <div class="card-text">目录和别的工具是同一份：会话工作区直接挂进虚拟机，cat data/a.csv 与 read_file("data/a.csv") 读的是同一批文件——shell 写的文件工具立刻能读到，工具写的文件 shell 里 cat 也立刻可见，中间没有「同步」这一环。</div>
-            <div class="card-text">开销与边界：首次调用要释放镜像并冷启动，约数十秒；之后同一进程内复用，空闲 10 分钟自动关机释放内存。命令默认 60 秒超时、上限 240 秒；输出超过 60 KB 时全文落到工作区 .spill/，随时能再读回来。命令退出码非 0 不算工具失败（grep 没匹配到本来就返回 1），由模型结合报错自己判断。</div>
+            <div class="card-title">手机里跑起真正的命令行</div>
+            <div class="card-text">工作模式提供 shell 工具：管道、重定向、通配符、命令替换、here-doc 与 case / for / while 都是 mksh 的真语义，不是另造一个「模拟命令行」。命令都是随包的 HarmonyOS 原生 .so，由执行核加载并 fork 直接运行，单条命令约 0.2–1.5 秒，不需要 JIT 这类手机上很难拿到的权限，正式上架的包也能用。</div>
+            <div class="card-text">命令随包即用，不用先联网安装：mksh、toybox 的 70 多个命令（ls / cat / grep / sed / awk / find / xargs …）、tar / zip / unzip / cpio、git（含 HTTPS）/ ssh / scp / sftp / curl / nc、jq / bc / diff、node / npm 与 python3 都在包里；命令能力由随包命令集决定。</div>
+            <div class="card-text">目录和别的工具是同一份：cwd 就是会话工作区，cat data/a.csv 与 read_file("data/a.csv") 读的是同一批文件——shell 写的文件工具立刻能读到，工具写的文件 shell 里 cat 也立刻可见，中间没有「同步」这一环。</div>
+            <div class="card-text">环境与边界：注入 PATH / HOME / TMPDIR，id、whoami 与 #!/usr/bin/env sh 都能正常工作，内置 CA 让 git clone、curl 与 Python 的 ssl 开箱可校验；命令默认 60 秒超时、上限 240 秒，同一时刻最多 8 条并发、超出排队；stdout / stderr 各截断到 60 KB，全文落到工作区 .spill/，随时能再读回来。命令退出码非 0 不算工具失败（grep 没匹配到本来就返回 1），由模型结合报错自己判断。</div>
           </div>
         </div>
 
@@ -1545,9 +1545,9 @@
         <div class="card">
           <div class="card-body">
             <div class="card-title">原生 Python 3.12：数据分析不必再到电脑上做</div>
-            <div class="card-text">虚拟机里的 Python 是被逐条仿真执行的，实测比原生慢两三个数量级。既然 JIT 权限拿不到，就把 CPython 3.12 直接编译成应用内的原生 .so：run_python 在应用进程里直接跑，中间没有指令翻译层，CPU 密集型负载回到可用区间。</div>
+            <div class="card-text">CPython 3.12 被编译成应用内的原生 .so：run_python 在应用进程里直接跑，中间没有指令翻译层，CPU 密集型负载也能落在可用区间。</div>
             <div class="card-text">numpy、pandas、scipy、matplotlib、lxml、sympy、python-docx、python-pptx 随包离线可用；ssl（含 118 张 CA 证书）、sqlite3、bz2、lzma 与完整时区数据也都补齐了，不用先联网装库。随包思源黑体，matplotlib 画中文标签不再是一排方块。</div>
-            <div class="card-text">还能在管道里用：虚拟机里放了一个 npy 桥，把 Python 转发给宿主原生解释器，npy gen.py | jq ... 一条命令跑完；单次往返约 134 毫秒，而在虚拟机里启动 python3 -c pass 要 3.1 秒。</div>
+            <div class="card-text">shell 里也能直接用：python3 与 run_python 共用同一份解释器、同一套标准库与三方库，python3 gen.py | jq ... 这样的管道一条命令跑完；每次调用由独立进程加载解释器，单次崩溃或被终止只影响那一次，不会把状态带到下一次，sys.exit(7) 的退出码也原样回传。</div>
             <div class="card-text">边界写清楚：默认 30 秒、上限 180 秒；输出超过 20000 字符落到 .spill/；运行期不能 pip install，缺库时会给出替代方案；解释器安装目录只读；每次调用前后会把环境变量、随机种子、警告过滤器这类进程级状态回滚，上一个脚本影响不到下一个。</div>
           </div>
         </div>
@@ -1569,7 +1569,7 @@
             <div class="card-title">编辑前先读取：不再照着记忆改文件</div>
             <div class="card-text">现在 edit 动手前必须先读过这个文件：没读过会被拒绝，并回一句可以直接照抄的 read_file("同一路径")；读过之后文件又被改过（哪怕字节数恰好没变），也会拒绝，让你重读一遍。</div>
             <div class="card-text">判断依据是文件大小、修改时间与开头 8 KB 的指纹——你自己改的、shell 改的、Python 改的都算，同一秒内的改动也逃不掉。</div>
-            <div class="card-text">于是「改错文件」这件事，从「靠提示词劝模型小心」变成了「内核直接拦住」；文件删掉或改名时，登记会一起清掉，不会把新建的同名文件当成已读过。</div>
+            <div class="card-text">于是「改错文件」这件事，从「靠提示词劝模型小心」变成了「应用直接拦住」；文件删掉或改名时，登记会一起清掉，不会把新建的同名文件当成已读过。</div>
           </div>
         </div>
 
