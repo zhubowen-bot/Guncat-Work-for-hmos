@@ -76,6 +76,7 @@ ITEM_IDS=(
     iec-native-host
     iec-exec-stress
     iec-libs
+    ca-bundle
 )
 ITEM_NAMES=(
     "纯逻辑单测（setup.mjs + test-core.mjs，754 项）"
@@ -94,8 +95,9 @@ ITEM_NAMES=(
     "IEC 原生代码宿主回归（exec 路由 / cwd / NCP / fs shim）"
     "IEC exec 会话并发/生命周期压测（8 路 / 终止 / fd / 超时）"
     "IEC 随包库检查（tools/check-iec-libs.py）"
+    "IEC CA bundle 可用性与接线（curl/python/git 真握手）"
 )
-ITEM_FAST_SKIP=(0 0 0 0 0 1 1 1 1 1 1 0 1 0 1 0)
+ITEM_FAST_SKIP=(0 0 0 0 0 1 1 1 1 1 1 0 1 0 1 0 1)
 
 print_list() {
     local i
@@ -474,6 +476,25 @@ check_toybox_parse() {
     command -v python3 >/dev/null 2>&1 || { skip_msg "找不到 python3"; return 77; }
     command -v cc >/dev/null 2>&1 || { skip_msg "找不到 cc"; return 77; }
     command -v make >/dev/null 2>&1 || { skip_msg "找不到 make"; return 77; }
+    bash "$script"
+}
+
+# CA bundle：IEC 内置 cacert.pem 的结构/根证书、CMake+ArkTS 接线与 curl/python/git
+# 真握手。证书错误判 FAIL；网络不可达、缺 curl/openssl/python3/git 判 SKIP（77）。
+# 注意：系统 CA 路径（curl 的 --capath、OpenSSL 的 SSL_CERT_DIR、git 的
+# GIT_SSL_CAPATH）会和显式 bundle 取并集，不隔离的话缺根也会 PASS；脚本已隔离
+# 并用“单张根”负向对照验证过。
+check_ca_bundle() {
+    local script="$ROOT/third_party/bettersh/iec/tests/ca_bundle/run.sh"
+    if [[ ! -f "$script" ]]; then
+        skip_msg "third_party/bettersh/iec/tests/ca_bundle/run.sh 不存在"
+        return 77
+    fi
+    command -v bash >/dev/null 2>&1 || { skip_msg "找不到 bash"; return 77; }
+    command -v curl >/dev/null 2>&1 || { skip_msg "找不到 curl"; return 77; }
+    command -v openssl >/dev/null 2>&1 || { skip_msg "找不到 openssl"; return 77; }
+    command -v python3 >/dev/null 2>&1 || { skip_msg "找不到 python3"; return 77; }
+    command -v git >/dev/null 2>&1 || { skip_msg "找不到 git"; return 77; }
     bash "$script"
 }
 

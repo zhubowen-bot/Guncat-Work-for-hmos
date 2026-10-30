@@ -58,11 +58,12 @@ bash scripts/check-all.sh --fast   # 跳过 soname / py_runner / IEC 命令集 /
 bash scripts/check-all.sh --list   # 只看检查项清单
 ```
 
-按顺序执行 16 项：纯逻辑单测（754 项）、服务层 `tsc`、界面文案可复制护栏、
+按顺序执行 17 项：纯逻辑单测（754 项）、服务层 `tsc`、界面文案可复制护栏、
 Markdown 相对链接、随包许可、共享库 soname、`py_runner` 宿主协议、
 IEC 命令集宿主测试、IEC hexdump 属性对拍（200 组随机输入）、IEC nc 属性/边界、
 IEC diff 属性/边界对拍、mksh 64 位算术回归、toybox applet 解析交叉验证、
-IEC 原生代码宿主回归、IEC exec 会话压测，以及存在时才跑的 `tools/check-iec-libs.py`。
+IEC 原生代码宿主回归、IEC exec 会话压测、存在时才跑的 `tools/check-iec-libs.py`，
+以及 CA bundle 可用性（curl/python/git 真握手）。
 
 - IEC 原生代码宿主回归对应
   `third_party/bettersh/iec/scripts/test_iec_native_host.sh`：在宿主编出
