@@ -570,6 +570,12 @@ main() {
         exit 0
     fi
 
+    # 大体积随包库（libnode.so）以 .xz 入库；跑检查前还原，已存在则不覆盖。
+    # 失败不在这里报错，交给 iec-libs 项给出具体原因。
+    if [[ -f "$ROOT/scripts/prepare-big-libs.sh" ]]; then
+        bash "$ROOT/scripts/prepare-big-libs.sh" >/dev/null 2>&1 || true
+    fi
+
     if ((FAST)); then
         local skipped=() i
         for i in "${!ITEM_IDS[@]}"; do

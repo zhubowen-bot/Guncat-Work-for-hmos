@@ -96,11 +96,14 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 Build steps:
 
 1. Clone or download the project.
-2. Open the **repository root** in DevEco Studio.
-3. Install and select HarmonyOS SDK API 24.
-4. Configure debug or release signing.
-5. Connect a physical HarmonyOS device.
-6. Run the `entry` module, or build the HAP with the command above.
+2. Restore the large bundled library: `bash scripts/prepare-big-libs.sh` (the repo stores
+   `libnode.so` as `libnode.so.xz`, ~23 MB, because GitHub rejects files over 100 MB;
+   skip it if you already ran `build_node.sh`, an existing `.so` is never overwritten).
+3. Open the **repository root** in DevEco Studio.
+4. Install and select HarmonyOS SDK API 24.
+5. Configure debug or release signing.
+6. Connect a physical HarmonyOS device.
+7. Run the `entry` module, or build the HAP with the command above.
 
 ### Shell tool (IEC native runtime) artifacts
 

@@ -100,11 +100,14 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
 构建步骤：
 
 1. 克隆或下载项目。
-2. 使用 DevEco Studio 打开**仓库根目录**。
-3. 安装并选择 HarmonyOS SDK API 24。
-4. 配置调试或发布签名。
-5. 连接 HarmonyOS 真机。
-6. 运行 `entry` 模块，或使用上述命令构建 HAP。
+2. 还原大体积随包库：`bash scripts/prepare-big-libs.sh`（仓库里 `libnode.so` 存为
+   `libnode.so.xz`，约 23MB；GitHub 拒绝 >100MB 单文件。跑过 `build_node.sh` 的
+   可跳过，已存在的 `.so` 不会被覆盖）。
+3. 使用 DevEco Studio 打开**仓库根目录**。
+4. 安装并选择 HarmonyOS SDK API 24。
+5. 配置调试或发布签名。
+6. 连接 HarmonyOS 真机。
+7. 运行 `entry` 模块，或使用上述命令构建 HAP。
 
 ### Shell 工具（IEC 原生执行核）的额外产物
 
