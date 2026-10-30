@@ -13,6 +13,7 @@ import { common } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { util } from '@kit.ArkTS';
+import { filterExplicit, parseAppletList } from './IecParsing';
 import {
   ensureDir,
   execKillStale,
@@ -429,15 +430,12 @@ export class IecRuntime {
       hilog.warn(DOMAIN, TAG, 'toybox applet list unavailable');
       return;
     }
+    // 显式注册的命令优先：toybox 也有 nc，别把 libnc 的 launcher 覆盖掉。
+    // 跳过空串 / `toybox` / explicitNames 的规则在 IecParsing.filterExplicit 里，
+    // 与 Node 单测共用同一份实现。
+    const writable: string[] = filterExplicit(names, IecRuntime.explicitNames);
     let wrote: number = 0;
-    for (const name of names) {
-      if (name === '' || name === 'toybox') {
-        continue;
-      }
-      // 显式注册的命令优先：toybox 也有 nc，别把 libnc 的 launcher 覆盖掉。
-      if (IecRuntime.explicitNames.has(name)) {
-        continue;
-      }
+    for (const name of writable) {
       wrote += writeSoLauncher(BIN_DIR + name, BUNDLE_LIBS + 'libtoybox.so',
         'bsh_toybox_main', 2, 0);
     }
@@ -536,14 +534,8 @@ export class IecRuntime {
       hilog.warn(DOMAIN, TAG, 'toybox applet probe ended abnormally: exited=%{public}d code=%{public}d',
         exited ? 1 : 0, code);
     }
-    const cleaned: string = out.replace(/[\[\]]/g, ' ');
-    const parts: string[] = cleaned.split(/\s+/);
-    const names: string[] = [];
-    for (const part of parts) {
-      if (part.length > 0 && part.length < 32 && /^[a-z0-9_]+$/.test(part)) {
-        names.push(part);
-      }
-    }
+    // 分词/过滤/去重规则与 Node 单测共用 IecParsing.parseAppletList。
+    const names: string[] = parseAppletList(out);
     return { names: names, complete: exited && code === 0 && sawEof };
   }
 

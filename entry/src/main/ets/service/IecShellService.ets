@@ -12,6 +12,7 @@ import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { util } from '@kit.ArkTS';
 import { Constants } from '../common/Constants';
+import { isSafeRelPath } from './IecParsing';
 import { IecRuntime, IecRunResult } from './IecRuntime';
 import { PythonService } from './PythonService';
 import {
@@ -45,7 +46,7 @@ export class IecShellService {
     }
 
     const cwdRel: string = IecShellService.strArg(args, 'cwd', '').trim();
-    if (cwdRel !== '' && !IecShellService.isSafeRel(cwdRel)) {
+    if (cwdRel !== '' && !isSafeRelPath(cwdRel)) {
       return IecShellService.fail('cwd 必须是工作区内的相对路径(不能以 / 开头, 不能含 ..)');
     }
 
@@ -193,13 +194,6 @@ export class IecShellService {
       hilog.warn(DOMAIN, TAG, 'spill failed: %{public}s', JSON.stringify(e));
       return '';
     }
-  }
-
-  private static isSafeRel(rel: string): boolean {
-    if (rel.startsWith('/') || rel.indexOf('..') !== -1 || rel.indexOf(':') !== -1) {
-      return false;
-    }
-    return true;
   }
 
   private static strArg(args: Record<string, Object>, name: string, fallback: string): string {

@@ -67,6 +67,7 @@ import {
   formatTruncationNote,
   signalName
 } from './gen/ShellResultFormat.ts';
+import { filterExplicit, isSafeRelPath, parseAppletList } from './gen/IecParsing.ts';
 
 let passed = 0;
 let failed = 0;
@@ -2581,6 +2582,130 @@ console.log('[组件库与提示词]');
       text.split('未观测到退出状态(会话丢失)').length === 2);
     check('shell格式: 会话丢失场景不含超时标记', text.indexOf('超时终止') < 0);
   }
+}
+
+// ===== IEC 解析/校验纯模块（IecParsing）：Node 直接跑真机同一份规则 =====
+// 样本取自宿主 x86_64 `toybox`（third_party/bettersh/iec/thirdparty/toybox，
+// defconfig，0.8.15）的无参输出，原样贴入：多列排版、`[` 本身就是 applet 名、
+// nbd-client / nbd-server 带连字符。真机 IecRuntime 现在调用同一个 parseAppletList，
+// 因此这里的断言就是设备上 applet 注册规则的回归。
+{
+  const TOYBOX_PLAIN = `[ acpi arch ascii base32 base64 basename blkdiscard blkid blockdev
+bunzip2 bzcat cal cat chattr chgrp chmod chown chroot chrt chvt cksum
+clear cmp comm count cp cpio crc32 cut date dd deallocvt devmem df
+dirname dmesg dnsdomainname dos2unix du echo egrep eject env expand
+factor fallocate false fgrep file find flock fmt fold free freeramdisk
+fsfreeze fstype fsync ftpget ftpput getconf getopt gpiodetect gpiofind
+gpioget gpioinfo gpioset grep groups gunzip halt hd head help hexedit
+host hostname httpd hwclock i2cdetect i2cdump i2cget i2cset i2ctransfer
+iconv id ifconfig inotifyd insmod install ionice iorenice iotop kill
+killall killall5 link linux32 ln logger login logname losetup ls lsattr
+lsmod lspci lsusb makedevs mcookie md5sum memeater microcom mix mkdir
+mkfifo mknod mkpasswd mkswap mktemp modinfo mount mountpoint mv nbd-client
+nbd-server nc netcat netstat nice nl nohup nologin nproc nsenter od
+oneit openvt partprobe paste patch pgrep pidof ping ping6 pivot_root
+pkill pmap poweroff printenv printf prlimit ps pwd pwdx pwgen readahead
+readelf readlink realpath reboot renice reset rev rfkill rm rmdir
+rmmod rtcwake sed seq setfattr setsid sha1sum sha224sum sha256sum
+sha384sum sha3sum sha512sum shred shuf sleep sntp sort split stat
+strings su swapoff swapon switch_root sync sysctl tac tail tar taskset
+tee test time timeout top touch true truncate ts tsort tty tunctl
+uclampset ucsicontrol ulimit umount uname unicode uniq unix2dos unlink
+unshare uptime usleep uudecode uuencode uuidgen vconfig vmstat w watch
+watchdog wc wget which who whoami xargs xxd yes zcat `;
+  const EXPECTED = [
+    'acpi', 'arch', 'ascii', 'base32', 'base64', 'basename', 'blkdiscard', 'blkid', 'blockdev', 'bunzip2',
+    'bzcat', 'cal', 'cat', 'chattr', 'chgrp', 'chmod', 'chown', 'chroot', 'chrt', 'chvt',
+    'cksum', 'clear', 'cmp', 'comm', 'count', 'cp', 'cpio', 'crc32', 'cut', 'date',
+    'dd', 'deallocvt', 'devmem', 'df', 'dirname', 'dmesg', 'dnsdomainname', 'dos2unix', 'du', 'echo',
+    'egrep', 'eject', 'env', 'expand', 'factor', 'fallocate', 'false', 'fgrep', 'file', 'find',
+    'flock', 'fmt', 'fold', 'free', 'freeramdisk', 'fsfreeze', 'fstype', 'fsync', 'ftpget', 'ftpput',
+    'getconf', 'getopt', 'gpiodetect', 'gpiofind', 'gpioget', 'gpioinfo', 'gpioset', 'grep', 'groups', 'gunzip',
+    'halt', 'hd', 'head', 'help', 'hexedit', 'host', 'hostname', 'httpd', 'hwclock', 'i2cdetect',
+    'i2cdump', 'i2cget', 'i2cset', 'i2ctransfer', 'iconv', 'id', 'ifconfig', 'inotifyd', 'insmod', 'install',
+    'ionice', 'iorenice', 'iotop', 'kill', 'killall', 'killall5', 'link', 'linux32', 'ln', 'logger',
+    'login', 'logname', 'losetup', 'ls', 'lsattr', 'lsmod', 'lspci', 'lsusb', 'makedevs', 'mcookie',
+    'md5sum', 'memeater', 'microcom', 'mix', 'mkdir', 'mkfifo', 'mknod', 'mkpasswd', 'mkswap', 'mktemp',
+    'modinfo', 'mount', 'mountpoint', 'mv', 'nc', 'netcat', 'netstat', 'nice', 'nl', 'nohup',
+    'nologin', 'nproc', 'nsenter', 'od', 'oneit', 'openvt', 'partprobe', 'paste', 'patch', 'pgrep',
+    'pidof', 'ping', 'ping6', 'pivot_root', 'pkill', 'pmap', 'poweroff', 'printenv', 'printf', 'prlimit',
+    'ps', 'pwd', 'pwdx', 'pwgen', 'readahead', 'readelf', 'readlink', 'realpath', 'reboot', 'renice',
+    'reset', 'rev', 'rfkill', 'rm', 'rmdir', 'rmmod', 'rtcwake', 'sed', 'seq', 'setfattr',
+    'setsid', 'sha1sum', 'sha224sum', 'sha256sum', 'sha384sum', 'sha3sum', 'sha512sum', 'shred', 'shuf', 'sleep',
+    'sntp', 'sort', 'split', 'stat', 'strings', 'su', 'swapoff', 'swapon', 'switch_root', 'sync',
+    'sysctl', 'tac', 'tail', 'tar', 'taskset', 'tee', 'test', 'time', 'timeout', 'top',
+    'touch', 'true', 'truncate', 'ts', 'tsort', 'tty', 'tunctl', 'uclampset', 'ucsicontrol', 'ulimit',
+    'umount', 'uname', 'unicode', 'uniq', 'unix2dos', 'unlink', 'unshare', 'uptime', 'usleep', 'uudecode',
+    'uuencode', 'uuidgen', 'vconfig', 'vmstat', 'w', 'watch', 'watchdog', 'wc', 'wget', 'which',
+    'who', 'whoami', 'xargs', 'xxd', 'yes', 'zcat'
+  ];
+
+  const parsed = parseAppletList(TOYBOX_PLAIN);
+  console.log('[IecParsing]');
+  check('IecParsing: 真实 toybox 样本解析出 236 个 applet', parsed.length === 236);
+  check('IecParsing: 真实样本逐项与固定清单精确一致（含顺序）',
+    JSON.stringify(parsed) === JSON.stringify(EXPECTED));
+  check('IecParsing: 真实样本无重复 applet', new Set(parsed).size === parsed.length);
+  check('IecParsing: 丢弃 `[`（方括号替换后为空）', parsed.indexOf('[') < 0 && parsed.indexOf('') < 0);
+  check('IecParsing: 丢弃带连字符的 nbd-client / nbd-server',
+    parsed.indexOf('nbd-client') < 0 && parsed.indexOf('nbd-server') < 0);
+  check('IecParsing: 保序（首个 acpi、末个 zcat）',
+    parsed[0] === 'acpi' && parsed[parsed.length - 1] === 'zcat');
+
+  // 合成样本：覆盖真实输出里没有的边界（重复、非法字符、长度上限、toybox 本体）。
+  check('IecParsing: 方括号与多列空白归一',
+    JSON.stringify(parseAppletList('[ [[ acpi ]]   ls\n\tcat ]')) ===
+      JSON.stringify(['acpi', 'ls', 'cat']));
+  check('IecParsing: 非法字符过滤（大写/连字符/点/斜杠）',
+    JSON.stringify(parseAppletList('LS a-b a.b a/b _ok 9lives')) ===
+      JSON.stringify(['_ok', '9lives']));
+  check('IecParsing: token 长度 31 保留、32 丢弃',
+    JSON.stringify(parseAppletList('a'.repeat(31) + ' ' + 'b'.repeat(32))) ===
+      JSON.stringify(['a'.repeat(31)]));
+  check('IecParsing: 去重且保序',
+    JSON.stringify(parseAppletList('ls cat ls ls cat dd')) ===
+      JSON.stringify(['ls', 'cat', 'dd']));
+  check('IecParsing: 剔除 toybox 本体',
+    JSON.stringify(parseAppletList('toybox ls toybox cat')) ===
+      JSON.stringify(['ls', 'cat']));
+  check('IecParsing: 空输入得到空数组', parseAppletList('').length === 0);
+  check('IecParsing: 只有方括号/空白得到空数组',
+    parseAppletList('[ ] [[ ]] \n\t').length === 0);
+
+  // filterExplicit：显式注册名（nc/hexdump/diff/jq/sh/mksh/toybox）绝不能写回
+  // libtoybox.so；空串与 toybox 无条件跳过。
+  const explicit = new Set(['nc', 'hexdump', 'diff', 'jq', 'sh', 'mksh', 'toybox']);
+  const mixed = ['nc', 'dd', 'hexdump', 'diff', 'jq', 'sh', 'mksh', 'toybox', 'md5sum'];
+  const mixedCopy = mixed.slice();
+  const kept = filterExplicit(mixed, explicit);
+  check('IecParsing: filterExplicit 剔除全部 7 个显式名',
+    ['nc', 'hexdump', 'diff', 'jq', 'sh', 'mksh', 'toybox'].every((n) => kept.indexOf(n) < 0));
+  check('IecParsing: filterExplicit 保留未显式注册的命令且保序',
+    JSON.stringify(kept) === JSON.stringify(['dd', 'md5sum']));
+  check('IecParsing: filterExplicit 不修改入参数组',
+    JSON.stringify(mixed) === JSON.stringify(mixedCopy));
+  check('IecParsing: filterExplicit 无条件跳过空串',
+    JSON.stringify(filterExplicit(['', 'ls'], new Set())) === JSON.stringify(['ls']));
+  check('IecParsing: filterExplicit 无条件跳过 toybox（即便不在 explicit 里）',
+    JSON.stringify(filterExplicit(['toybox', 'ls'], new Set())) === JSON.stringify(['ls']));
+  check('IecParsing: filterExplicit 空 explicit 时除空串/toybox 全保留',
+    JSON.stringify(filterExplicit(['dd', '', 'toybox', 'nc'], new Set())) ===
+      JSON.stringify(['dd', 'nc']));
+
+  // isSafeRelPath：逐字复刻 IecShellService 抽取前的 cwd 校验。
+  const allowed = ['', '.', 'a', 'a/b', 'a/b/c', '.hidden', 'a b', 'a.b', 'a\\b'];
+  const rejected = ['/', '/abs', '/abs/x', '..', '../a', 'a/../b', 'a..b', '...',
+    ':', 'a:b', 'C:\\tmp', 'a/b:c'];
+  check('IecParsing: isSafeRelPath 允许普通相对路径（含空串）',
+    allowed.every((p) => isSafeRelPath(p)));
+  check('IecParsing: isSafeRelPath 拒绝以 / 开头的绝对路径',
+    rejected.filter((p) => p.startsWith('/')).every((p) => !isSafeRelPath(p)));
+  check('IecParsing: isSafeRelPath 拒绝任何含 .. 的路径',
+    ['..', '../a', 'a/../b', 'a..b', '...', '..\\a'].every((p) => !isSafeRelPath(p)));
+  check('IecParsing: isSafeRelPath 拒绝含 : 的路径（含 Windows 盘符）',
+    [':', 'a:b', 'C:\\tmp', 'a/b:c'].every((p) => !isSafeRelPath(p)));
+  check('IecParsing: isSafeRelPath 对反斜杠保持既有语义（设备侧不是分隔符）',
+    isSafeRelPath('a\\b') && !isSafeRelPath('..\\a'));
 }
 
 console.log('');

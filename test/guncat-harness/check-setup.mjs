@@ -147,6 +147,7 @@ for (const [relSrc, relDst, replaces] of [
   ['service/PythonService.ts', 'PythonService.ts', [["from 'libguncatpy.so'", "from './py-shim'"]]],
   ['service/WorkToolRunner.ets', 'WorkToolRunner.ts', []],
   ['service/ShellResultFormat.ts', 'ShellResultFormat.ts', []],
+  ['service/IecParsing.ts', 'IecParsing.ts', []],
 ]) {
   port(relSrc, relDst, replaces);
 }

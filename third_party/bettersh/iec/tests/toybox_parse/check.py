@@ -2,17 +2,21 @@
 # check.py — 用宿主 x86_64 toybox 的真实输出，交叉验证 ArkTS 侧的 applet 解析与
 # launcher 优先级。
 #
-# 被测逻辑在 entry/src/main/ets/service/IecRuntime.ets：
-#   * listToyboxApplets()：跑 `toybox`，把 `[`/`]` 换成空格、按空白分词，只留
-#     长度 1..31 且匹配 ^[a-z0-9_]+$ 的 token；
-#   * writeToyboxApplets()：跳过 '' 与 'toybox'，再跳过 explicitNames 里的命令，
+# 被测逻辑现在抽到了 entry/src/main/ets/service/IecParsing.ts（纯 TS，无
+# HarmonyOS import），IecRuntime.ets / IecShellService.ets 调用的就是它：
+#   * parseAppletList()：把 `[`/`]` 换成空格、按空白分词，只留长度 1..31 且匹配
+#     ^[a-z0-9_]+$ 的 token，去掉 `toybox`，去重保序；
+#   * filterExplicit()：跳过 '' 与 'toybox'，再跳过 explicitNames 里的命令，
 #     其余每个 applet 都写一个指向 libtoybox.so 的 launcher；
 #   * writeLaunchers()：add(...) 与 writeSoLauncher(...) 注册显式命令（nc /
 #     hexdump / diff / jq / sh / mksh …），它们优先于同名 toybox applet。
 #
+# 本脚本优先用 Node（>= 22.6 的 strip-types）**直接加载 IecParsing.ts 真实现**；
+# 找不到 node / 版本过旧时退回下面 Python 复刻，只作为环境降级，不再作为判据来源。
+#
 # 这里不重新实现 toybox，也不抄静态 applet 清单：拿宿主编出来的同一份源码的
-# 真实输出当输入，按上面的规则复刻一遍，再断言：
-#   1. 复刻解析结果 == `toybox --long` 的 applet 名集合（--long 不可用时退回
+# 真实输出当输入，再断言：
+#   1. 真实现解析结果 == `toybox --long` 的 applet 名集合（--long 不可用时退回
 #      无参输出）；
 #   2. 显式注册名与 toybox 的交集全部被跳过，绝不写回 libtoybox.so；
 #   3. 最终 launcher 集合 == explicit ∪ (applets - explicit)；
@@ -23,15 +27,18 @@
 #   python3 third_party/bettersh/iec/tests/toybox_parse/check.py
 #   python3 .../check.py --toybox /tmp/toybox-host
 #
-# 环境变量 TOYBOX_HOST 可覆盖 toybox 路径（默认 /tmp/toybox-host）。
+# 环境变量 TOYBOX_HOST 可覆盖 toybox 路径（默认 /tmp/toybox-host）；
+# IEC_PARSE_NODE 可指定 node 可执行文件（默认从 PATH 找）。
 #
 # 退出码：0 = 全部通过；1 = 断言失败；2 = 环境/输入错误；77 = 还没有 toybox 二进制
 # （正常流程由同目录 run.sh 先编好；直接跑 check.py 时按 SKIP 处理）。
 #
 # 纯 Python 标准库；不连设备、不需要 HarmonyOS SDK、不访问网络。
 import argparse
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -39,16 +46,18 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[4]
 ETS = REPO / "entry" / "src" / "main" / "ets" / "service" / "IecRuntime.ets"
+IEC_PARSING = REPO / "entry" / "src" / "main" / "ets" / "service" / "IecParsing.ts"
 TOYBOX_SRC = REPO / "third_party" / "bettersh" / "iec" / "thirdparty" / "toybox"
 DEFAULT_TOYBOX = "/tmp/toybox-host"
+NODE_MIN = (22, 6)  # Node 原生 TypeScript strip 的最低版本
 
-# 与 ArkTS 完全一致：先去掉方括号，再按 \s+ 分词；token 长度 1..31 且只含
-# 小写字母/数字/下划线。注意 nbd-client / nbd-server 会被这条规则丢掉，这不是
-# 解析器 bug —— ArkTS 侧同样注册不了带连字符的 applet。
+# 仅作 node 不可用时的降级复刻：与 IecParsing.ts 的规则保持一致。
+# 注意 nbd-client / nbd-server 会被这条规则丢掉，这不是解析器 bug ——
+# IecParsing.parseAppletList 同样注册不了带连字符的 applet。
 APPLET_RE = re.compile(r"^[a-z0-9_]+$")
-TOKEN_MAX = 32  # ArkTS: part.length < 32
+TOKEN_MAX = 32  # IecParsing: part.length < 32
 
-# writeToyboxApplets() 里无条件跳过的名字。
+# writeToyboxApplets() / filterExplicit() 里无条件跳过的名字。
 SKIP_NAMES = {"", "toybox"}
 
 
@@ -61,9 +70,10 @@ def die(msg, code=2):
     return code
 
 
-def run(argv, timeout=30):
+def run(argv, timeout=30, stdin=None):
     return subprocess.run(
         argv,
+        input=stdin,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         timeout=timeout,
@@ -89,6 +99,64 @@ def parse_applets(text, strip_paths=False):
         if 0 < len(part) < TOKEN_MAX and APPLET_RE.match(part):
             names.append(part)
     return names
+
+
+def node_binary():
+    """返回 (node 路径, 版本) 或 (None, 不可用原因)。"""
+    exe = os.environ.get("IEC_PARSE_NODE") or shutil.which("node")
+    if not exe:
+        return None, "找不到 node"
+    try:
+        result = run([exe, "-p", "process.versions.node"])
+    except OSError as exc:
+        return None, "node 无法执行: {}".format(exc)
+    if result.returncode != 0:
+        return None, "node 不可用: {}".format(decode(result.stderr).strip()[:200])
+    version = decode(result.stdout).strip()
+    try:
+        major, minor = (int(x) for x in version.split(".")[:2])
+    except ValueError:
+        return None, "无法解析 node 版本 {}".format(version)
+    if (major, minor) < NODE_MIN:
+        return None, "node {} 过旧（需要 >= 22.6 的原生 TypeScript strip）".format(version)
+    return exe, version
+
+
+def parse_with_real_module(raw, explicit):
+    """用 Node 直接加载 IecParsing.ts，返回 ((parsed, written), 说明) 或 (None, 原因)。
+
+    IecRuntime / IecShellService 调用的就是这份模块，避免 Python 复刻随规则漂移。
+    """
+    node, detail = node_binary()
+    if node is None:
+        return None, detail
+    if not IEC_PARSING.is_file():
+        return None, "找不到 {}".format(IEC_PARSING)
+    script = (
+        "import { parseAppletList, filterExplicit } from " +
+        json.dumps(IEC_PARSING.as_uri()) + ";\n"
+        "const chunks = [];\n"
+        "for await (const c of process.stdin) chunks.push(c);\n"
+        "const req = JSON.parse(Buffer.concat(chunks).toString('utf8'));\n"
+        "const parsed = parseAppletList(req.raw);\n"
+        "const written = filterExplicit(parsed, new Set(req.explicit));\n"
+        "process.stdout.write(JSON.stringify({ parsed, written }));\n"
+    )
+    payload = json.dumps({"raw": raw, "explicit": sorted(explicit)}).encode("utf-8")
+    try:
+        result = run([node, "--experimental-strip-types", "--input-type=module", "-e", script],
+                     stdin=payload)
+    except OSError as exc:
+        return None, "node 无法执行: {}".format(exc)
+    if result.returncode != 0:
+        return None, "node 加载真实现失败: {}".format(
+            decode(result.stderr).strip()[:400])
+    try:
+        data = json.loads(decode(result.stdout))
+        return ([str(n) for n in data["parsed"]],
+                [str(n) for n in data["written"]]), detail
+    except (ValueError, KeyError, TypeError) as exc:
+        return None, "真实现输出无法解析: {}".format(exc)
 
 
 def dropped_tokens(text):
@@ -231,15 +299,35 @@ def main():
         return die("{} 无参运行失败（rc={}）：{}".format(
             toybox, plain.returncode, decode(plain.stderr).strip()), 2)
     plain_text = decode(plain.stdout)
-    parsed = parse_applets(plain_text)
+
+    # 显式注册名：解析 writeLaunchers() 的 add(...) / writeSoLauncher(...)。
+    ets_text = ets.read_text(encoding="utf-8")
+    try:
+        explicit_so = parse_explicit_names(ets_text)
+    except Failure as exc:
+        return die(str(exc), 1)
+    explicit = set(explicit_so)
+
+    # 先用真实现（IecParsing.ts）解析与过滤；node 不可用才退回 Python 复刻。
+    real, real_detail = parse_with_real_module(plain_text, explicit)
+    if real is not None:
+        parsed, toybox_written = real
+        impl_label = "IecParsing.ts 真实现（Node {}）".format(real_detail)
+    else:
+        parsed = parse_applets(plain_text)
+        toybox_written = None
+        impl_label = "Python 复刻（降级）"
 
     print()
-    print("== 解析器复刻 ==")
+    print("== 解析器 ==")
+    print("解析/过滤实现: {}".format(impl_label))
+    if real is None:
+        print("  注意: {}".format(real_detail))
     print("无参输出原始 token 数: {}".format(len(plain_text.split())))
     dropped = dropped_tokens(plain_text)
     for token, reason in dropped:
         print("  丢弃 {!r}: {}".format(token, reason))
-    print("按 ArkTS 规则解析出 {} 个 applet".format(len(parsed)))
+    print("解析出 {} 个 applet".format(len(parsed)))
     if len(parsed) < 100:
         return die("只解析出 {} 个 applet，输出疑似为空/被截断".format(len(parsed)), 1)
     if len(parsed) != len(set(parsed)):
@@ -282,15 +370,9 @@ def main():
         check(set(parse_applets(plain_text)) == oracle_set,
               "无参输出与 --long 的 applet 集合一致")
 
-    # 显式注册名：解析 writeLaunchers() 的 add(...) / writeSoLauncher(...)。
+    # 显式注册名已在解析前取出（真实现过滤要用）。
     print()
     print("== 断言 2：显式注册与 launcher 优先级 ==")
-    ets_text = ets.read_text(encoding="utf-8")
-    try:
-        explicit_so = parse_explicit_names(ets_text)
-    except Failure as exc:
-        return die(str(exc), 1)
-    explicit = set(explicit_so)
     print("解析到 {} 个显式注册名".format(len(explicit)))
     required_explicit = {
         "toybox", "sh", "mksh", "nc", "hexdump", "diff", "jq", "tar", "hd", "cpio",
@@ -300,16 +382,16 @@ def main():
           "关键显式名都从 IecRuntime.ets 解析出来（缺: {}）".format(
               ", ".join(missing_explicit) or "无"))
 
-    # 复刻 writeToyboxApplets：跳过 ''/'toybox'，再跳过 explicitNames。
-    skipped = []
-    toybox_written = []
-    for name in parsed:
-        if name in SKIP_NAMES:
-            continue
-        if name in explicit:
-            skipped.append(name)
-        else:
-            toybox_written.append(name)
+    # toybox 写入 = filterExplicit(parsed, explicit)，真实现已在上方算好；
+    # 降级时按同一规则复刻：跳过 ''/'toybox'，再跳过 explicitNames。
+    if toybox_written is None:
+        toybox_written = []
+        for name in parsed:
+            if name in SKIP_NAMES:
+                continue
+            if name not in explicit:
+                toybox_written.append(name)
+    skipped = [name for name in parsed if name in explicit]
     skipped_set = set(skipped)
     toybox_set = set(toybox_written)
     collisions = sorted(set(parsed) & explicit)
