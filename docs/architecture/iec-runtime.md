@@ -123,7 +123,17 @@ GitHub 直连在 WSL 里通常不通（`codeload.github.com` 可以）：`pcre2`
   首次调用会等 `PythonService.ensureRuntime()` 把 stdlib 解出来。
 * 超时由引擎线程强制（先 TERM 后 KILL），不依赖 ArkTS 轮询；`timeout_ms`
   上限沿用 `Constants.WORK_SHELL_MAX_TIMEOUT_MS`。
-* 输出超过 `WORK_SHELL_MAX_OUTPUT_BYTES` 时整段落 `.spill/`，返回里给相对路径。
+* 命令内部自己用 `timeout` 时也按“命令树”收口：子命令带独立的子 job
+  （`<IEC_JOB>/t<pid>`），toybox `timeout` 通过 `OP_SIGNAL_JOB` 让执行服务逐个
+  signal job 内进程，同时在 `/proc` 里按 pgrp + ppid 级联收本地 exec stand-in。沙箱
+  不支持 `kill(-pgid)`（`EINVAL`），只按进程组杀会漏掉 `git-remote-https` 这类孙进程，
+  让调用方的 `$(...)` 一直等到工具级超时。嵌套 `timeout` 的内层会为自己的子进程换组，
+  外层先走 ppid 级联再杀直接子进程（顺序反了子进程会先被重挂/换组），因此
+  `timeout 1 timeout 5 sleep 4` 也能在 2 秒内收口。
+* 单流超过模型可见上限 `WORK_SHELL_HEAD_CHARS`（20k 字符）时就把已收到的全文落
+  `.spill/`，返回里给相对路径；引擎 cap 仍是 `WORK_SHELL_MAX_OUTPUT_BYTES`（60KB）。
+  两个阈值不能只按 60KB 判断：20k~60k 字符的输出不会被引擎 cap，但正文只回前 20k，
+  不落盘就会静默丢尾巴。
 * 输出含非法 UTF-8 或 NUL 字节（图片/压缩包）时返回 `binary=true`，工具结果会明确提示改用
   "重定向到文件"或 `base64`，不把乱码当内容。
 * 并发：最多 8 条命令同时跑（`IecRuntime.MAX_RUNS`），超出的排队；每条命令最多占

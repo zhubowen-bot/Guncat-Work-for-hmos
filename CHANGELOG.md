@@ -52,6 +52,103 @@
   `ARG_MAX=128KB`、临时目录位置等，写进 `shell` 工具描述与系统提示，避免按 bash 习惯踩坑。
 - 修正原提示词中两处与实现不符的说法：`pre{a,b}post` 其实会展开（只有 `{1..5}` 范围
   不展开）；`whoami`/`logname` 走 `/etc/passwd`，不是 utmp。
+- **`timeout` 能收掉整棵命令树**：IEC 里每条命令都是 exec 服务的子进程，进程组是扁平的，
+  toybox `timeout` 原来的 `kill(-pid)` 既会被沙箱拒绝（`EINVAL`），也够不到命令自己派生的
+  孙进程（典型：`git` 的 `git-remote-https`）。结果是 `out=$(timeout 10 git ls-remote …)`
+  在超时后仍被孙进程握住的 stdout 卡到工具级 60 秒，`iecSelfTest` 的 git 段也会整段超时。
+  现在：① 子命令树带独立子 job（`<IEC_JOB>/t<pid>`），超时通过新增的 `OP_SIGNAL_JOB`
+  让执行服务按 job 给每个进程正向发信号；② 同时在 `/proc` 里按 pgrp + ppid 级联收本地
+  exec stand-in（嵌套 `timeout` 的内层会为自己的子进程换组，只按 pgrp 会漏）；③ 外层
+  job 按前缀匹配子 job，工具级取消仍能一次清干净。真机验证：
+  `timeout 1 sh -c 'sleep 4 & wait'` 1~2 秒返回 124、`timeout 1 timeout 5 sleep 4`
+  2 秒内返回 124、反向 `timeout 5 timeout 1 sleep 4` 1 秒内返回 124、
+  `timeout -k 1 1 …` 2 秒内升级到 137，`iecSelfTest` 从 60 秒超时恢复到正常
+  `SELFTEST DONE`（git 段 10 秒超时只记录 rc，不再拖住整组）。
+- **`zip` 支持合并短选项**：自编 `zip` 原来按整词比较，`zip -qr out.zip dir` 会报
+  `unknown option -qr`。现在按字符拆开解析，`-q` / `-r` / `-j` / `-0` 可任意组合，
+  `zip -q -r` 等分开写法保持不变；`zip -T` 仍不支持（用 `unzip -t` 校验）。
+- **`.tar.bz2` / `.tar.xz` 可解包**：bsdtar 的压缩格式在 libarchive 没编内置库时靠外部过滤器，
+  而 libarchive 用 `posix_spawnp` 启动过滤器——它走 libc 内部 exec，绕过 exec shim，被沙箱
+  以 `EACCES` 拒绝（`unable to run program "bzip2 -d"`）。现在 configure 时禁用
+  `posix_spawnp`/`vfork`，改走被 shim 接管的 `fork + execvp`；同时用 Python 标准库补了
+  `/bin/xz`、`/bin/bzip2` 两个最小过滤器。`tar xjf`/`xJf`/`xf`（自动识别）与 `tar cjf`
+  可用；`tar cJf` 仍不支持（libarchive 未编 lzma），可写 `tar cf - dir | xz > out.tar.xz`。
+- **`grep --color=never` 不再输出 ANSI**：toybox 原来把所有非 `auto` 的颜色值都当成“always”，
+  `grep --color=never`/`--color=none` 仍会包一层转义码。现在按值区分：`never`/`none` 直接关闭，
+  裸 `--color`/`auto` 只在 stdout 是 tty 时开启；`--color=always` 保持原样。
+- **`find -delete` 不再打印删除路径**：toybox 原来把 `-delete` 只当“强制深度优先”，没有算作动作，
+  于是隐式 `-print` 把每个被删文件都打出来；`find . -delete` 看起来像文件清单，容易误导。
+  现在按 GNU 语义把它计为动作，删除时安静；显式 `-print`/`-printf` 仍然照常输出。
+- **git 的非交互默认值**：会话 `~/.gitconfig` 补 `core.quotepath=false`（`git status`/`log`
+  不再把 `中.txt` 显示成 `\344\270\255.txt`）；`GIT_TEMPLATE_DIR` 指向 `<sysroot>/etc/git-templates`，
+  不再每次 `init`/`clone` 打 `templates not found`，模板里预建 `hooks/` 让 `.git/hooks`
+  照常生成（pre-commit 等可用），模板里也预建 `info/exclude`（`.git/info/exclude` 不会缺失）；环境里加 `GIT_TERMINAL_PROMPT=0` 与
+  `GIT_SSH_COMMAND='ssh -o BatchMode=yes -o StrictHostKeyChecking=no'`，误连私有仓库/SSH 远程时直接失败
+  （实测 ssh 远程从挂到 10s 超时变为 2s 返回），而不是等凭据或 host key 交互挂到工具超时。旧会话的 `.gitconfig` 只在缺失时追加 `quotepath`，不覆盖用户设置。
+- **rename 覆盖软链按 POSIX 语义**：fs shim 的 `rename()` 在“普通文件覆盖软链”时把源文件重命名成了
+  `<名字>.IEC_SYMLINK`，于是文件内容被当成链接目标——`sed -i` 一个软链会把它改成指向
+  `changed` 的悬空链，`mv file link` 同理。现在先删除目标 marker，再让普通文件落到可见名；
+  链接→链接/链接→普通文件仍按 marker 语义移动，`sed -i`、`mv` 覆盖软链的行为与 GNU 一致
+  （目标文件不变、软链被普通文件替换），并进自检。
+- **`head -n -N` 可用**：GNU 的负行数（除最后 N 行之外全部输出）在裁剪输出末尾摘要时很常见，
+  toybox 原来直接报 `-n < 0`。现在按环形缓冲保留最后 N 行，行一到界就输出更早的一行，
+  内存只与 N 和最长行有关；`-n -1`/`-n -2`/无尾换行/`-n -0` 均进自检。
+- **`awk` 的 `system()` / 管道可用**：libc 的 `system(3)`/`popen(3)` 在 libc 内部调用
+  `execl`，绕过了 exec shim，被沙箱以 `EACCES` 拒绝（`system()` 返回 -1、`"cmd" | getline`
+  读不到数据）。shim 里补了 `--wrap=system/popen/pclose`：fork 后走与其他命令相同的
+  exec 服务路径，`awk 'BEGIN{system("echo hi")}'` 正常输出且退出码透传，`print | "cat"`
+  与 `"cmd" | getline` 也可用。`python3` 的 `os.system`/`os.popen` 仍在 libpython 内部，
+  本轮未改，脚本里请用 `subprocess`（已验证可用）。
+- **`zip -x` 排除生效**：Info-ZIP 的 `-x` 出现在路径之后（`zip -qr out.zip dir -x 'dir/skip/*'`），
+  原解析器把它和模式当成输入文件——排除静默失效，被排除的文件还会重复入包。现在先收集
+  所有 `-x` 模式再遍历路径；目录命中时整棵子树跳过，无 `/` 的模式也按 basename 匹配
+  （`-x '*.log'`），并进自检。
+- **长参数不再被 32KiB 截断**：exec 请求原来是固定的 32KiB 栈缓冲，超出的
+  argv/环境以 `E2BIG` 失败——长 `sh -c '…'`、`python3 -c '…'`、`xargs` 追加的大参数
+  都会中招，而系统其余部分按 128KiB `ARG_MAX` 行事。现在小请求继续用栈缓冲，放不下时
+  按实际长度分配（上限 1MiB），真机 40KB/60KB/100KB 单参数均已通过并进自检。
+- **`diff -r` 可用**：目录比较由 `git diff --no-index` 实现，它本身递归但没有 `-r`
+  开关，原包装器会把 `-r` 原样转发并以 `unknown switch 'r'` 退出。现在接受 GNU 的
+  `-r`/`--recursive` 并忽略，`diff -r dir1 dir2` 按目录递归比较并返回 1。
+- **`xargs` 支持 `-I`，并恢复 `-0`/`-a`**：toybox 原版没有 insert mode，AI 常用的
+  `xargs -I{} cmd {}` / `xargs -I {} cmd {}` 会直接报错。现在按行读入、逐项替换，
+  没有占位符时把输入行追加到命令尾，`-P` 并行也可用。选项串里的 `^`（在第一个非选项
+  参数处停止解析）必须留在**最开头**：补丁一度把 `I:` 放到它前面，导致
+  `xargs -n1 sh -c '…'`、`xargs echo -n` 里的 `-c`/`-n` 被当成 xargs 自己的选项并报
+  `Unknown option`；现已改回 `"^I:…"` 并进自检。`-0` 与 `-a FILE` 在真机上也已正常
+  （`printf 'a b\0c\0' | xargs -0 -n1 echo base` 输出两组；`xargs -a file` 读完全部行），
+  不再需要先 `tr '\0' '\n'`。
+- **20k~60k 字符的输出不再静默丢尾巴**：正文只回前 20k 字符，但 `.spill` 落盘阈值
+  之前沿用引擎 cap 的 60KB；这个区间的输出既没送给模型、也不在 `.spill` 里，还会被
+  标成“落盘失败”。现在只要超过模型可见上限就落盘，说明里的 `.spill/` 路径真实可读；
+  `iecSelfTest` 用 `seq 1 8000`（约 38KB）钉住这条。
+- **shell `python3` 的 stdin 不再在 16MB 截断**：客户端 `python_entry.c` 把 stdin
+  缓冲到 16MB 就 `break`，既不报错也不继续读，`xz`/`bzip2` 压缩 20MB 数据会得到
+  “成功但少一截”的流，解压后 md5 才对不上。现在：stdin 是普通文件（`< file`、shell
+  工具注入的 stdin）时只把路径发给 runner，由 runner 边读文件边喂管道，不进内存也
+  没有上限；管道/终端输入上限提到 64MB，超过时明确报错而不是静默截断。runner 协议
+  新增 `stdin_len == 0xffffffff` 的路径模式。真机验证 20MB 文件的 xz/bzip2 压缩→
+  解压 `cmp` 一致，`cat | xz` 的管道路径同样一致；宿主 py_runner 协议测试 18 项通过。
+- **`sort -h` 可用**：toybox `sort` 原来不认 `-h`，`du -h`/`ls -lh` 的结果没法直接按
+  大小排序。现在按 GNU 语义把 `2K`/`1.5M`/`3G`（1024 进制，支持 K~Y）解析成数值再比较，
+  可与 `-r`、`-k` 组合；真机验证 `1K < 1.5K < 2M < 1G`，反序正确。
+- **`split -d` 可用**：GNU 常用的数字后缀（`x00`/`x01`）原来被 toybox 报
+  `Unknown option 'd'`。现在支持 `-d`，与 `-a`/`-b`/`-l`/`-n` 组合；真机验证
+  `split -d -b 5` 生成 `part_00`/`part_01`，`-a 3` 生成 `p3_000`~`p3_003`。
+- **`sed` 支持 GNU 步长地址 `first~step`**：`sed -n '1~2p'` 原来报
+  `bad pattern '1~2p'`。现在 `1~2p`/`2~2p`/`2~3p`、`0~3p`（GNU 语义：从第
+  step 行起每 step 行）以及 `sed '1~2d'` 都可用，普通 `3,5p` 范围不受影响；
+  真机逐项验证输出正确。
+- **自检补回归**：`timeout` 命令树、嵌套 `timeout`（外层/内层先到点两个方向）、
+  `zip -qr`、`xargs -I{}`/`-I {}`、20k~60k 落盘、`base64`（二进制结果提示依赖它）
+  都进了 `iecSelfTest`，不再只靠人工复跑；连续冷启动自检均 `SELFTEST DONE`、无
+  `[FAIL]`。
+- **提示词同步实现**：去掉“`zip` 组合选项要分开写”的旧说法，改为 `zip -qr` 可用
+  （`-T` 不支持）；输出说明改为“单流超 20k 字符只回前 20k，全文落 `.spill`”，
+  并提示不要嵌套 `timeout`（外层限时直接用 `timeout_ms`），避免模型按过期限制
+  绕路或踩到嵌套超时的边界。
+- **截断不拆 emoji**：20k 字符的截断点若落在 UTF-16 代理对中间，向前让一个码元，
+  正文末尾不再出现孤立代理/`�`；宿主回归新增一条。
 
 ### 执行核：从 QEMU/Alpine 换成 IEC
 

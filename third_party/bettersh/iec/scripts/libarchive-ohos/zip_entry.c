@@ -23,6 +23,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <fnmatch.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,6 +32,34 @@
 #include <unistd.h>
 
 static int g_quiet;
+
+static const char* BaseName(const char* path);
+
+/* Info-ZIP's -x patterns. Everything after the first -x on the command line is a
+ * pattern, not an input file, which is why these are collected separately from
+ * the paths. A pattern with no '/' is also matched against the basename, so the
+ * common `-x '*.log'` works without spelling out the directory. */
+#define MAX_EXCLUDES 64
+static const char* g_exclude[MAX_EXCLUDES];
+static int g_nexclude;
+
+static int Excluded(const char* arc)
+{
+    char name[PATH_MAX];
+    size_t n;
+
+    if (g_nexclude == 0) return 0;
+    if (snprintf(name, sizeof name, "%s", arc) < 0) return 0;
+    n = strlen(name);
+    while (n > 0 && name[n - 1] == '/') name[--n] = '\0';
+
+    for (int i = 0; i < g_nexclude; i++) {
+        const char* pat = g_exclude[i];
+        if (fnmatch(pat, name, 0) == 0) return 1;
+        if (strchr(pat, '/') == NULL && fnmatch(pat, BaseName(name), 0) == 0) return 1;
+    }
+    return 0;
+}
 
 static void complain(const char* path, const char* what)
 {
@@ -145,6 +174,10 @@ static int AddPath(struct archive* a, const char* fs_path,
         return -1;
     }
 
+    /* A directory that matches an exclusion is skipped with its whole subtree,
+     * which is what `-x 'node_modules/*'` needs; files are skipped one by one. */
+    if (Excluded(arc)) return 0;
+
     if (S_ISLNK(st.st_mode)) {
         char target[PATH_MAX];
         const ssize_t n = readlink(fs_path, target, sizeof target - 1);
@@ -218,13 +251,18 @@ int main(int argc, char** argv)
             i++;
             break;
         }
-        if (!strcmp(argv[i], "-r")) recurse = 1;
-        else if (!strcmp(argv[i], "-q")) g_quiet = 1;
-        else if (!strcmp(argv[i], "-j")) junk = 1;
-        else if (!strcmp(argv[i], "-0")) store = 1;
-        else {
-            fprintf(stderr, "zip: unknown option %s\n", argv[i]);
-            return 2;
+        // Info-ZIP accepts bundled short options ("zip -qr out.zip dir"). The
+        // parser used to compare whole words, so the common -qr form failed
+        // with "unknown option".
+        for (const char* p = argv[i] + 1; *p; p++) {
+            if (*p == 'r') recurse = 1;
+            else if (*p == 'q') g_quiet = 1;
+            else if (*p == 'j') junk = 1;
+            else if (*p == '0') store = 1;
+            else {
+                fprintf(stderr, "zip: unknown option -%c\n", *p);
+                return 2;
+            }
         }
     }
 
@@ -248,7 +286,28 @@ int main(int argc, char** argv)
     }
 
     int rc = 0;
-    for (; i < argc; i++) {
+    // `-x` comes after the paths in the usual `zip -r out.zip dir -x 'pat'`
+    // form, so the patterns have to be collected before any path is walked:
+    // adding `dir` first would already have archived the file the pattern is
+    // meant to exclude. Pass one finds the first -x and records the patterns;
+    // pass two adds the paths that precede it.
+    int xidx = argc;
+    const int first = i;
+    for (int j = first; j < argc; j++) {
+        if (strcmp(argv[j], "-x") == 0 ||
+            (strncmp(argv[j], "-x", 2) == 0 && argv[j][2] != '\0')) {
+            xidx = j;
+            break;
+        }
+    }
+    for (int j = xidx; j < argc; j++) {
+        const char* pat = argv[j];
+        if (j == xidx && strcmp(pat, "-x") == 0) continue;
+        if (j == xidx) pat += 2;   // -xPATTERN attached form
+        if (g_nexclude < MAX_EXCLUDES) g_exclude[g_nexclude++] = pat;
+        else fprintf(stderr, "zip: too many -x patterns (max %d)\n", MAX_EXCLUDES);
+    }
+    for (i = first; i < xidx; i++) {
         if (AddPath(a, argv[i], NULL, recurse, junk) != 0) rc = 1;
     }
 

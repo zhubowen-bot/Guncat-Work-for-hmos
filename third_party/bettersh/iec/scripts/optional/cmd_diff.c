@@ -197,6 +197,11 @@ int iec_diff_main(int argc, char** argv) {
             endopts = 1;
             continue;
         }
+        if (!endopts && (strcmp(a, "-r") == 0 || strcmp(a, "--recursive") == 0)) {
+            // git diff --no-index 对目录默认递归，没有 -r 开关；接受 GNU 的写法，
+            // 但不转发，否则 git 会以 `unknown switch 'r'` 退出。
+            continue;
+        }
         if (!endopts && strcmp(a, "-q") == 0) {
             opts[nopt++] = (char*)"--quiet";
             continue;

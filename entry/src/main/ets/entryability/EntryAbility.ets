@@ -14,6 +14,7 @@
  */
 
 import { AbilityConstant, ConfigurationConstant, UIAbility, Want, Configuration, common } from '@kit.AbilityKit';
+import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { systemShare } from '@kit.ShareKit';
@@ -59,16 +60,70 @@ export default class EntryAbility extends UIAbility {
     if (params !== undefined && params['iecSelfTest'] !== undefined) {
       hilog.info(DOMAIN, 'IecSelfTest', 'starting');
       IecShellService.selfTest(this.context).then((text: string): void => {
-        hilog.info(DOMAIN, 'IecSelfTest', 'RESULT\n%{public}s', text);
+        // 逐行打：一次 hilog 调用有长度上限，整段多行结果会被截断/拆散，
+        // 之后想 grep 一行 [FAIL] 都找不到。
+        text.split('\n').forEach((line: string): void => {
+          hilog.info(DOMAIN, 'IecSelfTest', 'ST|%{public}s', line);
+        });
       }).catch((e: Error): void => {
         hilog.error(DOMAIN, 'IecSelfTest', 'FAILED %{public}s', e.message);
       });
     }
+    this.runProbe(want);
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
   }
 
   onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     this.publishSharedFiles(want);
+    // 覆盖已运行实例时也能跑探针：冷启动只用于安装后第一次，之后的排障
+    // 用 `aa start` 落到这里，不必 force-stop（前台也就不会中断）。
+    this.runProbe(want);
+  }
+
+  // 调试钩子：`aa start ... --ps iecCmdB64 <base64>` 时用 shell 工具同一条链路跑一遍，
+  // 结果写 hilog。只用于真机排障，正常使用不会走到这里。命令走 base64 是为了避开
+  // aa 参数对引号/空格/中文的解析；可选的 `iecStdinB64` 注入同一份 stdin。
+  private runProbe(want: Want): void {
+    const params: Record<string, Object> | undefined = want.parameters;
+    if (params === undefined) return;
+    const raw: Object | undefined = params['iecCmdB64'];
+    if (raw === undefined) return;
+    let command: string = '';
+    let stdin: string = '';
+    try {
+      const decoder: util.TextDecoder = util.TextDecoder.create('utf-8');
+      command = decoder.decodeToString(new util.Base64Helper().decodeSync(raw as string));
+      const stdinRaw: Object | undefined = params['iecStdinB64'];
+      if (stdinRaw !== undefined) {
+        const d2: util.TextDecoder = util.TextDecoder.create('utf-8');
+        stdin = d2.decodeToString(new util.Base64Helper().decodeSync(stdinRaw as string));
+      }
+    } catch (e) {
+      hilog.error(DOMAIN, 'IecProbe', 'bad probe param: %{public}s', JSON.stringify(e));
+      return;
+    }
+    hilog.info(DOMAIN, 'IecProbe', 'CMD %{public}s', command);
+    let timeoutMs: number = 30000;
+    const tRaw: Object | undefined = params['iecTimeoutMs'];
+    if (tRaw !== undefined) {
+      const t: number = Number(tRaw as string);
+      if (!isNaN(t) && t >= 1000) timeoutMs = t;
+    }
+    let cwd: string = '';
+    const cRaw: Object | undefined = params['iecCwd'];
+    if (cRaw !== undefined) cwd = cRaw as string;
+    IecShellService.run(this.context, '__iec_probe', {
+      'command': command,
+      'stdin': stdin,
+      'cwd': cwd,
+      'timeout_ms': timeoutMs
+    }).then((r: ToolExecResult): void => {
+      // 折成一行：hilog 会把内嵌换行拆成不带 tag 的后续行，抓日志时容易漏。
+      const flat: string = r.output.split('\n').join('\\n');
+      hilog.info(DOMAIN, 'IecProbe', 'RESULT %{public}s', flat);
+    }).catch((e: Error): void => {
+      hilog.error(DOMAIN, 'IecProbe', 'FAILED %{public}s', e.message);
+    });
   }
 
   onDestroy(): void {

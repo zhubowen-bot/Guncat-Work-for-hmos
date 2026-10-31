@@ -1,0 +1,17 @@
+diff --git a/toys/posix/find.c b/toys/posix/find.c
+index 1dcb1b8..549e95c 100644
+--- a/toys/posix/find.c
++++ b/toys/posix/find.c
+@@ -302,8 +302,11 @@ static int do_find(struct dirtree *new)
+ 
+     if (!strcmp(s, "xdev")) TT.xdev = 1;
+     else if (!strcmp(s, "delete")) {
+-      // Delete forces depth first
++      // Delete forces depth first. It is also an action: GNU find does not add
++      // the implicit -print after it, and printing every removed path is both
++      // noisy and surprising for `find ... -delete` (it looked like a file list).
+       TT.depth = 1;
++      print++;
+       if (new && check)
+         test = !unlinkat(dirtree_parentfd(new), new->name,
+           S_ISDIR(new->st.st_mode) ? AT_REMOVEDIR : 0);

@@ -178,6 +178,8 @@ export class IecRuntime {
       // 放在 applet 枚举之后：writeToyboxApplets 会把 id/whoami/logname 注册成
       // libtoybox 的 launcher，这里再用带兜底的包装器覆盖它们。
       IecRuntime.writeIdentityWrappers();
+      // toybox xargs 的 -0/-a 在设备上只读第一行（libc getdelim 对非原始
+      // stdin 的 FILE 流异常）；用包装器把 -0 转成换行、-a 转成 stdin 重定向。
 
       // npm 是纯 JS 树（node 源码里的 deps/npm），随包成 rawfile/tools/npm.tar.gz，
       // 首次启动解到 <sysroot>/npm —— iec_npm_main 拼的命令行就是
@@ -206,6 +208,44 @@ export class IecRuntime {
   private static readonly SH_WRAPPER: string = '#!' + SYSROOT + '/bin/mksh\n' +
     '# 统一 UTF-8：mksh 对脚本/-c 默认关闭 utf8-mode\n' +
     'exec ' + SYSROOT + '/bin/mksh -U "$@"\n';
+
+  // toybox tar 的 -j/-J 以及按扩展名自动识别，都要启动外部过滤程序；包里只有
+  // bzcat/bunzip2，没有 bzip2/xz/xzcat，所以 `.tar.bz2`/`.tar.xz` 会报
+  // "unable to run program"。这里用 Python 标准库补两个最小过滤器：`-d` 解压、
+  // 默认压缩。tar 只通过 stdin/stdout 传数据，不涉及文件名参数。
+  private static readonly XZ_FILTER: string = '#!' + SYSROOT + '/usr/bin/env python3\n' +
+    'import sys, lzma\n' +
+    'a = sys.argv[1:]\n' +
+    'dec = any((x in ("-d", "--decompress", "-dc", "-cd")) or\n' +
+    '          (x.startswith("-") and not x.startswith("--") and "d" in x[1:]) for x in a)\n' +
+    'if "-z" in a or "--compress" in a:\n' +
+    '    dec = False\n' +
+    'f = lzma.LZMADecompressor() if dec else lzma.LZMACompressor()\n' +
+    'w = lambda o: o and sys.stdout.buffer.write(o)\n' +
+    'while True:\n' +
+    '    b = sys.stdin.buffer.read(65536)\n' +
+    '    if not b:\n' +
+    '        break\n' +
+    '    w(f.decompress(b) if dec else f.compress(b))\n' +
+    'if not dec:\n' +
+    '    w(f.flush())\n';
+
+  private static readonly BZ2_FILTER: string = '#!' + SYSROOT + '/usr/bin/env python3\n' +
+    'import sys, bz2\n' +
+    'a = sys.argv[1:]\n' +
+    'dec = any((x in ("-d", "--decompress", "-dc", "-cd")) or\n' +
+    '          (x.startswith("-") and not x.startswith("--") and "d" in x[1:]) for x in a)\n' +
+    'if "-z" in a or "--compress" in a:\n' +
+    '    dec = False\n' +
+    'f = bz2.BZ2Decompressor() if dec else bz2.BZ2Compressor()\n' +
+    'w = lambda o: o and sys.stdout.buffer.write(o)\n' +
+    'while True:\n' +
+    '    b = sys.stdin.buffer.read(65536)\n' +
+    '    if not b:\n' +
+    '        break\n' +
+    '    w(f.decompress(b) if dec else f.compress(b))\n' +
+    'if not dec:\n' +
+    '    w(f.flush())\n';
 
   // 返回 0 表示成功；写不了包装器（或无 fork 渠道）时退回直接 launcher：
   // 脚本仍能跑，只是 UTF-8 不统一。
@@ -307,6 +347,13 @@ export class IecRuntime {
     }
     if (IecRuntime.hasSo('libnode.so')) {
       writeSoLauncher(usrBin + '/node', BUNDLE_LIBS + 'libnode.so', 'iec_node_main', 2, 0);
+    }
+
+    // .tar.xz / .tar.bz2 的过滤器（见 XZ_FILTER/BZ2_FILTER）。只有 python3
+    // 在包里时才写；否则保持原状，tar 自己会报 unable to run program。
+    if (IecRuntime.hasSo('libpycmd.so')) {
+      writeTxtFile(BIN_DIR + '/xz', IecRuntime.XZ_FILTER);
+      writeTxtFile(BIN_DIR + '/bzip2', IecRuntime.BZ2_FILTER);
     }
 
     let fails: number = 0;

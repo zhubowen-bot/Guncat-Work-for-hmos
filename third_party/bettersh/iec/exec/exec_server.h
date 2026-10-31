@@ -29,6 +29,10 @@ private:
     // the pid the caller was given).
     bool onTerminateJob(const Packet& req, Reply& reply);
 
+    // Sends one signal to every process of a job; see OP_SIGNAL_JOB. Used by
+    // toybox timeout: TERM now, KILL after its own grace period.
+    bool onSignalJob(const Packet& req, Reply& reply);
+
     // One text line per known process; see OP_LIST.
     bool onList(const Packet& req, Reply& reply);
 

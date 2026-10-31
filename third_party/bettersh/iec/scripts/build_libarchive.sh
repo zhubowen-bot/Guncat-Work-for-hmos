@@ -99,6 +99,7 @@ iec_log "configure libarchive $VER (static, zlib only, shared=$SHARED)"
 	LDFLAGS="-fuse-ld=lld --target=$TARGET --sysroot=$SYSROOT -L$IEC_DEPS_LIB" \
 	PKG_CONFIG_LIBDIR="$IEC_DEPS_LIB/pkgconfig:$IEC_DEPS_DIR/usr/lib/pkgconfig" \
 	PKG_CONFIG_PATH="" \
+	ac_cv_func_posix_spawnp=no ac_cv_func_vfork=no \
 	"$SRC/configure" \
 		--host=aarch64-linux-musl --build=x86_64-pc-linux-gnu \
 		--prefix="$IEC_DEPS_DIR/usr" \

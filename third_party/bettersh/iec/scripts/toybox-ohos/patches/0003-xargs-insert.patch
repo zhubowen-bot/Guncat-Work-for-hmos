@@ -1,0 +1,156 @@
+diff --git a/toys/posix/xargs.c b/toys/posix/xargs.c
+index ac8aa5b..240b54e 100644
+--- a/toys/posix/xargs.c
++++ b/toys/posix/xargs.c
+@@ -9,7 +9,7 @@
+  * TODO: -L	Max number of lines of input per command
+  * TODO: -x	Exit if can't fit everything in one command
+ 
+-USE_XARGS(NEWTOY(xargs, "^(process-slot-var):a:E:P#<0(null)=1optr(no-run-if-empty)n#<1(max-args)s#0[!0E]", TOYFLAG_USR|TOYFLAG_BIN))
++USE_XARGS(NEWTOY(xargs, "^I:(process-slot-var):a:E:P#<0(null)=1optr(no-run-if-empty)n#<1(max-args)s#0[!0E]", TOYFLAG_USR|TOYFLAG_BIN))
+ 
+ config XARGS
+   bool "xargs"
+@@ -24,6 +24,7 @@ config XARGS
+     -0	Each argument is NULL terminated, no whitespace or quote processing
+     -a FILE	Read arguments from FILE, don't close stdin
+     -E	Stop at line matching string
++    -I R	Replace R in each command argument with one input line
+     -n	Max number of arguments per command
+     -o	Open tty for COMMAND's stdin (default /dev/null)
+     -P	Parallel processes (default 1)
+@@ -40,7 +41,7 @@ config XARGS
+ 
+ GLOBALS(
+   long s, n, P;
+-  char *E, *a, *process_slot_var;
++  char *E, *a, *I, *process_slot_var;
+ 
+   long entries, bytes, np;
+   char delim;
+@@ -56,8 +57,41 @@ GLOBALS(
+ // Returning 1 means hit data limits, but consumed all data
+ // Returning 2 means hit -E STR
+ 
++// Replace every occurrence of pat in src with rep. The caller owns the result;
++// a missing pat is copied verbatim so the caller can decide whether to append
++// the input line instead.
++static char *replace_all(const char *src, const char *pat, const char *rep)
++{
++  size_t plen = strlen(pat), rlen = strlen(rep), n = 0;
++  const char *p = src, *q;
++  char *out, *d;
++
++  if (!plen) return xstrdup(src);
++  while ((p = strstr(p, pat))) { n++; p += plen; }
++  if (!n) return xstrdup(src);
++  out = d = xmalloc(strlen(src) - n*plen + n*rlen + 1);
++  for (p = src; (q = strstr(p, pat)); p = q + plen) {
++    size_t l = q - p;
++    memcpy(d, p, l); d += l;
++    memcpy(d, rep, rlen); d += rlen;
++  }
++  strcpy(d, p);
++  return out;
++}
++
+ static char *handle_entries(char *data, char **entry)
+ {
++  // -I: one input line is one argument, no whitespace splitting.
++  if (TT.I) {
++    long bytes = TT.bytes+sizeof(char *)+strlen(data)+1;
++
++    if (bytes >= TT.s || TT.entries) return data;
++    TT.bytes = bytes;
++    if (entry) entry[0] = data;
++    TT.entries = 1;
++    return 0;
++  }
++
+   if (TT.delim) {
+     char *save, *ss, *s;
+ 
+@@ -102,6 +136,7 @@ static void signal_P(int sig)
+   else TT.P++;
+ }
+ 
++
+ static void waitchild(int options)
+ {
+   int pid, i, status;
+@@ -129,7 +164,7 @@ void xargs_main(void)
+ {
+   struct double_list *dlist = 0, *dtemp;
+   int entries, bytes, slot, done = 0;
+-  char *data = 0, **out = 0;
++  char *data = 0, **out = 0, **owned = 0;
+   pid_t pid = 0;
+   FILE *args_fp = TT.a ? xfopen(TT.a, "re") : stdin;
+ 
+@@ -171,6 +206,12 @@ void xargs_main(void)
+     dlist = 0;
+     free(out);
+     out = 0;
++    if (owned) {
++      int j;
++      for (j = 0; owned[j]; j++) free(owned[j]);
++      free(owned);
++      owned = 0;
++    }
+ 
+     // Loop reading input
+     for (;;) {
+@@ -183,6 +224,11 @@ void xargs_main(void)
+           done++;
+           break;
+         }
++        if (TT.I && TT.delim) {
++          size_t end = strlen(data);
++          while (end && (data[end-1]=='\n' || data[end-1]=='\r'))
++            data[--end] = 0;
++        }
+       }
+       dlist_add(&dlist, data);
+       // Count data used
+@@ -196,17 +242,34 @@ void xargs_main(void)
+ 
+     if (!TT.entries) {
+       if (data) error_exit("argument too long");
+-      if (pid || FLAG(r)) break;
++      if (TT.I || pid || FLAG(r)) break;
+     }
+ 
+     // Fill out command line to exec
+-    out = xzalloc((toys.optc+TT.entries+1)*sizeof(char *));
+-    memcpy(out, toys.optargs, toys.optc*sizeof(char *));
+-    TT.entries = 0;
+-    TT.bytes = bytes;
+     dlist_terminate(dlist);
+-    for (dtemp = dlist; dtemp; dtemp = dtemp->next)
+-      handle_entries(dtemp->data, out+entries);
++    if (TT.I) {
++      char *line = dlist->data;
++      int i, n = toys.optc, found = 0, oi = 0;
++
++      out = xzalloc((n+2)*sizeof(char *));
++      owned = xzalloc((n+1)*sizeof(char *));
++      for (i = 0; i < n; i++) {
++        if (strstr(toys.optargs[i], TT.I)) {
++          out[i] = owned[oi++] = replace_all(toys.optargs[i], TT.I, line);
++          found = 1;
++        } else out[i] = toys.optargs[i];
++      }
++      // GNU xargs appends the input when the command has no replacement.
++      if (!found) out[n++] = line;
++      out[n] = 0;
++    } else {
++      out = xzalloc((toys.optc+TT.entries+1)*sizeof(char *));
++      memcpy(out, toys.optargs, toys.optc*sizeof(char *));
++      TT.entries = 0;
++      TT.bytes = bytes;
++      for (dtemp = dlist; dtemp; dtemp = dtemp->next)
++        handle_entries(dtemp->data, out+entries);
++    }
+ 
+     if (FLAG(p) || FLAG(t)) {
+       int i;

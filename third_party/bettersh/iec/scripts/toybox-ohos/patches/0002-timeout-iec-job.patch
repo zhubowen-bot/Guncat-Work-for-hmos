@@ -1,0 +1,182 @@
+diff --git a/toys/other/timeout.c b/toys/other/timeout.c
+index 4c4288e..4b8d7ee 100644
+--- a/toys/other/timeout.c
++++ b/toys/other/timeout.c
+@@ -28,15 +28,27 @@ config TIMEOUT
+ 
+ #define FOR_timeout
+ #include "toys.h"
++#include <dirent.h>
+ 
+ GLOBALS(
+   char *s, *k;
+ 
++  // Sub-job name for the command tree: "<IEC_JOB>/t<pid>". Every command in
++  // IEC is a child of the exec server and process groups are flat, so
++  // kill(-pid) cannot reach a grandchild such as git-remote-https. A job is
++  // the handle that survives the exec chain (see iec_signal_job).
++  char *subjob;
++  int nested;
++
+   struct pollfd pfd;
+   sigjmp_buf sj;
+   int fds[2], pid, rc;
+ )
+ 
++// Provided by the IEC exec shim. NULL outside IEC (for example the host
++// selftest), where the original kill path is used.
++extern int iec_signal_job(const char *job, int signo) __attribute__((weak));
++
+ static void handler(int sig, siginfo_t *si)
+ {
+   TT.rc = si->si_status + ((si->si_code!=CLD_EXITED)<<7);
+@@ -48,9 +60,89 @@ static long nantomil(struct timespec *ts)
+   return ts->tv_sec*1000+ts->tv_nsec/1000000;
+ }
+ 
++// IEC refuses kill(-pgid, sig) with EINVAL, and timeout's local children can
++// leave that group: the inner timeout in `timeout 1 timeout 5 sleep 4` calls
++// setpgid(0,0) for its own child, which then holds the caller's stdout. Walk
++// /proc and signal the whole local descendant tree by positive pid; the job
++// signal below still covers the remote programs. Parent links are real for
++// these local toybox forks even though exec-spawned programs are flat, so a
++// bounded ppid cascade catches the nested groups too.
++#define KILL_LOCAL_MAX 512
++static void kill_local_group(pid_t root, int sig)
++{
++  struct local_proc { pid_t pid, ppid, pgrp; } procs[KILL_LOCAL_MAX];
++  int mark[KILL_LOCAL_MAX] = {0};
++  int n = 0, any = 0, changed;
++  DIR *d = opendir("/proc");
++
++  if (!d) {
++    kill(-root, sig);
++    return;
++  }
++  for (struct dirent *e; (e = readdir(d));) {
++    char path[64], buf[1024];
++    long pid, ppid, pgrp;
++    char *p;
++
++    if (e->d_name[0] < '0' || e->d_name[0] > '9') continue;
++    snprintf(path, sizeof(path), "/proc/%s/stat", e->d_name);
++    FILE *f = fopen(path, "r");
++    if (!f) continue;
++    if (!fgets(buf, sizeof(buf), f)) {
++      fclose(f);
++      continue;
++    }
++    fclose(f);
++    // The comm field may contain spaces or parentheses; parse after the last ')'.
++    if (!(p = strrchr(buf, ')'))) continue;
++    if (sscanf(p+1, " %*c %ld %ld", &ppid, &pgrp) != 2) continue;
++    if (n < KILL_LOCAL_MAX) {
++      pid = atoi(e->d_name);
++      procs[n].pid = (pid_t)pid;
++      procs[n].ppid = (pid_t)ppid;
++      procs[n].pgrp = (pid_t)pgrp;
++      n++;
++    }
++  }
++  closedir(d);
++
++  // Start from the root itself, its group, and its immediate children, then
++  // follow parent links until no new descendant is found. The child does not
++  // always lead its own group (nested timeout / failed setpgid): use the
++  // root's effective group as well, but never signal timeout itself.
++  const pid_t root_group = getpgid(root) > 0 ? getpgid(root) : root;
++  for (int i = 0; i < n; i++)
++    if (procs[i].pid == root || procs[i].pgrp == root ||
++        procs[i].pgrp == root_group || procs[i].ppid == root) mark[i] = 1;
++  do {
++    changed = 0;
++    for (int i = 0; i < n; i++) {
++      if (mark[i]) continue;
++      for (int j = 0; j < n; j++) {
++        if (mark[j] && procs[i].ppid == procs[j].pid) {
++          mark[i] = 1;
++          changed = 1;
++          break;
++        }
++      }
++    }
++  } while (changed);
++
++  for (int i = 0; i < n; i++)
++    if (mark[i] && procs[i].pid != getpid() && kill(procs[i].pid, sig) == 0)
++      any = 1;
++  if (!any) kill(-root, sig);
++}
++
+ static void callback(char *argv[])
+ {
+-  if (!FLAG(foreground)) setpgid(0, 0);
++  // A nested timeout stays in the outer command's process group. It must not
++  // create a new group: the outer deadline then reaches the inner timeout and
++  // its children as one local tree (see kill_local_group()).
++  if (!FLAG(foreground) && !TT.nested) setpgid(0, 0);
++  // Only the command tree moves to the sub-job; timeout itself stays in the
++  // outer job so a tool-level cancel still reaches it.
++  if (TT.subjob) setenv("IEC_JOB", TT.subjob, 1);
+ }
+ 
+ void timeout_main(void)
+@@ -70,6 +162,26 @@ void timeout_main(void)
+   if (sigsetjmp(TT.sj, 1)) goto done;
+   xsignal_flags(SIGCHLD, handler, SA_NOCLDSTOP|SA_SIGINFO);
+ 
++  // Give the command tree its own sub-job under the current one. Without
++  // IEC_JOB (host environment) leave it empty and use the original path.
++  {
++    char *job = getenv("IEC_JOB");
++    if (job && *job) {
++      // A timeout already running inside a sub-job keeps that job instead of
++      // appending another level: the outer deadline can then reach the inner
++      // timeout and the programs it starts with one lookup, instead of walking
++      // a tree of sub-jobs that may not be registered yet.
++      if (strstr(job, "/t")) {
++        TT.nested = 1;
++        TT.subjob = xstrdup(job);
++      } else {
++        char buf[512];
++        snprintf(buf, sizeof(buf), "%s/t%d", job, (int)getpid());
++        TT.subjob = xstrdup(buf);
++      }
++    }
++  }
++
+   TT.pid = xpopen_setup(toys.optargs+1, FLAG(i) ? TT.fds : 0, callback);
+   xsignal(SIGTTIN, SIG_IGN);
+   xsignal(SIGTTOU, SIG_IGN);
+@@ -79,11 +191,28 @@ void timeout_main(void)
+   ms = nantomil(&tts);
+   for (;;) {
+     if (1 != xpoll(&TT.pfd, 1, ms)) {
+-      if (FLAG(v))
++      int sent = 0;
++
++      toys.exitval = (nextsig==9) ? 137 : 124;
++      // Signal the remote programs through the sub-job. Process groups are
++      // flat here, so a grandchild (git-remote-https, for example) is not in
++      // the child's group and would otherwise keep the caller's stdout open.
++      if (TT.subjob && iec_signal_job)
++        sent = iec_signal_job(TT.subjob, nextsig);
++      // Also signal the local stand-ins: they hold the caller's pipe, and the
++      // remote processes being gone does not make them exit immediately. The
++      // direct child is always signalled by pid; the group walk adds any
++      // stand-ins below it (and covers the case where the exec request had not
++      // been recorded yet, so the job lookup found nothing).
++      // Walk the local tree first: signalling the direct child can make its
++      // descendants reparent or change group before they are found.
++      if (TT.pid > 0) {
++        if (!FLAG(foreground)) kill_local_group(TT.pid, nextsig);
++        kill(TT.pid, nextsig);
++      }
++      if (sent <= 0 && FLAG(v))
+         perror_msg("sending signal %s to command %s", num_to_sig(nextsig),
+           toys.optargs[1]);
+-      toys.exitval = (nextsig==9) ? 137 : 124;
+-      kill(FLAG(foreground) ? TT.pid : -TT.pid, nextsig);
+       if (!TT.k || nextsig==SIGKILL) break;
+       nextsig = SIGKILL;
+       ms = nantomil(&kts);

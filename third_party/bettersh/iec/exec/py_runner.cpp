@@ -14,7 +14,8 @@
 // 协议（本机 UDS，小端）：
 //   请求: u32 argc, u32 envc, u32 stdin_len
 //         argc 个 NUL 结尾 argv；envc 个 NUL 结尾 "K=V"；cwd 一个 NUL 结尾字符串
-//         stdin_len 字节 stdin
+//         stdin_len == 0xffffffff 时再跟一个 stdin 文件路径字符串（由 runner
+//         自己流式读进管道）；否则跟 stdin_len 字节 stdin。
 //   响应: u32 exit_code, u32 out_len, out bytes, u32 err_len, err bytes
 #include "py_runner.h"
 
@@ -220,7 +221,12 @@ void HandleClient(int fd) {
     const uint32_t argc = Get32(head + 0);
     const uint32_t envc = Get32(head + 4);
     const uint32_t stdin_len = Get32(head + 8);
-    if (argc == 0 || argc > 256 || envc > 4096 || stdin_len > 16u * 1024 * 1024) {
+    // 0xffffffff 表示 stdin 走文件路径，runner 边读文件边喂管道：客户端不必
+    // 把大文件读进内存，也就不存在 16MB 截断。内联缓冲保留 64MB 上限，超过
+    // 直接拒绝而不是悄悄截断（客户端也会先在本地报错）。
+    const bool stdin_by_path = stdin_len == 0xffffffffu;
+    if (argc == 0 || argc > 256 || envc > 4096 ||
+        (!stdin_by_path && stdin_len > 64u * 1024 * 1024)) {
         close(fd);
         return;
     }
@@ -240,7 +246,27 @@ void HandleClient(int fd) {
     }
     if (!ReadString(fd, &cwd)) { close(fd); return; }
     std::string stdin_data;
-    if (stdin_len > 0) {
+    std::string stdin_path;
+    int in_file = -1;
+    if (stdin_by_path) {
+        if (!ReadString(fd, &stdin_path) || stdin_path.empty()) { close(fd); return; }
+        in_file = open(stdin_path.c_str(), O_RDONLY | O_CLOEXEC);
+        if (in_file < 0) {
+            static const char kOpenFailed[] = "python3: cannot open the stdin file\n";
+            char resp[8];
+            const uint32_t ucode = 127;
+            const uint32_t zero = 0;
+            std::memcpy(resp, &ucode, 4);
+            std::memcpy(resp + 4, &zero, 4);
+            WriteFull(fd, resp, sizeof resp);
+            const uint32_t err_len = static_cast<uint32_t>(sizeof kOpenFailed - 1);
+            std::memcpy(resp, &err_len, 4);
+            WriteFull(fd, resp, 4);
+            WriteFull(fd, kOpenFailed, sizeof kOpenFailed - 1);
+            close(fd);
+            return;
+        }
+    } else if (stdin_len > 0) {
         stdin_data.resize(stdin_len);
         if (!ReadFull(fd, stdin_data.data(), stdin_len)) { close(fd); return; }
     }
@@ -275,6 +301,7 @@ void HandleClient(int fd) {
         for (int pfd : {in_pipe[0], in_pipe[1], out_pipe[0], out_pipe[1],
                         err_pipe[0], err_pipe[1]})
             if (pfd >= 0) close(pfd);
+        if (in_file >= 0) close(in_file);
         close(fd);
         return;
     }
@@ -342,7 +369,7 @@ void HandleClient(int fd) {
     // stdout 再回来读 stdin，双方各等对方的管道腾出空间，64KB 一满就是死锁。
     // 所以把 stdin 也放进同一个 poll：可写就写一段，可读就读 stdout/stderr。
     size_t in_off = 0;
-    if (stdin_data.empty()) {
+    if (stdin_data.empty() && in_file < 0) {
         close(in_pipe[1]);
         in_pipe[1] = -1;
     } else {
@@ -353,6 +380,10 @@ void HandleClient(int fd) {
     std::string out;
     std::string err;
     char buf[65536];
+    // 走文件路径时只在需要写入管道时读 64KB，不把整个文件装进 runner 内存。
+    char in_chunk[65536];
+    size_t in_chunk_len = 0;
+    size_t in_chunk_off = 0;
     // 同时读 stdout/stderr，避免任一管道写满把孙进程卡住。
     int open_fds = 2;
     // 客户端连上后不会再发一个字节，所以它一旦可读，读到的只可能是 EOF：调用者
@@ -401,11 +432,28 @@ void HandleClient(int fd) {
         // 让孙进程看到 EOF。对端先退出时 write 给 EPIPE（SIGPIPE 已忽略）。
         if (in_pipe[1] >= 0 && (pfd[2].revents & (POLLOUT | POLLHUP | POLLERR)) != 0) {
             bool close_in = (pfd[2].revents & (POLLHUP | POLLERR)) != 0;
-            while (!close_in && in_off < stdin_data.size()) {
-                const ssize_t n = write(in_pipe[1], stdin_data.data() + in_off,
-                                        stdin_data.size() - in_off);
+            while (!close_in) {
+                const char* src;
+                size_t avail;
+                if (in_file >= 0) {
+                    if (in_chunk_off == in_chunk_len) {
+                        ssize_t r = read(in_file, in_chunk, sizeof in_chunk);
+                        if (r < 0 && errno == EINTR) continue;
+                        if (r <= 0) { close_in = true; break; }
+                        in_chunk_len = static_cast<size_t>(r);
+                        in_chunk_off = 0;
+                    }
+                    src = in_chunk + in_chunk_off;
+                    avail = in_chunk_len - in_chunk_off;
+                } else {
+                    if (in_off >= stdin_data.size()) { close_in = true; break; }
+                    src = stdin_data.data() + in_off;
+                    avail = stdin_data.size() - in_off;
+                }
+                const ssize_t n = write(in_pipe[1], src, avail);
                 if (n > 0) {
-                    in_off += static_cast<size_t>(n);
+                    if (in_file >= 0) in_chunk_off += static_cast<size_t>(n);
+                    else in_off += static_cast<size_t>(n);
                 } else if (n < 0 && errno == EINTR) {
                     continue;
                 } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
@@ -414,7 +462,6 @@ void HandleClient(int fd) {
                     close_in = true;
                 }
             }
-            if (in_off >= stdin_data.size()) close_in = true;
             if (close_in) {
                 close(in_pipe[1]);
                 in_pipe[1] = -1;
@@ -440,6 +487,7 @@ void HandleClient(int fd) {
         }
     }
     if (in_pipe[1] >= 0) close(in_pipe[1]);
+    if (in_file >= 0) close(in_file);
     close(out_pipe[0]);
     close(err_pipe[0]);
 
