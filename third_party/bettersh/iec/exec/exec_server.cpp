@@ -569,12 +569,24 @@ static std::string JobOfEnv(const std::vector<std::string>& env) {
 
 // Every live process of one job. Only called on the server thread, which is the
 // only place procmap is touched.
+// A job owns its sub-jobs: "<parent>/t<pid>" is what toybox timeout puts in its
+// child's IEC_JOB, so that its deadline can reach only that command's tree. The
+// prefix match keeps tool-level cancellation working -- the outer job must still
+// reach everything a sub-job started, or a cancel would leave the very processes
+// timeout was meant to bound.
+static bool JobOwns(const std::string& candidate, const std::string& job) {
+    if (candidate == job) return true;
+    return candidate.size() > job.size() &&
+           candidate.compare(0, job.size(), job) == 0 &&
+           candidate[job.size()] == '/';
+}
+
 static std::vector<pid_t> JobPids(const std::string& job) {
     std::vector<pid_t> pids;
 
     if (job.empty()) return pids;
     for (const auto& kv : procmap)
-        if (kv.second.alive && kv.second.job == job) pids.push_back(kv.first);
+        if (kv.second.alive && JobOwns(kv.second.job, job)) pids.push_back(kv.first);
     return pids;
 }
 
@@ -607,6 +619,8 @@ ExecServer::ExecServer(const std::string& path) : SockServer(path) {
     registerHandler(OP_SIGNAL,     std::bind(&ExecServer::onSignal,     this, _1, _2));
     registerHandler(OP_TERMINATE_JOB,
                     std::bind(&ExecServer::onTerminateJob, this, _1, _2));
+    registerHandler(OP_SIGNAL_JOB,
+                    std::bind(&ExecServer::onSignalJob, this, _1, _2));
     registerHandler(OP_LIST,       std::bind(&ExecServer::onList,       this, _1, _2));
 }
 
@@ -1101,6 +1115,34 @@ bool ExecServer::onSignal(const Packet& req, Reply& reply) {
     }
     // The reply is empty: whether the signal was accepted or refused is the whole
     // answer, and the fate of the program shows up in OP_WAIT like any other end.
+    return true;
+}
+
+// Delivers one signal to every process of a job. This is the primitive toybox
+// timeout needs: it owns the deadline and the TERM -> KILL escalation, but the
+// programs it started are the server's children, not its own, so a plain
+// kill(-pid) cannot name them (process groups are deliberately flat here; see
+// the OP_TERMINATE_JOB comment). Sending to the job reaches them all.
+bool ExecServer::onSignalJob(const Packet& req, Reply& reply) {
+    if (req.body.size() < 5) {
+        Logger::GetInstance()->LogE("[exec] signal job request too short: %zu bytes",
+                                    req.body.size());
+        return false;
+    }
+    const int signo = static_cast<int>(get32(req.body.data()));
+    std::string job(reinterpret_cast<const char*>(req.body.data() + 4),
+                    req.body.size() - 4);
+    if (!job.empty() && job.back() == '\0') job.pop_back();
+    if (job.empty()) {
+        Logger::GetInstance()->LogE("[exec] signal job: empty id");
+        return false;
+    }
+
+    const std::vector<pid_t> pids = JobPids(job);
+    if (!pids.empty()) SignalPids(pids, signo);
+    Logger::GetInstance()->LogI("[exec] signal job %s: %zu process(es), signal %d",
+                                job.c_str(), pids.size(), signo);
+    put32(reply.body, static_cast<uint32_t>(pids.size()));
     return true;
 }
 

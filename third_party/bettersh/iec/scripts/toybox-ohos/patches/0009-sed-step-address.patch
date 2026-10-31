@@ -1,0 +1,69 @@
+diff --git a/toys/posix/sed.c b/toys/posix/sed.c
+index 0858849..5553515 100644
+--- a/toys/posix/sed.c
++++ b/toys/posix/sed.c
+@@ -52,7 +52,8 @@ config SED
+     ADDRESS is a line number (starting at 1), a /REGULAR EXPRESSION/, or $ for
+     last line (-s or -i makes it last line of each file). One address matches one
+     line, ADDRESS,ADDRESS matches from first to second inclusive. Two regexes can
+-    match multiple ranges. ADDRESS,+N ends N lines later. ! inverts the match.
++    match multiple ranges. ADDRESS,+N ends N lines later. FIRST~STEP matches
++    FIRST, FIRST+STEP, FIRST+2*STEP, and so on. ! inverts the match.
+ 
+     REGULAR EXPRESSIONS start and end with the same character (anything but
+     backslash or newline). To use the delimiter in the regex escape it with a
+@@ -149,6 +150,7 @@ struct sedcmd {
+ 
+   // Begin and end of each match
+   long lmatch[2]; // line number of match
++  long lstep[2];  // 0 = no step, else GNU first~step address
+   int rmatch[2];  // offset of regex struct for prefix matches (/abc/,/def/p)
+   int arg1, arg2, w; // offset of two arguments per command, plus s//w filename
+   unsigned not, hit;
+@@ -280,7 +282,7 @@ static void sed_line(char **pline, long plen)
+     char *str, c = command->c;
+ 
+     // Have we got a line or regex matching range for this rule?
+-    if (*command->lmatch || *command->rmatch) {
++    if (*command->lmatch || *command->rmatch || command->lstep[0]) {
+       int miss = 0;
+       long lm;
+ 
+@@ -299,12 +301,18 @@ static void sed_line(char **pline, long plen)
+ 
+       // Start a new match?
+       } else {
+-        if (!(lm = *command->lmatch)) {
++        lm = *command->lmatch;
++        // lmatch==0 且没有 step 才是“无行号地址 → 用正则”；0~N 是有效的
++        // GNU 步长地址（从第 N 行起每 N 行），不能掉进 regex 分支。
++        if (!lm && !command->lstep[0]) {
+           void *rm = get_regex(command, *command->rmatch);
+ 
+           if (line && !regexec0(rm, line, len, 0, 0, 0))
+             command->hit = TT.count;
+-        } else if (lm == TT.count || (lm == -1 && !pline))
++        } else if (lm == TT.count || (lm == -1 && !pline) ||
++                   (lm > 0 && command->lstep[0] && TT.count >= lm &&
++                    !((TT.count - lm) % command->lstep[0])) ||
++                   (!lm && command->lstep[0] && !(TT.count % command->lstep[0])))
+           command->hit = TT.count;
+ 
+         if (!command->lmatch[1] && !command->rmatch[1]) miss = 1;
+@@ -827,8 +835,14 @@ static void parse_pattern(char **pline, long len)
+       if (i && *line == '+' && isdigit(line[1])) {
+         line++;
+         command->lmatch[i] = -2-strtol(line, &line, 0);
+-      } else if (isdigit(*line)) command->lmatch[i] = strtol(line, &line, 0);
+-      else if (*line == '$') {
++      } else if (isdigit(*line)) {
++        // GNU first~step：从第 first 行开始，每 step 行匹配一次。
++        command->lmatch[i] = strtol(line, &line, 0);
++        if (*line == '~' && isdigit(line[1])) {
++          command->lstep[i] = strtol(line+1, &line, 0);
++          if (command->lstep[i] < 1) goto error;
++        }
++      } else if (*line == '$') {
+         command->lmatch[i] = -1;
+         line++;
+       } else if (*line == '/' || *line == '\\') {

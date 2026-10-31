@@ -1,0 +1,31 @@
+diff --git a/main.c b/main.c
+index a573568..4667c3f 100644
+--- a/main.c
++++ b/main.c
+@@ -5,6 +5,10 @@
+ 
+ #include "toys.h"
+ 
++#ifdef __linux__
++#include <sys/prctl.h>
++#endif
++
+ // Populate toy_list[].
+ 
+ #undef NEWTOY
+@@ -203,6 +207,15 @@ void toy_singleinit(struct toy_list *which, char *argv[])
+   toys.argv = argv;
+   toys.toycount = ARRAY_LEN(toy_list);
+ 
++  // IEC runs applets inside a server child (dlopen), so /proc/<pid>/comm would
++  // otherwise stay "appspawn" for every command. Give the child the applet name
++  // so ps/pgrep and logs can tell a sleep from a cat. Best effort: prctl can be
++  // unavailable on non-Linux or restricted sandboxes. (Applets dispatched by
++  // main() come here through toy_singleinit, not toy_init.)
++#ifdef __linux__
++  prctl(PR_SET_NAME, which->name, 0, 0, 0);
++#endif
++
+   if (NEED_OPTIONS && which->options) get_optflags();
+   else {
+     check_help(toys.optargs = argv+1);

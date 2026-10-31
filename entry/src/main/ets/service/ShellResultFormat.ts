@@ -28,7 +28,14 @@ export function formatStreamBody(text: string, spillRel: string, headChars: numb
   let head: string = text;
   let truncated: boolean = spillRel !== '';
   if (head.length > headChars) {
-    head = head.substring(0, headChars);
+    // 截断点可能落在 UTF-16 代理对中间（emoji / 扩展汉字）；切一半会在正文
+    // 末尾留一个孤立代理，模型看到的是 �。向前让一个码元，保持字符完整。
+    let cut: number = headChars;
+    const before: number = text.charCodeAt(cut - 1);
+    if (cut > 0 && before >= 0xD800 && before <= 0xDBFF) {
+      cut--;
+    }
+    head = head.substring(0, cut);
     truncated = true;
   }
   if (!truncated) {

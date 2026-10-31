@@ -1421,13 +1421,32 @@ static int do_rename(int od, const char* oldp, int nd, const char* newp) {
 
     const char* src = oisl ? omark : ocand;
     char dst[IEC_BUF];
-    if (marker_name(ncand, dst, sizeof dst) < 0) return -1;
+    if (oisl) {
+        /* The source is a link, so it must stay one: it lands on the marker name. */
+        if (marker_name(ncand, dst, sizeof dst) < 0) return -1;
+    } else {
+        /* Destination was a link and the source is an ordinary file. The marker
+         * was removed above, so the file has to land on the visible name and
+         * replace the link. Renaming it onto the marker instead would turn the
+         * file's *contents* into the link target -- which is what `sed -i file`
+         * on a symlink used to do (`l -> changed`). */
+        if (snprintf(dst, sizeof dst, "%s", ncand) < 0 ||
+            strlen(ncand) >= sizeof dst) {
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+    }
     int rc = fr(src, dst);
     if (rc == 0) {
-        // The visible destination is a link (or the source was one): a mode
-        // sidecar belongs to neither, so drop both leftovers.
-        remove_chmod_marker(ncand);
-        remove_chmod_marker(ocand);
+        if (oisl) {
+            // The visible destination is a link (or the source was one): a mode
+            // sidecar belongs to neither, so drop both leftovers.
+            remove_chmod_marker(ncand);
+            remove_chmod_marker(ocand);
+        } else {
+            // Ordinary file replacing a link: its mode sidecar moves with it.
+            move_chmod_marker(ocand, ncand);
+        }
     }
     return rc;
 }

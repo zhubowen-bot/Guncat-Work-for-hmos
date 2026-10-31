@@ -2533,6 +2533,8 @@ console.log('[组件库与提示词]');
   check('shell格式: 恰好等于上限不算截断', formatStreamBody('abcde', '', 5, '') === 'abcde');
   check('shell格式: 超过上限截到前 N 字符并附失败说明',
     formatStreamBody('abcdef', '', 5, '') === 'abcde' + FAIL_NOTE);
+  check('shell格式: 截断不拆 UTF-16 代理对',
+    formatStreamBody('abcd😀x', '', 5, '') === 'abcd' + FAIL_NOTE);
   check('shell格式: 有 spill 时即使正文很短也标记已截断',
     formatStreamBody('abc', '.spill/a.log', 5, '') === 'abc' + spillNote('.spill/a.log'));
   check('shell格式: 超限 + spill + caveat 一起出现',

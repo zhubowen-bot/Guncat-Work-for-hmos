@@ -642,6 +642,11 @@ export class WorkFileService {
       return 0;
     }
     for (let i: number = 0; i < names.length; i++) {
+      // 自检用的 __iec_selftest 工作区不属于会话列表，但要跨启动保留给
+      // `iecSelfTest` 钩子用；启动清扫只跳过这一个保留名。
+      if (names[i] === '__iec_selftest') {
+        continue;
+      }
       try {
         if (fileIo.statSync(root + '/' + names[i]).isDirectory()) {
           dirs.push(names[i]);

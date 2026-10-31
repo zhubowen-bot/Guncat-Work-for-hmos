@@ -1,0 +1,22 @@
+diff --git a/toys/posix/grep.c b/toys/posix/grep.c
+index f12918a..7bbd582 100644
+--- a/toys/posix/grep.c
++++ b/toys/posix/grep.c
+@@ -496,8 +496,15 @@ void grep_main(void)
+ 
+   TT.fixed = xzalloc(256*sizeof(*TT.fixed));
+ 
+-  if (FLAG(color) && (!TT.color || !strcmp(TT.color, "auto")) && !isatty(1))
+-    toys.optflags &= ~FLAG_color;
++  // --color=never/none must switch color off even on a tty; a bare --color or
++  // --color=auto only keeps it when stdout is a tty. The old test treated every
++  // value except "auto" as "always", so --color=never still emitted escapes.
++  if (FLAG(color)) {
++    if (!TT.color || !strcmp(TT.color, "auto")) {
++      if (!isatty(1)) toys.optflags &= ~FLAG_color;
++    } else if (!strcmp(TT.color, "never") || !strcmp(TT.color, "none"))
++      toys.optflags &= ~FLAG_color;
++  }
+ 
+   if (FLAG(color)) {
+     TT.purple = "\e[35m";

@@ -21,6 +21,7 @@
 #include <signal.h>
 #include <stdarg.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
@@ -74,6 +75,30 @@ static int rpc_call_fds(uint32_t op, const void *body, uint32_t len,
 static int rpc_call(uint32_t op, const void *body, uint32_t len,
                     void *out, uint32_t out_max, uint32_t *out_len) {
     return iec_rpc_call(EXEC_SOCK_PATH, op, body, len, out, out_max, out_len);
+}
+
+/* Sends one signal to every process of a job, and returns how many the server
+ * named (or a negative value when the request could not be made). This is the
+ * counterpart of OP_SIGNAL_JOB, used by toybox timeout: it can only see its own
+ * child, while the programs that child starts are the server's children, and
+ * the flat process tree means there is no pid walk from one to the other. The
+ * job name is the handle that survives an exec chain. */
+int iec_signal_job(const char *job, int signo) {
+    if (job == NULL || job[0] == '\0') return 0;
+    const size_t len = strlen(job) + 1;
+    if (len > 4096) return -1;
+
+    uint8_t body[4 + 4096];
+    uint8_t out[4];
+    uint32_t out_len = 0;
+    body_put32(body, (uint32_t)signo);
+    memcpy(body + 4, job, len);
+    if (rpc_call(OP_SIGNAL_JOB, body, (uint32_t)(4 + len), out, sizeof out,
+                 &out_len) != 0) {
+        return -1;
+    }
+    if (out_len < 4) return -1;
+    return (int)iec_get32(out);
 }
 
 /* Diagnostics must not go through stdio here. The client is free to have forked
@@ -382,18 +407,19 @@ static int exec_common(enum CallMethod method, const char *file,
      * entirely, and then counting along the received fds would map stderr onto
      * stdout.
      */
-    /* The request has to hold the whole environment, which is why this is far more
-     * than the rest of the request needs: an interactive environment is a few
-     * kilobytes -- PATH alone is over a thousand bytes of the one this was written
-     * against -- and a request that does not fit fails the exec outright, so the
-     * cost of a size that is too small is no shell at all for a command that works
-     * everywhere else. 32 KiB is several times the largest environment seen on the
-     * target and small enough to sit on the stack of a thread that is not the main
-     * one. Overrunning it stays a defined failure: see the too_long arm below,
-     * which reports it and fails the call with E2BIG. */
-    enum { EXEC_REQ_MAX = 32768, EXEC_FLAG_WAIT = 1, EXEC_FLAG_STDIO = 2, EXEC_STDIO_FDS = 3,
+    /* The request has to hold the whole environment plus argv. It used to be a
+     * fixed 32 KiB stack buffer; anything larger was refused with E2BIG, which
+     * quietly capped `sh -c '...'`, `python3 -c '...'` and a single large
+     * argument well below the 128 KiB ARG_MAX the rest of the system assumes.
+     * Small requests (the overwhelming case) still use the stack buffer; one
+     * that does not fit is allocated to size, up to a hard ceiling. */
+    enum { EXEC_REQ_STACK = 32768, EXEC_REQ_MAX = 1 << 20,
+           EXEC_FLAG_WAIT = 1, EXEC_FLAG_STDIO = 2, EXEC_STDIO_FDS = 3,
            EXEC_PID_REPLY = 4, EXEC_FAIL_REPLY = 8 };
-    uint8_t req[EXEC_REQ_MAX];
+    uint8_t stack_req[EXEC_REQ_STACK];
+    uint8_t *req = stack_req;
+    size_t req_cap = sizeof stack_req;
+    int req_heap = 0;
     uint8_t answer[EXEC_FAIL_REPLY];      /* the larger of the two OP_EXECUTE answers */
     uint32_t answer_len;
     int send_fds[EXEC_STDIO_FDS];
@@ -443,6 +469,30 @@ static int exec_common(enum CallMethod method, const char *file,
         nfds++;
     }
 
+    /* Size the request before writing it, so a long argv or environment can use a
+     * buffer that actually fits. Overflow is not a practical concern (each term is
+     * a strlen of a live string), and the ceiling keeps a hostile caller from
+     * asking for an arbitrary allocation. */
+    {
+        size_t need = 20 + 4 * (size_t)nfds + strlen(file) + 1 + strlen(cwd) + 1;
+
+        for (i = 0; i < argc; i++) need += strlen(argv[i]) + 1;
+        for (i = 0; i < envc; i++) need += strlen(env[i]) + 1;
+        for (i = 0; i < (size_t)KEPT_COUNT; i++)
+            if ((kept >> i) & 1u)
+                need += strlen(g_kept[i]) + 1 + strlen(getenv(g_kept[i])) + 1;
+        if (need > EXEC_REQ_MAX) goto too_long;
+        if (need > req_cap) {
+            req = (uint8_t *)malloc(need);
+            if (!req) {
+                errno = ENOMEM;
+                return -1;
+            }
+            req_cap = need;
+            req_heap = 1;
+        }
+    }
+
     /* The strings start after the header and the target list, so the offset of
      * every string below moves with fd_count. */
     off = 20 + 4 * (size_t)nfds;
@@ -456,7 +506,7 @@ static int exec_common(enum CallMethod method, const char *file,
 #define PUT_CSTR(s)                                     \
     do {                                                \
         len = strlen(s) + 1;                            \
-        if (off + len > EXEC_REQ_MAX) goto too_long;    \
+        if (off + len > req_cap) goto too_long;         \
         memcpy(req + off, (s), len);                    \
         off += len;                                     \
     } while (0)
@@ -467,7 +517,7 @@ static int exec_common(enum CallMethod method, const char *file,
     do {                                                 \
         size_t n = strlen(name);                         \
         len = n + 1 + strlen(value) + 1;                 \
-        if (off + len > EXEC_REQ_MAX) goto too_long;     \
+        if (off + len > req_cap) goto too_long;          \
         memcpy(req + off, (name), n);                    \
         req[off + n] = '=';                              \
         memcpy(req + off + n + 1, (value), len - n - 1); \
@@ -497,14 +547,17 @@ static int exec_common(enum CallMethod method, const char *file,
      * error a bare "the request failed" would leave behind. */
     answer_len = 0;
     if (rpc_call_fds(OP_EXECUTE, req, (uint32_t)off, send_fds, nfds,
-                     answer, sizeof answer, &answer_len) < 0)
+                     answer, sizeof answer, &answer_len) < 0) {
+        if (req_heap) free(req);
         return -1;                     /* errno is already set by the rpc layer */
+    }
 
     if (answer_len >= EXEC_FAIL_REPLY) {
         errno = (int)iec_get32(answer + 4);
         /* 0 would mean the server refused without saying why, which is not a
          * state it produces; a defined failure still beats an undefined errno. */
         if (errno == 0) errno = EIO;
+        if (req_heap) free(req);
         return -1;
     }
 
@@ -513,6 +566,7 @@ static int exec_common(enum CallMethod method, const char *file,
          * the body empty when it did not start one, so this is a failure too. */
         report("[shim] exec: the reply named no process\n");
         errno = EIO;
+        if (req_heap) free(req);
         return -1;
     }
 
@@ -523,6 +577,7 @@ static int exec_common(enum CallMethod method, const char *file,
     become_stand_in(iec_get32(answer));
 
 too_long:
+    if (req_heap) free(req);
     report("[shim] exec: request is too long\n");
     errno = E2BIG;
     return -1;
@@ -580,4 +635,130 @@ int IEC_EXPORT(execle)(const char *path, const char *arg0, ...) {
     envp = va_arg(ap, char *const *);
     va_end(ap);
     return exec_common(CALL_EXECLE, path, argv, envp);
+}
+
+/* ------------------------------------------------------------------ */
+/* system(3) / popen(3)                                                */
+/*                                                                     */
+/* The libc implementations call execl() inside libc, which reaches    */
+/* the real execve syscall instead of this file's hook; the sandbox    */
+/* refuses that with EACCES, so `awk 'BEGIN{system(...)}'` and          */
+/* `"cmd" | getline` fail (system() returns -1, errno 13). These        */
+/* replacements fork and take the same server route as every other      */
+/* exec, so the child really runs. Only callers linked with             */
+/* --wrap=system/popen/pclose get them; today that is toybox.           */
+/* ------------------------------------------------------------------ */
+
+int IEC_EXPORT(system)(const char *cmd) {
+    pid_t pid;
+    int status;
+
+    /* POSIX: system(NULL) asks whether a shell is available. */
+    if (cmd == NULL) return 1;
+    pid = fork();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        char *argv[4];
+
+        argv[0] = (char *)"sh";
+        argv[1] = (char *)"-c";
+        argv[2] = (char *)cmd;
+        argv[3] = NULL;
+        exec_common(CALL_EXECVP, "sh", argv, NULL);
+        _exit(127);
+    }
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR) return -1;
+    }
+    return status;
+}
+
+/* FILE* -> child pid, so pclose() waits for the right child. A command so is
+ * single-threaded and rarely has more than a couple of pipes open at once. */
+enum { IEC_POPEN_SLOTS = 16 };
+static struct { FILE *fp; pid_t pid; } g_popen[IEC_POPEN_SLOTS];
+
+static void popen_reap(pid_t pid) {
+    while (waitpid(pid, NULL, 0) < 0)
+        if (errno != EINTR) return;
+}
+
+FILE *IEC_EXPORT(popen)(const char *cmd, const char *mode) {
+    int fds[2], rd, slot;
+    pid_t pid;
+    FILE *fp;
+
+    if (cmd == NULL || mode == NULL || (mode[0] != 'r' && mode[0] != 'w')) {
+        errno = EINVAL;
+        return NULL;
+    }
+    rd = mode[0] == 'r';
+    if (pipe(fds) < 0) return NULL;
+
+    pid = fork();
+    if (pid < 0) {
+        close(fds[0]);
+        close(fds[1]);
+        return NULL;
+    }
+    if (pid == 0) {
+        char *argv[4];
+
+        /* The child keeps only the pipe end the child side of the program uses;
+         * the exec request carries fd 0/1/2 after the dup2. */
+        if (rd) {
+            close(fds[0]);
+            if (dup2(fds[1], STDOUT_FILENO) < 0) _exit(127);
+            close(fds[1]);
+        } else {
+            close(fds[1]);
+            if (dup2(fds[0], STDIN_FILENO) < 0) _exit(127);
+            close(fds[0]);
+        }
+        argv[0] = (char *)"sh";
+        argv[1] = (char *)"-c";
+        argv[2] = (char *)cmd;
+        argv[3] = NULL;
+        exec_common(CALL_EXECVP, "sh", argv, NULL);
+        _exit(127);
+    }
+
+    close(rd ? fds[1] : fds[0]);
+    fp = fdopen(rd ? fds[0] : fds[1], rd ? "r" : "w");
+    if (fp == NULL) {
+        close(rd ? fds[0] : fds[1]);
+        popen_reap(pid);
+        return NULL;
+    }
+    for (slot = 0; slot < IEC_POPEN_SLOTS; slot++)
+        if (g_popen[slot].fp == NULL) break;
+    if (slot == IEC_POPEN_SLOTS) {
+        fclose(fp);
+        popen_reap(pid);
+        errno = EMFILE;
+        return NULL;
+    }
+    g_popen[slot].fp = fp;
+    g_popen[slot].pid = pid;
+    return fp;
+}
+
+int IEC_EXPORT(pclose)(FILE *fp) {
+    int slot, status = -1;
+    pid_t pid;
+
+    for (slot = 0; slot < IEC_POPEN_SLOTS; slot++)
+        if (g_popen[slot].fp == fp) break;
+    if (slot == IEC_POPEN_SLOTS) {
+        errno = ECHILD;
+        return -1;
+    }
+    pid = g_popen[slot].pid;
+    g_popen[slot].fp = NULL;
+    g_popen[slot].pid = 0;
+    fclose(fp);                    /* flush before the child can exit */
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR) return -1;
+    }
+    return status;
 }

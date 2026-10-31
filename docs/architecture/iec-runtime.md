@@ -44,7 +44,7 @@ hvigorw --no-daemon assembleHap --mode module -p product=default
 
 | 命令 | so | 入口 |
 | --- | --- | --- |
-| `sh` / `mksh` | `libmksh.so` | `main` |
+| `sh` / `mksh` | `libmksh.so` | `main`（`sh` 是补 `-U` 的包装器） |
 | `toybox` 及 70+ applet（`ls/cat/grep/sed/awk/find/xargs/…`） | `libtoybox.so` | `bsh_toybox_main` |
 | `tar` / `bsdtar` | `libbsdtar.so` | `iec_bsdtar_main` |
 | `unzip` | `libbsdunzip.so` | `iec_bsdunzip_main` |
@@ -100,11 +100,22 @@ GitHub 直连在 WSL 里通常不通（`codeload.github.com` 可以）：`pcre2`
 
 ## 语义
 
-* `sh -c "<command>"` 执行；管道/重定向/通配符都是 mksh 的真语义。
-* `cwd` 是工作区内的相对路径，服务端会拒绝不存在的目录（不会静默回退）。
+* `mksh -o utf8-mode -c "<command>"` 执行；管道/重定向/通配符都是 mksh 的真语义。
+* `cwd` 是工作区内的相对路径，服务端会拒绝不存在的目录（不会静默回退）。NCP 渠道的
+  exec 请求 cwd 不会真正应用（子进程会停在 `/`），所以 `IecRuntime.run` 在脚本前先
+  `[ -d <cwd> ]` 校验再 `cd`；fork 渠道重复 `cd` 无副作用。`pwd`、相对路径写入与
+  `read_file` 因此保持一致。
 * 环境：`IecShellService` 显式给 `PATH=<sysroot>/bin:<sysroot>/usr/bin:/usr/bin:/bin`、
-  `HOME=<sysroot>/home`、`TMPDIR=<sysroot>/tmp`。**PATH 必须给**——IEC 起进程不会替
-  我们拼 PATH，而应用进程自己的环境里没有 launcher 目录，不给就是 `command not found`。
+  `HOME=<sysroot>/home/<会话>`、`TMPDIR=<sysroot>/session-tmp/<会话>`、`USER=LOGNAME=guncat`、
+  `PAGER=GIT_PAGER=cat`。**PATH 必须给**——IEC 起进程不会替我们拼 PATH，而应用进程自己的
+  环境里没有 launcher 目录，不给就是 `command not found`。`HOME`/`TMPDIR` 按会话分目录，
+  避免 A 会话的 `~/.gitconfig`、`~/.ssh` 与临时文件串到 B 会话；两者都在工作区外，
+  `read_file` 看不见。
+* UTF-8：工具自身以 `mksh -o utf8-mode` 启动；`/bin/sh` 写成一层薄包装
+  （`exec /bin/mksh -U "$@"`），所以 `sh -c`、`sh script.sh` 与 `#!/bin/sh` 脚本也统一
+  按字符处理，`${#中文}`=2、切片按字符。直接 `mksh script.sh` 仍默认按字节，需要
+  `mksh -U` 或脚本里 `set -U`；`set +U` 可退回字节语义。`printf` 是 toybox 外部命令，
+  **字段宽度仍按字节**（`printf '%5s' 中文` 不会补空格），对齐用 awk/python。
 * Python：launcher `python3`/`python` 指向 `libpycmd.so`（`iec_python_main`），由常驻
   python runner 的子进程 `dlopen libpython3.12.so` 并跑 `Py_BytesMain`；每次调用前把
   `PYTHONHOME`/`PYTHONPATH`（stdlib zip + site-packages + extras + bundle libs）传进去，
@@ -112,7 +123,17 @@ GitHub 直连在 WSL 里通常不通（`codeload.github.com` 可以）：`pcre2`
   首次调用会等 `PythonService.ensureRuntime()` 把 stdlib 解出来。
 * 超时由引擎线程强制（先 TERM 后 KILL），不依赖 ArkTS 轮询；`timeout_ms`
   上限沿用 `Constants.WORK_SHELL_MAX_TIMEOUT_MS`。
-* 输出超过 `WORK_SHELL_MAX_OUTPUT_BYTES` 时整段落 `.spill/`，返回里给相对路径。
+* 命令内部自己用 `timeout` 时也按“命令树”收口：子命令带独立的子 job
+  （`<IEC_JOB>/t<pid>`），toybox `timeout` 通过 `OP_SIGNAL_JOB` 让执行服务逐个
+  signal job 内进程，同时在 `/proc` 里按 pgrp + ppid 级联收本地 exec stand-in。沙箱
+  不支持 `kill(-pgid)`（`EINVAL`），只按进程组杀会漏掉 `git-remote-https` 这类孙进程，
+  让调用方的 `$(...)` 一直等到工具级超时。嵌套 `timeout` 的内层会为自己的子进程换组，
+  外层先走 ppid 级联再杀直接子进程（顺序反了子进程会先被重挂/换组），因此
+  `timeout 1 timeout 5 sleep 4` 也能在 2 秒内收口。
+* 单流超过模型可见上限 `WORK_SHELL_HEAD_CHARS`（20k 字符）时就把已收到的全文落
+  `.spill/`，返回里给相对路径；引擎 cap 仍是 `WORK_SHELL_MAX_OUTPUT_BYTES`（60KB）。
+  两个阈值不能只按 60KB 判断：20k~60k 字符的输出不会被引擎 cap，但正文只回前 20k，
+  不落盘就会静默丢尾巴。
 * 输出含非法 UTF-8 或 NUL 字节（图片/压缩包）时返回 `binary=true`，工具结果会明确提示改用
   "重定向到文件"或 `base64`，不把乱码当内容。
 * 并发：最多 8 条命令同时跑（`IecRuntime.MAX_RUNS`），超出的排队；每条命令最多占
@@ -148,7 +169,7 @@ hdc shell hilog -x | grep -A 120 IecSelfTest
 | 基线 | `uname -s`、`pwd` | `Linux`；工作区绝对路径（`<filesDir>/workspaces/__iec_selftest` 一类） |
 | PATH | `command -v` 枚举 `dd md5sum od nproc jq curl bc nc hexdump diff sftp node npm tar unzip zip git ssh python3` | 每个都打 `ok   <名字>`（`ok` 后 3 个空格）；缺失时单独一行 `[FAIL] <名字> not found`，不中断后续段 |
 | mksh 64 位算术 | `v=$((2000000000+2000000000)); echo "2000000000+2000000000=$v"` | `2000000000+2000000000=4000000000`（32 位会溢出成负数，并追加 `[FAIL] arithmetic`） |
-| `/tmp` + `id` | `echo x > /tmp/_t && cat /tmp/_t && rm -f /tmp/_t \|\| echo "[FAIL] /tmp write"`；`id; id 2>/dev/null \| grep -q "uid=" \|\| echo "[FAIL] id (no uid)"` | 打印 `x`；`id` 输出含 `uid=<真实 uid>`，没有 `[FAIL]` |
+| `$TMPDIR` + `/tmp` 不存在 + `id` | `echo x > "$TMPDIR/_t" && cat "$TMPDIR/_t" && rm -f "$TMPDIR/_t"`；`[ -e /tmp ] && echo "[FAIL] /tmp should be absent"`；`id; id -un` | 打印 `x`；`ok /tmp absent`；`id` 含 `uid=<真实 uid>`、`id -un` 为 `guncat`，没有 `[FAIL]` |
 | CA + git 网络 | `echo "GIT_SSL_CAINFO=${GIT_SSL_CAINFO:-<empty>}"`；`[ -n "$GIT_SSL_CAINFO" ] && [ -f "$GIT_SSL_CAINFO" ]`；`GIT_TERMINAL_PROMPT=0 git ls-remote https://github.com/git/git.git HEAD` | `GIT_SSL_CAINFO=` 指向存在的 `…/etc/ssl/certs/cacert.pem`；git 输出前 3 行含 40 位 commit，末行 `git ls-remote rc=0 (网络失败不算自检失败)`（网络不通时 `rc=124/128` 只记录，**不判自检失败**） |
 | python3 | `python3 -c "import sys; sys.exit(7)"`；`python3 -c "print(1+1)"` | `rc=7 (expect 7)`（退出码原样透传）；`2` |
 | jq | `printf '{"a":1}\n' \| jq -r .a` | `1` |
@@ -156,13 +177,13 @@ hdc shell hilog -x | grep -A 120 IecSelfTest
 | bc | `echo '1+1' \| bc` | `2` |
 | nc | `nc -h` / 无参，取 usage 首行 | 含 `usage: nc`（自编 nc 没有 `-h` 也走 usage） |
 | hexdump | `printf AB \| hexdump -C` | 首行 `00000000  41 42` + 补齐空格 + `\|AB\|`（`\|` 在第 60 列），第二行 `00000002`（最终偏移） |
-| diff | `/tmp/_d1`=a、`/tmp/_d2`=b，`diff -u` | git 前缀 + unified diff（`-a` / `+b`），末行 `diff rc=1 (expect 1)`（有差异是正确结果） |
+| diff | `$TMPDIR/_d1`=a、`$TMPDIR/_d2`=b，`diff -u` | git 前缀 + unified diff（`-a` / `+b`），末行 `diff rc=1 (expect 1)`（有差异是正确结果） |
 | sftp | `sftp -V` / `sftp -h` / 无参，取首行 | OpenSSH sftp 的 `unknown option -- V` 或 `usage: sftp ...`（没有 `-V` 属正常） |
 | node/npm | `node -v`、`npm -v` | `v22.19.0` 与 `10.9.3`（npm 有版本号说明 `npm-cli.js` 解包与 launcher 都对） |
-| 清理 | `rm -f /tmp/_t /tmp/_d1 /tmp/_d2 t.txt t.tar` | 无输出；随后 `SELFTEST DONE` |
+| 清理 | `rm -f "$TMPDIR/_t" "$TMPDIR/_d1" "$TMPDIR/_d2" t.txt t.tar` | 无输出；随后 `SELFTEST DONE` |
 
 `SELFTEST DONE` 之前的任一行 `[FAIL]` 都对应上表某一项；PATH 段的 `ok   <名字>` 行数应为 19。
-自检只读/临时写 `/tmp` 与工作区内的 `t.txt`/`t.tar`（跑完即删），不碰用户数据。
+自检只读/临时写 `$TMPDIR` 与工作区内的 `t.txt`/`t.tar`（跑完即删），不碰用户数据。
 
 ## 回退
 
@@ -174,6 +195,31 @@ hdc shell hilog -x | grep -A 120 IecSelfTest
 
 * 没有真 pty：依赖终端的程序（交互式 TUI）不适用，shell 工具本来就是非交互的。
 * 没有 job control（Ctrl+Z/fg/bg）；后台进程用 `&` 可以，但不能挂起。
+* `:` / `exec` 的重定向失败会按 POSIX 特殊内建语义**直接终止整条非交互脚本**，
+  `set +e` / `if` / `||` / `for` 都拦不住。探测可写性用 `printf '' > f 2>/dev/null`
+  再看 `$?`；关键清理/落盘段放进函数或子 shell。
+* `umask` 被平台文件系统忽略：新文件恒 666、新目录 775，`umask 077` 无效；
+  `chmod` 本身可用（fs shim 用 `.IEC_CHMOD` 旁路记录）。敏感文件必须显式
+  `chmod 600` 并用 `stat -c %a` 复核。
+* `flock` 不可用：toybox 只接受 fd 形式，且锁系统调用在沙箱里被拒绝；
+  互斥用 `mkdir lockdir`（成功即持锁，`rmdir` 释放）。
+* `ulimit` 是空实现：mksh 编译时没有 `HAVE_SETRLIMIT`，`c_ulimit` 被定义成
+  `c_true`，所以查询无输出、设置恒成功。
+* `id` / `whoami` / `logname` 都依赖 `<sysroot>/etc/passwd`（用户 `guncat`），uid/gid
+  在启动时从 `/proc/self/status` 读取，读不到则用 `process.uid` 与 sysroot 的
+  `st_uid`/`st_gid`；另外 `/bin/id`、`/bin/whoami`、`/bin/logname` 是带兜底的包装器：
+  先试 toybox 真实现，失败时用 mksh 的 `USER_ID`/`KSHEGID` 输出。取 uid/gid 仍可用
+  `stat -c %u/%g`（toybox 的 `whoami`/`logname` 本质都是 `id -un`）。
+* `df` 的容量列可用，`Mounted on` 列来自沙箱的 `/proc/mounts`，是伪值。
+* `/tmp` **刻意不提供**：fs shim 的路径映射只覆盖 `open`/`opendir`，`stat`/`chdir`/`mkdir`
+  会落到宿主只读根，保留 `<sysroot>/tmp` 只会得到“`test -d /tmp` 为真、`cd /tmp` 失败”
+  的半挂载。启动时删除旧版本留下的 `<sysroot>/tmp`；临时文件用 `$TMPDIR`
+  （`<sysroot>/session-tmp/<会话>`）或 `mktemp ./x.XXXXXX`。
+* `getconf ARG_MAX` = 131072（128KB）：`rm *` 遇到大量长文件名或 `xargs` 大批量会
+  `E2BIG`，改用 `find ... -exec ... +` 或分组处理。
+* 硬链接会被沙箱拒绝（`IEC_SHIM_LINK_STRICT=1` 让 `git clone` 正确回退到复制）；
+  `chown` 返回 `Operation not permitted`。
+* 管道退出码默认只取最后一条，要全链路判断用 `set -o pipefail`。
 * `exec` 的 socket 路径是 IEC 的编译期常量（`/data/storage/el2/base/files/iec-exec.sock`），
   与 `startIecServer()` 的默认值一致；改路径要同时改 `common/constant.h`。
 * 命令 so 只构建了 arm64-v8a；x86_64 模拟器上 IEC 的 NAPI 会加载失败，

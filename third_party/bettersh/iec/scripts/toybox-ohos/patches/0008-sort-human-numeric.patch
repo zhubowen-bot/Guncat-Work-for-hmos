@@ -1,0 +1,61 @@
+diff --git a/toys/posix/sort.c b/toys/posix/sort.c
+index 55c843c..4f70c13 100644
+--- a/toys/posix/sort.c
++++ b/toys/posix/sort.c
+@@ -7,7 +7,7 @@
+  * Deviations from POSIX: Lots.
+  * We invented -x
+ 
+-USE_SORT(NEWTOY(sort, USE_TOYBOX_FLOAT("g")"S:T:m" "o:k*t:" "xVbMCcszdfirun", TOYFLAG_USR|TOYFLAG_BIN|TOYFLAG_ARGFAIL(2)|TOYFLAG_MOREHELP(CFG_TOYBOX_FLOAT)))
++USE_SORT(NEWTOY(sort, USE_TOYBOX_FLOAT("g")"S:T:m" "o:k*t:" "xVhbMCcszdfirun", TOYFLAG_USR|TOYFLAG_BIN|TOYFLAG_ARGFAIL(2)|TOYFLAG_MOREHELP(CFG_TOYBOX_FLOAT)))
+ 
+ config SORT
+   bool "sort"
+@@ -23,6 +23,7 @@ config SORT
+     -d	Dictionary order (use alphanumeric and whitespace chars only)
+     -f	Force uppercase (case insensitive sort)
+     !-g	General numeric sort (double precision with nan and inf)
++    -h	Human readable numbers (2K, 1M, 3G...)
+     -i	Ignore nonprinting characters
+     -k	Sort by KEY (see below)
+     -M	Month sort (jan, feb, etc)
+@@ -167,6 +168,28 @@ static struct sort_key *add_key(void)
+   return *pkey = xzalloc(sizeof(struct sort_key));
+ }
+ 
++// GNU sort -h：按 1024 进制解析 "2K"/"1.5M"/"3G" 这类人类可读数字。
++// 没有后缀时就是普通数字；尾随的 "B"/"iB" 忽略。单位与 du -h 一致。
++static double human_number(char *s)
++{
++  char *end;
++  double v = strtod(s, &end);
++  int shift = 0;
++
++  switch (*end) {
++    case 'k': case 'K': shift = 1; break;
++    case 'm': case 'M': shift = 2; break;
++    case 'g': case 'G': shift = 3; break;
++    case 't': case 'T': shift = 4; break;
++    case 'p': case 'P': shift = 5; break;
++    case 'e': case 'E': shift = 6; break;
++    case 'z': case 'Z': shift = 7; break;
++    case 'y': case 'Y': shift = 8; break;
++  }
++  while (shift--) v *= 1024;
++  return v;
++}
++
+ // Perform actual comparison
+ static int compare_values(int flags, char *x, char *y)
+ {
+@@ -206,6 +229,10 @@ static int compare_values(int flags, char *x, char *y)
+     else if (!yy) return 1;
+     else return dx==thyme.tm_mon ? 0 : dx-thyme.tm_mon;
+ 
++  } else if (flags & FLAG_h) {
++    double dx = human_number(x), dy = human_number(y);
++
++    return dx<dy ? -1 : dx>dy;
+   } else if (flags & FLAG_x) return strtol(x, NULL, 16)-strtol(y, NULL, 16);
+   else if (flags & FLAG_V) {
+     while (*x && *y) {

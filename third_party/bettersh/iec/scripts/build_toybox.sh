@@ -131,6 +131,7 @@ WRAPS=(symlink symlinkat readlink readlinkat lstat stat fstatat fstat
        tcgetattr tcsetattr tcgetpgrp tcsetpgrp getpt grantpt unlockpt ptsname
        openpty login_tty forkpty
        execve execv execvp execvpe execl execlp execle
+       popen pclose system
        exit)
 WRAP_FLAGS=()
 for name in "${WRAPS[@]}"; do

@@ -125,6 +125,17 @@ enum OpExec {
     // after a restart; nothing in the server depends on it.
     OP_LIST = OP_EXEC_START + 4,
 
+    // [4 bytes signo][job string, NUL-terminated] -> [4 bytes signaled].
+    //
+    // Sends one signal to every live process of a job without ending the job or
+    // scheduling a follow-up. OP_TERMINATE_JOB is the blunt form used when the
+    // whole tool call is cancelled; this one exists for programs that implement
+    // their own deadline (toybox `timeout`): it needs TERM first, then KILL
+    // after its own grace period, and it must not reach the shell that started
+    // it. A job name may be a sub-job ("<parent>/t<pid>"); JobPids() matches
+    // those as part of the parent, so a tool-level cancel still reaches them.
+    OP_SIGNAL_JOB = OP_EXEC_START + 5,
+
     OP_EXEC_END,
 };
 
