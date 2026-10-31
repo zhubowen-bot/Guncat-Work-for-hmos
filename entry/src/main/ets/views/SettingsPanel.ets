@@ -35,7 +35,8 @@ export struct SettingsPanel {
   @Prop initMmBaseUrl: string = '';
   @Prop initMmApiKey: string = '';
   @Prop initMmModel: string = '';
-  @Prop initMmPreparseEnabled: boolean = true;
+  @Prop initMmPreparseEnabled: boolean = false;
+  @Prop initMmPreparseUserSet: boolean = false;
   // 工作副本 (用户可编辑). 改回 @State, 不再被父级覆盖
   @State provider: string = 'openai-completions';
   @State profileName: string = '默认配置';
@@ -53,7 +54,8 @@ export struct SettingsPanel {
   @State mmBaseUrl: string = '';
   @State mmApiKey: string = '';
   @State mmModel: string = '';
-  @State mmPreparseEnabled: boolean = true;
+  @State mmPreparseEnabled: boolean = false;
+  @State mmPreparseUserSet: boolean = false;
   // 本地联网搜索可见编辑字段(仅当前选中引擎); 完整配置存 searchDraft(普通字段, 保存时整体落盘)
   @State searchOpen: boolean = false;
   @State searchEngine: string = 'bing';
@@ -121,6 +123,7 @@ export struct SettingsPanel {
     this.mmApiKey = this.initMmApiKey;
     this.mmModel = this.initMmModel;
     this.mmPreparseEnabled = this.initMmPreparseEnabled;
+    this.mmPreparseUserSet = this.initMmPreparseUserSet;
   }
 
   build() {
@@ -602,6 +605,7 @@ export struct SettingsPanel {
               .selectedColor($r('app.color.brand'))
               .onChange((enabled: boolean) => {
                 this.mmPreparseEnabled = enabled;
+                this.mmPreparseUserSet = true;
               })
           }
           .width('100%')
@@ -1034,6 +1038,7 @@ export struct SettingsPanel {
       cfg.model = this.mmModel.trim();
     }
     cfg.preparseEnabled = this.mmPreparseEnabled;
+    cfg.preparseUserSet = this.mmPreparseUserSet;
     return cfg;
   }
 }
