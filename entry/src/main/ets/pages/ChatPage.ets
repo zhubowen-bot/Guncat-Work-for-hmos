@@ -697,6 +697,7 @@ struct ChatPage {
         initMmApiKey: this.vm.multimodalConfig.apiKey,
         initMmModel: this.vm.multimodalConfig.model,
         initMmPreparseEnabled: this.vm.multimodalConfig.preparseEnabled,
+        initMmPreparseUserSet: this.vm.multimodalConfig.preparseUserSet,
         onClose: () => {
           this.settingsOpen = false;
         },
