@@ -7,22 +7,33 @@
 > 关于 QEMU / Alpine / `npy` / `tooling/linux-vm` 的描述仅代表当时状态；当前实现见
 > [docs/architecture/iec-runtime.md](docs/architecture/iec-runtime.md)。
 
-## 7.1.0（Word 公式修复 · 三端对齐）
+## 7.1.0（2026-11-01）
 
-> 一句话：真机自检报告里的 8 类公式问题，在三端同源的解析器里一并修掉；鸿蒙版版本号跟到
-> `7.1.0`，不再挂在 `7.0.0-alpha` 下面。
+### Agent 内核：跨轮次思考记忆
 
-本版重点：
+- **根因**：历史轮次的 `reasoning` 一直存在会话里，但工作 / 交互模式重建循环历史时只搬了
+  正文；聊天模式里 Chat Completions 的 `reasoning_content` 只在联网搜索开启时才回传，
+  Anthropic 的 `thinkingSignature` 只存内存、没随消息落盘，Responses 的 reasoning output
+  item 则完全没有保存。结果是第二轮起模型看不到上一轮推理过的结论；带 `tools` 的
+  DeepSeek 思考模式甚至会直接 400。
+- **修复（三种协议按各自规范回传）**：
+  - **OpenAI 兼容 Chat Completions**：历史 assistant 的 `reasoning_content` 一律回传，
+    带 `tool_calls` 的消息也带；无论请求是否携带 `tools` 都不跳过（不带时服务端自动忽略）。
+  - **Anthropic Messages**：`thinking` 块随历史回传并置于消息首位，`signature` 与
+    `redacted_thinking` 随消息持久化、跨轮次与重启后原样带回；DeepSeek / Opencode 等兼容
+    端点接受无签名块，官方 `api.anthropic.com` 仅对「历史 + 无签名」跳过。历史被修剪 /
+    摘要压缩 / 整条裁剪后旧签名绑定的前缀已失效，会先清掉再发，避免 `Invalid signature` 400。
+  - **OpenAI / DeepSeek Responses**：保存 `response.output_item.done` 里的 reasoning item，
+    下一轮原样作为 `reasoning` input item 回传；DeepSeek 等兼容端点额外支持明文 `content`
+    兜底，官方 OpenAI 只回传带 `id` / `encrypted_content` 的原始 item。请求同时声明
+    `include: ["reasoning.encrypted_content"]`（DeepSeek 文档说明不支持该参数时静默忽略）。
+- **顺带**：只有思考、没有正文的 assistant 历史消息不再整条跳过；`Message` 新增并持久化
+  `thinkingSignature` / `redactedThinking` / `reasoningItems`，上下文预算把回传的思考一并
+  计入字符量，长任务不会因为多带思考而悄悄超出预算。
 
-- **Word 公式**：矩阵定界符、对齐环境、正体单位、范数、缺失符号，以及 `\mathbf{…}` 后的
-  上下标静默丢失。
-- **三端同步**：电脑版 / 安卓版 / 鸿蒙版共用同一套 `OmmlConverter` 修复，解析结果一致。
-- **版本号**：`7.1.0`（`Constants.APP_VERSION` 与 README 徽章同步；`AppScope/app.json5` 的 Beta 调试配置不随本次提交）。
+### Word 工具链：公式与自检
 
-### Word 文档公式修复（真机自检）
-
-> 真机自检报告里的 8 类公式问题；`OmmlConverter` / `DocxBuilder` 与电脑版、安卓版同源，
-> 本次三端一起修，HAP 内的公式解析不再“生成成功但局部走样”。
+> 真机自检报告里的 8 类公式问题；`OmmlConverter` / `DocxBuilder` 与电脑版、安卓版同源。
 
 - **矩阵定界符**：`bmatrix` 之前左右都写成 `[`，现在右括号是 `]`；`cases` 之前只生成矩阵、
   没有左大括号，现在用 `m:d` 包一层左花括号；`array` 的 `{ll}` 列格式不再漏成正文。
@@ -40,6 +51,16 @@
 - **回归**：`test/docx-harness` 新增 bmatrix / cases / aligned / mathbb / mathrm / 范数 /
   lfloor / mid / mathbf 上标 / array 列格式 / tag 共 16 项断言；`setup → test-build →
   validate.py → deep-check.py` 全过。
+
+### 版本与产物
+
+- 应用内版本号 `7.1.0`（`Constants.APP_VERSION` 与 README 徽章同步）；
+  `AppScope/app.json5` 的 Beta 调试配置不随本次提交。
+- `hvigorw assembleApp --mode project -p product=default -p buildMode=release` 构建成功
+  （DevEco Studio 6.1.1 / HarmonyOS SDK API 24）。
+- 产物：`build/outputs/default/Guncat-Work-for-hmos-default-signed.app`（181.5 MB）、
+  `entry/build/default/outputs/default/entry-default-signed.hap`（427.3 MB）。
+- `test/guncat-harness` 逻辑测试 760 项通过。
 
 ## 7.0.0-alpha（IEC 原生执行核 · 无虚拟机 shell）
 
