@@ -5,6 +5,9 @@ export class SSEParseContext {
   onFailure: (message: string) => boolean = () => false;
   onToken: (delta: string) => void = () => {};
   onReasoning: (text: string) => void = () => {};
+  // Responses 协议的 reasoning output item(完整 JSON, 含 id/encrypted_content):
+  // 跨轮次回传思考只能靠它, 纯文本字段在 Responses 上无效。
+  onReasoningItem: (itemJson: string) => void = () => {};
   onSignature: (signature: string) => void = () => {};
   onRedactedThinking: (data: string) => void = () => {};
   onUsage: (usage: Record<string, Object> | null) => void = () => {};
@@ -21,6 +24,7 @@ export class SSEProtocolAdapter {
   extractFailure: (sseData: string) => string = () => '';
   extractDelta: (sseData: string) => string = () => '';
   extractReasoning: (sseData: string) => string = () => '';
+  extractReasoningItem: (sseData: string) => string = () => '';
   extractSignature: (sseData: string) => string = () => '';
   extractRedactedThinking: (sseData: string) => string = () => '';
   extractUsage: (sseData: string) => Record<string, Object> | null = () => null;
@@ -43,6 +47,10 @@ export class SSEProtocolAdapter {
     let reasoning: string = this.extractReasoning(sseData);
     if (reasoning !== '') {
       ctx.onReasoning(reasoning);
+    }
+    let reasoningItem: string = this.extractReasoningItem(sseData);
+    if (reasoningItem !== '') {
+      ctx.onReasoningItem(reasoningItem);
     }
     let signature: string = this.extractSignature(sseData);
     if (signature !== '') {

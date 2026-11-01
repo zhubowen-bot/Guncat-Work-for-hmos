@@ -293,6 +293,9 @@ export class StorageManager {
       'attachments': atts,
       'timestamp': (m['timestamp'] as number) ?? 0,
       'reasoning': (m['reasoning'] as string) ?? '',
+      'thinkingSignature': (m['thinkingSignature'] as string) ?? '',
+      'redactedThinking': (m['redactedThinking'] as string) ?? '',
+      'reasoningItems': (m['reasoningItems'] as string) ?? '',
       'toolCalls': calls
     };
   }

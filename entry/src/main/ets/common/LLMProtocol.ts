@@ -78,6 +78,18 @@ export class LLMProtocol {
     return base + Constants.CHAT_COMPLETIONS_PATH;
   }
 
+  // 是否官方 Anthropic 端点: 官方会严格校验 thinking 块签名, 无签名的历史思考块会被拒绝;
+  // 兼容端点(DeepSeek / Opencode 等)接受无签名 thinking 块。
+  static isOfficialAnthropic(baseUrl: string): boolean {
+    return baseUrl.toLowerCase().indexOf('api.anthropic.com') >= 0;
+  }
+
+  // 是否官方 OpenAI 端点: Responses 协议里官方要求 reasoning item 带 id / encrypted_content,
+  // 只有明文 content 的 reasoning item 会被拒绝; 兼容端点(DeepSeek 等)支持明文 content。
+  static isOfficialOpenAI(baseUrl: string): boolean {
+    return baseUrl.toLowerCase().indexOf('api.openai.com') >= 0;
+  }
+
   static displayName(protocol: string): string {
     if (protocol === LLMProtocol.RESPONSES) {
       return 'OpenAI Responses';

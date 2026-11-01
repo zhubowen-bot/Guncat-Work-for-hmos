@@ -2177,7 +2177,8 @@ export class ChatViewModel {
         if (m.role === 'user' && m.content !== '') {
           messages.push(LoopMessage.user(m.content));
           this.pushUserImageMessages(messages, m);
-        } else if (m.role === 'assistant' && (m.content !== '' || m.toolCalls.length > 0)) {
+        } else if (m.role === 'assistant' &&
+          (m.content !== '' || m.toolCalls.length > 0 || m.reasoning !== '')) {
           // 中断遗留的空结果标记为已中断, 避免模型把空串当成功
           let calls: ToolCallRecord[] = m.toolCalls;
           for (let c: number = 0; c < calls.length; c++) {
@@ -2191,7 +2192,15 @@ export class ChatViewModel {
             }
           }
           // 交互模式的界面程序里携带的绑定值要用自然语言告诉模型(尾标记本身对模型是噪音)
-          messages.push(LoopMessage.assistant(this.assistantLoopContent(m), calls));
+          let loopMsg: LoopMessage = LoopMessage.assistant(this.assistantLoopContent(m), calls);
+          // 跨轮次思考记忆: reasoning 与各协议的回传载体(Anthropic 签名 / Responses reasoning item)
+          // 一并带上; 签名只有在历史消息里持久化过才有, 由协议构建器决定是否可下发。
+          loopMsg.reasoning = m.reasoning;
+          loopMsg.thinkingSignature = m.thinkingSignature;
+          loopMsg.redactedThinking = m.redactedThinking;
+          loopMsg.reasoningItems = m.reasoningItems;
+          loopMsg.reasoningFromHistory = true;
+          messages.push(loopMsg);
         }
       }
 
@@ -2300,6 +2309,11 @@ export class ChatViewModel {
             metrics.recordCompaction();
             turnMsg.toolCalls = [];
           });
+        // Anthropic 思考块签名 / 加密思考块、Responses reasoning item 随消息持久化：
+        // 下一轮（含重启后）回传思考时必须原样携带。
+        turnMsg.thinkingSignature = turn.thinkingSignature;
+        turnMsg.redactedThinking = turn.redactedThinking;
+        turnMsg.reasoningItems = turn.reasoningItems;
         if (this.abortSignal.aborted) {
           turnEndStatus = 'aborted';
           this.finalizeWorkTurn(turnMsg, true, conv);
@@ -2672,7 +2686,8 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
         if (m.role === 'user' && m.content !== '') {
           messages.push(LoopMessage.user(m.content));
           this.pushUserImageMessages(messages, m);
-        } else if (m.role === 'assistant' && (m.content !== '' || m.toolCalls.length > 0)) {
+        } else if (m.role === 'assistant' &&
+          (m.content !== '' || m.toolCalls.length > 0 || m.reasoning !== '')) {
           // 中断遗留的空结果标记为已中断, 避免模型把空串当成功
           let calls: ToolCallRecord[] = m.toolCalls;
           for (let c: number = 0; c < calls.length; c++) {
@@ -2686,7 +2701,15 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
             }
           }
           // 交互模式的界面程序里携带的绑定值要用自然语言告诉模型(尾标记本身对模型是噪音)
-          messages.push(LoopMessage.assistant(this.assistantLoopContent(m), calls));
+          let loopMsg: LoopMessage = LoopMessage.assistant(this.assistantLoopContent(m), calls);
+          // 跨轮次思考记忆: reasoning 与各协议的回传载体(Anthropic 签名 / Responses reasoning item)
+          // 一并带上; 签名只有在历史消息里持久化过才有, 由协议构建器决定是否可下发。
+          loopMsg.reasoning = m.reasoning;
+          loopMsg.thinkingSignature = m.thinkingSignature;
+          loopMsg.redactedThinking = m.redactedThinking;
+          loopMsg.reasoningItems = m.reasoningItems;
+          loopMsg.reasoningFromHistory = true;
+          messages.push(loopMsg);
         }
       }
 
@@ -2985,6 +3008,11 @@ if (this.abortSignal.aborted) {
             turnMsg.toolCalls = [];
           });
         lastTurn = turn;
+        // Anthropic 思考块签名 / 加密思考块、Responses reasoning item 随消息持久化：
+        // 下一轮（含重启后）回传思考时必须原样携带。
+        turnMsg.thinkingSignature = turn.thinkingSignature;
+        turnMsg.redactedThinking = turn.redactedThinking;
+        turnMsg.reasoningItems = turn.reasoningItems;
         if (this.abortSignal.aborted) {
           state.turnEndStatus = 'aborted';
           this.finalizeWorkTurn(turnMsg, true, conv);
@@ -3362,6 +3390,8 @@ if (this.abortSignal.aborted) {
     // 第一级: 修剪早期过长的工具结果(模型无参与, 零成本; 原文可随时用工具重新获取)
     if (oldEnd > 1 && pruneOldToolResults(messages, 1, oldEnd)) {
       notes += '（已自动修剪早期过长的工具结果以释放上下文）\n\n';
+      // 前缀已经被改写, 旧的 thinking 签名全部失效 → 先清掉再发摘要/后续请求
+      this.dropThinkingSignatures(messages);
     }
     if (!force && !this.workHistoryOverBudget(messages)) {
       return notes;
@@ -3396,6 +3426,8 @@ if (this.abortSignal.aborted) {
         compacted = true;
         notes += '（已自动压缩早期历史: ' + (oldEnd - 1).toString() +
           ' 条已汇总为状态摘要）\n\n';
+        // 摘要替换了早期历史, 保留尾部消息的签名同样绑定在旧前缀上 → 一并清掉
+        this.dropThinkingSignatures(messages);
       }
     }
     // 压缩后(或压缩失败时)仍超预算 → 从最旧处整条丢弃
@@ -3404,6 +3436,9 @@ if (this.abortSignal.aborted) {
       messages.splice(1, 1);
       compacted = true;
     }
+    if (compacted) {
+      this.dropThinkingSignatures(messages);
+    }
     if (compacted && notes.indexOf('已自动压缩早期历史') < 0) {
       notes += '（已自动裁剪早期历史以释放上下文）\n\n';
     }
@@ -3411,6 +3446,29 @@ if (this.abortSignal.aborted) {
     this.lastWorkPromptTokens = 0;
     this.lastWorkPromptChars = 0;
     return notes;
+  }
+
+  /**
+   * 清掉循环消息里的 Anthropic thinking 签名。
+   *
+   * signature 绑定在「生成该思考块时的完整前缀」（系统提示词 + 工具面 + 更早的消息）上。
+   * 修剪工具结果 / 摘要压缩 / 整条裁剪都会改写前缀，旧签名随即失效，官方 API 会直接 400
+   * （Invalid signature in thinking block）。清掉签名并标记为历史消息后，构建器会按
+   * 「无签名」规则处理：兼容端点照常回传思考正文，官方端点省略该块；后续轮次会拿到新签名。
+   */
+  private dropThinkingSignatures(messages: LoopMessage[]): void {
+    for (let i: number = 0; i < messages.length; i++) {
+      let m: LoopMessage = messages[i];
+      if (m.role !== 'assistant') {
+        continue;
+      }
+      if (m.thinkingSignature === '' && m.redactedThinking === '') {
+        continue;
+      }
+      m.thinkingSignature = '';
+      m.redactedThinking = '';
+      m.reasoningFromHistory = true;
+    }
   }
 
   // 上下文是否超预算: 上一请求真实 usage 已达阈值必然超预算(历史只会继续增长);
@@ -3603,6 +3661,8 @@ if (this.abortSignal.aborted) {
         this.apiConfig, this.currentAgent, currentHistory, currentUserText,
         this.thinkingEnabled, this.webSearchEnabled, callbacks, this.abortSignal);
       assistantMsg.thinkingSignature = result.thinkingSignature;
+      assistantMsg.redactedThinking = result.redactedThinking;
+      assistantMsg.reasoningItems = result.reasoningItems;
       // 中断: 与旧流程一致, 不做收尾(由 stopStreaming 负责状态)
       if (this.abortSignal.aborted) {
         return;
@@ -4054,9 +4114,9 @@ function loopMsgChars(messages: LoopMessage[]): number {
   return n;
 }
 
-// 单条循环消息的字符量
+// 单条循环消息的字符量(正文 + 工具参数与结果 + 回传的思考内容)
 function msgChars(m: LoopMessage): number {
-  let n: number = m.content.length;
+  let n: number = m.content.length + m.reasoning.length;
   for (let c: number = 0; c < m.toolCalls.length; c++) {
     n += m.toolCalls[c].argsJson.length + m.toolCalls[c].result.length;
   }

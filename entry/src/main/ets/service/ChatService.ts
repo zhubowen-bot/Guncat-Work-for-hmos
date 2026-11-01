@@ -53,6 +53,8 @@ export class ChatStreamResult {
   toolCalls: ToolCallRecord[] = [];
   thinkingSignature: string = '';
   redactedThinking: string = '';
+  // Responses 协议的 reasoning output item(JSON 数组字符串), 跨轮次回传思考所需
+  reasoningItems: string = '';
   // 本轮累积的正文(供重试层判断"空响应", 也供 onDone 收尾)
   content: string = '';
 }
@@ -143,8 +145,9 @@ function buildChatCompletionsBody(config: ApiConfig, agent: Agent | null,
   }
   for (let i: number = 0; i < history.length; i++) {
     let m: Message = history[i];
-    // 只带工具调用的 assistant 消息(content 为空)不能跳过, 工具结果回灌依赖它
-    if (m.content === '' && m.toolCalls.length === 0) {
+    // 只带工具调用的 assistant 消息(content 为空)不能跳过, 工具结果回灌依赖它;
+    // 只有思考、没有正文的 assistant 消息同样保留(跨轮次思考记忆)。
+    if (m.content === '' && m.toolCalls.length === 0 && m.reasoning === '') {
       continue;
     }
     if (m.role !== 'user' && m.role !== 'assistant') {
@@ -203,11 +206,17 @@ function buildChatCompletionsBody(config: ApiConfig, agent: Agent | null,
           function: { name: call.name, arguments: call.argsJson === '' ? '{}' : call.argsJson }
         });
       }
-      messages.push({
+      let toolMsg: Record<string, Object> = {
         role: 'assistant',
         content: m.content === '' ? null : m.content,
         tool_calls: callArr
-      });
+      };
+      // 带 tool_calls 的 assistant 同样回传 reasoning_content —— DeepSeek 的规则是
+      // 「带 tools 的请求，后续每次请求都要完整回传历史 reasoning」，漏掉会 400。
+      if (m.reasoning !== '') {
+        toolMsg['reasoning_content'] = m.reasoning;
+      }
+      messages.push(toolMsg);
       for (let c: number = 0; c < m.toolCalls.length; c++) {
         let call: ToolCallRecord = m.toolCalls[c];
         messages.push({
@@ -219,8 +228,9 @@ function buildChatCompletionsBody(config: ApiConfig, agent: Agent | null,
       continue;
     }
     let chatMsg: Record<string, Object> = { role: m.role, content: m.content };
-    // 请求携带 tools（联网搜索）时，DeepSeek 要求回传中间 assistant 的 reasoning_content，否则多轮可能 400。
-    if (m.role === 'assistant' && webSearchEnabled && m.reasoning !== '') {
+    // 历史轮次的深度思考必须以 reasoning_content(与 content 同级)回传, 否则跨轮次丢失思考记忆。
+    // 无论请求是否携带 tools 都带上: 未带 tools 时服务端会忽略该字段, 带上无害。
+    if (m.role === 'assistant' && m.reasoning !== '') {
       chatMsg['reasoning_content'] = m.reasoning;
     }
     messages.push(chatMsg);
@@ -280,10 +290,40 @@ function buildChatCompletionsBody(config: ApiConfig, agent: Agent | null,
   return body;
 }
 
+// Responses 协议跨轮次思考: 优先回传服务端下发的 reasoning output item(原样, 含 id /
+// encrypted_content); 兼容端点(DeepSeek 等)还支持明文 content 归并到相邻 assistant 消息,
+// 而官方 OpenAI 对缺 id/encrypted_content 的明文 reasoning item 会拒绝, 故明文兜底只给非官方端点。
+export function responsesReasoningItems(reasoningItemsJson: string, reasoningText: string,
+  allowPlainText: boolean): Record<string, Object>[] {
+  let out: Record<string, Object>[] = [];
+  if (reasoningItemsJson !== '') {
+    try {
+      let parsed: Object = JSON.parse(reasoningItemsJson);
+      if (parsed instanceof Array) {
+        let arr: Object[] = parsed as Object[];
+        for (let i: number = 0; i < arr.length; i++) {
+          let item: Object = arr[i];
+          if (typeof item === 'object' && item !== null) {
+            out.push(item as Record<string, Object>);
+          }
+        }
+      }
+    } catch (e) {
+      // 坏数据忽略: 宁可丢思考, 也不让整条历史把请求弄挂
+    }
+  }
+  if (out.length === 0 && reasoningText !== '' && allowPlainText) {
+    out.push({ type: 'reasoning', content: [{ type: 'reasoning_text', text: reasoningText }] });
+  }
+  return out;
+}
+
 function buildResponsesBody(config: ApiConfig, agent: Agent | null,
   history: Message[], userText: string,
   thinkingEnabled: boolean, webSearchEnabled: boolean): Record<string, Object> {
   let input: Record<string, Object>[] = [];
+  // Responses 没有 reasoning_content 字段: 思考以 reasoning input item 回传(见 responsesReasoningItems)
+  let allowPlainReasoning: boolean = !LLMProtocol.isOfficialOpenAI(config.baseUrl);
   for (let i: number = 0; i < history.length; i++) {
     let m: Message = history[i];
     // 只带工具调用的 assistant 消息(content 为空)不能跳过, 工具结果回灌依赖它
@@ -331,7 +371,12 @@ function buildResponsesBody(config: ApiConfig, agent: Agent | null,
       }
       input.push({ role: m.role, content: contentParts });
     } else if (m.role === 'assistant' && m.toolCalls.length > 0) {
-      // 本地工具循环: function_call + function_call_output 输入项
+      // 本地工具循环: reasoning? + function_call + function_call_output 输入项
+      let reasoningItems: Record<string, Object>[] = responsesReasoningItems(
+        m.reasoningItems, m.reasoning, allowPlainReasoning);
+      for (let r: number = 0; r < reasoningItems.length; r++) {
+        input.push(reasoningItems[r]);
+      }
       if (m.content !== '') {
         input.push({
           role: 'assistant',
@@ -356,6 +401,13 @@ function buildResponsesBody(config: ApiConfig, agent: Agent | null,
         });
       }
     } else {
+      if (m.role === 'assistant') {
+        let reasoningItems: Record<string, Object>[] = responsesReasoningItems(
+          m.reasoningItems, m.reasoning, allowPlainReasoning);
+        for (let r: number = 0; r < reasoningItems.length; r++) {
+          input.push(reasoningItems[r]);
+        }
+      }
       input.push({ role: m.role, content: m.content });
     }
   }
@@ -371,7 +423,10 @@ function buildResponsesBody(config: ApiConfig, agent: Agent | null,
     model: config.model,
     input: input,
     stream: true,
-    store: false
+    store: false,
+    // 无状态模式(store:false): 拿到 reasoning.encrypted_content 才能在下一轮回传思考。
+    // DeepSeek 不支持 include(文档说明静默忽略), 兼容端点不受影响。
+    include: ['reasoning.encrypted_content']
   };
 
   if (agent !== null && agent.systemPrompt !== '') {
@@ -530,9 +585,13 @@ function buildAnthropicBody(config: ApiConfig, agent: Agent | null,
     if (m.role === 'assistant' && m.toolCalls.length > 0) {
       // 本地工具循环: assistant(thinking? + text? + tool_use) + user(tool_result)。
       // 思考模式下带 tool_use 的 assistant 消息必须回传思考块(置于首位, 与工作模式同规则):
-      // 有思考文本即回传, 签名在流式捕获到时随块携带(部分兼容服务不返回签名则省略该字段)
+      // 有思考文本即回传, 签名随消息持久化后原样携带
+      let allowUnsigned: boolean = !LLMProtocol.isOfficialAnthropic(config.baseUrl);
       let blocks: Object[] = [];
-      if (thinkingEnabled && m.reasoning !== '') {
+      if (thinkingEnabled && m.redactedThinking !== '') {
+        blocks.push({ type: 'redacted_thinking', data: m.redactedThinking });
+      } else if (thinkingEnabled && m.reasoning !== '' &&
+        (m.thinkingSignature !== '' || allowUnsigned)) {
         let thinkingBlock: Record<string, Object> = { type: 'thinking', thinking: m.reasoning };
         if (m.thinkingSignature !== '') {
           thinkingBlock['signature'] = m.thinkingSignature;
@@ -562,6 +621,33 @@ function buildAnthropicBody(config: ApiConfig, agent: Agent | null,
         });
       }
       appendAnthropicMessage(messages, 'user', results);
+    } else if (m.role === 'assistant') {
+      // 跨轮次思考记忆: 历史 assistant 的 thinking 块同样回传(置于消息首位)。
+      // 签名随消息持久化; 官方端点对无签名块会 400, 仅在其上跳过"无签名历史"组合。
+      let allowUnsigned: boolean = !LLMProtocol.isOfficialAnthropic(config.baseUrl);
+      let blocks: Object[] = [];
+      if (thinkingEnabled && m.redactedThinking !== '') {
+        blocks.push({ type: 'redacted_thinking', data: m.redactedThinking });
+      } else if (thinkingEnabled && m.reasoning !== '' &&
+        (m.thinkingSignature !== '' || allowUnsigned)) {
+        let thinkingBlock: Record<string, Object> = { type: 'thinking', thinking: m.reasoning };
+        if (m.thinkingSignature !== '') {
+          thinkingBlock['signature'] = m.thinkingSignature;
+        }
+        blocks.push(thinkingBlock);
+      }
+      if (m.content !== '') {
+        blocks.push({ type: 'text', text: m.content });
+      }
+      if (blocks.length === 0) {
+        continue;
+      }
+      // 没有思考块时保持旧形态(纯字符串 content), 不改变既有请求前缀
+      if (blocks.length === 1 && m.content !== '') {
+        appendAnthropicMessage(messages, 'assistant', m.content);
+      } else {
+        appendAnthropicMessage(messages, 'assistant', blocks);
+      }
     } else {
       appendAnthropicMessage(messages, m.role, m.content);
     }
@@ -788,6 +874,52 @@ export function extractChatCompletionsReasoning(sseData: string): string {
   } catch (e) {
     return '';
   }
+}
+
+// Responses 协议的 reasoning output item: response.output_item.done 里的 item 就是
+// 可回传的完整形状(OpenAI 带 id/summary/encrypted_content, DeepSeek 带明文 content)。
+// 跨轮次思考回传只能靠它, 因此把 item 原样序列化保存。
+export function extractResponsesReasoningItem(sseData: string): string {
+  try {
+    let json: Object = JSON.parse(sseData);
+    if (typeof json !== 'object' || json === null) {
+      return '';
+    }
+    if ((json as Record<string, Object>)['type'] !== 'response.output_item.done') {
+      return '';
+    }
+    let item: Object = (json as Record<string, Object>)['item'];
+    if (typeof item !== 'object' || item === null) {
+      return '';
+    }
+    if ((item as Record<string, Object>)['type'] !== 'reasoning') {
+      return '';
+    }
+    return JSON.stringify(item);
+  } catch (e) {
+    return '';
+  }
+}
+
+// 把一条 reasoning item 追加进 JSON 数组字符串(跨事件累积)
+export function appendReasoningItem(current: string, itemJson: string): string {
+  let arr: Object[] = [];
+  if (current !== '') {
+    try {
+      let parsed: Object = JSON.parse(current);
+      if (parsed instanceof Array) {
+        arr = parsed as Object[];
+      }
+    } catch (e) {
+      arr = [];
+    }
+  }
+  try {
+    arr.push(JSON.parse(itemJson) as Object);
+  } catch (e) {
+    return current;
+  }
+  return JSON.stringify(arr);
 }
 
 export function extractResponsesReasoning(sseData: string): string {
@@ -1173,6 +1305,7 @@ export class ChatService {
     // Anthropic 思考块签名与加密思考块(思考模式下本地工具循环回传所需)
     let thinkingSignature: string = '';
     let redactedThinking: string = '';
+    let reasoningItems: string = '';
     let streamResult: ChatStreamResult = new ChatStreamResult();
     // 对齐 web 版本: SSE 解析出一个 delta 就立即 onToken 全量累积,
     // UI 端 50ms 节流刷新. 不做应用层字符拆分 (避免 setTimeout 队列过长 OOM)
@@ -1197,6 +1330,9 @@ export class ChatService {
       };
       ctx.onRedactedThinking = (data: string): void => {
         redactedThinking = data;
+      };
+      ctx.onReasoningItem = (itemJson: string): void => {
+        reasoningItems = appendReasoningItem(reasoningItems, itemJson);
       };
       ctx.onUsage = (usageObj: Record<string, Object> | null): void => {
         let stats: number[] = deriveStreamStats(usageObj, Date.now() - startTime);
@@ -1395,6 +1531,7 @@ export class ChatService {
       streamResult.toolCalls = ChatService.normalizeChatToolCalls(callAcc.calls);
       streamResult.thinkingSignature = thinkingSignature;
       streamResult.redactedThinking = redactedThinking;
+      streamResult.reasoningItems = reasoningItems;
       streamResult.content = acc.fullContent;
     } catch (e) {
       let err: Error = e as Error;

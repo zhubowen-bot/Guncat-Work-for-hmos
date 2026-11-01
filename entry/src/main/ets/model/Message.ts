@@ -19,9 +19,12 @@ export class Message {
   // 由 API 返回的 usage 派生的统计: token 速度(tok/s)与缓存命中率(0..1), -1 表示无返回值
   tokenSpeed: number = -1;
   cacheHitRate: number = -1;
-  // Anthropic 协议思考块的签名(仅内存内有效, 不持久化): 聊天模式本地工具循环中,
-  // 思考模式下带 tool_use 的 assistant 消息回传给下一轮请求时需随思考块携带签名
+  // Anthropic 协议思考块的签名(跨轮次回传 thinking 块时必须原样带回; 官方 API 会校验)
   thinkingSignature: string = '';
+  // Anthropic 加密思考块(安全拦截时由服务端返回的 data, 回传时原样带回)
+  redactedThinking: string = '';
+  // Responses 协议的 reasoning output item(JSON 数组字符串), 跨轮次回传思考的唯一载体
+  reasoningItems: string = '';
 
   static ofUser(id: string, content: string, displayContent: string,
     attachments: Attachment[]): Message {
@@ -54,6 +57,9 @@ export class Message {
     msg.displayContent = (json['displayContent'] as string) ?? '';
     msg.timestamp = (json['timestamp'] as number) ?? 0;
     msg.reasoning = (json['reasoning'] as string) ?? '';
+    msg.thinkingSignature = (json['thinkingSignature'] as string) ?? '';
+    msg.redactedThinking = (json['redactedThinking'] as string) ?? '';
+    msg.reasoningItems = (json['reasoningItems'] as string) ?? '';
     msg.tokenSpeed = (json['tokenSpeed'] as number) ?? -1;
     msg.cacheHitRate = (json['cacheHitRate'] as number) ?? -1;
     let raw: Object = json['attachments'];
@@ -94,6 +100,9 @@ export class Message {
       'attachments': attArr,
       'timestamp': this.timestamp,
       'reasoning': this.reasoning,
+      'thinkingSignature': this.thinkingSignature,
+      'redactedThinking': this.redactedThinking,
+      'reasoningItems': this.reasoningItems,
       'tokenSpeed': this.tokenSpeed,
       'cacheHitRate': this.cacheHitRate,
       'toolCalls': callArr

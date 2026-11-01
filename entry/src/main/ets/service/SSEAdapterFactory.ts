@@ -6,7 +6,8 @@ import { ToolCallAccumulator, collectCompletionsToolDelta, collectResponsesToolI
   collectAnthropicToolEvent } from './ToolCallStream';
 import {
   extractChatCompletionsDelta, extractChatCompletionsReasoning, extractChatCompletionsUsage,
-  extractResponsesDelta, extractResponsesReasoning, extractResponsesUsage, extractResponsesFailure,
+  extractResponsesDelta, extractResponsesReasoning, extractResponsesReasoningItem,
+  extractResponsesUsage, extractResponsesFailure,
   extractAnthropicDelta, extractAnthropicReasoning, extractAnthropicUsage, extractAnthropicFailure,
   extractAnthropicSignature, extractAnthropicRedactedThinking
 } from './ChatService';
@@ -47,6 +48,12 @@ export class SSEAdapterFactory {
         return extractAnthropicReasoning(sseData);
       }
       return extractChatCompletionsReasoning(sseData);
+    };
+    adapter.extractReasoningItem = (sseData: string): string => {
+      if (protocol === 'responses') {
+        return extractResponsesReasoningItem(sseData);
+      }
+      return '';
     };
     adapter.extractSignature = (sseData: string): string => {
       if (protocol === 'anthropic') {
