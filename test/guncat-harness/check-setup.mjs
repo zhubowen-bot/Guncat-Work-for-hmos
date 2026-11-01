@@ -91,6 +91,7 @@ for (const [relSrc, relDst, replaces] of [
   ['export/OmmlConverter.ets', 'OmmlConverter.ts', []],
   ['export/DocModel.ets', 'DocModel.ts', []],
   ['export/DocxBuilder.ets', 'DocxBuilder.ts', []],
+  ['export/DocxAudit.ets', 'DocxAudit.ts', []],
   ['export/DocxImporter.ets', 'DocxImporter.ts', []],
   ['export/XlsxModel.ets', 'XlsxModel.ts', []],
   ['export/XlsxBuilder.ets', 'XlsxBuilder.ts', []],
