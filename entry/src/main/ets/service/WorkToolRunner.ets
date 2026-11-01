@@ -8,7 +8,7 @@ import { http } from '@kit.NetworkKit';
 import { image } from '@kit.ImageKit';
 import { WorkFileService, ToolExecResult } from './WorkFileService';
 import { PdfTextExtractor, PdfPagesResult, PdfSearchHit, PdfRenderResult } from './PdfTextExtractor';
-import { DocxBuilder, DocxImagePart, DocImageResolver } from '../export/DocxBuilder';
+import { DocxBuilder, DocxBuildResult, DocxImagePart, DocImageResolver } from '../export/DocxBuilder';
 import { DocxImporter, DocxImportResult } from '../export/DocxImporter';
 import { Doc, DocParser, DocOps, MdToDoc } from '../export/DocModel';
 import { XlsxExporter } from '../export/XlsxExporter';
@@ -365,18 +365,21 @@ export class WorkToolRunner {
       doc.style = style;
     }
     try {
-      let bytes: Uint8Array = await DocxBuilder.buildDocxBytes(doc,
+      let built: DocxBuildResult = await DocxBuilder.buildDocxWithReport(doc,
         WorkToolRunner.docxResolver(context, root));
+      let bytes: Uint8Array = built.bytes;
       let result: ToolExecResult = WorkFileService.writeBytesAt(context, convId, rel, bytes);
       if (result.ok) {
         result.output = '已生成《' + doc.title + '》(' + doc.blocks.length.toString() + ' 块' +
           (doc.cover ? ', 含封面' : '') + (doc.toc ? ', 含目录' : '') + ', 样式 ' + doc.style +
           ') → ' + rel + ' (' + WorkFileService.formatSize(bytes.length) + ')' +
+          '\n自检: ' + built.audit.report() +
           '\n—— 用 read_docx 或 read_file 抽查内容; 需要改图/改字用 edit_docx。';
       }
       return result;
     } catch (e) {
-      return WorkToolRunner.failMsg('生成 Word 文档失败: ' + WorkToolRunner.extractErrMessage(e as Object));
+      return WorkToolRunner.failMsg('生成 Word 文档失败(未写入任何文件): ' +
+        WorkToolRunner.extractErrMessage(e as Object));
     }
   }
 
@@ -472,16 +475,19 @@ export class WorkToolRunner {
           backupNote = '\n原文件已备份为 ' + backupRel + '(外来 docx 为近似导入, 重建后不保留原版式细节)';
         }
       }
-      let bytes: Uint8Array = await DocxBuilder.buildDocxBytes(r.doc,
+      let built: DocxBuildResult = await DocxBuilder.buildDocxWithReport(r.doc,
         WorkToolRunner.docxResolver(context, root));
+      let bytes: Uint8Array = built.bytes;
       let result: ToolExecResult = WorkFileService.writeBytesAt(context, convId, rel, bytes);
       if (result.ok) {
         result.output = '《' + rel + '》已更新(' + r.doc.blocks.length.toString() + ' 块, ' +
-          WorkFileService.formatSize(bytes.length) + '):\n' + summary + backupNote;
+          WorkFileService.formatSize(bytes.length) + '):\n' + summary + backupNote +
+          '\n自检: ' + built.audit.report();
       }
       return result;
     } catch (e) {
-      return WorkToolRunner.failMsg('编辑 Word 文档失败: ' + WorkToolRunner.extractErrMessage(e as Object));
+      return WorkToolRunner.failMsg('编辑 Word 文档失败(原文件未改动): ' +
+        WorkToolRunner.extractErrMessage(e as Object));
     }
   }
 

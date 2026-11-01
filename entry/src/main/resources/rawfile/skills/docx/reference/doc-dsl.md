@@ -95,8 +95,18 @@ Doc JSON 是 Word 文档的结构化中间层：AI 写 JSON → 渲染为 .docx�
 | `![说明](assets/icon.png)` | 行内图片（按需嵌入，最大宽 ≈5.8 英寸） |
 | `$E=mc^2$` | 行内公式（渲染为 OMML） |
 | `$$\\sum_{i=1}^n i$$` | 显示公式（独立成行） |
+| `$\\mu_0$` / `$\\alpha_2$` / `$\\bar{I}^2$` | 命令后的上下标会绑定到前一个原子（希腊字母、重音组、分式、定界符均可） |
+| `$\\frac{a}{b}$` `$\\sqrt[3]{x}$` `$\\int_0^1 f(x)dx$` | 分式 / 根式 / 积分（求和、连乘同理） |
+| `$\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}$` | 矩阵（bmatrix/pmatrix/cases/array/aligned 等） |
+| `$\\begin{cases} x & y \\\\ z & w \\end{cases}$` | 分段函数（自动生成左大括号） |
+| `$\\begin{aligned} a &= b \\\\ c &= d \\end{aligned}$` | 对齐环境（m:eqArr，等号对齐） |
+| `$\\left\\langle x \\right\\rangle$` | 自动缩放定界符（`\\left\\{` / `\\right.` / `\\langle` 等） |
+| `$\\mathbb{R}^n$` `$\\vec{AB}$` `$\\overbrace{a+b}$` | 双线体 / 向量 / 上下括号 |
+| `$\\mathrm{m/s^2}$` `$\\|\\mathbf{x}\\|_2$` | 正体单位（组内上标照常解析）/ 范数双竖线与下标 |
 | `~~删除线~~` | 删除线 |
 | `\\n` | 段落内换行 |
+
+> **公式失败会硬错**：未知命令、空 `m:t`、LaTeX 残留、`m:oMathPara` 父元素不合规都会让 `write_docx` 拒绝写盘并返回具体原因，不会生成「看起来成功」的坏文件。返回值里的「自检」行会给出公式段数、行内公式数、空节点数、残留数与父元素合规数。
 
 ## 模板/仿制/占位符填充
 

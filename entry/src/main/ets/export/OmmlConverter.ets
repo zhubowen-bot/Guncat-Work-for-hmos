@@ -133,6 +133,58 @@ class LatexSymbols {
     map.set('yen', '¥');
     map.set('zeta', 'ζ');
     map.set('checkmark', '✓');
+    // 定界符(不在 \left...\right 里单独使用时也要能显示)
+    map.set('langle', '⟨');
+    map.set('rangle', '⟩');
+    map.set('lfloor', '⌊');
+    map.set('rfloor', '⌋');
+    map.set('lceil', '⌈');
+    map.set('rceil', '⌉');
+    map.set('vert', '|');
+    map.set('Vert', '‖');
+    map.set('lvert', '|');
+    map.set('rvert', '|');
+    map.set('lVert', '‖');
+    map.set('rVert', '‖');
+    map.set('backslash', '\\');
+    // 逻辑/关系/集合的常用补充
+    map.set('because', '∵');
+    map.set('therefore', '∴');
+    map.set('triangleq', '≜');
+    map.set('coloneqq', '≔');
+    map.set('eqqcolon', '≕');
+    map.set('approxeq', '≊');
+    map.set('lesssim', '≲');
+    map.set('gtrsim', '≳');
+    map.set('leqslant', '⩽');
+    map.set('geqslant', '⩾');
+    map.set('nleq', '≰');
+    map.set('ngeq', '≱');
+    map.set('nless', '≮');
+    map.set('ngtr', '≯');
+    map.set('subsetneq', '⊊');
+    map.set('supsetneq', '⊋');
+    map.set('setminus', '∖');
+    map.set('mid', '∣');
+    map.set('nmid', '∤');
+    map.set('vdash', '⊢');
+    map.set('dashv', '⊣');
+    map.set('models', '⊨');
+    map.set('top', '⊤');
+    map.set('bot', '⊥');
+    map.set('imath', 'ı');
+    map.set('jmath', 'ȷ');
+    map.set('mho', '℧');
+    map.set('measuredangle', '∡');
+    map.set('sphericalangle', '∢');
+    map.set('ltimes', '⋉');
+    map.set('rtimes', '⋊');
+    map.set('uplus', '⊎');
+    map.set('sqcup', '⊔');
+    map.set('sqcap', '⊓');
+    map.set('amalg', '⨿');
+    map.set('dagger', '†');
+    map.set('ddagger', '‡');
 
     let greek: Map<string, string> = LatexSymbols.GREEK;
     greek.set('alpha', 'α');
@@ -201,6 +253,43 @@ class LatexSymbols {
   }
 }
 
+// LaTeX 解析审计: 记录未识别命令与结构性错误, 由 DocxBuilder 生成后自检使用。
+// 关键原则: 不静默降级 —— 解析不了的内容要么明确记录, 要么原样保留, 由自检决定拒绝写盘。
+class LatexAudit {
+  private static unknown: Map<string, number> = new Map<string, number>();
+  private static issues: string[] = [];
+
+  static begin(): void {
+    LatexAudit.unknown = new Map<string, number>();
+    LatexAudit.issues = [];
+  }
+
+  static unknownCommand(name: string): void {
+    let n: number | undefined = LatexAudit.unknown.get(name);
+    LatexAudit.unknown.set(name, n === undefined ? 1 : n + 1);
+  }
+
+  static issue(message: string): void {
+    if (LatexAudit.issues.indexOf(message) === -1) {
+      LatexAudit.issues.push(message);
+    }
+  }
+
+  static take(): MathAuditResult {
+    let r: MathAuditResult = new MathAuditResult();
+    r.unknownCommands = Array.from(LatexAudit.unknown.keys());
+    r.issues = LatexAudit.issues.slice();
+    LatexAudit.unknown = new Map<string, number>();
+    LatexAudit.issues = [];
+    return r;
+  }
+}
+
+export class MathAuditResult {
+  unknownCommands: string[] = [];
+  issues: string[] = [];
+}
+
 // 行内数学渲染上下文 (供 parseCommand 中的 \text 内部转义等使用)
 class LatexParser {
   private src: string = '';
@@ -229,22 +318,33 @@ class LatexParser {
         continue;
       }
       if (c === '\\') {
-        let cmdRes: CmdResult = this.parseCommand(parts, stack);
-        if (cmdRes.produced) {
+        // \left / \right 需要在当前 segment 的栈上配对, 其余命令一律按「原子 + 上下标」处理。
+        // 这是 \mu_0 / \alpha_2 / \bar{I}^2 下标被吞的根因: 命令直接写入 parts 后,
+        // 后面的 ^/_ 找不到基元, 只能退化成空 run + 普通文本。
+        let cmdName: string = this.peekCommandName();
+        if (cmdName === 'left') {
+          this.parseCommand(parts, stack);
           continue;
         }
-        // 解析失败(命令为空), 跳过
-        continue;
-      }
-      if (c === '{') {
-        this.pos++;
-        parts.push(this.parseSegment(true));
+        if (cmdName === 'right') {
+          this.parseCommand(parts, stack);
+          if (parts.length > 0) {
+            parts[parts.length - 1] = this.applyScripts(parts[parts.length - 1]);
+          }
+          continue;
+        }
+        parts.push(this.parseAtomWithScripts());
         continue;
       }
       if (c === '^' || c === '_') {
-        // 基元为空时上下标单独成组(容错)
-        parts.push(LatexParser.emptyRun());
+        // 没有基元的上下标属于非法输入: 记录后仍消费参数, 让自检拒绝写盘, 不再静默降级。
+        LatexAudit.issue('上下标缺少基元(如公式以 ^ 或 _ 开头, 或前面是空组)');
         this.pos++;
+        let orphan: string = this.parseScriptArg();
+        parts.push(LatexParser.emptyRun());
+        if (orphan !== '') {
+          parts.push(orphan);
+        }
         continue;
       }
       if (c === '&' || c === '\\' && this.pos + 1 < len && this.src.charAt(this.pos + 1) === '\\') {
@@ -261,18 +361,43 @@ class LatexParser {
       // 普通原子 + 可能的上下标
       parts.push(this.parseAtomWithScripts());
     }
-    // 处理未闭合的 \left( ... 栈 (按普通字符回退)
+    // 处理未闭合的 \left( ... 栈: 保留已经解析出的内容, 只补回可见的起始定界符。
+    // 不能把 marker.start 之后的内容整段替换掉 —— 那是静默丢内容。
     for (let i: number = stack.length - 1; i >= 0; i--) {
       let marker: DelimMarker = stack[i];
-      let fallback: string = marker.beg !== '.' ? LatexParser.run(marker.beg) : '';
-      parts.splice(marker.start, parts.length - marker.start, fallback);
+      LatexAudit.issue('\\left 缺少配对的 \\right(已保留内容, 但定界符不会自动缩放)');
+      if (marker.beg !== '') {
+        parts.splice(marker.start, 0, LatexParser.run(marker.beg));
+      }
     }
     return parts.join('');
   }
 
+  // 查看当前反斜杠命令名(不移动 pos); 转义字符或末尾返回 ''
+  private peekCommandName(): string {
+    let len: number = this.src.length;
+    if (this.pos >= len || this.src.charAt(this.pos) !== '\\') {
+      return '';
+    }
+    let i: number = this.pos + 1;
+    if (i >= len || !LatexParser.isLetter(this.src.charAt(i))) {
+      return '';
+    }
+    let name: string = '';
+    while (i < len && LatexParser.isLetter(this.src.charAt(i))) {
+      name += this.src.charAt(i);
+      i++;
+    }
+    return name;
+  }
+
   // 解析一个普通原子(单字符/组), 然后附加可能的 ^ 和 _ 后缀, 返回组合后的 OMML
   private parseAtomWithScripts(): string {
-    let base: string = this.parseAtom();
+    return this.applyScripts(this.parseAtom());
+  }
+
+  // 把紧随其后的 ^/_ 绑定到 base 上。\left...\right 组、命令、字符、组都走同一条路径。
+  private applyScripts(base: string): string {
     let subStr: string = '';
     let supStr: string = '';
     let len: number = this.src.length;
@@ -308,17 +433,17 @@ class LatexParser {
   private parseScriptArg(): string {
     let len: number = this.src.length;
     if (this.pos >= len) {
+      LatexAudit.issue('上下标缺少内容(公式在 ^ 或 _ 后结束)');
       return LatexParser.emptyRun();
     }
     if (this.src.charAt(this.pos) === '{') {
       this.pos++;
       let inner: string = this.parseSegment(true);
-      if (inner === '') {
-        return LatexParser.emptyRun();
-      }
+      // 空组 {} 视为「没有上下标」, 不生成空 m:t 节点
       return inner;
     }
     if (this.src.charAt(this.pos) === '^' || this.src.charAt(this.pos) === '_') {
+      LatexAudit.issue('上下标缺少内容(连续出现 ^ 或 _)');
       return LatexParser.emptyRun();
     }
     return this.parseAtom();
@@ -328,15 +453,12 @@ class LatexParser {
   private parseAtom(): string {
     let len: number = this.src.length;
     if (this.pos >= len) {
-      return LatexParser.emptyRun();
+      return '';
     }
     let c: string = this.src.charAt(this.pos);
     if (c === '{') {
       this.pos++;
       let inner: string = this.parseSegment(true);
-      if (inner === '') {
-        return LatexParser.emptyRun();
-      }
       return inner;
     }
     if (c === '\\') {
@@ -347,12 +469,14 @@ class LatexParser {
       if (cmdRes.produced) {
         for (let i: number = localStack.length - 1; i >= 0; i--) {
           let marker: DelimMarker = localStack[i];
-          localParts.splice(marker.start, localParts.length - marker.start,
-            marker.beg !== '.' ? LatexParser.run(marker.beg) : '');
+          if (marker.beg !== '') {
+            localParts.splice(marker.start, 0, LatexParser.run(marker.beg));
+          }
         }
         return localParts.join('');
       }
-      return LatexParser.emptyRun();
+      LatexAudit.issue('反斜杠后缺少命令');
+      return '';
     }
     // 单字符
     this.pos++;
@@ -392,6 +516,9 @@ class LatexParser {
         esc = '}';
       } else if (c === '\\') {
         esc = '';
+      } else if (c === '|') {
+        // LaTeX 的 \| 是双竖线(范数), 不是单竖线
+        esc = '‖';
       } else if (c === '~') {
         esc = ' ';
       } else if (c === '^') {
@@ -426,28 +553,89 @@ class LatexParser {
   private handleNamedCommand(name: string, parts: string[], stack: DelimMarker[]): void {
     let len: number = this.src.length;
 
-    // \left / \right 分隔符
+    // 大小定界符: \big( \Big[ \bigl\{ ... 只输出定界符本身
+    if (name === 'big' || name === 'Big' || name === 'bigg' || name === 'Bigg' ||
+      name === 'bigl' || name === 'bigr' || name === 'Bigl' || name === 'Bigr' ||
+      name === 'biggl' || name === 'biggr' || name === 'Biggl' || name === 'Biggr') {
+      let delim: string = this.readDelimiter();
+      if (delim !== '.') {
+        parts.push(LatexParser.run(delim));
+      }
+      return;
+    }
+
+    // \not 组合: 常见否定关系直接映射, 避免整条公式因未知命令被拒
+    if (name === 'not') {
+      let target: string = '';
+      if (this.pos < len && this.src.charAt(this.pos) === '\\') {
+        target = this.peekCommandName();
+        this.pos += 1 + target.length;
+      } else if (this.pos < len) {
+        target = this.src.charAt(this.pos);
+        this.pos++;
+      }
+      let negMap: Map<string, string> = new Map<string, string>();
+      negMap.set('=', '≠');
+      negMap.set('<', '≮');
+      negMap.set('>', '≯');
+      negMap.set('in', '∉');
+      negMap.set('subset', '⊄');
+      negMap.set('supset', '⊅');
+      negMap.set('subseteq', '⊈');
+      negMap.set('supseteq', '⊉');
+      negMap.set('equiv', '≢');
+      negMap.set('approx', '≉');
+      negMap.set('leq', '≰');
+      negMap.set('geq', '≱');
+      let neg: string | undefined = negMap.get(target);
+      parts.push(LatexParser.run(neg !== undefined ? neg : '¬' + target));
+      return;
+    }
+
+    // 公式编号与矩阵横线: 属于排版元信息, 丢弃但必须消费参数, 不能把 \tag{1} 当正文
+    if (name === 'tag') {
+      this.readGroupRaw();
+      return;
+    }
+    if (name === 'notag' || name === 'nonumber' || name === 'hline' || name === 'hdashline') {
+      return;
+    }
+    if (name === 'cline') {
+      this.readGroupRaw();
+      return;
+    }
+
+    // \middle| 作为 \left...\right 中间的分隔符, 直接输出字符
+    if (name === 'middle') {
+      let delim: string = this.readDelimiter();
+      if (delim !== '.') {
+        parts.push(LatexParser.run(delim));
+      }
+      return;
+    }
+
+    // \left / \right 分隔符; '.' 表示不可见, 用空 begChr/endChr 而不是字面句点
     if (name === 'left' || name === 'right') {
       let delim: string = this.readDelimiter();
+      let visible: string = delim === '.' ? '' : delim;
       if (name === 'left') {
-        if (delim !== '.') {
-          let marker: DelimMarker = new DelimMarker();
-          marker.start = parts.length;
-          marker.beg = delim;
-          stack.push(marker);
-        }
+        let marker: DelimMarker = new DelimMarker();
+        marker.start = parts.length;
+        marker.beg = visible;
+        stack.push(marker);
         return;
       }
       // right: 弹栈 wrap
       if (stack.length === 0) {
-        if (delim !== '.') {
-          parts.push(LatexParser.run(delim));
+        LatexAudit.issue('\\right 缺少配对的 \\left');
+        if (visible !== '') {
+          parts.push(LatexParser.run(visible));
         }
         return;
       }
       let marker: DelimMarker = stack.pop() as DelimMarker;
       let begVal: string = marker.beg;
-      let endVal: string = delim;
+      let endVal: string = visible;
       let inner: string = parts.slice(marker.start).join('');
       parts.splice(marker.start, parts.length - marker.start, '');
       let dXml: string = '<m:d><m:dPr><m:begChr m:val="' + XmlUtil.escapeAttr(begVal) + '"/>' +
@@ -563,15 +751,20 @@ class LatexParser {
           remain = false;
         }
       }
+      // 没有上下限时用空元素(合法), 不要生成空 m:t 节点 —— 否则自检无法区分「正常的无上下限」
+      // 与「脚本被吞掉的坏公式」。
       if (subXml === '') {
-        subXml = LatexParser.emptyRun();
+        subXml = '<m:sub/>';
+      } else {
+        subXml = '<m:sub>' + subXml + '</m:sub>';
       }
       if (supXml === '') {
-        supXml = LatexParser.emptyRun();
+        supXml = '<m:sup/>';
+      } else {
+        supXml = '<m:sup>' + supXml + '</m:sup>';
       }
       parts.push('<m:nary><m:naryPr><m:chr m:val="' + naryChr + '"/>' +
-        '<m:limLoc m:val="' + naryLoc + '"/></m:naryPr><m:sub>' + subXml + '</m:sub>' +
-        '<m:sup>' + supXml + '</m:sup><m:e/></m:nary>');
+        '<m:limLoc m:val="' + naryLoc + '"/></m:naryPr>' + subXml + supXml + '<m:e/></m:nary>');
       return;
     }
 
@@ -581,16 +774,16 @@ class LatexParser {
       if (this.pos < len && this.src.charAt(this.pos) === '_') {
         this.pos++;
         let sub: string = this.parseScriptArg();
-        parts.push('<m:limLow><m:e>' + LatexParser.run(label) + '</m:e><m:lim>' + sub + '</m:lim></m:limLow>');
+        parts.push('<m:limLow><m:e>' + LatexParser.styledRun(label, 'p') + '</m:e><m:lim>' + sub + '</m:lim></m:limLow>');
       } else {
-        parts.push(LatexParser.run(label));
+        parts.push(LatexParser.styledRun(label, 'p'));
       }
       return;
     }
 
     // 函数名(带自动正体与可选的上下标由外层处理): sin cos tan 等
     if (LatexSymbols.isFunction(name)) {
-      parts.push(LatexParser.run(name));
+      parts.push(LatexParser.styledRun(name, 'p'));
       return;
     }
 
@@ -601,9 +794,9 @@ class LatexParser {
       return;
     }
 
-    // \text / \mathrm 等文本模式
-    if (name === 'text' || name === 'mathrm' || name === 'operatorname' || name === 'textbf' ||
-      name === 'textit' || name === 'textnormal' || name === 'texttt' || name === 'textsc') {
+    // \text / \textbf 等真正的文本模式: 内容按原样显示, 不解析 ^/_
+    if (name === 'text' || name === 'textbf' || name === 'textit' || name === 'textnormal' ||
+      name === 'texttt' || name === 'textsc') {
       let txt: string = this.readGroupRaw();
       let sty: string = 'p';
       if (name === 'textbf') {
@@ -614,32 +807,66 @@ class LatexParser {
       parts.push(LatexParser.styledRun(escText(txt), sty));
       return;
     }
-    if (name === 'mathbf' || name === 'boldsymbol') {
+    // \mathrm 是数学模式里的正体, 不是 \text: 组内必须继续解析 ^/_/分式等
+    if (name === 'mathrm') {
       let inner: string = this.readGroupOrAtom();
-      parts.push('<m:r><m:rPr><m:sty m:val="b"/></m:rPr><m:t xml:space="preserve">' +
-        XmlUtil.escape(inner.replace(/<[^>]*>/g, '')) + '</m:t></m:r>');
+      parts.push(LatexParser.applyStyle(inner, 'p'));
       return;
     }
-    if (name === 'mathit') {
+    // \operatorname{arg\,max}: 函数名按文本读取, 但整体保持正体
+    if (name === 'operatorname') {
+      let txt: string = this.readGroupRaw();
+      parts.push(LatexParser.styledRun(escText(txt), 'p'));
+      return;
+    }
+    // \mathbf / \boldsymbol / \mathit: 保留组内结构(上下标/分式), 只给每个 m:r 加字形
+    if (name === 'mathbf' || name === 'boldsymbol' || name === 'mathit') {
       let inner: string = this.readGroupOrAtom();
-      parts.push('<m:r><m:rPr><m:sty m:val="i"/></m:rPr><m:t xml:space="preserve">' +
-        XmlUtil.escape(inner.replace(/<[^>]*>/g, '')) + '</m:t></m:r>');
+      let sty: string = name === 'mathit' ? 'i' : 'b';
+      parts.push(LatexParser.applyStyle(inner, sty));
+      return;
+    }
+    // \mathbb{R} 等双线体: 直接映射到 Unicode 双线字符(Word 不依赖额外字体)
+    if (name === 'mathbb') {
+      let raw: string = this.readGroupRaw();
+      parts.push(LatexParser.run(LatexParser.blackboard(raw)));
+      return;
+    }
+    // \mathcal / \mathfrak / \mathsf 等: 至少保留内容, 不静默丢弃
+    if (name === 'mathcal' || name === 'mathfrak' || name === 'mathsf' || name === 'mathscr' ||
+      name === 'mathnormal') {
+      let raw: string = this.readGroupRaw();
+      parts.push(LatexParser.run(raw));
+      return;
+    }
+    // 上下堆叠: \overset{上}{基} / \underset{下}{基} / \stackrel{上}{基}
+    if (name === 'overset' || name === 'underset' || name === 'stackrel') {
+      let over: string = this.readGroupOrAtom();
+      let base: string = this.readGroupOrAtom();
+      if (base === '') {
+        parts.push(LatexParser.run('\\' + name));
+        return;
+      }
+      let tag: string = name === 'underset' ? 'm:limLow' : 'm:limUpp';
+      let limTag: string = name === 'underset' ? 'm:lim' : 'm:lim';
+      parts.push('<' + tag + '><m:e>' + base + '</m:e><' + limTag + '>' + over + '</' + limTag + '></' + tag + '>');
       return;
     }
 
-    // 重音
+    // 重音: 用组合附加符(比 ASCII ^ / ~ 更贴近 Word 数学排版)
     let accMap: Map<string, string> = new Map<string, string>();
-    accMap.set('hat', '^');
-    accMap.set('widehat', '^');
-    accMap.set('vec', '→');
-    accMap.set('bar', '‾');
-    accMap.set('overline', '‾');
-    accMap.set('dot', '˙');
+    accMap.set('hat', '̂');
+    accMap.set('widehat', '̂');
+    accMap.set('vec', '⃗');
+    accMap.set('dot', '̇');
     accMap.set('ddot', '̈');
-    accMap.set('tilde', '~');
-    accMap.set('widetilde', '~');
-    accMap.set('check', 'ˇ');
-    accMap.set('breve', '˘');
+    accMap.set('tilde', '̃');
+    accMap.set('widetilde', '̃');
+    accMap.set('check', '̌');
+    accMap.set('breve', '̆');
+    accMap.set('overrightarrow', '⃗');
+    accMap.set('overleftarrow', '⃖');
+    accMap.set('overleftrightarrow', '⃡');
     if (accMap.has(name)) {
       let content: string = this.readGroupOrAtom();
       parts.push('<m:acc><m:accPr><m:chr m:val="' + accMap.get(name) + '"/></m:accPr>' +
@@ -647,15 +874,27 @@ class LatexParser {
       return;
     }
 
-    // 上下划线
-    if (name === 'overbrace') {
+    // 上下划线: \bar / \overline 只加一层 m:bar, 不再走 m:acc(避免一层变两层)
+    if (name === 'bar' || name === 'overline') {
       let content: string = this.readGroupOrAtom();
       parts.push('<m:bar><m:barPr><m:pos m:val="top"/></m:barPr><m:e>' + content + '</m:e></m:bar>');
       return;
     }
-    if (name === 'underbrace' || name === 'underline') {
+    if (name === 'underline') {
       let content: string = this.readGroupOrAtom();
-      parts.push('<m:under><m:underPr><m:pos m:val="bottom"/></m:underPr><m:e>' + content + '</m:e></m:under>');
+      parts.push('<m:bar><m:barPr><m:pos m:val="bottom"/></m:barPr><m:e>' + content + '</m:e></m:bar>');
+      return;
+    }
+    if (name === 'overbrace') {
+      let content: string = this.readGroupOrAtom();
+      parts.push('<m:groupChr><m:groupChrPr><m:chr m:val="⏞"/><m:pos m:val="top"/>' +
+        '<m:vertJc m:val="bot"/></m:groupChrPr><m:e>' + content + '</m:e></m:groupChr>');
+      return;
+    }
+    if (name === 'underbrace') {
+      let content: string = this.readGroupOrAtom();
+      parts.push('<m:groupChr><m:groupChrPr><m:chr m:val="⏟"/><m:pos m:val="bot"/>' +
+        '<m:vertJc m:val="top"/></m:groupChrPr><m:e>' + content + '</m:e></m:groupChr>');
       return;
     }
 
@@ -669,6 +908,14 @@ class LatexParser {
       }
       parts.push('<m:d><m:dPr><m:begChr m:val="("/><m:endChr m:val=")"/></m:dPr>' +
         '<m:e><m:f><m:num>' + top + '</m:num><m:den>' + bottom + '</m:den></m:f></m:e></m:d>');
+      return;
+    }
+
+    // 方框: \boxed{...}
+    if (name === 'boxed') {
+      let content: string = this.readGroupOrAtom();
+      parts.push('<m:borderBox><m:borderBoxPr><m:hide m:val="off"/></m:borderBoxPr>' +
+        '<m:e>' + content + '</m:e></m:borderBox>');
       return;
     }
 
@@ -717,41 +964,56 @@ class LatexParser {
       // 部分命令需要吃掉参数
       let takeArgs: boolean = name === 'label' || name === 'ref' || name === 'eqref' || name === 'pageref' ||
         name === 'rule' || name === 'kern' || name === 'mkern' || name === 'vspace' ||
-        name === 'hspace' || name === 'vskip';
+        name === 'hspace' || name === 'vskip' || name === 'phantom' || name === 'hphantom' ||
+        name === 'vphantom';
       if (takeArgs) {
         this.readGroupOrAtom();
       }
       return;
     }
 
-    // 未知命令: 按原样输出名字
-    parts.push(LatexParser.run(name));
+    // 未知命令: 保留完整的 \name 原文(而不是只留 name), 并记录到审计;
+    // 这样自检能明确拒绝, 不会生成「看起来成功、实际丢了命令」的文档。
+    LatexAudit.unknownCommand(name);
+    parts.push(LatexParser.run('\\' + name));
   }
 
-  // 解析环境体(矩阵等), 输出到 parts
+  // 解析环境体(矩阵/对齐), 输出到 parts
   private parseEnvironment(env: string, parts: string[]): void {
     let openDelim: string = '';
+    let closeDelim: string = '';
+    let isEqArray: boolean = false;
     let len: number = this.src.length;
     if (env === 'pmatrix') {
       openDelim = '(';
+      closeDelim = ')';
     } else if (env === 'bmatrix') {
       openDelim = '[';
+      closeDelim = ']';
     } else if (env === 'Bmatrix') {
       openDelim = '{';
+      closeDelim = '}';
     } else if (env === 'vmatrix') {
       openDelim = '|';
+      closeDelim = '|';
     } else if (env === 'Vmatrix') {
       openDelim = '‖';
+      closeDelim = '‖';
     } else if (env === 'cases') {
+      // cases 只有左大括号, 没有右定界符
       openDelim = '{';
-    } else if (env === 'array' || env === 'aligned' || env === 'split' || env === 'matrix' ||
-      env === 'smallmatrix' || env === 'gathered' || env === 'alignedat' || env === 'equation' ||
-      env === 'equation*' || env === 'displaymath' || env === 'multline' || env === 'gather' ||
-      env === 'align' || env === 'align*' || env === 'flalign' || env === 'math') {
+      closeDelim = '';
+    } else if (env === 'aligned' || env === 'alignedat' || env === 'split' || env === 'gathered' ||
+      env === 'gather' || env === 'multline' || env === 'align' || env === 'align*' ||
+      env === 'flalign' || env === 'equation' || env === 'equation*' || env === 'displaymath' ||
+      env === 'math') {
+      // 对齐环境用 m:eqArr, 不再退化成两列矩阵
+      isEqArray = true;
+    } else if (env === 'array' || env === 'matrix' || env === 'smallmatrix') {
       openDelim = '';
     } else {
-      // 未知环境: 跳过内容
-      let depth: number = 0;
+      // 未知环境: 不再静默跳过(那会让用户以为公式生成成功)。记录后跳过内容, 由自检拒绝写盘。
+      LatexAudit.issue('不支持的环境: \\begin{' + env + '}');
       while (this.pos < len) {
         if (this.src.startsWith('\\end', this.pos)) {
           this.pos += 4;
@@ -761,6 +1023,10 @@ class LatexParser {
         this.pos++;
       }
       return;
+    }
+    // array / alignedat 的环境参数({cc} 列格式 / {2} 对齐点数量)不是公式内容, 必须消费掉
+    if ((env === 'array' || env === 'alignedat') && this.pos < len && this.src.charAt(this.pos) === '{') {
+      this.readBracedName();
     }
     // 收集矩阵单元格(按 \\ 分行, & 分列)
     let rows: string[][] = [];
@@ -778,13 +1044,24 @@ class LatexParser {
         rows.push(currentRow);
         currentRow = [];
         this.pos += 2;
-        // 跳过行尾的 \cr 或空白
+        // 跳过行尾的 \cr 或可选间距 [2pt]
         if (this.src.startsWith('\\cr', this.pos)) {
           this.pos += 3;
+        }
+        if (this.pos < len && this.src.charAt(this.pos) === '[') {
+          let close: number = this.src.indexOf(']', this.pos);
+          if (close !== -1) {
+            this.pos = close + 1;
+          }
         }
         continue;
       }
       if (this.src.charAt(this.pos) === '&') {
+        if (isEqArray) {
+          // 对齐环境里的 & 只是对齐点标记, 不产生新列
+          this.pos++;
+          continue;
+        }
         currentRow.push(currentCell);
         currentCell = '';
         this.pos++;
@@ -801,66 +1078,98 @@ class LatexParser {
     if (rows.length === 0) {
       rows.push(['']);
     }
-    // 渲染 <m:m>
-    let mXml: string = '<m:m>';
-    if (openDelim !== '') {
-      mXml += '<m:mPr><m:chr m:val="' + XmlUtil.escapeAttr(openDelim) + '"/></m:mPr>';
-    }
-    for (let r: number = 0; r < rows.length; r++) {
-      mXml += '<m:mr>';
-      let row: string[] = rows[r];
-      if (row.length === 0) {
-        row = [''];
-      }
-      for (let cIdx: number = 0; cIdx < row.length; cIdx++) {
-        let cellXml: string = row[cIdx].trim();
-        cellXml = cellXml === '' ? LatexParser.emptyRun() : new LatexParser().initAndParse(cellXml);
+    let mXml: string = '';
+    if (isEqArray) {
+      // 对齐环境: 每行一个 m:e, 由 Word 按关系符对齐(不再是 m:m 两列)
+      mXml = '<m:eqArr>';
+      for (let r: number = 0; r < rows.length; r++) {
+        let rowText: string = rows[r].join('').trim();
+        let cellXml: string = rowText === '' ? '' : new LatexParser().initAndParse(rowText);
         mXml += '<m:e>' + cellXml + '</m:e>';
       }
-      mXml += '</m:mr>';
+      mXml += '</m:eqArr>';
+    } else {
+      // 渲染 <m:m>
+      mXml = '<m:m>';
+      for (let r: number = 0; r < rows.length; r++) {
+        mXml += '<m:mr>';
+        let row: string[] = rows[r];
+        if (row.length === 0) {
+          row = [''];
+        }
+        for (let cIdx: number = 0; cIdx < row.length; cIdx++) {
+          let cellXml: string = row[cIdx].trim();
+          cellXml = cellXml === '' ? '' : new LatexParser().initAndParse(cellXml);
+          mXml += '<m:e>' + cellXml + '</m:e>';
+        }
+        mXml += '</m:mr>';
+      }
+      mXml += '</m:m>';
     }
-    mXml += '</m:m>';
-    // 带定界符的环境包一层 m:d(自动缩放)
-    if (openDelim === '{') {
-      parts.push(mXml);
-    } else if (openDelim !== '') {
+    // 带定界符的环境包一层 m:d(自动缩放); cases 只有左括号, closeDelim 为空
+    if (openDelim !== '' || closeDelim !== '') {
       parts.push('<m:d><m:dPr><m:begChr m:val="' + XmlUtil.escapeAttr(openDelim) + '"/>' +
-        '<m:endChr m:val="' + XmlUtil.escapeAttr(openDelim) + '"/></m:dPr><m:e>' + mXml + '</m:e></m:d>');
+        '<m:endChr m:val="' + XmlUtil.escapeAttr(closeDelim) + '"/></m:dPr><m:e>' + mXml + '</m:e></m:d>');
     } else {
       parts.push(mXml);
     }
   }
 
-  // 读取 \begin{env} 之后紧邻的分隔符字符(\left( 等)
+  // 读取 \left / \right / \big 之后的分隔符(支持 \langle / \lfloor 等命名定界符)
   private readDelimiter(): string {
     let len: number = this.src.length;
     if (this.pos >= len) {
       return '.';
     }
-    if (this.src.charAt(this.pos) === '\\') {
+    if (this.src.charAt(this.pos) !== '\\') {
+      let c: string = this.src.charAt(this.pos);
       this.pos++;
-      if (this.pos < len) {
-        let c: string = this.src.charAt(this.pos);
-        this.pos++;
-        if (c === '{') {
-          return '{';
-        }
-        if (c === '}') {
-          return '}';
-        }
-        if (c === '|') {
-          return '|';
-        }
-        if (c === '.') {
-          return '.';
-        }
-        return c;
-      }
+      return c;
+    }
+    this.pos++;
+    if (this.pos >= len) {
       return '.';
     }
     let c: string = this.src.charAt(this.pos);
-    this.pos++;
-    return c;
+    if (!LatexParser.isLetter(c)) {
+      this.pos++;
+      if (c === '|') {
+        return '‖';
+      }
+      if (c === '{' || c === '}' || c === '.') {
+        return c;
+      }
+      return c;
+    }
+    let name: string = '';
+    while (this.pos < len && LatexParser.isLetter(this.src.charAt(this.pos))) {
+      name += this.src.charAt(this.pos);
+      this.pos++;
+    }
+    let map: Map<string, string> = new Map<string, string>();
+    map.set('langle', '⟨');
+    map.set('rangle', '⟩');
+    map.set('lfloor', '⌊');
+    map.set('rfloor', '⌋');
+    map.set('lceil', '⌈');
+    map.set('rceil', '⌉');
+    map.set('vert', '|');
+    map.set('Vert', '‖');
+    map.set('lvert', '|');
+    map.set('rvert', '|');
+    map.set('lVert', '‖');
+    map.set('rVert', '‖');
+    map.set('backslash', '\\');
+    map.set('lbrack', '[');
+    map.set('rbrack', ']');
+    map.set('lbrace', '{');
+    map.set('rbrace', '}');
+    let mapped: string | undefined = map.get(name);
+    if (mapped !== undefined) {
+      return mapped;
+    }
+    LatexAudit.unknownCommand(name);
+    return '.';
   }
 
   // 读取 {name} 形式的参数
@@ -931,10 +1240,11 @@ class LatexParser {
     if (text === '') {
       return '';
     }
-    return '<m:r><m:t xml:space="preserve">' + XmlUtil.escape(text) + '</m:t></m:r>';
+    return '<m:r>' + LatexParser.mathFontPr(text) + '<m:t xml:space="preserve">' +
+      XmlUtil.escape(text) + '</m:t></m:r>';
   }
 
-  // 空 run(占位)
+  // 空 run(占位; 仅用于非法输入, 正常路径不应产生)
   static emptyRun(): string {
     return '<m:r><m:t/></m:r>';
   }
@@ -946,8 +1256,90 @@ class LatexParser {
 
   // 指定字形的 run
   static styledRun(text: string, style: string): string {
-    return '<m:r><m:rPr><m:sty m:val="' + style + '"/></m:rPr><m:t xml:space="preserve">' +
-      XmlUtil.escape(text) + '</m:t></m:r>';
+    if (text === '') {
+      return '';
+    }
+    return '<m:r><m:rPr><m:sty m:val="' + style + '"/></m:rPr>' + LatexParser.mathFontPr(text) +
+      '<m:t xml:space="preserve">' + XmlUtil.escape(text) + '</m:t></m:r>';
+  }
+
+  // 给一段已生成的 OMML 里每个 m:r 加字形(保留上下标/分式等结构)。
+  // \mathrm{m/s^2} 这类写法必须先按数学解析, 再统一改成正体, 不能按 \text 原样吞掉。
+  static applyStyle(inner: string, style: string): string {
+    if (inner === '') {
+      return '';
+    }
+    return inner.replace(/<m:r>([\s\S]*?)<\/m:r>/g,
+      (full: string, body: string): string => {
+        if (body.indexOf('<m:sty ') !== -1) {
+          return full;
+        }
+        if (body.indexOf('<m:rPr>') !== -1) {
+          return '<m:r>' + body.replace('<m:rPr>',
+            '<m:rPr><m:sty m:val="' + style + '"/>') + '</m:r>';
+        }
+        return '<m:r><m:rPr><m:sty m:val="' + style + '"/></m:rPr>' + body + '</m:r>';
+      });
+  }
+
+  // 数学 run 的字体兜底: CJK 用宋体, 特殊符号用 Cambria Math, 避免 Uₐ 这类字符
+  // 在默认数学字体里缺字形后被无声吞掉。
+  private static mathFontPr(text: string): string {
+    let needMath: boolean = false;
+    let needCjk: boolean = false;
+    for (let i: number = 0; i < text.length;) {
+      let code: number = text.codePointAt(i) ?? 0;
+      let step: number = code > 0xFFFF ? 2 : 1;
+      if (LatexParser.isCjkCode(code)) {
+        needCjk = true;
+      } else if (LatexParser.isMathSymbolCode(code)) {
+        needMath = true;
+      }
+      i += step;
+    }
+    if (!needMath && !needCjk) {
+      return '';
+    }
+    return '<w:rPr><w:rFonts w:ascii="Cambria Math" w:hAnsi="Cambria Math" w:eastAsia="宋体"/></w:rPr>';
+  }
+
+  static isCjkCode(code: number): boolean {
+    return (code >= 0x2E80 && code <= 0x9FFF) || (code >= 0xF900 && code <= 0xFAFF) ||
+      (code >= 0xFE30 && code <= 0xFE4F) || (code >= 0xFF00 && code <= 0xFFEF) ||
+      (code >= 0x20000 && code <= 0x2FA1F);
+  }
+
+  static isMathSymbolCode(code: number): boolean {
+    return (code >= 0x00B2 && code <= 0x00B3) || code === 0x00B9 ||
+      (code >= 0x2070 && code <= 0x209F) || (code >= 0x2100 && code <= 0x214F) ||
+      (code >= 0x2190 && code <= 0x21FF) || (code >= 0x2200 && code <= 0x22FF) ||
+      (code >= 0x2300 && code <= 0x23FF) || (code >= 0x25A0 && code <= 0x25FF) ||
+      (code >= 0x27C0 && code <= 0x27FF) || (code >= 0x2900 && code <= 0x297F) ||
+      (code >= 0x2A00 && code <= 0x2AFF) || (code >= 0x1D400 && code <= 0x1D7FF);
+  }
+
+  // \mathbb 字母 -> Unicode 双线体
+  static blackboard(text: string): string {
+    let upper: string[] = ['𝔸', '𝔹', 'ℂ', '𝔻', '𝔼', '𝔽', '𝔾', 'ℍ', '𝕀', '𝕁', '𝕂', '𝕃', '𝕄',
+      'ℕ', '𝕆', 'ℙ', 'ℚ', 'ℝ', '𝕊', '𝕋', '𝕌', '𝕍', '𝕎', '𝕏', '𝕐', 'ℤ'];
+    let lower: string[] = ['𝕒', '𝕓', '𝕔', '𝕕', '𝕖', '𝕗', '𝕘', '𝕙', '𝕚', '𝕛', '𝕜', '𝕝', '𝕞',
+      '𝕟', '𝕠', '𝕡', '𝕢', '𝕣', '𝕤', '𝕥', '𝕦', '𝕧', '𝕨', '𝕩', '𝕪', '𝕫'];
+    let digits: string[] = ['𝟘', '𝟙', '𝟚', '𝟛', '𝟜', '𝟝', '𝟞', '𝟟', '𝟠', '𝟡'];
+    let out: string = '';
+    for (let i: number = 0; i < text.length; i++) {
+      let c: string = text.charAt(i);
+      let code: number = text.charCodeAt(i);
+      if (code >= 65 && code <= 90) {
+        out += upper[code - 65];
+      } else if (code >= 97 && code <= 122) {
+        out += lower[code - 97];
+      } else if (code >= 48 && code <= 57) {
+        out += digits[code - 48];
+      } else {
+        out += c;
+      }
+    }
+    return out;
   }
 
   initAndParse(src: string): string {
@@ -1003,6 +1395,24 @@ function escText(raw: string): string {
 }
 
 export class OmmlConverter {
+  // 每次生成文档前 beginAudit(), 生成完 takeAudit() 读取未识别命令/结构问题
+  static beginAudit(): void {
+    LatexAudit.begin();
+  }
+
+  static takeAudit(): MathAuditResult {
+    return LatexAudit.take();
+  }
+
+  // 字体兜底分类(供 DocxBuilder 的普通文本 run 复用同一套字符范围)
+  static isCjkCode(code: number): boolean {
+    return LatexParser.isCjkCode(code);
+  }
+
+  static isMathSymbolCode(code: number): boolean {
+    return LatexParser.isMathSymbolCode(code);
+  }
+
   // 行内公式: 返回完整 <m:oMath>...</m:oMath>
   static inline(latex: string): string {
     let p: LatexParser = new LatexParser();

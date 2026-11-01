@@ -41,6 +41,7 @@ port('export/DocModel.ets', 'DocModel.ts', [
 port('export/DocxBuilder.ets', 'DocxBuilder.ts', [
   ["from '../common/Constants'", "from './Constants'"]
 ]);
+port('export/DocxAudit.ets', 'DocxAudit.ts', []);
 port('export/MarkdownParser.ets', 'MarkdownParser.ts', []);
 port('export/OmmlConverter.ets', 'OmmlConverter.ts', []);
 // Excel 管线(供 check-setup 类型检查 WorkToolRunner 使用)

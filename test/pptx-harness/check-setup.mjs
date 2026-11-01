@@ -36,7 +36,7 @@ function port(relSrc, relDst, replaces) {
 // ===== 从 gen/ 复用已移植的纯模块 =====
 for (const f of ['DeckModel.ts', 'PptxThemes.ts', 'PptxCharts.ts', 'PptxBuilder.ts', 'XmlUtil.ts',
   'ZipWriter.ts', 'Constants.ts', 'CsvWriter.ts', 'SvgUtil.ts', 'CsvParser.ts', 'DataPipeline.ts',
-  'DocModel.ts', 'DocxBuilder.ts', 'MarkdownParser.ts', 'OmmlConverter.ts', 'DocxImporter.ts',
+  'DocModel.ts', 'DocxBuilder.ts', 'DocxAudit.ts', 'MarkdownParser.ts', 'OmmlConverter.ts', 'DocxImporter.ts',
   'XlsxModel.ts', 'XlsxBuilder.ts', 'XlsxImporter.ts',
   'arkts-shim.ts']) {
   writeFileSync(join(allDir, f), readFileSync(join(here, 'gen', f)));

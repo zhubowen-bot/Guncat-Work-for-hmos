@@ -10,6 +10,7 @@ import { ZipWriter, ZipEntry } from './ZipWriter';
 import { Doc, DocBlock, DocListItem, MdToDoc, DocStylePalette, DocStyleColors } from './DocModel';
 import { InlineParser, InlineToken } from './MarkdownParser';
 import { OmmlConverter } from './OmmlConverter';
+import { DocxAudit } from './DocxAudit';
 import { Constants } from '../common/Constants';
 
 // A4 页面(twips)与边距
@@ -50,10 +51,22 @@ class DocxMediaPart {
   heightPx: number = 0;
 }
 
+// 一段文本的字形分类(用于按字符覆盖范围拆 run)
+class DocxFontSegment {
+  text: string = '';
+  font: string = 'default'; // default | cjk | math
+}
+
 // 超链接记录
 class DocxHyperlink {
   relId: string = '';
   url: string = '';
+}
+
+// 生成结果: 字节 + 结构自检证据(工具层把证据回给模型, 自检不过则根本不写盘)
+export class DocxBuildResult {
+  bytes: Uint8Array = new Uint8Array(0);
+  audit: DocxAudit = new DocxAudit();
 }
 
 export class DocxBuilder {
@@ -66,23 +79,32 @@ export class DocxBuilder {
   private drawIdCounter: number = 1;
   private palette: DocStyleColors = new DocStyleColors();
 
-  // Doc -> docx 字节; 图片按需经 resolver 解析, 失败整篇报错(信息面向 AI)
+  // Doc -> docx 字节(兼容旧调用; 自检不过会抛错)
   static async buildDocxBytes(doc: Doc, resolveImage: DocImageResolver): Promise<Uint8Array> {
-    return DocxBuilder.buildDocx(doc, resolveImage);
+    let r: DocxBuildResult = await DocxBuilder.buildDocxWithReport(doc, resolveImage);
+    return r.bytes;
   }
 
   // Markdown -> docx 字节(兼容旧 write_docx 入口; 行内/独立图片均支持工作区路径)
   static async buildFromMarkdown(markdown: string, title: string,
     resolveImage: DocImageResolver): Promise<Uint8Array> {
     let doc: Doc = MdToDoc.convert(markdown, title);
-    return DocxBuilder.buildDocx(doc, resolveImage);
+    return DocxBuilder.buildDocxBytes(doc, resolveImage);
   }
 
-  private static async buildDocx(doc: Doc, resolveImage: DocImageResolver): Promise<Uint8Array> {
+  // Doc -> docx 字节 + 自检证据; 工具层用它把「公式段/空节点/合规」回给模型
+  static async buildDocxWithReport(doc: Doc, resolveImage: DocImageResolver): Promise<DocxBuildResult> {
     let builder: DocxBuilder = new DocxBuilder();
     builder.blocks = doc.blocks;
     builder.palette = DocStylePalette.of(doc.style);
     await builder.collectImages(resolveImage, doc);
+    // 公式解析审计必须覆盖整篇 document.xml 的生成过程(同步), 生成完立即取走结果
+    OmmlConverter.beginAudit();
+    let documentXml: string = builder.buildDocumentXml(doc);
+    let mathAudit = OmmlConverter.takeAudit();
+    let audit: DocxAudit = DocxAudit.scan(documentXml, mathAudit.unknownCommands,
+      mathAudit.issues, doc.blocks.length);
+    audit.assertClean();
     let entries: ZipEntry[] = [];
     entries.push(DocxBuilder.xmlEntry('[Content_Types].xml', builder.buildContentTypesXml()));
     entries.push(DocxBuilder.xmlEntry('_rels/.rels', builder.buildRootRelsXml()));
@@ -93,7 +115,7 @@ export class DocxBuilder {
     docSource.name = 'docProps/doc.json';
     docSource.data = DocxBuilder.stringToBytes(JSON.stringify(doc));
     entries.push(docSource);
-    entries.push(DocxBuilder.xmlEntry('word/document.xml', builder.buildDocumentXml(doc)));
+    entries.push(DocxBuilder.xmlEntry('word/document.xml', documentXml));
     entries.push(DocxBuilder.xmlEntry('word/styles.xml', builder.buildStylesXml(doc.style)));
     entries.push(DocxBuilder.xmlEntry('word/numbering.xml', builder.buildNumberingXml()));
     entries.push(DocxBuilder.xmlEntry('word/_rels/document.xml.rels', builder.buildDocumentRelsXml()));
@@ -107,7 +129,10 @@ export class DocxBuilder {
         await DocxBuilder.yieldNow();
       }
     }
-    return ZipWriter.create(entries);
+    let result: DocxBuildResult = new DocxBuildResult();
+    result.bytes = ZipWriter.create(entries);
+    result.audit = audit;
+    return result;
   }
 
   // ===== 图片收集(第一遍) =====
@@ -435,27 +460,32 @@ export class DocxBuilder {
 
   // ===== 行内渲染 =====
 
-  private renderInline(text: string, forceBold: boolean = false): string {
+  private renderInline(text: string, forceBold: boolean = false, allowMath: boolean = true): string {
     if (text === '') {
       return '';
     }
     let tokens: InlineToken[] = InlineParser.parse(text);
     let out: string = '';
     for (let i: number = 0; i < tokens.length; i++) {
-      out += this.renderToken(tokens[i], forceBold);
+      out += this.renderToken(tokens[i], forceBold, allowMath);
     }
     return out;
   }
 
-  private renderToken(token: InlineToken, forceBold: boolean): string {
+  private renderToken(token: InlineToken, forceBold: boolean, allowMath: boolean): string {
     if (token.type === 'br') {
       return '<w:r><w:br/></w:r>';
     }
     if (token.type === 'math') {
-      if (token.displayMath) {
-        return '<w:r>' + OmmlConverter.display(token.text) + '</w:r>';
+      // m:oMath / m:oMathPara 必须是 w:p 的子元素, 不能包在 w:r 里(ECMA-376)。
+      // 超链接内部不允许公式, 退化为纯文本, 保证结构始终合法。
+      if (!allowMath) {
+        return this.renderRun(token.text, false, false, false, false, forceBold);
       }
-      return '<w:r>' + OmmlConverter.inline(token.text) + '</w:r>';
+      if (token.displayMath) {
+        return OmmlConverter.display(token.text);
+      }
+      return OmmlConverter.inline(token.text);
     }
     if (token.type === 'link') {
       let relId: string = this.ensureHyperlink(token.href);
@@ -463,7 +493,7 @@ export class DocxBuilder {
         return this.renderRun(token.text, token.bold, token.italic, token.strike, false, forceBold);
       }
       return '<w:hyperlink r:id="' + relId + '" w:history="1">' +
-        this.renderInline(token.text, forceBold) + '</w:hyperlink>';
+        this.renderInline(token.text, forceBold, false) + '</w:hyperlink>';
     }
     if (token.type === 'image') {
       return this.renderInlineImage(token);
@@ -474,21 +504,64 @@ export class DocxBuilder {
 
   private renderRun(text: string, bold: boolean, italic: boolean, strike: boolean,
     code: boolean, forceBold: boolean): string {
-    let rPr: string = '';
-    if (code) {
-      rPr += '<w:rStyle w:val="CodeChar"/>';
+    if (text === '') {
+      return '';
     }
+    // 字形兜底: 按字符范围把一段文本拆成「普通 / CJK / 数学符号」三类 run。
+    // 典型问题: Uₐ 的下标 ₐ 在 Calibri 下缺字形会被打印成 U; CJK 进 Cambria Math 会变怪字。
+    let segments: DocxFontSegment[] = DocxBuilder.fontSegments(text);
+    let stylePart: string = code ? '<w:rStyle w:val="CodeChar"/>' : '';
+    let formatPart: string = '';
     if (bold || forceBold) {
-      rPr += '<w:b/><w:bCs/>';
+      formatPart += '<w:b/><w:bCs/>';
     }
     if (italic) {
-      rPr += '<w:i/><w:iCs/>';
+      formatPart += '<w:i/><w:iCs/>';
     }
     if (strike) {
-      rPr += '<w:strike/>';
+      formatPart += '<w:strike/>';
     }
-    let rPrXml: string = rPr === '' ? '' : '<w:rPr>' + rPr + '</w:rPr>';
-    return '<w:r>' + rPrXml + '<w:t xml:space="preserve">' + XmlUtil.escape(text) + '</w:t></w:r>';
+    let out: string = '';
+    for (let i: number = 0; i < segments.length; i++) {
+      let seg: DocxFontSegment = segments[i];
+      let fonts: string = '';
+      if (seg.font === 'math') {
+        fonts = '<w:rFonts w:ascii="Cambria Math" w:hAnsi="Cambria Math" w:eastAsia="宋体"/>';
+      } else if (seg.font === 'cjk') {
+        fonts = '<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="宋体"/>';
+      }
+      let rPrXml: string = (stylePart === '' && fonts === '' && formatPart === '')
+        ? '' : '<w:rPr>' + stylePart + fonts + formatPart + '</w:rPr>';
+      out += '<w:r>' + rPrXml + '<w:t xml:space="preserve">' + XmlUtil.escape(seg.text) +
+        '</w:t></w:r>';
+    }
+    return out;
+  }
+
+  // 按字形覆盖范围切段: cjk / math / default。相邻同类字符合并, 避免 run 爆炸。
+  private static fontSegments(text: string): DocxFontSegment[] {
+    let out: DocxFontSegment[] = [];
+    for (let i: number = 0; i < text.length;) {
+      let code: number = text.codePointAt(i) ?? 0;
+      let step: number = code > 0xFFFF ? 2 : 1;
+      let ch: string = text.substring(i, i + step);
+      let font: string = 'default';
+      if (OmmlConverter.isCjkCode(code)) {
+        font = 'cjk';
+      } else if (OmmlConverter.isMathSymbolCode(code)) {
+        font = 'math';
+      }
+      if (out.length > 0 && out[out.length - 1].font === font) {
+        out[out.length - 1].text += ch;
+      } else {
+        let seg: DocxFontSegment = new DocxFontSegment();
+        seg.text = ch;
+        seg.font = font;
+        out.push(seg);
+      }
+      i += step;
+    }
+    return out;
   }
 
   private ensureHyperlink(url: string): string {

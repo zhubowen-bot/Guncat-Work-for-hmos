@@ -1815,7 +1815,7 @@ export class WorkFileService {
         'width', WorkFileService.strProp('可选: 预览 PNG 的宽度(px), 默认 512, 高度按 viewBox 比例自动计算')),
       ['path', 'svg']));
     defs.push(WorkFileService.makeTool('write_docx',
-      '把结构化 Doc JSON 或 Markdown 生成 Word 文档(.docx)写入工作区。正式文档用 doc(Doc JSON 结构化源: 封面/目录/分级标题/正文/列表/表格/图片/引用/代码块, 图片 src 支持工作区相对路径, 排版规范)或 doc_file(工作区中 Doc JSON 文件路径, 长文档先 write_file/append_file 分块写好再导出); 简单内容可直接传 markdown(与旧版一致, 图片同样支持工作区路径)。title 可选文档标题, style 可选样式预设 default/academic/minimal。做正式 Word 文档前必须先 load_skill("docx") 全量加载；新建前 ask_user_question 前置提问；交付前写 docx_qa_report.md。',
+      '把结构化 Doc JSON 或 Markdown 生成 Word 文档(.docx)写入工作区。正式文档用 doc(Doc JSON 结构化源: 封面/目录/分级标题/正文/列表/表格/图片/引用/代码块, 图片 src 支持工作区相对路径, 排版规范)或 doc_file(工作区中 Doc JSON 文件路径, 长文档先 write_file/append_file 分块写好再导出); 简单内容可直接传 markdown(与旧版一致, 图片同样支持工作区路径)。title 可选文档标题, style 可选样式预设 default/academic/minimal。返回值含结构自检证据(公式段/行内公式/空 m:t/LaTeX 残留/未识别命令/父元素合规); 公式解析失败会拒绝写盘并说明原因, 不会生成坏文件。做正式 Word 文档前必须先 load_skill("docx") 全量加载；新建前 ask_user_question 前置提问；交付前写 docx_qa_report.md。',
       WorkFileService.props6(
         'path', WorkFileService.strProp('目标文件相对路径(建议以 .docx 结尾)'),
         'doc', WorkFileService.strProp('可选: Doc JSON 结构化源(与 doc_file/markdown 三选一)'),

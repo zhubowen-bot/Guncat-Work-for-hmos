@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { DocxBuilder, DocxImagePart } from './gen/DocxBuilder.ts';
 import { DocParser, DocOps, MdToDoc } from './gen/DocModel.ts';
 import { DocxImporter } from './gen/DocxImporter.ts';
+import { OmmlConverter } from './gen/OmmlConverter.ts';
+import { DocxAudit } from './gen/DocxAudit.ts';
 import { ZipWriter, ZipEntry } from './gen/ZipWriter.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -203,6 +205,73 @@ async function main() {
     console.error('FAIL: 图片解析失败未抛错');
     process.exitCode = 1;
   }
+  // ===== 7. 公式回归(真机自检报告里的 8 类问题) =====
+  function expectContains(name, xml, needle) {
+    if (!xml.includes(needle)) {
+      console.error('FAIL:', name, '缺少', needle);
+      process.exitCode = 1;
+    } else {
+      console.log('  [OK]', name);
+    }
+  }
+  OmmlConverter.beginAudit();
+  const bmatrix = OmmlConverter.inline('\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}');
+  const cases = OmmlConverter.inline('\\begin{cases} x & y \\\\ z & w \\end{cases}');
+  const aligned = OmmlConverter.inline('\\begin{aligned} a &= b \\\\ c &= d \\end{aligned}');
+  const mathbb = OmmlConverter.inline('\\mathbb{R}^n');
+  const mathrm = OmmlConverter.inline('\\mathrm{m/s^2}');
+  const norm = OmmlConverter.inline('\\|\\mathbf{x}\\|_2');
+  const floor = OmmlConverter.inline('\\lfloor x\\rfloor');
+  const mid = OmmlConverter.inline('\\mid');
+  const transpose = OmmlConverter.inline('\\mathbf{w}^T');
+  const arraySpec = OmmlConverter.inline('\\begin{array}{ll} a & b \\\\ c & d \\end{array}');
+  const tag = OmmlConverter.inline('\\tag{1} x');
+  const audit = OmmlConverter.takeAudit();
+  expectContains('bmatrix 右定界符', bmatrix, '<m:endChr m:val="]"/>');
+  expectContains('cases 左大括号', cases, '<m:begChr m:val="{"/>');
+  expectContains('cases 无右大括号', cases, '<m:endChr m:val=""/>');
+  expectContains('aligned 用 eqArr', aligned, '<m:eqArr>');
+  expectContains('mathbb 上标', mathbb, '<m:sSup>');
+  expectContains('mathbb 双线体', mathbb, 'ℝ');
+  expectContains('mathrm 解析上标', mathrm, '<m:sSup>');
+  expectContains('norm 双竖线', norm, '‖');
+  expectContains('norm 下标', norm, '<m:sSub>');
+  expectContains('lfloor 符号', floor, '⌊');
+  expectContains('mid 符号', mid, '∣');
+  expectContains('mathbf 后上标', transpose, '<m:sSup>');
+  if (arraySpec.includes('ll')) {
+    console.error('FAIL: array 列格式 ll 漏进公式');
+    process.exitCode = 1;
+  } else {
+    console.log('  [OK] array 列格式已消费');
+  }
+  if (tag.includes('tag')) {
+    console.error('FAIL: \\tag 漏进公式');
+    process.exitCode = 1;
+  } else {
+    console.log('  [OK] \\tag 已消费');
+  }
+  if (audit.unknownCommands.length > 0 || audit.issues.length > 0) {
+    console.error('FAIL: 公式审计有未识别命令/问题', audit);
+    process.exitCode = 1;
+  } else {
+    console.log('  [OK] 公式审计无未识别命令');
+  }
+  const badAudit = DocxAudit.scan('<w:document><w:p><m:oMath><m:r><m:t>\\foo</m:t></m:r></m:oMath></w:p></w:document>',
+    ['foo'], [], 1);
+  let rejected = false;
+  try {
+    badAudit.assertClean();
+  } catch (e) {
+    rejected = true;
+  }
+  if (!rejected) {
+    console.error('FAIL: 未知命令未被自检拒绝');
+    process.exitCode = 1;
+  } else {
+    console.log('  [OK] 未知命令被自检拒绝');
+  }
+
   console.log('ALL BUILD OK');
 }
 
