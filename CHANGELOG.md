@@ -7,6 +7,40 @@
 > 关于 QEMU / Alpine / `npy` / `tooling/linux-vm` 的描述仅代表当时状态；当前实现见
 > [docs/architecture/iec-runtime.md](docs/architecture/iec-runtime.md)。
 
+## 7.1.0（Word 公式修复 · 三端对齐）
+
+> 一句话：真机自检报告里的 8 类公式问题，在三端同源的解析器里一并修掉；鸿蒙版版本号跟到
+> `7.1.0`，不再挂在 `7.0.0-alpha` 下面。
+
+本版重点：
+
+- **Word 公式**：矩阵定界符、对齐环境、正体单位、范数、缺失符号，以及 `\mathbf{…}` 后的
+  上下标静默丢失。
+- **三端同步**：电脑版 / 安卓版 / 鸿蒙版共用同一套 `OmmlConverter` 修复，解析结果一致。
+- **版本号**：`7.1.0`（`Constants.APP_VERSION` 与 README 徽章同步；`AppScope/app.json5` 的 Beta 调试配置不随本次提交）。
+
+### Word 文档公式修复（真机自检）
+
+> 真机自检报告里的 8 类公式问题；`OmmlConverter` / `DocxBuilder` 与电脑版、安卓版同源，
+> 本次三端一起修，HAP 内的公式解析不再“生成成功但局部走样”。
+
+- **矩阵定界符**：`bmatrix` 之前左右都写成 `[`，现在右括号是 `]`；`cases` 之前只生成矩阵、
+  没有左大括号，现在用 `m:d` 包一层左花括号；`array` 的 `{ll}` 列格式不再漏成正文。
+- **对齐环境**：`aligned` / `align` / `split` 之前退化成两行两列矩阵，现在用 `m:eqArr`，
+  等号按关系符对齐；`alignedat` 的 `{n}` 参数会被消费。
+- **单位与范数**：`\mathrm{m/s^2}` 之前按文本原样输出、`^` 留在字面上，现在先按数学解析
+  再统一套正体；`\|` 之前是单竖线，现在映射为 `‖`，后面的 `_2` 也会绑定到双竖线。
+- **符号缺失**：`\lfloor` / `\rfloor` / `\mid` 不再输出 `lfloor` / `mid` 字母，直接映射为
+  `⌊` / `⌋` / `∣`；`\mathbb{R}^n` 的空心体与上标都保留。
+- **静默丢内容**：`\mathbf{…}` 后的 `^` / `_` 之前会被丢弃且不报错，现在命令、组、定界符
+  统一走「原子 + 上下标」绑定；`\tag{}` 会被消费，不再漏进公式正文。
+- **写盘前自检**：`write_docx` / `edit_docx` 写盘前扫描 `document.xml`，空 `m:t`、LaTeX
+  残留、未识别命令、公式父元素不合规都会拒绝写盘，并在返回值里给出公式段数、空节点数等
+  证据；不再出现“已生成 xxx.docx”但文件里是坏公式的情况。
+- **回归**：`test/docx-harness` 新增 bmatrix / cases / aligned / mathbb / mathrm / 范数 /
+  lfloor / mid / mathbf 上标 / array 列格式 / tag 共 16 项断言；`setup → test-build →
+  validate.py → deep-check.py` 全过。
+
 ## 7.0.0-alpha（IEC 原生执行核 · 无虚拟机 shell）
 
 > 一句话：`shell` 从“在应用里跑一台 QEMU 虚拟机”换成 IEC 原生执行核。命令是随包的
@@ -267,28 +301,6 @@
   `Ctrl+Z` / `fg` / `bg`。`shell` 工具本来就是非交互执行，这些边界已在工具说明里写明。
 - **不再提供包管理器式扩展**：`apk add` / `pkg install` 那一套已随 VM 一起移除；需要新命令时
   通过 IEC 构建链编成 `.so` 随包，而不是在设备上现场安装。
-
-### Word 文档公式修复（真机自检）
-
-> 真机自检报告里的 8 类公式问题；`OmmlConverter` / `DocxBuilder` 与电脑版、安卓版同源，
-> 本次三端一起修，HAP 内的公式解析不再“生成成功但局部走样”。
-
-- **矩阵定界符**：`bmatrix` 之前左右都写成 `[`，现在右括号是 `]`；`cases` 之前只生成矩阵、
-  没有左大括号，现在用 `m:d` 包一层左花括号；`array` 的 `{ll}` 列格式不再漏成正文。
-- **对齐环境**：`aligned` / `align` / `split` 之前退化成两行两列矩阵，现在用 `m:eqArr`，
-  等号按关系符对齐；`alignedat` 的 `{n}` 参数会被消费。
-- **单位与范数**：`\mathrm{m/s^2}` 之前按文本原样输出、`^` 留在字面上，现在先按数学解析
-  再统一套正体；`\|` 之前是单竖线，现在映射为 `‖`，后面的 `_2` 也会绑定到双竖线。
-- **符号缺失**：`\lfloor` / `\rfloor` / `\mid` 不再输出 `lfloor` / `mid` 字母，直接映射为
-  `⌊` / `⌋` / `∣`；`\mathbb{R}^n` 的空心体与上标都保留。
-- **静默丢内容**：`\mathbf{…}` 后的 `^` / `_` 之前会被丢弃且不报错，现在命令、组、定界符
-  统一走「原子 + 上下标」绑定；`\tag{}` 会被消费，不再漏进公式正文。
-- **写盘前自检**：`write_docx` / `edit_docx` 写盘前扫描 `document.xml`，空 `m:t`、LaTeX
-  残留、未识别命令、公式父元素不合规都会拒绝写盘，并在返回值里给出公式段数、空节点数等
-  证据；不再出现“已生成 xxx.docx”但文件里是坏公式的情况。
-- **回归**：`test/docx-harness` 新增 bmatrix / cases / aligned / mathbb / mathrm / 范数 /
-  lfloor / mid / mathbf 上标 / array 列格式 / tag 共 16 项断言；`setup → test-build →
-  validate.py → deep-check.py` 全过。
 
 ## 7.0.0（手机上的完整 Linux · 原生 CPython · 三端对齐）
 

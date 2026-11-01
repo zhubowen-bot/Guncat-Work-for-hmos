@@ -7,7 +7,7 @@
 <!-- Demo slot (optional upgrade): a 30–60s real-device screen recording — enter work mode → generate a PPT from one sentence → expand the artifact card → switch to interactive mode and drag a slider to recompute. A moving GIF beats static screenshots. -->
 
 ![HarmonyOS](https://img.shields.io/badge/HarmonyOS-API%2024%20(6.1.1)-blue)
-![version](https://img.shields.io/badge/version-7.0.0-blue)
+![version](https://img.shields.io/badge/version-7.1.0-blue)
 ![forms](https://img.shields.io/badge/Agent%20Forms-Intelligent%20UI%20%2B%20Harness-blueviolet)
 ![shell](https://img.shields.io/badge/shell-IEC%20native%20%C2%B7%20no%20VM-orange)
 ![python](https://img.shields.io/badge/CPython-3.12%20native-3776AB)
@@ -58,7 +58,7 @@ Work Mode brings a sandboxed workspace and tool-calling capability with 47 built
 
 The UI adapts between phone and desktop: wide screens (≥700vp) expand into a three-column layout (sidebar / conversation column / workspace detail column), narrow screens fall back to a single column plus a drawer. Workspace files can be previewed in place and shared in one tap; generations and edits carry line-level diffs; conversation history, configuration and read-aloud preferences all persist locally. Architecturally the project is layered MVVM, all three protocols' SSE streams converge into one protocol-adapter layer, and every document generator has a dedicated offline verification environment (Node build + Python structural validation + tsc type checking).
 
-Current app version: `7.0.0` · full change history in the [changelog](CHANGELOG.md)
+Current app version: `7.1.0` · full change history in the [changelog](CHANGELOG.md)
 
 ## Capabilities
 
