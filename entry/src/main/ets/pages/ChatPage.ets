@@ -1410,8 +1410,10 @@ struct ChatPage {
   }
 
   // 空态胶囊换挡: 先**同步**把深色落到手点的那一档, 再走 VM 的 setInteractiveMode / setWorkMode。
+  // 换挡落在目标模式的"新建对话"上(VM 内部走 selectAgentForNewConversation), 不会进入该模式的历史会话;
+  // 目标模式已有空对话时直接复用, 来回换挡不会重复建会话。
   //
-  // 为什么需要本地 pending: 换挡要经过 selectAgent → (异步写盘之后)切/建会话, 而胶囊的选中态原本
+  // 为什么需要本地 pending: 换挡要经过 selectAgentForNewConversation → (异步写盘之后)切/建会话, 而胶囊的选中态原本
   // 完全派生自 vm.interactiveMode / vm.workMode(即当前会话的 mode)。会话 mode 变过来之前那两个值
   // 还是旧的 —— 深色滑块会先留在"被点走"的那一档上, 用户看到的就是"我点工作模式, 交互模式却先亮了
   // 一个深色"。这里在点击时同步记下目标档, 让深色立刻到位; 切换完成后清空, 交回 vm 派生 —— 最后
@@ -1422,8 +1424,8 @@ struct ChatPage {
       return;
     }
     if (this.modeTabActive(agentId)) {
-      // 点的是当前已经在的那一档: 什么都不做。尤其不能重开一次 selectAgent ——
-      // 那会把用户从正在看的会话带到"该智能体的最新会话"上去。
+      // 点的是当前已经在的那一档: 什么都不做。尤其不能重走一次换挡 ——
+      // 多余的状态写入/空对话探测没有意义, 也会让胶囊闪一下。
       return;
     }
     if (this.vm.isStreaming || this.vm.isParsing) {

@@ -417,6 +417,22 @@ export class ChatViewModel {
     return latest;
   }
 
+  // 目标智能体最近一条"空对话"(新建后还没发过消息)。胶囊换挡复用它, 避免来回换挡反复建会话。
+  // 空对话不等于空工作区(系统分享/拍照可能先落文件), 这类草稿同样复用, 不能因为"没消息"就丢掉。
+  private findLatestEmptyConversationForAgent(agentId: string): Conversation | null {
+    let latest: Conversation | null = null;
+    for (let i: number = 0; i < this.conversations.length; i++) {
+      let c: Conversation = this.conversations[i];
+      if (c.agentId !== agentId || c.messages.length > 0) {
+        continue;
+      }
+      if (latest === null || c.createdAt > latest.createdAt) {
+        latest = c;
+      }
+    }
+    return latest;
+  }
+
   // 切换智能体('work' / 'interactive' 即工作模式 / 交互模式虚拟智能体)
   async selectAgent(agentId: string): Promise<void> {
     let target: Agent | null = null;
@@ -443,6 +459,45 @@ export class ChatViewModel {
     } else {
       this.startNewConversation();
     }
+  }
+
+  // 胶囊换挡专用: 切到目标模式, 并落在该模式的"新建对话"上, **不进入历史会话**。
+  //
+  // 与 selectAgent 的差别:
+  //   1. 只找空对话, 不找 latest —— 目标模式有历史时也不会被带进历史;
+  //   2. 目标模式已有空对话就复用(来回换挡始终停在同一条新对话上);
+  //   3. 没有空对话才新建, 且不清理换挡前的空对话 —— 交互/工作两个模式各自保留一份
+  //      未使用的新对话, 反复换挡不会一边建一边删, 也不会越换越多。
+  // 侧边栏/抽屉选择智能体仍走 selectAgent(打开该智能体最新会话), 那里才是"看历史"的入口。
+  async selectAgentForNewConversation(agentId: string): Promise<void> {
+    let target: Agent | null = null;
+    for (let i: number = 0; i < this.agents.length; i++) {
+      if (this.agents[i].id === agentId) {
+        target = this.agents[i];
+        break;
+      }
+    }
+    if (target === null) {
+      return;
+    }
+    this.currentAgent = target;
+    if (agentId !== Constants.WORK_AGENT_ID && agentId !== Constants.INTERACTIVE_AGENT_ID) {
+      this.lastChatAgentId = agentId;
+    }
+    if (this.context !== null) {
+      await StorageManager.saveString(this.context, Constants.LS_KEY_CURRENT_AGENT_ID, agentId);
+    }
+    let draft: Conversation | null = this.findLatestEmptyConversationForAgent(agentId);
+    if (draft !== null) {
+      if (draft.id !== this.currentConversationId) {
+        await this.openConversation(draft.id);
+      } else {
+        // 已经站在这条新对话上: 只需让 UI 跟随 currentAgent 的变化重算胶囊
+        this.notifyUIChange();
+      }
+      return;
+    }
+    await this.createConversationForCurrentAgent();
   }
 
   // 打开/切换对话
@@ -501,8 +556,14 @@ export class ChatViewModel {
 
   // 新建对话(模式由当前智能体决定: work → 工作模式, interactive → 交互模式, 其他 → 聊天模式)
   async startNewConversation(): Promise<void> {
-    // 清空空对话
+    // 清空空对话(用户主动点"新建"时, 上一份空草稿直接回收; 胶囊换挡走 createConversationForCurrentAgent,
+    // 不清理另一模式的空草稿, 见 selectAgentForNewConversation 的说明)
     await this.cleanupEmptyConversation();
+    await this.createConversationForCurrentAgent();
+  }
+
+  // 按当前智能体创建一条新会话并切过去。调用方负责决定是否先清理旧空对话。
+  private async createConversationForCurrentAgent(): Promise<void> {
     if (this.currentAgent === null) {
       return;
     }
@@ -767,7 +828,9 @@ export class ChatViewModel {
     return agent;
   }
 
-  // 进入/退出交互模式: 即切换到/切离 interactive 虚拟智能体
+  // 进入/退出交互模式: 即切换到/切离 interactive 虚拟智能体。
+  // 进入时走 selectAgentForNewConversation —— 胶囊换挡落在"新建对话"上, 不会被带进该模式的历史会话;
+  // 退出时仍回到最近聊天智能体的最新会话。
   async setInteractiveMode(enabled: boolean): Promise<void> {
     if (enabled === this.interactiveMode) {
       return;
@@ -780,11 +843,18 @@ export class ChatViewModel {
     if (targetId === '') {
       return;
     }
-    await this.selectAgent(targetId);
+    // 胶囊换挡(进入目标模式)落在该模式的新建对话上; 退出模式仍回到最近聊天智能体的最新会话
+    if (enabled) {
+      await this.selectAgentForNewConversation(targetId);
+    } else {
+      await this.selectAgent(targetId);
+    }
     this.notifyUIChange();
   }
 
-  // 进入/退出工作模式: 即切换到/切离 work 虚拟智能体
+  // 进入/退出工作模式: 即切换到/切离 work 虚拟智能体。
+  // 进入时走 selectAgentForNewConversation —— 胶囊换挡落在"新建对话"上, 不会被带进该模式的历史会话;
+  // 退出时仍回到最近聊天智能体的最新会话。
   async setWorkMode(enabled: boolean): Promise<void> {
     if (enabled === this.workMode) {
       return;
@@ -797,7 +867,12 @@ export class ChatViewModel {
     if (targetId === '') {
       return;
     }
-    await this.selectAgent(targetId);
+    // 胶囊换挡(进入目标模式)落在该模式的新建对话上; 退出模式仍回到最近聊天智能体的最新会话
+    if (enabled) {
+      await this.selectAgentForNewConversation(targetId);
+    } else {
+      await this.selectAgent(targetId);
+    }
     this.notifyUIChange();
   }
 
