@@ -261,6 +261,9 @@ export struct ChatBubbleView {
   // 工具行状态签名: 只有调用状态真的变化才递增 stepsTick, 避免流式期间每 33ms
   // 把所有工具行 key 都换掉(销毁重建 LoadingProgress + 重新解析 argsJson)。
   private lastCallsSig: string = '';
+  // 交互界面切分/解析比纯文本贵得多(要扫围栏并解析程序), 不需要跟 50ms 文本刷新
+  // 同频; 120ms 一次在观感上仍是"实时成形", 但解析次数少一半以上。
+  private lastUiPartsMs: number = 0;
   // 收尾自愈状态: uiBuildFinalized 记录当前 uiSegs 是否按"已结束"语义构建
   private uiSettleTimer: number = -1;
   private uiBuildFinalized: boolean = false;
@@ -476,7 +479,11 @@ export struct ChatBubbleView {
             }
           }
           // 交互界面块随流式文本渐进成形(未闭合时按中间态渲染并禁用交互)
-          this.refreshUiParts();
+          const now: number = Date.now();
+          if (now - this.lastUiPartsMs >= 120) {
+            this.lastUiPartsMs = now;
+            this.refreshUiParts();
+          }
         }
       }, 50);
     }

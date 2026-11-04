@@ -64,6 +64,8 @@ export struct WorkTurnView {
   // 上一次工具行状态签名(数量/参数量/执行态): 变化才递增 stepsTick 触发行重建,
   // 避免流式期间每 33ms 无条件重建导致 LoadingProgress 动画永远停在第一帧(观感即"卡住")
   private lastCallsSig: string = '';
+  // 界面切分/解析节流(见 ChatBubbleView 同名字段)
+  private lastUiPartsMs: number = 0;
   private flushTimer: number = -1;
   // 收尾自愈状态: uiBuildFinalized 记录当前 uiSegs 是否按"已结束"语义构建
   private uiSettleTimer: number = -1;
@@ -286,8 +288,12 @@ export struct WorkTurnView {
             this.lastCallsSig = sig;
             this.stepsTick++;
           }
-          // 交互界面块随流式文本渐进成形
-          this.refreshUiParts();
+          // 交互界面块随流式文本渐进成形(解析较贵, 120ms 一次即可)
+          const now: number = Date.now();
+          if (now - this.lastUiPartsMs >= 120) {
+            this.lastUiPartsMs = now;
+            this.refreshUiParts();
+          }
         }
       }, 50);
     }

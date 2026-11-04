@@ -20,7 +20,23 @@
  *   3. 代码围栏 / 缩进代码 / 列表项 / 引用块 内的内容一律不参与检测,
  *      原样透传, 避免误伤非表格语法。
  */
+// 纯函数结果缓存: RichTextView 在流式期间每 50ms 会对同一段内容渲染一次,
+// 而一次 ArkUI 构建里也可能多次求值。命中时直接复用上次的规范化结果,
+// 避免反复 split 整篇 Markdown(长表格/长文时这是可观的主线程开销)。
+let sanitizerLastInput: string = '';
+let sanitizerLastOutput: string = '';
+
 export function sanitizeMarkdownForRender(content: string): string {
+  if (content === sanitizerLastInput) {
+    return sanitizerLastOutput;
+  }
+  const output: string = sanitizeMarkdownContent(content);
+  sanitizerLastInput = content;
+  sanitizerLastOutput = output;
+  return output;
+}
+
+function sanitizeMarkdownContent(content: string): string {
   // 快速路径: 没有竖线就绝不可能是表格, 直接返回原文
   if (content === '' || content.indexOf('|') < 0) {
     return content;

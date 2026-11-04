@@ -120,6 +120,9 @@ export class ChatViewModel {
   // 工作模式(Agent Loop): 当前会话的工作区文件列表 + 刚上传尚未随任务发送的文件名
   workspaceFiles: WorkspaceFileInfo[] = [];
   workspaceLoading: boolean = false;
+  // 工作区扫描节流: 并行工具/多个调用方会在几十毫秒内连续触发 refreshWorkspace,
+  // 每次都要遍历最多 400 个条目并 stat。300ms 内的重复请求直接复用上一次结果。
+  private lastWorkspaceRefreshAt: number = 0;
   // 会话工作时间(秒): 任务执行期间由 ChatPage 每秒累计, 工作区面板显示用
   workElapsedSec: number = 0;
   // 上一工作请求的真实 prompt tokens 与该请求的字符量(usage 锚定,
@@ -482,6 +485,9 @@ export class ChatViewModel {
       if (!this.thinkingEnabled) {
         await this.setThinkingEnabled(true);
       }
+      // 切换会话必须绕过扫描节流, 否则可能继续显示上一个会话的文件
+      this.workspaceFiles = [];
+      this.lastWorkspaceRefreshAt = 0;
       await this.refreshWorkspace();
     } else {
       this.workspaceFiles = [];
@@ -512,6 +518,8 @@ export class ChatViewModel {
     this.persistConversations();
     if (mode === Constants.MODE_WORK || mode === Constants.MODE_INTERACTIVE) {
       this.workspaceJustAdded = [];
+      this.workspaceFiles = [];
+      this.lastWorkspaceRefreshAt = 0;
       // Agent Loop 模式默认强制开启深度思考(工具行不再显示该开关);
       // 交互模式的档位(含「关闭」)另存在 interactiveEffort, 由 loopThinkingEnabled 在下发时生效
       await this.setThinkingEnabled(true);
@@ -787,7 +795,7 @@ export class ChatViewModel {
   }
 
   // 刷新当前 Agent Loop 会话(工作/交互模式)的文件列表(其他会话为空)
-  async refreshWorkspace(): Promise<void> {
+  async refreshWorkspace(force: boolean = false): Promise<void> {
     if (this.context === null) {
       return;
     }
@@ -796,6 +804,11 @@ export class ChatViewModel {
       (conv.mode !== Constants.MODE_WORK && conv.mode !== Constants.MODE_INTERACTIVE)) {
       return;
     }
+    const now: number = Date.now();
+    if (!force && this.workspaceFiles.length > 0 && now - this.lastWorkspaceRefreshAt < 300) {
+      return;
+    }
+    this.lastWorkspaceRefreshAt = now;
     this.workspaceLoading = true;
     let items: WorkspaceFileInfo[] = WorkFileService.listWorkspace(this.context, conv.id);
     this.workspaceFiles = items;
@@ -848,7 +861,7 @@ export class ChatViewModel {
     for (let i: number = 0; i < saved.length; i++) {
       this.workspaceJustAdded.push(saved[i]);
     }
-    await this.refreshWorkspace();
+    await this.refreshWorkspace(true);
     promptAction.showToast({ message: saved.length.toString() + ' 个文件已加入工作区', duration: 2000 });
   }
 
@@ -1032,7 +1045,7 @@ export class ChatViewModel {
     WorkFileService.deleteWorkspace(this.context, conv.id);
     WorkFileService.ensureWorkspace(this.context, conv.id);
     this.workspaceJustAdded = [];
-    await this.refreshWorkspace();
+    await this.refreshWorkspace(true);
     promptAction.showToast({ message: '工作区已清空', duration: 2000 });
   }
 
@@ -1048,7 +1061,7 @@ export class ChatViewModel {
     let removed: boolean = WorkFileService.removePath(this.context, conv.id, path);
     if (removed) {
       this.workspaceJustAdded = this.workspaceJustAdded.filter((n: string): boolean => n !== path);
-      await this.refreshWorkspace();
+      await this.refreshWorkspace(true);
     }
   }
 

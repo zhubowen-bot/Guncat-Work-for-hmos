@@ -473,35 +473,50 @@ export class WorkFileService {
     }
   }
 
-  // 工作区文件树文本(注入运行时快照, 每轮工具调用后刷新); .spill/ 溢出暂存目录不进入快照
+  // 工作区文件树文本(注入运行时快照, 每轮工具调用后刷新); .spill/ 溢出暂存目录不进入快照。
+  // 800ms 内的重复调用复用上一次结果: 每个工具步都会请求一次, 而工作区文件树
+  // 最多 400 条, 每步完整 walk 一次在长任务里是纯浪费。快照只用于给模型定位文件,
+  // 刚写完的文件即使晚一步出现也不影响决策(工具结果里已经有路径)。
+  private static treeCacheAt: Map<string, number> = new Map<string, number>();
+  private static treeCacheText: Map<string, string> = new Map<string, string>();
+
   static listWorkspaceTree(context: common.UIAbilityContext, convId: string): string {
+    const root: string = WorkFileService.workspaceRoot(context, convId);
+    const now: number = Date.now();
+    const cachedAt: number | undefined = WorkFileService.treeCacheAt.get(root);
+    const cachedText: string | undefined = WorkFileService.treeCacheText.get(root);
+    if (cachedAt !== undefined && cachedText !== undefined && now - cachedAt < 800) {
+      return cachedText;
+    }
     WorkFileService.ensureWorkspace(context, convId);
     let items: WorkspaceFileInfo[] = WorkFileService.listWorkspace(context, convId);
-    if (items.length === 0) {
-      return '(工作区为空)';
-    }
-    let lines: string[] = [];
-    let shownCount: number = 0;
-    for (let i: number = 0; i < items.length; i++) {
-      let item: WorkspaceFileInfo = items[i];
-      if (item.path === Constants.WORK_SPILL_DIR + '/' ||
-        item.path.startsWith(Constants.WORK_SPILL_DIR + '/')) {
-        continue;
+    let text: string = '(工作区为空)';
+    if (items.length > 0) {
+      let lines: string[] = [];
+      let shownCount: number = 0;
+      for (let i: number = 0; i < items.length; i++) {
+        let item: WorkspaceFileInfo = items[i];
+        if (item.path === Constants.WORK_SPILL_DIR + '/' ||
+          item.path.startsWith(Constants.WORK_SPILL_DIR + '/')) {
+          continue;
+        }
+        shownCount++;
+        if (item.isDir) {
+          lines.push(item.path);
+        } else {
+          lines.push(item.path + ' (' + WorkFileService.formatSize(item.size) + ')');
+        }
       }
-      shownCount++;
-      if (item.isDir) {
-        lines.push(item.path);
-      } else {
-        lines.push(item.path + ' (' + WorkFileService.formatSize(item.size) + ')');
+      if (shownCount > 0) {
+        if (items.length >= Constants.WORK_LIST_MAX_ENTRIES) {
+          lines.push('...(条目已达上限, 仅展示部分)');
+        }
+        text = lines.join('\n');
       }
     }
-    if (shownCount === 0) {
-      return '(工作区为空)';
-    }
-    if (items.length >= Constants.WORK_LIST_MAX_ENTRIES) {
-      lines.push('...(条目已达上限, 仅展示部分)');
-    }
-    return lines.join('\n');
+    WorkFileService.treeCacheAt.set(root, now);
+    WorkFileService.treeCacheText.set(root, text);
+    return text;
   }
 
   static ensureWorkspace(context: common.UIAbilityContext, convId: string): void {
@@ -1185,12 +1200,28 @@ export class WorkFileService {
   }
 
   // 读取当前任务清单(注入系统提示; 无清单返回空串)
+  // 任务清单文本缓存: 运行时快照每个工具步都会读一次 .todo.json, 而它只在
+  // todo_write 时变化。用 size+mtime 判断, 没变就直接复用上次渲染结果,
+  // 省掉 open/read/decode/JSON.parse 的整条链路。
+  private static todoSig: Map<string, string> = new Map<string, string>();
+  private static todoText: Map<string, string> = new Map<string, string>();
+
   static readTodo(context: common.UIAbilityContext, convId: string): string {
     try {
       let root: string = WorkFileService.workspaceRoot(context, convId);
       let todoPath: string = root + '/' + Constants.WORK_TODO_FILE;
       if (!fileIo.accessSync(todoPath)) {
+        WorkFileService.todoSig.delete(root);
+        WorkFileService.todoText.delete(root);
         return '';
+      }
+      let st: fileIo.Stat = fileIo.statSync(todoPath);
+      const sig: string = st.size.toString() + '/' + Math.floor(st.mtime).toString();
+      if (WorkFileService.todoSig.get(root) === sig) {
+        const hit: string | undefined = WorkFileService.todoText.get(root);
+        if (hit !== undefined) {
+          return hit;
+        }
       }
       let bytes: Uint8Array = WorkFileService.readBytes(todoPath, 64 * 1024);
       let decoder: util.TextDecoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
@@ -1215,7 +1246,10 @@ export class WorkFileService {
           (statusStr === 'in_progress' ? '[~]' : '[ ]');
         lines.push(mark + ' ' + contentStr);
       }
-      return lines.join('\n');
+      const text: string = lines.join('\n');
+      WorkFileService.todoSig.set(root, sig);
+      WorkFileService.todoText.set(root, text);
+      return text;
     } catch (e) {
       return '';
     }

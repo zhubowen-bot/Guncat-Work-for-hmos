@@ -64,8 +64,11 @@ export class FileService {
       }
       let file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
       let buffer: ArrayBuffer = new ArrayBuffer(stat.size);
-      fileIo.readSync(file.fd, buffer, { offset: 0 });
-      fileIo.closeSync(file.fd);
+      try {
+        fileIo.readSync(file.fd, buffer, { offset: 0 });
+      } finally {
+        fileIo.closeSync(file.fd);
+      }
       let cleanUri: string = uri.split('?')[0];
       let name: string = cleanUri.substring(cleanUri.lastIndexOf('/') + 1);
       if (name === '') {
@@ -101,8 +104,11 @@ export class FileService {
         }
         let file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
         let buf: ArrayBuffer = new ArrayBuffer(size);
-        fileIo.readSync(file.fd, buf, { offset: 0 });
-        fileIo.closeSync(file.fd);
+        try {
+          fileIo.readSync(file.fd, buf, { offset: 0 });
+        } finally {
+          fileIo.closeSync(file.fd);
+        }
         let name: string = uri.substring(uri.lastIndexOf('/') + 1);
         if (name === '' || name.indexOf('?') !== -1) {
           name = uri.split('?')[0].substring(uri.split('?')[0].lastIndexOf('/') + 1);
@@ -135,8 +141,11 @@ export class FileService {
         }
         let file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
         let buf: ArrayBuffer = new ArrayBuffer(size);
-        fileIo.readSync(file.fd, buf, { offset: 0 });
-        fileIo.closeSync(file.fd);
+        try {
+          fileIo.readSync(file.fd, buf, { offset: 0 });
+        } finally {
+          fileIo.closeSync(file.fd);
+        }
         let name: string = uri.substring(uri.lastIndexOf('/') + 1);
         if (name === '' || name.indexOf('?') !== -1) {
           name = uri.split('?')[0].substring(uri.split('?')[0].lastIndexOf('/') + 1);

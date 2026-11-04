@@ -182,12 +182,15 @@ export default class EntryAbility extends UIAbility {
     // Ability has back to background
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
     AppStorage.set<boolean>('appForeground', false);
-    // 切后台前先落盘: 系统随时可能回收后台进程, 合并写窗口里的内容不能丢
-    StorageManager.flushConversations(this.context).catch((): void => {});
+    // 先申请保活再落盘: 大存档的序列化可能占用几百毫秒, 不能让后台任务请求
+    // 排在这段同步工作后面(系统可能已经准备挂起进程)。
     // 切后台时若流式长程任务(AI 回复/Agent 循环)仍在进行, 申请 dataTransfer 长时任务保活
     if (AppStorage.get<boolean>('chatStreamingActive') === true) {
       BackgroundTaskService.start(this.context);
     }
+    // 切后台前落盘: 系统随时可能回收后台进程, 合并写窗口里的内容不能丢
+    StorageManager.flushConversations(this.context).catch((): void => {});
+    // 页面侧的 1s/100ms 轮询会在下一次 tick 看到 appForeground=false 后跳过重活
   }
 
   private async publishSharedFiles(want: Want): Promise<void> {
