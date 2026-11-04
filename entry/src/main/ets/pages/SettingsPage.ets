@@ -1,9 +1,11 @@
 import { router, promptAction } from '@kit.ArkUI';
+import { deviceInfo } from '@kit.BasicServicesKit';
 import { ApiConfig } from '../model/ApiConfig';
 import { ApiProfile } from '../model/ApiProfile';
 import { MultimodalConfig } from '../model/MultimodalConfig';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { SettingsSession } from '../viewmodel/SettingsSession';
+import { Constants } from '../common/Constants';
 import { SearchEngineSettings, SEARCH_ENGINE_BING, SEARCH_ENGINE_BRAVE, SEARCH_ENGINE_TAVILY,
   SEARCH_ENGINE_EXA, SEARCH_ENGINE_METASO, SEARCH_ENGINE_FIRECRAWL,
   searchEngineNeedsApiKey, searchEngineSupportsBaseUrl, searchEngineLabel } from '../service/LocalWebSearch';
@@ -17,7 +19,7 @@ struct SettingsPage {
   // 聊天页注入的 ViewModel(与聊天页共享, 保存后立即生效)
   private vm: ChatViewModel | null = null;
 
-  // 当前页面: root / model / advanced / search / multimodal
+  // 当前页面: root / model / advanced / search / multimodal / terminal
   @State private view: string = 'root';
 
   // 自动保存: 修改后防抖落盘, 不阻塞输入; 切方案/离开页面前强制排队一次
@@ -66,6 +68,12 @@ struct SettingsPage {
     SEARCH_ENGINE_EXA, SEARCH_ENGINE_METASO, SEARCH_ENGINE_FIRECRAWL
   ];
 
+  // 声音: 与聊天页右上角开关共用 VM.autoReadEnabled, 两边同步
+  @State private autoReadEnabled: boolean = false;
+  // 终端信息页展示用
+  @State private systemName: string = 'HarmonyOS';
+  @State private deviceLabel: string = '本机设备';
+
   aboutToAppear(): void {
     this.vm = SettingsSession.current();
     if (this.vm === null) {
@@ -76,6 +84,50 @@ struct SettingsPage {
       return;
     }
     this.syncFromVm();
+    this.loadEnvironmentInfo();
+  }
+
+  // 终端页的只读环境信息: 系统名称与设备类型来自当前设备, 不展示任何设备标识
+  private loadEnvironmentInfo(): void {
+    try {
+      let name: string = deviceInfo.osFullName;
+      this.systemName = name !== '' ? name : 'HarmonyOS';
+    } catch (e) {
+      this.systemName = 'HarmonyOS';
+    }
+    try {
+      this.deviceLabel = this.deviceTypeLabel(deviceInfo.deviceType);
+    } catch (e) {
+      this.deviceLabel = '本机设备';
+    }
+  }
+
+  private deviceTypeLabel(type: string): string {
+    if (type === 'phone') {
+      return '手机';
+    }
+    if (type === 'tablet') {
+      return '平板';
+    }
+    if (type === '2in1' || type === 'pc') {
+      return '电脑';
+    }
+    if (type === 'wearable') {
+      return '穿戴设备';
+    }
+    if (type === 'tv') {
+      return '智慧屏';
+    }
+    return '本机设备';
+  }
+
+  // 与聊天页右上角开关共用 VM.autoReadEnabled: 任意一侧修改, 另一侧跟随
+  private toggleAutoRead(enabled: boolean): void {
+    this.autoReadEnabled = enabled;
+    let vm: ChatViewModel | null = this.vm;
+    if (vm !== null) {
+      vm.setAutoReadEnabled(enabled).catch((): void => {});
+    }
   }
 
   // 把 VM 里的当前方案完整同步到本页草稿(打开设置、切换方案、增删方案后调用)
@@ -117,6 +169,8 @@ struct SettingsPage {
     this.searchApiKey = this.searchDraft.apiKeyForEngine(this.searchEngine);
     this.searchBaseUrl = this.draftBaseUrl(this.searchEngine);
     this.searchMaxResults = this.searchDraft.maxResults.toString();
+
+    this.autoReadEnabled = vm.autoReadEnabled;
   }
 
   build() {
@@ -130,6 +184,8 @@ struct SettingsPage {
         this.buildSearchView()
       } else if (this.view === 'multimodal') {
         this.buildMultimodalView()
+      } else if (this.view === 'terminal') {
+        this.buildTerminalView()
       } else {
         this.buildRootView()
       }
@@ -218,6 +274,68 @@ struct SettingsPage {
             this.buildOptionRow($r('sys.symbol.picture'), '多模态解析',
               this.multimodalSummary(), (): void => {
                 this.view = 'multimodal';
+              })
+          }
+          .width('100%')
+          .backgroundColor($r('app.color.surface'))
+          .borderRadius(22)
+          .border({ width: 1, color: $r('app.color.divider') })
+          .clip(true)
+
+          this.buildSectionLabel('声音')
+          Column() {
+            Row() {
+              Stack() {
+                SymbolGlyph($r('sys.symbol.speaker_wave_3'))
+                  .fontSize(23)
+                  .fontColor([$r('app.color.brand')])
+              }
+              .width(28)
+              .height(40)
+              .backgroundColor(Color.Transparent)
+
+              Column() {
+                Text('自动朗读')
+                  .fontSize(15)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor($r('app.color.text_primary'))
+                  .width('100%')
+                Text(this.autoReadEnabled ?
+                  '已开启：AI 回复结束后自动朗读' :
+                  '已关闭：可在对话页手动朗读回复')
+                  .fontSize(12)
+                  .fontColor($r('app.color.text_secondary'))
+                  .width('100%')
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .margin({ top: 3 })
+              }
+              .layoutWeight(1)
+              .alignItems(HorizontalAlign.Start)
+              .margin({ left: 14 })
+
+              Toggle({ type: ToggleType.Switch, isOn: this.autoReadEnabled })
+                .selectedColor($r('app.color.brand'))
+                .onChange((enabled: boolean) => {
+                  this.toggleAutoRead(enabled);
+                })
+            }
+            .width('100%')
+            .height(68)
+            .padding({ left: 14, right: 14 })
+            .alignItems(VerticalAlign.Center)
+          }
+          .width('100%')
+          .backgroundColor($r('app.color.surface'))
+          .borderRadius(22)
+          .border({ width: 1, color: $r('app.color.divider') })
+          .clip(true)
+
+          this.buildSectionLabel('系统')
+          Column() {
+            this.buildOptionRow($r('sys.symbol.code'), '终端',
+              '原生 Shell 与 Python 运行环境', (): void => {
+                this.view = 'terminal';
               })
           }
           .width('100%')
@@ -1121,6 +1239,155 @@ struct SettingsPage {
     .edgeEffect(EdgeEffect.Spring)
   }
 
+  // ===== 终端环境(只读) =====
+  @Builder
+  private buildTerminalView() {
+    Scroll() {
+      Column() {
+        Column() {
+          Row() {
+            Column() {
+              Row() {
+                Column()
+                  .width(7)
+                  .height(7)
+                  .borderRadius(3.5)
+                  .backgroundColor($r('app.color.success'))
+                Text('运行中')
+                  .fontSize(11)
+                  .fontColor($r('app.color.success'))
+                  .margin({ left: 6 })
+              }
+              .alignItems(VerticalAlign.Center)
+
+              Text('端侧执行环境')
+                .fontSize(22)
+                .fontWeight(FontWeight.Bold)
+                .fontColor($r('app.color.text_primary'))
+                .margin({ top: 8 })
+              Text('工具、脚本和文件处理都在设备内完成，不依赖远程执行服务。')
+                .fontSize(12)
+                .fontColor($r('app.color.text_secondary'))
+                .lineHeight(18)
+                .margin({ top: 6 })
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
+
+            SymbolGlyph($r('sys.symbol.code'))
+              .fontSize(30)
+              .fontColor([$r('app.color.brand')])
+              .margin({ left: 12 })
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Top)
+        }
+        .width('100%')
+        .padding(18)
+        .backgroundColor($r('app.color.surface'))
+        .borderRadius(22)
+        .border({ width: 1, color: $r('app.color.divider') })
+        .margin({ top: 16 })
+
+        this.buildSectionLabel('运行组件')
+        Column() {
+          this.buildRuntimeRow('原生 Shell',
+            '命令直接运行在设备上，无需虚拟机或远程连接。')
+          Divider()
+            .strokeWidth(0.5)
+            .color($r('app.color.divider'))
+          this.buildRuntimeRow('原生 CPython 3.12',
+            '脚本在应用进程内执行，常用科学计算与文档处理库可离线使用。')
+          Divider()
+            .strokeWidth(0.5)
+            .color($r('app.color.divider'))
+          this.buildRuntimeRow('原生界面',
+            '界面由系统原生组件绘制，自动适配手机、平板与桌面。')
+          Divider()
+            .strokeWidth(0.5)
+            .color($r('app.color.divider'))
+          this.buildRuntimeRow('本机存储',
+            '配置、会话和工作区文件均保存在设备内。')
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16 })
+        .backgroundColor($r('app.color.surface'))
+        .borderRadius(22)
+        .border({ width: 1, color: $r('app.color.divider') })
+
+        this.buildSectionLabel('运行信息')
+        Column() {
+          this.buildInfoRow('应用版本', Constants.APP_VERSION)
+          Divider()
+            .strokeWidth(0.5)
+            .color($r('app.color.divider'))
+          this.buildInfoRow('系统版本', this.systemName)
+          Divider()
+            .strokeWidth(0.5)
+            .color($r('app.color.divider'))
+          this.buildInfoRow('设备类型', this.deviceLabel)
+          Divider()
+            .strokeWidth(0.5)
+            .color($r('app.color.divider'))
+          this.buildInfoRow('执行位置', '本机')
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16 })
+        .backgroundColor($r('app.color.surface'))
+        .borderRadius(22)
+        .border({ width: 1, color: $r('app.color.divider') })
+        .margin({ bottom: 32 })
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 720 })
+      .padding({ left: 16, right: 16 })
+    }
+    .layoutWeight(1)
+    .width('100%')
+    .align(Alignment.Top)
+    .scrollBar(BarState.Off)
+    .edgeEffect(EdgeEffect.Spring)
+  }
+
+  @Builder
+  private buildRuntimeRow(title: string, subtitle: string) {
+    Column() {
+      Text(title)
+        .fontSize(15)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_primary'))
+        .width('100%')
+      Text(subtitle)
+        .fontSize(11)
+        .fontColor($r('app.color.text_secondary'))
+        .width('100%')
+        .lineHeight(17)
+        .margin({ top: 4 })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .padding({ top: 13, bottom: 13 })
+  }
+
+  @Builder
+  private buildInfoRow(label: string, value: string) {
+    Row() {
+      Text(label)
+        .fontSize(13)
+        .fontColor($r('app.color.text_secondary'))
+      Text(value)
+        .fontSize(13)
+        .fontColor($r('app.color.text_primary'))
+        .layoutWeight(1)
+        .textAlign(TextAlign.End)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+    }
+    .width('100%')
+    .height(48)
+    .alignItems(VerticalAlign.Center)
+  }
+
   // ===== 页面标题 =====
   private viewTitle(): string {
     if (this.view === 'model') {
@@ -1134,6 +1401,9 @@ struct SettingsPage {
     }
     if (this.view === 'multimodal') {
       return '多模态解析';
+    }
+    if (this.view === 'terminal') {
+      return '终端';
     }
     return '设置';
   }
