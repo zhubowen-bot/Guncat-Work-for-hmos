@@ -174,7 +174,7 @@ struct SettingsPage {
     .width('100%')
     .height(56)
     .alignItems(HorizontalAlign.Center)
-    .backgroundColor($r('app.color.background'))
+    .backgroundColor($r('app.color.surface'))
     .border({ width: { bottom: 0.5 }, color: { bottom: $r('app.color.divider') } })
   }
 

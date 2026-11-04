@@ -257,22 +257,24 @@ export default class EntryAbility extends UIAbility {
     });
   }
 
-  // 根据深浅色主题设置状态栏 & 导航栏颜色
+  // 根据深浅色主题设置状态栏 & 导航栏颜色。
+  // 状态栏直接用顶栏的 surface 色, 视觉上等同于把标题栏底色向上拉长;
+  // 内容仍由系统安全区限制在下方, 不会上移。导航栏保持透明, 由页面底部自行延伸。
   private applySystemBarTheme(win: window.Window, isDark: boolean): void {
     if (isDark) {
-      // 深色下 statusBar/navigationBar 用 surface (#1B1F27) 与顶部标题栏、底部输入区背景一致
+      win.setWindowBackgroundColor('#FF151517');
       win.setWindowSystemBarProperties({
-        statusBarColor: '#FF1B1F27',
+        statusBarColor: '#FF232324',
         statusBarContentColor: '#FFEDF0F5',
-        navigationBarColor: '#FF1B1F27',
+        navigationBarColor: '#00000000',
         navigationBarContentColor: '#FFEDF0F5'
       });
     } else {
-      // 浅色下 statusBar/navigationBar 用 surface (#FFFFFF) 与顶部标题栏、底部输入区背景一致
+      win.setWindowBackgroundColor('#FFFFFFFF');
       win.setWindowSystemBarProperties({
         statusBarColor: '#FFFFFFFF',
         statusBarContentColor: '#FF1B2330',
-        navigationBarColor: '#FFFFFFFF',
+        navigationBarColor: '#00000000',
         navigationBarContentColor: '#FF1B2330'
       });
     }
