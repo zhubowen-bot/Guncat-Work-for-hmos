@@ -1331,21 +1331,47 @@ export class ChatViewModel {
     apiConfig: ApiConfig,
     multimodalConfig: MultimodalConfig
   ): Promise<void> {
-    let profile: ApiProfile | null = this.currentApiProfile;
+    await this.saveApiProfile(this.currentApiProfileId, name, apiConfig, multimodalConfig);
+  }
+
+  // 按方案 id 保存: 设置页的自动保存可能在用户已经切到别的方案之后才落盘,
+  // 不能依赖"当前方案"指针, 否则会把旧草稿写进新方案。找不到方案(已删除)时静默跳过。
+  async saveApiProfile(
+    profileId: string,
+    name: string,
+    apiConfig: ApiConfig,
+    multimodalConfig: MultimodalConfig
+  ): Promise<void> {
+    let profile: ApiProfile | null = null;
+    for (let i: number = 0; i < this.apiProfiles.length; i++) {
+      if (this.apiProfiles[i].id === profileId) {
+        profile = this.apiProfiles[i];
+        break;
+      }
+    }
     if (profile === null) {
       return;
     }
     profile.name = name.trim() !== '' ? name.trim() : '未命名配置';
     profile.apiConfig = apiConfig;
     profile.multimodalConfig = multimodalConfig;
-    this.applyApiProfile(profile);
-    await this.persistApiProfiles();
-    // 同时保留旧键，便于降级到旧版本应用。
+    let isCurrent: boolean = profile.id === this.currentApiProfileId;
+    if (isCurrent) {
+      this.applyApiProfile(profile);
+    }
+    // 只写方案列表, 不碰"当前方案 id": 自动保存可能在用户切方案之后才执行,
+    // 当前 id 由 selectApiProfile / addApiProfile / deleteApiProfile 统一维护。
     if (this.context !== null) {
+      await StorageManager.saveApiProfiles(this.context, this.apiProfiles);
+    }
+    // 旧键只跟随当前方案, 后台保存非当前方案时不能覆盖它, 便于降级到旧版本应用。
+    if (isCurrent && this.context !== null) {
       await StorageManager.saveApiConfig(this.context, apiConfig);
       await StorageManager.saveMultimodalConfig(this.context, multimodalConfig);
     }
-    this.notifyUIChange();
+    if (isCurrent) {
+      this.notifyUIChange();
+    }
   }
 
   private applyApiProfile(profile: ApiProfile): void {

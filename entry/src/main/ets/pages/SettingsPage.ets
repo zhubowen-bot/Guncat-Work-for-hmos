@@ -10,7 +10,7 @@ import { SearchEngineSettings, SEARCH_ENGINE_BING, SEARCH_ENGINE_BRAVE, SEARCH_E
 
 // 设置页: 独立路由页, 用"设置首页 + 分项详情"的两级结构替代原来的底部弹层。
 // 每一块配置都是独立选项, 点进去只编辑这一块; 草稿在所有分页之间共享,
-// 右上角保存时统一提交, 避免一页里堆叠多个折叠框。
+// 修改后自动防抖保存, 避免一页里堆叠多个折叠框, 也不用手动点保存。
 @Entry
 @Component
 struct SettingsPage {
@@ -19,10 +19,13 @@ struct SettingsPage {
 
   // 当前页面: root / model / advanced / search / multimodal
   @State private view: string = 'root';
-  // 是否有未保存的草稿修改
-  @State private dirty: boolean = false;
-  // 保存中: 防止重复点击
-  @State private saving: boolean = false;
+
+  // 自动保存: 修改后防抖落盘, 不阻塞输入; 切方案/离开页面前强制排队一次
+  private autoSaveTimer: number = -1;
+  private saveChain: Promise<void> = Promise.resolve();
+  private editVersion: number = 0;
+  private queuedVersion: number = 0;
+  private savedVersion: number = 0;
 
   // 配置方案快照(VM 内部数组不受本页状态观察, 每次增删/切换后重新取一份)
   @State private profiles: ApiProfile[] = [];
@@ -81,6 +84,7 @@ struct SettingsPage {
     if (vm === null) {
       return;
     }
+    this.cancelAutoSave();
     this.profiles = vm.apiProfiles.slice();
     this.currentProfileId = vm.currentApiProfileId;
 
@@ -113,8 +117,6 @@ struct SettingsPage {
     this.searchApiKey = this.searchDraft.apiKeyForEngine(this.searchEngine);
     this.searchBaseUrl = this.draftBaseUrl(this.searchEngine);
     this.searchMaxResults = this.searchDraft.maxResults.toString();
-
-    this.dirty = false;
   }
 
   build() {
@@ -146,52 +148,29 @@ struct SettingsPage {
             .fontSize(20)
             .fontColor([$r('app.color.text_primary')])
         }
-        .width(40)
-        .height(40)
-        .borderRadius(20)
-        .backgroundColor($r('app.color.surface_secondary'))
+        .width(36)
+        .height(36)
+        .borderRadius(18)
+        .backgroundColor(Color.Transparent)
         .onClick(() => {
           this.handleBack();
         })
 
-        Column() {
-          Text(this.viewTitle())
-            .fontSize(22)
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.text_primary'))
-          Text(this.viewSubtitle())
-            .fontSize(12)
-            .fontColor($r('app.color.text_secondary'))
-            .margin({ top: 2 })
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        .margin({ left: 12 })
-
-        Button() {
-          Text(this.dirty ? '保存' : '完成')
-            .fontSize(14)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(this.dirty ? Color.White : $r('app.color.brand'))
-        }
-        .width(64)
-        .height(34)
-        .borderRadius(17)
-        .backgroundColor(this.dirty ? $r('app.color.brand') : $r('app.color.brand_light'))
-        .enabled(!this.saving)
-        .opacity(this.saving ? 0.55 : 1)
-        .onClick(() => {
-          this.handleHeaderAction();
-        })
+        Text(this.viewTitle())
+          .fontSize(20)
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.text_primary'))
+          .layoutWeight(1)
+          .margin({ left: 8 })
       }
       .width('100%')
       .constraintSize({ maxWidth: 720 })
-      .height(76)
-      .padding({ left: 12, right: 16 })
+      .height(56)
+      .padding({ left: 10, right: 16 })
       .alignItems(VerticalAlign.Center)
     }
     .width('100%')
-    .height(76)
+    .height(56)
     .alignItems(HorizontalAlign.Center)
     .backgroundColor($r('app.color.background'))
     .border({ width: { bottom: 0.5 }, color: { bottom: $r('app.color.divider') } })
@@ -212,7 +191,7 @@ struct SettingsPage {
             Divider()
               .strokeWidth(0.5)
               .color($r('app.color.divider'))
-              .margin({ left: 68 })
+              .margin({ left: 56 })
             this.buildOptionRow($r('sys.symbol.wrench_and_screwdriver'), '高级参数',
               this.advancedSummary(), (): void => {
                 this.view = 'advanced';
@@ -233,7 +212,7 @@ struct SettingsPage {
             Divider()
               .strokeWidth(0.5)
               .color($r('app.color.divider'))
-              .margin({ left: 68 })
+              .margin({ left: 56 })
             this.buildOptionRow($r('sys.symbol.picture'), '多模态解析',
               this.multimodalSummary(), (): void => {
                 this.view = 'multimodal';
@@ -244,23 +223,17 @@ struct SettingsPage {
           .borderRadius(22)
           .border({ width: 1, color: $r('app.color.divider') })
           .clip(true)
-
-          Text('配置仅保存在本机，点击保存后立即生效')
-            .fontSize(11)
-            .fontColor($r('app.color.text_tertiary'))
-            .width('100%')
-            .textAlign(TextAlign.Center)
-            .margin({ top: 24, bottom: 32 })
         }
         .width('100%')
         .constraintSize({ maxWidth: 720 })
-        .padding({ left: 16, right: 16 })
+        .padding({ left: 16, right: 16, bottom: 24 })
       }
       .width('100%')
       .alignItems(HorizontalAlign.Center)
     }
     .layoutWeight(1)
     .width('100%')
+    .align(Alignment.Top)
     .scrollBar(BarState.Off)
     .edgeEffect(EdgeEffect.Spring)
   }
@@ -273,7 +246,7 @@ struct SettingsPage {
       .fontColor($r('app.color.text_secondary'))
       .width('100%')
       .padding({ left: 4 })
-      .margin({ top: 20, bottom: 8 })
+      .margin({ top: 12, bottom: 8 })
   }
 
   @Builder
@@ -281,13 +254,12 @@ struct SettingsPage {
     Row() {
       Stack() {
         SymbolGlyph(icon)
-          .fontSize(20)
+          .fontSize(23)
           .fontColor([$r('app.color.brand')])
       }
-      .width(40)
+      .width(28)
       .height(40)
-      .borderRadius(13)
-      .backgroundColor($r('app.color.brand_light'))
+      .backgroundColor(Color.Transparent)
 
       Column() {
         Text(title)
@@ -461,7 +433,7 @@ struct SettingsPage {
             .placeholderColor($r('app.color.text_tertiary'))
             .onChange((value: string) => {
               this.profileName = value;
-              this.dirty = true;
+              this.onDraftChanged();
             })
           Text('用于在模型选择器中区分不同的配置方案。')
             .fontSize(11)
@@ -528,7 +500,7 @@ struct SettingsPage {
             .placeholderColor($r('app.color.text_tertiary'))
             .onChange((value: string) => {
               this.baseUrl = value;
-              this.dirty = true;
+              this.onDraftChanged();
             })
 
           Row() {
@@ -554,7 +526,7 @@ struct SettingsPage {
               .selectedColor($r('app.color.brand'))
               .onChange((enabled: boolean) => {
                 this.autoSuffix = enabled;
-                this.dirty = true;
+                this.onDraftChanged();
               })
           }
           .width('100%')
@@ -584,7 +556,7 @@ struct SettingsPage {
             .placeholderColor($r('app.color.text_tertiary'))
             .onChange((value: string) => {
               this.apiKey = value;
-              this.dirty = true;
+              this.onDraftChanged();
             })
           Text('仅保存在本机，不会上传到服务器。')
             .fontSize(11)
@@ -676,6 +648,7 @@ struct SettingsPage {
     }
     .layoutWeight(1)
     .width('100%')
+    .align(Alignment.Top)
     .scrollBar(BarState.Off)
     .edgeEffect(EdgeEffect.Spring)
   }
@@ -704,7 +677,7 @@ struct SettingsPage {
             .placeholderColor($r('app.color.text_tertiary'))
             .onChange((value: string) => {
               this.temperature = value;
-              this.dirty = true;
+              this.onDraftChanged();
             })
           Text('数值越低回答越确定，越高越随机。留空使用服务端默认值。')
             .fontSize(11)
@@ -735,7 +708,7 @@ struct SettingsPage {
             .placeholderColor($r('app.color.text_tertiary'))
             .onChange((value: string) => {
               this.topP = value;
-              this.dirty = true;
+              this.onDraftChanged();
             })
           Text('与 Temperature 类似，通常只调整其中一个。')
             .fontSize(11)
@@ -767,7 +740,7 @@ struct SettingsPage {
             .placeholderColor($r('app.color.text_tertiary'))
             .onChange((value: string) => {
               this.maxTokens = value;
-              this.dirty = true;
+              this.onDraftChanged();
             })
           Text('单次回复的最大输出长度，思考内容同样计入额度。')
             .fontSize(11)
@@ -797,7 +770,7 @@ struct SettingsPage {
             .placeholderColor($r('app.color.text_tertiary'))
             .onChange((value: string) => {
               this.extraBody = value;
-              this.dirty = true;
+              this.onDraftChanged();
             })
           Text('JSON 对象会合并到请求体中，适合自定义 provider 专属参数。')
             .fontSize(11)
@@ -819,6 +792,7 @@ struct SettingsPage {
     }
     .layoutWeight(1)
     .width('100%')
+    .align(Alignment.Top)
     .scrollBar(BarState.Off)
     .edgeEffect(EdgeEffect.Spring)
   }
@@ -903,7 +877,7 @@ struct SettingsPage {
               .placeholderColor($r('app.color.text_tertiary'))
               .onChange((value: string) => {
                 this.searchApiKey = value;
-                this.dirty = true;
+                this.onDraftChanged();
               })
           }
 
@@ -929,7 +903,7 @@ struct SettingsPage {
               .placeholderColor($r('app.color.text_tertiary'))
               .onChange((value: string) => {
                 this.searchBaseUrl = value;
-                this.dirty = true;
+                this.onDraftChanged();
               })
           }
         }
@@ -953,7 +927,7 @@ struct SettingsPage {
             .placeholderColor($r('app.color.text_tertiary'))
             .onChange((value: string) => {
               this.searchMaxResults = value;
-              this.dirty = true;
+              this.onDraftChanged();
             })
           Text('每次 local_web_search 取回 1~20 条结果。条数越多上下文越挤，手机上 5~8 条通常够用。')
             .fontSize(11)
@@ -975,6 +949,7 @@ struct SettingsPage {
     }
     .layoutWeight(1)
     .width('100%')
+    .align(Alignment.Top)
     .scrollBar(BarState.Off)
     .edgeEffect(EdgeEffect.Spring)
   }
@@ -1009,7 +984,7 @@ struct SettingsPage {
               .onChange((enabled: boolean) => {
                 this.mmPreparseEnabled = enabled;
                 this.mmPreparseUserSet = true;
-                this.dirty = true;
+                this.onDraftChanged();
               })
           }
           .width('100%')
@@ -1065,7 +1040,7 @@ struct SettingsPage {
               .placeholderColor($r('app.color.text_tertiary'))
               .onChange((value: string) => {
                 this.mmBaseUrl = value;
-                this.dirty = true;
+                this.onDraftChanged();
               })
 
             Divider()
@@ -1091,7 +1066,7 @@ struct SettingsPage {
               .placeholderColor($r('app.color.text_tertiary'))
               .onChange((value: string) => {
                 this.mmApiKey = value;
-                this.dirty = true;
+                this.onDraftChanged();
               })
 
             Divider()
@@ -1116,7 +1091,7 @@ struct SettingsPage {
               .placeholderColor($r('app.color.text_tertiary'))
               .onChange((value: string) => {
                 this.mmModel = value;
-                this.dirty = true;
+                this.onDraftChanged();
               })
           }
           .width('100%')
@@ -1139,6 +1114,7 @@ struct SettingsPage {
     }
     .layoutWeight(1)
     .width('100%')
+    .align(Alignment.Top)
     .scrollBar(BarState.Off)
     .edgeEffect(EdgeEffect.Spring)
   }
@@ -1160,118 +1136,86 @@ struct SettingsPage {
     return '设置';
   }
 
-  private viewSubtitle(): string {
-    if (this.view === 'model') {
-      return '方案、接入地址与模型';
-    }
-    if (this.view === 'advanced') {
-      return '生成参数与额外请求体';
-    }
-    if (this.view === 'search') {
-      return '手机直连搜索引擎';
-    }
-    if (this.view === 'multimodal') {
-      return '附件先行解析 API';
-    }
-    return '模型接入与扩展能力';
-  }
-
-  // ===== 返回 / 保存 =====
+  // ===== 返回 / 自动保存 =====
   private handleBack(): void {
-    if (this.saving) {
-      return;
-    }
     if (this.view !== 'root') {
       this.view = 'root';
       return;
     }
-    this.requestClose();
-  }
-
-  private handleHeaderAction(): void {
-    if (this.saving) {
-      return;
-    }
-    if (this.dirty) {
-      this.saveDraft(true);
-      return;
-    }
+    // 立即返回, 不等待写盘; 草稿已在 flushSave 里同步取好并排队, 后台继续完成
+    this.flushSave();
     router.back();
   }
 
-  private requestClose(): void {
-    if (!this.dirty) {
-      router.back();
-      return;
-    }
-    this.confirmDiscard();
-  }
-
-  private confirmDiscard(): void {
-    promptAction.showDialog({
-      title: '放弃未保存的修改？',
-      message: '返回后，本次修改将不会保存。',
-      buttons: [
-        { text: '继续编辑', color: '#6B7280' },
-        { text: '放弃', color: '#E05252' }
-      ]
-    }).then((result: promptAction.ShowDialogSuccessResponse): void => {
-      if (result.index === 1) {
-        this.dirty = false;
-        router.back();
-      }
-    }).catch((): void => {
-      // 弹窗不可用时保持当前页面, 不丢草稿
-    });
-  }
-
   onBackPress(): boolean {
-    if (this.saving) {
-      return true;
-    }
     if (this.view !== 'root') {
       this.view = 'root';
       return true;
     }
-    if (this.dirty) {
-      this.confirmDiscard();
-      return true;
-    }
+    this.flushSave();
     return false;
   }
 
-  // 提交所有分页的草稿; close 为 true 时保存后返回聊天页
-  private async saveDraft(close: boolean): Promise<boolean> {
-    let vm: ChatViewModel | null = this.vm;
-    if (vm === null || this.saving) {
-      return false;
-    }
-    if (vm.currentApiProfile === null) {
-      promptAction.showToast({ message: '配置尚未加载完成，请稍后再试', duration: 1600 });
-      return false;
-    }
-    this.saving = true;
-    try {
-      await vm.saveLocalSearchConfig(this.buildSearchConfig());
-      await vm.saveCurrentApiProfile(this.profileName, this.buildConfig(), this.buildMmConfig());
-      this.dirty = false;
-      this.saving = false;
-      if (close) {
-        router.back();
-        promptAction.showToast({ message: '配置已保存', duration: 1600 });
-      }
-      return true;
-    } catch (e) {
-      this.saving = false;
-      promptAction.showToast({ message: '保存失败，请稍后重试', duration: 2000 });
-      return false;
+  // 任一字段变化后调用: 只记版本并启动 350ms 防抖, 不做任何会触发整页重绘的保存状态
+  private onDraftChanged(): void {
+    this.editVersion++;
+    this.cancelAutoSave();
+    this.autoSaveTimer = setTimeout((): void => {
+      this.autoSaveTimer = -1;
+      this.flushSave();
+    }, 350);
+  }
+
+  private cancelAutoSave(): void {
+    if (this.autoSaveTimer !== -1) {
+      clearTimeout(this.autoSaveTimer);
+      this.autoSaveTimer = -1;
     }
   }
 
+  // 把当前草稿排队落盘。返回的 Promise 用于切换方案前等待, 确保旧方案先写完。
+  private flushSave(): Promise<void> {
+    this.cancelAutoSave();
+    if (this.editVersion <= this.queuedVersion) {
+      return this.saveChain;
+    }
+    return this.enqueueSave();
+  }
+
+  private enqueueSave(): Promise<void> {
+    let targetVm: ChatViewModel | null = this.vm;
+    if (targetVm === null || targetVm.currentApiProfile === null) {
+      return this.saveChain;
+    }
+    let vm: ChatViewModel = targetVm;
+    // 同步取好快照: 之后页面销毁、继续输入或切换方案都不会改变这次要写的内容
+    let profileId: string = this.currentProfileId;
+    let name: string = this.profileName;
+    let api: ApiConfig = this.buildConfig();
+    let mm: MultimodalConfig = this.buildMmConfig();
+    let search: SearchEngineSettings = this.buildSearchConfig();
+    let version: number = this.editVersion;
+    this.queuedVersion = version;
+    // 串行写: 避免多次 Preferences 写入互相覆盖, 也不会阻塞输入
+    this.saveChain = this.saveChain.then(async (): Promise<void> => {
+      await vm.saveLocalSearchConfig(search);
+      await vm.saveApiProfile(profileId, name, api, mm);
+      if (version > this.savedVersion) {
+        this.savedVersion = version;
+      }
+    }).catch((): void => {
+      // 自动保存失败不打断编辑; 下一次修改或离开页面会重新排队
+      if (this.queuedVersion === version) {
+        this.queuedVersion = this.savedVersion;
+      }
+    });
+    return this.saveChain;
+  }
+
   // ===== 配置方案操作 =====
-  private async selectProfile(index: number): Promise<void> {
+  private selectProfile(index: number): void {
     let vm: ChatViewModel | null = this.vm;
-    if (vm === null || this.saving || index < 0 || index >= this.profiles.length) {
+    if (vm === null || index < 0 || index >= this.profiles.length) {
       return;
     }
     if (vm.isStreaming) {
@@ -1282,32 +1226,25 @@ struct SettingsPage {
     if (target.id === this.currentProfileId) {
       return;
     }
-    // 切换方案会换掉整份表单: 有未保存修改时先落到当前方案, 避免用户输入被静默丢弃
-    if (this.dirty) {
-      let saved: boolean = await this.saveDraft(false);
-      if (!saved) {
-        return;
-      }
-    }
-    await vm.selectApiProfile(target.id);
+    // 切换方案会换掉整份表单: 先把当前草稿按旧方案 id 排队, 切过去后后台继续写
+    this.flushSave();
+    // selectApiProfile 在第一个 await 之前就完成 applyApiProfile, 这里不等待写盘,
+    // 表单立即切到新方案, 避免点一下卡半拍。
+    vm.selectApiProfile(target.id).catch((): void => {});
     this.syncFromVm();
   }
 
   private async addProfile(): Promise<void> {
     let vm: ChatViewModel | null = this.vm;
-    if (vm === null || this.saving) {
+    if (vm === null) {
       return;
     }
     if (vm.isStreaming) {
       promptAction.showToast({ message: 'AI 正在回复中，暂不能新建配置', duration: 1600 });
       return;
     }
-    if (this.dirty) {
-      let saved: boolean = await this.saveDraft(false);
-      if (!saved) {
-        return;
-      }
-    }
+    // 新建/删除会改方案列表, 先等排队中的写入完成, 避免两次列表写盘互相覆盖
+    await this.flushSave();
     await vm.addApiProfile();
     this.syncFromVm();
   }
@@ -1321,6 +1258,8 @@ struct SettingsPage {
       promptAction.showToast({ message: 'AI 正在回复中，暂不能删除配置', duration: 1600 });
       return;
     }
+    // 先等排队中的写入完成, 避免删除与列表写盘并发; 用户取消删除时草稿仍然保留
+    await this.flushSave();
     let deleted: boolean = await vm.deleteApiProfile(this.currentProfileId);
     if (deleted) {
       this.syncFromVm();
@@ -1400,7 +1339,7 @@ struct SettingsPage {
     } else if (index === 2) {
       this.provider = 'anthropic-messages';
     }
-    this.dirty = true;
+    this.onDraftChanged();
   }
 
   private updateModelName(index: number, value: string): void {
@@ -1414,7 +1353,7 @@ struct SettingsPage {
     let next: string[] = this.models.slice();
     next[index] = value;
     this.models = next;
-    this.dirty = true;
+    this.onDraftChanged();
   }
 
   private addModelName(): void {
@@ -1422,7 +1361,7 @@ struct SettingsPage {
     next.push('');
     this.models = next;
     this.modelFormTick++;
-    this.dirty = true;
+    this.onDraftChanged();
   }
 
   private removeModelName(index: number): void {
@@ -1437,7 +1376,7 @@ struct SettingsPage {
     }
     this.models = next;
     this.modelFormTick++;
-    this.dirty = true;
+    this.onDraftChanged();
   }
 
   // ===== 搜索字段操作 =====
@@ -1483,7 +1422,7 @@ struct SettingsPage {
     this.searchEngine = this.searchEngineIds[index];
     this.searchApiKey = this.searchDraft.apiKeyForEngine(this.searchEngine);
     this.searchBaseUrl = this.draftBaseUrl(this.searchEngine);
-    this.dirty = true;
+    this.onDraftChanged();
   }
 
   private getSearchEngineOptions(): SelectOption[] {
