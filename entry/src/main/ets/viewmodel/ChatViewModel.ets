@@ -358,7 +358,11 @@ export class ChatViewModel {
       }
     }
     // 启动清扫: 清掉没有对应会话的工作区目录与会话事件日志(旧版本残留/删除过程中崩溃/运行中被删后又被写回)。
-    this.sweepOrphanData();
+    // 延后到首屏之后再做: 它要遍历 workspaces/sessions 目录, 大目录时会让冷启动
+    // 多卡几百毫秒。清扫只处理孤儿, 晚一两秒没有任何副作用。
+    setTimeout((): void => {
+      this.sweepOrphanData();
+    }, 1200);
 
     // 启动落点: 固定进入交互模式(Intelligent UI), 不再恢复"上次使用的智能体"。
     // 打开应用的第一屏就是"能操作的界面"; 想用工作模式或某个聊天智能体, 走空态大标题处的
@@ -2260,11 +2264,24 @@ export class ChatViewModel {
       // 组装与协议无关的循环历史(含既有全部消息); 系统提示词为静态文本, 整个循环不重写
       let messages: LoopMessage[] = [];
       messages.push(LoopMessage.system(AgentLoopService.buildWorkSystemPromptFor(conv.mode)));
+      // 只把最近 3 条用户消息的图片重新注入请求: 历史图片每轮都随 base64
+      // 重发会让请求体随轮次线性膨胀, 是长任务内存/网络压力的重要来源。
+      // 更早的图片仍保留在工作区/会话记录里, 模型需要时可用 read_file 重新读取。
+      let userTotal: number = 0;
+      for (let ui: number = 0; ui < conv.messages.length; ui++) {
+        if (conv.messages[ui].role === 'user') {
+          userTotal++;
+        }
+      }
+      let userSeen: number = 0;
       for (let i: number = 0; i < conv.messages.length; i++) {
         let m: Message = conv.messages[i];
         if (m.role === 'user' && m.content !== '') {
           messages.push(LoopMessage.user(m.content));
-          this.pushUserImageMessages(messages, m);
+          userSeen++;
+          if (userTotal - userSeen < 3) {
+            this.pushUserImageMessages(messages, m);
+          }
         } else if (m.role === 'assistant' &&
           (m.content !== '' || m.toolCalls.length > 0 || m.reasoning !== '')) {
           // 中断遗留的空结果标记为已中断, 避免模型把空串当成功。
@@ -2779,11 +2796,24 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
       // 组装与协议无关的循环历史(含既有全部消息); 系统提示词为静态文本, 整个循环不重写
       let messages: LoopMessage[] = [];
       messages.push(LoopMessage.system(AgentLoopService.buildWorkSystemPromptFor(conv.mode)));
+      // 只把最近 3 条用户消息的图片重新注入请求: 历史图片每轮都随 base64
+      // 重发会让请求体随轮次线性膨胀, 是长任务内存/网络压力的重要来源。
+      // 更早的图片仍保留在工作区/会话记录里, 模型需要时可用 read_file 重新读取。
+      let userTotal: number = 0;
+      for (let ui: number = 0; ui < conv.messages.length; ui++) {
+        if (conv.messages[ui].role === 'user') {
+          userTotal++;
+        }
+      }
+      let userSeen: number = 0;
       for (let i: number = 0; i < conv.messages.length; i++) {
         let m: Message = conv.messages[i];
         if (m.role === 'user' && m.content !== '') {
           messages.push(LoopMessage.user(m.content));
-          this.pushUserImageMessages(messages, m);
+          userSeen++;
+          if (userTotal - userSeen < 3) {
+            this.pushUserImageMessages(messages, m);
+          }
         } else if (m.role === 'assistant' &&
           (m.content !== '' || m.toolCalls.length > 0 || m.reasoning !== '')) {
           // 中断遗留的空结果标记为已中断, 避免模型把空串当成功。
@@ -3540,7 +3570,13 @@ if (this.abortSignal.aborted) {
     }
     // 压缩后(或压缩失败时)仍超预算 → 从最旧处整条丢弃
     let threshold: number = Constants.WORK_CONTEXT_WINDOW_TOKENS * Constants.WORK_COMPACT_TOKEN_RATIO;
-    while (this.estimateWorkTokens(loopMsgChars(messages)) >= threshold && messages.length > 2) {
+    // 每轮从最旧处删一条时增量更新字符量, 不重新扫整个数组(旧实现在
+    // 删除很多条时是 O(n²))。
+    let remainingChars: number = loopMsgChars(messages);
+    while (messages.length > 2 &&
+      (remainingChars >= Constants.WORK_CONTEXT_MAX_CHARS ||
+        this.estimateWorkTokens(remainingChars) >= threshold)) {
+      remainingChars -= msgChars(messages[1]);
       messages.splice(1, 1);
       compacted = true;
     }
@@ -3586,7 +3622,12 @@ if (this.abortSignal.aborted) {
     if (this.lastWorkPromptTokens >= threshold) {
       return true;
     }
-    return this.estimateWorkTokens(loopMsgChars(messages)) >= threshold;
+    const chars: number = loopMsgChars(messages);
+    // 字符硬上限优先: 它防的是"构造请求时的内存峰值", 与模型窗口大小无关
+    if (chars >= Constants.WORK_CONTEXT_MAX_CHARS) {
+      return true;
+    }
+    return this.estimateWorkTokens(chars) >= threshold;
   }
 
   // 字符量 → token 估算: 有本会话实测比例时按实测, 否则按 中英混合 ≈ 2 字符/token 的保守值

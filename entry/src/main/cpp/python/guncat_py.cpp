@@ -1349,7 +1349,7 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
         int state2 = api.gilEnsure();
         int rc2 = api.runSimpleString(mini.c_str());
         api.gilRelease(state2);
-        std::string diag = Trim(ReadFile(diagPath));
+        std::string diag = Trim(ReadFileCapped(diagPath));
         out.error = "Python 启动器没有产出结果(rc=" + std::to_string(rc) +
             ", 兜底诊断 rc=" + std::to_string(rc2) + ")";
         if (!diag.empty()) {
@@ -1360,7 +1360,8 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
         }
         return out;
     }
-    std::string meta = ReadFile(metaPath);
+    // 异常消息也可能是超大字符串(脚本可 raise 一个几十 MB 的 message), 同样限长
+    std::string meta = ReadFileCapped(metaPath);
     std::size_t first = meta.find('\n');
     std::size_t second = (first == std::string::npos) ? std::string::npos : meta.find('\n', first + 1);
     if (first == std::string::npos) {
@@ -1404,7 +1405,7 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
             out.error += "\n(启动器停在阶段: " + stage + ")";
         }
         // 启动器判失败时也把诊断带上: 用户/模型能直接看到 sys.path 与哪些扩展加载不了
-        std::string diag = Trim(ReadFile(diagPath));
+        std::string diag = Trim(ReadFileCapped(diagPath));
         if (!diag.empty() && out.error.find("import ") == std::string::npos) {
             out.error += "\n—— 运行库诊断 ——\n" + diag;
         }

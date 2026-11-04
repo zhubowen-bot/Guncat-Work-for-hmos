@@ -19,6 +19,9 @@ export class AskAnswer {
 export class AskUserBridge {
   private static pending: Map<string, PendingAsk> = new Map();
   private static resolvers: Map<string, (answer: AskAnswer | null) => void> = new Map();
+  // 超时定时器: 用户提前作答后必须清掉, 否则最长 5 分钟的闭包会一直留在
+  // 定时器队列里(AskUserBridge 是进程级静态对象)。
+  private static timers: Map<string, number> = new Map();
   private static seq: number = 0;
 
   // 注册提问并等待用户作答; 用户中断时返回 null
@@ -34,12 +37,14 @@ export class AskUserBridge {
     return new Promise<AskAnswer | null>((resolve: (a: AskAnswer | null) => void) => {
       AskUserBridge.resolvers.set(id, resolve);
       if (timeoutMs > 0) {
-        setTimeout((): void => {
+        const timer: number = setTimeout((): void => {
+          AskUserBridge.timers.delete(id);
           if (AskUserBridge.resolvers.has(id)) {
             // 超时未答: 以取消收场, 避免工具永久挂起
             AskUserBridge.resolveWith(id, null);
           }
         }, timeoutMs);
+        AskUserBridge.timers.set(id, timer);
       }
     });
   }
@@ -84,6 +89,11 @@ export class AskUserBridge {
     }
     AskUserBridge.resolvers.delete(id);
     AskUserBridge.pending.delete(id);
+    const timer: number | undefined = AskUserBridge.timers.get(id);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      AskUserBridge.timers.delete(id);
+    }
     resolver(answer);
     return true;
   }

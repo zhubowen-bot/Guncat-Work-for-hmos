@@ -54,7 +54,11 @@ export class Message {
     msg.id = (json['id'] as string) ?? '';
     msg.role = (json['role'] as string) ?? 'user';
     msg.content = (json['content'] as string) ?? '';
-    msg.displayContent = (json['displayContent'] as string) ?? '';
+    const display: string = (json['displayContent'] as string) ?? '';
+    // 存档里 displayContent 与 content 相同时会省略(见 toJson), 读回时补上。
+    // 所有 UI 读取处本来就有 `displayContent !== '' ? ... : content` 的兜底,
+    // 这里再显式还原一次, 保证重新编辑等逻辑拿到的值不变。
+    msg.displayContent = display === '' ? msg.content : display;
     msg.timestamp = (json['timestamp'] as number) ?? 0;
     msg.reasoning = (json['reasoning'] as string) ?? '';
     msg.thinkingSignature = (json['thinkingSignature'] as string) ?? '';
@@ -96,7 +100,9 @@ export class Message {
       'id': this.id,
       'role': this.role,
       'content': this.content,
-      'displayContent': this.displayContent,
+      // 绝大多数消息两者逐字相同, 再存一份等于把正文体积翻倍。省略后由
+      // fromJson(以及各 UI 读取处)回退到 content, 行为不变。
+      'displayContent': this.displayContent === this.content ? '' : this.displayContent,
       'attachments': attArr,
       'timestamp': this.timestamp,
       'reasoning': this.reasoning,

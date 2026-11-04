@@ -559,10 +559,19 @@ export class WorkFileService {
   static async saveUriFile(context: common.UIAbilityContext, convId: string,
     uri: string, fallbackName: string): Promise<string> {
     let stat: fileIo.Stat = fileIo.statSync(uri);
+    // 与附件选择同口径: 先看大小再分配, 避免分享/拍照入口绕过上限
+    const maxBytes: number = Constants.MAX_FILE_SIZE_MB * 1024 * 1024;
+    if (stat.size > maxBytes) {
+      throw new Error('文件过大(' + WorkFileService.formatSize(stat.size) + '), 上限 ' +
+        WorkFileService.formatSize(maxBytes));
+    }
     let file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
     let buffer: ArrayBuffer = new ArrayBuffer(stat.size);
-    fileIo.readSync(file.fd, buffer, { offset: 0 });
-    fileIo.closeSync(file.fd);
+    try {
+      fileIo.readSync(file.fd, buffer, { offset: 0 });
+    } finally {
+      fileIo.closeSync(file.fd);
+    }
     WorkFileService.ensureWorkspace(context, convId);
     let root: string = WorkFileService.workspaceRoot(context, convId);
     let name: string = WorkFileService.sanitizeFileName(fallbackName);
@@ -576,11 +585,26 @@ export class WorkFileService {
     let root: string = WorkFileService.workspaceRoot(context, convId);
     let items: WorkspaceFileInfo[] = WorkFileService.listWorkspace(context, convId);
     let hasFile: boolean = false;
+    // 整包导出在内存里同时持有"全部源文件 + zip 输出"。没有上限时, 工作区里
+    // 一个几百 MB 的视频就能直接把应用撑爆。超限时明确拒绝, 而不是闪退。
+    const maxSingleBytes: number = 64 * 1024 * 1024;
+    const maxTotalBytes: number = 128 * 1024 * 1024;
+    let totalBytes: number = 0;
     let entries: ZipEntry[] = [];
-    for (let i = 0; i < items.length; i++) {
+    for (let i: number = 0; i < items.length; i++) {
       let item: WorkspaceFileInfo = items[i];
       if (item.isDir) {
         continue;
+      }
+      if (item.size > maxSingleBytes) {
+        throw new Error('文件过大, 无法打包导出: ' + item.path + ' (' +
+          WorkFileService.formatSize(item.size) + ', 单文件上限 ' +
+          WorkFileService.formatSize(maxSingleBytes) + ')');
+      }
+      totalBytes += item.size;
+      if (totalBytes > maxTotalBytes) {
+        throw new Error('工作区总大小超过打包上限(' +
+          WorkFileService.formatSize(maxTotalBytes) + '), 请先删除或拆分大文件');
       }
       let abs: string = WorkFileService.resolveSafe(root, item.path);
       if (abs === null) {

@@ -1397,7 +1397,11 @@ struct ChatPage {
 
   private visibleMessageStart(): number {
     const total: number = this.vm.currentMessages.length;
-    return Math.max(0, total - this.messageWindowSize);
+    // 切会话后的第一次构建可能早于 runUiRefresh 重置窗口; 这时先按默认步长算,
+    // 避免拿着上一个会话展开的 3000 条窗口去渲染新会话。
+    const window: number = this.vm.currentConversationId !== this.lastWindowConvId ?
+      ChatPage.MESSAGE_WINDOW_STEP : this.messageWindowSize;
+    return Math.max(0, total - window);
   }
 
   private visibleMessages(): Message[] {

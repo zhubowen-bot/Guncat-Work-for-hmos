@@ -148,6 +148,7 @@ export class StorageManager {
           console.error('loadConversations: main store corrupt, trying backup');
         }
       }
+      let recovered: string = '';
       if (!trusted) {
         // 主文件缺失/损坏时回退到上一次成功写下的 .bak。没有这层,
         // 一次写盘中途被杀就会让用户觉得"闪退后对话全没了"。
@@ -156,15 +157,32 @@ export class StorageManager {
           try {
             convs = StorageManager.parseConversations(backup);
             trusted = true;
-            // 备份可用就顺手恢复主文件, 下次启动不再走回退路径。
-            // 先删掉损坏的主文件: 否则 writeConversationsFile 会把它转成 .bak,
-            // 反而用坏文件覆盖掉刚才这份唯一可用的备份(崩溃窗口里就彻底没了)。
-            StorageManager.unlinkQuietly(StorageManager.conversationsFilePath(context));
-            StorageManager.writeConversationsFile(context, backup);
+            recovered = backup;
           } catch (e) {
             console.error('loadConversations: backup corrupt too');
           }
         }
+      }
+      if (!trusted) {
+        // 最后一次机会: 写到一半的 .tmp。首次安装/迁移后如果恰好在 rename
+        // 之前被杀, 主文件和 .bak 都不存在, 但 .tmp 里已经是完整 JSON。
+        const temp: string = StorageManager.readTextFile(
+          StorageManager.conversationsFilePath(context) + '.tmp');
+        if (temp !== '') {
+          try {
+            convs = StorageManager.parseConversations(temp);
+            trusted = true;
+            recovered = temp;
+          } catch (e) {
+            console.error('loadConversations: temp file corrupt too');
+          }
+        }
+      }
+      if (recovered !== '') {
+        // 恢复可用存档为主文件。先删掉损坏的主文件: 否则 writeConversationsFile
+        // 会把它转成 .bak, 反而用坏文件覆盖掉刚才这份唯一可用的备份。
+        StorageManager.unlinkQuietly(StorageManager.conversationsFilePath(context));
+        StorageManager.writeConversationsFile(context, recovered);
       }
       // 空串 = 没有存档(全新安装), 不算"读成功"; 有内容且解析成数组 = 可信
       StorageManager.loadOk = trusted;

@@ -129,6 +129,10 @@ export class Constants {
   static readonly WORK_CONTEXT_WINDOW_TOKENS: number = 1000000;
   // 触发上下文压缩的 token 占比(usage 锚定: 上一请求真实 prompt tokens 达阈值即压缩)
   static readonly WORK_COMPACT_TOKEN_RATIO: number = 0.85;
+  // 请求历史的字符硬上限(内存安全阀): 即使模型声明 1M 上下文, 把数百万字符的
+  // 历史 stringify 成请求体也会产生数倍峰值内存。超过该值时同样触发压缩/裁剪,
+  // 避免低内存设备在构造请求阶段直接闪退。
+  static readonly WORK_CONTEXT_MAX_CHARS: number = 2000000;
   // 压缩第一阶段(无模型参与)对早期工具结果的修剪阈值与头尾保留量
   static readonly WORK_PRUNE_RESULT_MAX_CHARS: number = 2500;
   static readonly WORK_PRUNE_KEEP_HEAD: number = 1200;
