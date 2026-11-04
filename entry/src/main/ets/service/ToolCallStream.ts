@@ -10,8 +10,8 @@ export class ToolCallAccumulator {
   calls: ToolCallRecord[] = [];
   // 协议内 index(completions 的 delta.index / anthropic 的 block index) → calls 下标
   keyMap: number[] = [];
-  // 参数分片 join 的节流时间戳。80ms 一次既能让 UI 看到参数在增长,
-  // 又避免每个 token 都复制整段 argsJson。
+  // 参数分片 join 的节流时间戳。200ms 一次对"参数正在生成"的观感足够,
+  // 同时把 512KB 级参数反复拼接的次数再降 60%。
   private lastArgsFlushMs: number = 0;
 
   // 追加一段工具参数(不立即拼接)
@@ -24,7 +24,7 @@ export class ToolCallAccumulator {
   // 把已攒下的分片拼进 argsJson。force=true 用于流结束/工具执行前。
   flushArgs(force: boolean = false): void {
     const now: number = Date.now();
-    if (!force && now - this.lastArgsFlushMs < 80) {
+    if (!force && now - this.lastArgsFlushMs < 200) {
       return;
     }
     this.lastArgsFlushMs = now;

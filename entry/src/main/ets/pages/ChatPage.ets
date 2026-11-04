@@ -266,9 +266,10 @@ struct ChatPage {
 
   private onAppForegroundChanged(): void {
     if (this.appForeground) {
-      // 后台期间积压的 VM 变更没有刷新, 回前台补一次
+      // 后台期间积压的 VM 变更没有刷新, 回前台补一次。
+      // 是否置底由 runUiRefresh 依据"是否刚结束流式/是否有新产物"决定,
+      // 不在这里无条件滚动, 避免用户回前台时丢失原来的阅读位置。
       this.scheduleUiRefresh();
-      this.scrollToBottomDelayed();
       return;
     }
     // 切后台: 取消尚未执行的刷新, 不让整页重建在后台发生

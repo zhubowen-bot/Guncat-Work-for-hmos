@@ -17,7 +17,7 @@ export class WorkStepFormat {
 
   // 参数概要: 优先展示 path/from/to/query, content 只取开头
   static summarizeArgs(call: ToolCallRecord): string {
-    // 大参数解析结果缓存: 流式期间每 80ms 就会重建一次工具行, write_file 的
+    // 大参数解析结果缓存: 流式期间每 200ms 就会重建一次工具行, write_file 的
     // 512KB argsJson 反复 JSON.parse 是纯浪费。长度 + 是否收口足够作为缓存键
     // (参数只会追加, 收口后不再变化)。
     const cacheKey: string = call.argsJson.length.toString() + '#' +
