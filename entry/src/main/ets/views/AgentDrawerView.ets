@@ -63,7 +63,7 @@ export struct AgentDrawerView {
 
         // 新建对话
         // 用包裹 Column 的 padding 实现左右内边距, 避免按钮 width('100%') + margin 溢出
-        // 样式与下方「表格提取」完全一致: 蓝底图标 + 主文字, 白底胶囊 + 轻阴影
+        // 保留原有品牌浅蓝底方案, 仅把文字加号换成真正的 plus 图标
         Column() {
           Button() {
             Row() {
@@ -72,7 +72,7 @@ export struct AgentDrawerView {
                 .fontColor([$r('app.color.brand')])
               Text('新建对话')
                 .fontSize(14)
-                .fontColor($r('app.color.text_primary'))
+                .fontColor($r('app.color.brand'))
                 .fontWeight(FontWeight.Medium)
                 .margin({ left: 8 })
             }
@@ -83,8 +83,7 @@ export struct AgentDrawerView {
           .width('100%')
           .height(38)
           .borderRadius(18)
-          .backgroundColor($r('app.color.raised_surface'))
-          .shadow({ radius: 12, color: '#12000000', offsetX: 0, offsetY: 3 })
+          .backgroundColor($r('app.color.brand_light'))
           .onClick(() => {
             this.onNewConversation();
           })
