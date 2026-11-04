@@ -309,7 +309,7 @@ export class GuncatUiParts {
     // 普通回答(没有这些记号)不必再做 trailer 切分 + 围栏扫描 + 逐行判断,
     // 这条路径在流式收尾采样里每 250ms 会跑一次。
     if (content.indexOf('```') < 0 && content.indexOf('root') < 0 &&
-      content.indexOf(' = ') < 0) {
+      content.indexOf('=') < 0) {
       return false;
     }
     let split: GuncatUiSplit = GuncatUiTrailer.split(content);

@@ -1607,6 +1607,13 @@ export class ChatService {
       streamResult.reasoningItems = reasoningItems;
       streamResult.content = acc.fullContent;
     } catch (e) {
+      // 错误/中断路径也要把最后一个不足 80ms 的批次交给 UI,
+      // 否则用户看到/保存的正文会比实际收到的少一段。
+      try {
+        flushPending();
+      } catch (flushError) {
+        // 回调本身异常不覆盖原始错误
+      }
       let err: Error = e as Error;
       if (!abortSignal.aborted) {
         // 已经是分类错误(LoopError)就原样上抛: 网络中断/流截断是 transport,

@@ -35,6 +35,10 @@ export class StorageManager {
   private static saveTimer: number = -1;
   private static pendingContext: Context | undefined = undefined;
   private static pendingConversations: Conversation[] | undefined = undefined;
+  // 最近一次请求保存的会话数组。合并写完成后 pending 会被清空, 但后续的
+  // flushConversations()(停止生成/切后台/退出)仍需要能强制再写一次 ——
+  // 否则"最后一次写盘之后追加的流式内容"会因为 pending 为空而永远不落盘。
+  private static latestConversations: Conversation[] | undefined = undefined;
   private static writeInFlight: boolean = false;
   private static writeAgain: boolean = false;
 
@@ -49,6 +53,7 @@ export class StorageManager {
     // 稍后写盘时拿到的就是最新状态, 不会写入过期快照。
     StorageManager.pendingContext = context;
     StorageManager.pendingConversations = convs;
+    StorageManager.latestConversations = convs;
     if (StorageManager.saveTimer !== -1) {
       return;
     }
@@ -66,6 +71,12 @@ export class StorageManager {
     if (StorageManager.saveTimer !== -1) {
       clearTimeout(StorageManager.saveTimer);
       StorageManager.saveTimer = -1;
+    }
+    // 没有待写数据时也用最近一次的会话引用强制重写: 流式最后几秒的内容可能
+    // 在上一轮合并写之后才追加, 而各调用方在 flush 前已经清掉了自己的定时器。
+    if (StorageManager.pendingConversations === undefined &&
+      StorageManager.latestConversations !== undefined) {
+      StorageManager.pendingConversations = StorageManager.latestConversations;
     }
     StorageManager.writePending();
   }
@@ -161,9 +172,56 @@ export class StorageManager {
     // "会话列表可信" —— 读失败时列表为空, 若拿空列表去清扫就等于把用户所有工作区删掉。
     StorageManager.loadOk = false;
     try {
+      const mainPath: string = StorageManager.conversationsFilePath(context);
+      const tmpPath: string = mainPath + '.tmp';
+      let mainExists: boolean = false;
+      try {
+        mainExists = fileIo.accessSync(mainPath);
+      } catch (e) {
+        mainExists = false;
+      }
+      // .tmp 只有在"完整写完并准备提交"时才会保留(写失败会删掉; 进程被杀
+      // 留下的半截文件解析会失败)。它比主文件新时优先采用, 避免 commit
+      // 在 rename 阶段失败后下次启动回退到更旧的 .bak/主文件。
+      let tmpExists: boolean = false;
+      try {
+        tmpExists = fileIo.accessSync(tmpPath);
+      } catch (e) {
+        tmpExists = false;
+      }
+      let convs: Conversation[] = [];
+      let trusted: boolean = false;
+      let recovered: string = '';
+      let recoveredKind: string = '';
+      if (tmpExists) {
+        let tmpNewer: boolean = !mainExists;
+        if (mainExists) {
+          try {
+            tmpNewer = fileIo.statSync(tmpPath).mtime > fileIo.statSync(mainPath).mtime;
+          } catch (e) {
+            tmpNewer = false;
+          }
+        }
+        if (tmpNewer) {
+          const temp: string = StorageManager.readTextFile(tmpPath);
+          if (temp !== '') {
+            try {
+              convs = StorageManager.parseConversations(temp);
+              trusted = true;
+              recovered = temp;
+              recoveredKind = 'tmp';
+            } catch (e) {
+              console.error('loadConversations: preferred tmp is partial/corrupt');
+            }
+          }
+        }
+      }
       // 新存储优先读文件
-      let jsonStr: string = StorageManager.readConversationsFile(context);
-      if (jsonStr === '') {
+      let jsonStr: string = '';
+      if (!trusted && mainExists) {
+        jsonStr = StorageManager.readConversationsFile(context);
+      }
+      if (!trusted && jsonStr === '') {
         // 首次升级到文件存储: 从 Preferences 迁移旧对话数据
         let legacy: string = await StorageManager.readLegacyConversations(context);
         if (legacy !== '') {
@@ -179,9 +237,7 @@ export class StorageManager {
           }
         }
       }
-      let convs: Conversation[] = [];
-      let trusted: boolean = false;
-      if (jsonStr !== '') {
+      if (!trusted && jsonStr !== '') {
         try {
           convs = StorageManager.parseConversations(jsonStr);
           trusted = true;
@@ -189,24 +245,38 @@ export class StorageManager {
           console.error('loadConversations: main store corrupt, trying backup');
         }
       }
-      let recovered: string = '';
+      // 恢复顺序要分清"主文件缺失"和"主文件损坏":
+      //  - 主文件缺失通常是 commit 在 rename(main→bak) 之后、rename(tmp→main)
+      //    之前被打断, 此时 .tmp 才是**最新完整**存档, 必须先试 .tmp;
+      //  - 主文件损坏则 .bak 是上一个成功版本, 先试 .bak。
+      if (!trusted && !mainExists) {
+        const temp: string = StorageManager.readTextFile(tmpPath);
+        if (temp !== '') {
+          try {
+            convs = StorageManager.parseConversations(temp);
+            trusted = true;
+            recovered = temp;
+            recoveredKind = 'tmp';
+          } catch (e) {
+            console.error('loadConversations: temp file corrupt');
+          }
+        }
+      }
       if (!trusted) {
-        // 主文件缺失/损坏时回退到上一次成功写下的 .bak。没有这层,
-        // 一次写盘中途被杀就会让用户觉得"闪退后对话全没了"。
         const backup: string = StorageManager.readConversationsBackup(context);
         if (backup !== '') {
           try {
             convs = StorageManager.parseConversations(backup);
             trusted = true;
             recovered = backup;
+            recoveredKind = 'bak';
           } catch (e) {
-            console.error('loadConversations: backup corrupt too');
+            console.error('loadConversations: backup corrupt');
           }
         }
       }
-      if (!trusted) {
-        // 最后一次机会: 写到一半的 .tmp。首次安装/迁移后如果恰好在 rename
-        // 之前被杀, 主文件和 .bak 都不存在, 但 .tmp 里已经是完整 JSON。
+      if (!trusted && mainExists && recoveredKind === '') {
+        // 主文件存在但损坏时, 最后再试一次 .tmp
         const temp: string = StorageManager.readTextFile(
           StorageManager.conversationsFilePath(context) + '.tmp');
         if (temp !== '') {
@@ -214,19 +284,32 @@ export class StorageManager {
             convs = StorageManager.parseConversations(temp);
             trusted = true;
             recovered = temp;
+            recoveredKind = 'tmp';
           } catch (e) {
             console.error('loadConversations: temp file corrupt too');
           }
         }
       }
       if (recovered !== '') {
-        // 恢复可用存档为主文件。先删掉损坏的主文件: 否则 writeConversationsFile
-        // 会把它转成 .bak, 反而用坏文件覆盖掉刚才这份唯一可用的备份。
-        StorageManager.unlinkQuietly(StorageManager.conversationsFilePath(context));
-        StorageManager.writeConversationsFile(context, recovered);
+        if (recoveredKind === 'tmp') {
+          // .tmp 已是最新完整数据: 直接改名成主文件, 不再重写一遍。
+          // 失败时保持 .tmp 原样, 下次启动还会走同一条恢复路径。
+          try {
+            StorageManager.unlinkQuietly(mainPath);
+            fileIo.renameSync(tmpPath, mainPath);
+          } catch (e) {
+            console.error('loadConversations: promote tmp failed, keep it for next launch');
+          }
+        } else {
+          // 从 .bak 恢复: 先删掉损坏的主文件, 避免它被转成 .bak 覆盖掉可用备份。
+          StorageManager.unlinkQuietly(mainPath);
+          StorageManager.writeConversationsFile(context, recovered);
+        }
       }
-      // 空串 = 没有存档(全新安装), 不算"读成功"; 有内容且解析成数组 = 可信
-      StorageManager.loadOk = trusted;
+      // 空串 = 没有存档(全新安装), 不算"读成功"; 有内容且解析成数组 = 可信。
+      // 从 .bak/.tmp 恢复时列表可能落后于崩溃前最后一次写入, 本次启动禁用
+      // 孤儿清扫, 否则会把"只存在于丢失存档里的会话"的工作区/日志删掉。
+      StorageManager.loadOk = trusted && recoveredKind === '';
       return convs;
     } catch (error) {
       // 读取失败(如文件损坏)不阻塞启动, 按无历史处理
@@ -356,8 +439,16 @@ export class StorageManager {
         // 继续走恢复
       }
     }
-    // 改名失败: 把 .bak 恢复成主文件, 避免出现"没有任何主文件"的窗口。
-    if (!hasMain) {
+    // 改名失败: 只要主文件现在不存在, 就把 .bak 恢复成主文件。
+    // 不能判断 hasMain —— 主文件可能已经成功改名为 .bak, 此时 hasMain 仍为 true,
+    // 但 abs 实际已经不存在。
+    let absExists: boolean = false;
+    try {
+      absExists = fileIo.accessSync(abs);
+    } catch (e) {
+      absExists = false;
+    }
+    if (!absExists) {
       try {
         if (fileIo.accessSync(bakPath)) {
           fileIo.renameSync(bakPath, abs);

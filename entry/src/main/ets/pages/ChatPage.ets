@@ -174,7 +174,7 @@ struct ChatPage {
   // GuncatUiView), 打开一个几百轮的会话等于在主线程一次性解析几百份 Markdown,
   // 这正是"历史对话积累过多"后闪退/卡死的直接原因。窗口化后渲染成本与历史总长
   // 解耦, 仍可按需回看更早内容。
-  private static readonly MESSAGE_WINDOW_STEP: number = 60;
+  private static readonly MESSAGE_WINDOW_STEP: number = 40;
   @State private messageWindowSize: number = ChatPage.MESSAGE_WINDOW_STEP;
   private lastWindowConvId: string = '';
 
@@ -312,6 +312,8 @@ struct ChatPage {
     if (this.vm.currentConversationId !== this.lastWindowConvId) {
       this.lastWindowConvId = this.vm.currentConversationId;
       this.messageWindowSize = ChatPage.MESSAGE_WINDOW_STEP;
+      // 不同会话的工作区是不同目录, 旧的产物签名必须失效
+      this.artifactsSig = '';
     }
     this.rebuildPreviewItems();
     // 详情面板统计快照随 VM 状态变化重建(工具结果/流式统计到达后立刻反映)
@@ -2254,7 +2256,12 @@ struct ChatPage {
           c.result.length.toString() + ':' + c.durationMs.toString());
       }
     }
-    parts.push('w' + this.vm.workspaceFiles.length.toString());
+    // 只取数量不够: 两个工作区文件数相同但名字不同时, 产物卡会错误复用上一次过滤结果。
+    const files: WorkspaceFileInfo[] = this.vm.workspaceFiles;
+    parts.push('w' + files.length.toString());
+    for (let i: number = 0; i < files.length; i++) {
+      parts.push(files[i].path + ':' + files[i].size.toString());
+    }
     return parts.join('|');
   }
 

@@ -108,8 +108,13 @@ class ExecStream {
   }
 
   text(): string {
-    // 冲刷解码器里可能残留的半个多字节字符
-    this.parts.push(this.decoder.decodeToString(new Uint8Array(0), { stream: false }));
+    // 冲刷解码器里可能残留的半个多字节字符。冲刷结果同样要检查 U+FFFD:
+    // 输出末尾的非法 UTF-8 只有在 flush 时才会被解码出来。
+    const tail: string = this.decoder.decodeToString(new Uint8Array(0), { stream: false });
+    if (tail.indexOf('\uFFFD') !== -1) {
+      this.binary = true;
+    }
+    this.parts.push(tail);
     const joined: string = this.parts.join('');
     this.parts = [];
     return joined;

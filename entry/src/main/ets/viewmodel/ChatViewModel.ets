@@ -4300,6 +4300,33 @@ function msgChars(m: LoopMessage): number {
 // 第一级压缩(无模型参与): 把 [from, to) 范围内过长的工具结果替换为头尾节选 +
 // 精确省略提示(原文可随时用 read_file/search_files/parse_document 重新获取)。
 // 返回是否有任何修剪发生。assistant 与其工具结果同在一条消息内, 不会拆散协议对。
+// 压缩专用浅拷贝: 只复制对象外壳, 字符串字段继续共享(不可变)。
+// 上下文压缩必须 copy-on-write, 不能直接改 LoopMessage 里的调用对象:
+// 当前任务运行期间 LoopMessage 与时间线 Message 共用同一批 ToolCallRecord,
+// 原地修剪会把用户看到/落盘的工具结果也永久截断。
+function cloneToolCallsForPrune(calls: ToolCallRecord[]): ToolCallRecord[] {
+  let out: ToolCallRecord[] = [];
+  for (let i: number = 0; i < calls.length; i++) {
+    let s: ToolCallRecord = calls[i];
+    let d: ToolCallRecord = new ToolCallRecord();
+    d.id = s.id;
+    d.name = s.name;
+    d.argsJson = s.argsJson;
+    d.result = s.result;
+    d.isError = s.isError;
+    d.durationMs = s.durationMs;
+    d.meta = s.meta;
+    d.preparing = s.preparing;
+    d.started = s.started;
+    d.timeout = s.timeout;
+    d.cancelled = s.cancelled;
+    d.schemaError = s.schemaError;
+    d.traceId = s.traceId;
+    out.push(d);
+  }
+  return out;
+}
+
 function pruneOldToolResults(messages: LoopMessage[], from: number, to: number): boolean {
   let pruned: boolean = false;
   let end: number = Math.min(to, messages.length);
@@ -4308,25 +4335,39 @@ function pruneOldToolResults(messages: LoopMessage[], from: number, to: number):
     if (m.role !== 'assistant') {
       continue;
     }
-    for (let c: number = 0; c < m.toolCalls.length; c++) {
-      let call: ToolCallRecord = m.toolCalls[c];
+    let calls: ToolCallRecord[] = m.toolCalls;
+    let copied: boolean = false;
+    for (let c: number = 0; c < calls.length; c++) {
+      let call: ToolCallRecord = calls[c];
+      const trimArgs: boolean = call.argsJson.length > 16384;
+      const trimResult: boolean = call.result.length > Constants.WORK_PRUNE_RESULT_MAX_CHARS;
+      if (!trimArgs && !trimResult) {
+        continue;
+      }
+      if (!copied) {
+        // 第一条需要修剪的调用出现时, 整个数组换成副本并挂回 LoopMessage,
+        // 之后的修改只影响请求历史。
+        calls = cloneToolCallsForPrune(calls);
+        m.toolCalls = calls;
+        copied = true;
+      }
+      call = calls[c];
       // 旧调用的参数同样会永久占上下文: write_file/append_file 的 argsJson 最大
       // 512KB, 几次之后就能把一轮请求推到几十 MB。参数本身对后续推理的边际价值
       // 很低, 超过阈值后替换成合法 JSON 占位(保持 tool_calls 协议可解析)。
-      if (call.argsJson.length > 16384) {
+      if (trimArgs) {
         call.argsJson = '{"_note":"早期调用参数已在历史压缩中省略"}';
         pruned = true;
       }
-      if (call.result.length <= Constants.WORK_PRUNE_RESULT_MAX_CHARS) {
-        continue;
+      if (trimResult) {
+        let omitted: number = call.result.length -
+          Constants.WORK_PRUNE_KEEP_HEAD - Constants.WORK_PRUNE_KEEP_TAIL;
+        call.result = call.result.substring(0, Constants.WORK_PRUNE_KEEP_HEAD) +
+          '\n[...早期工具结果已修剪, 省略 ' + omitted.toString() +
+          ' 字符; 需要原文时用 read_file/search_files/parse_document 重新获取...]\n' +
+          call.result.substring(call.result.length - Constants.WORK_PRUNE_KEEP_TAIL);
+        pruned = true;
       }
-      let omitted: number = call.result.length -
-        Constants.WORK_PRUNE_KEEP_HEAD - Constants.WORK_PRUNE_KEEP_TAIL;
-      call.result = call.result.substring(0, Constants.WORK_PRUNE_KEEP_HEAD) +
-        '\n[...早期工具结果已修剪, 省略 ' + omitted.toString() +
-        ' 字符; 需要原文时用 read_file/search_files/parse_document 重新获取...]\n' +
-        call.result.substring(call.result.length - Constants.WORK_PRUNE_KEEP_TAIL);
-      pruned = true;
     }
   }
   return pruned;

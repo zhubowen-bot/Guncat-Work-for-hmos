@@ -539,6 +539,12 @@ export class AgentLoopService {
         });
       });
     } catch (e) {
+      // 错误/中断前把尚未满 80ms 的文本/思考批次交给 UI
+      try {
+        flushPending();
+      } catch (flushError) {
+        // 回调异常不覆盖原始错误
+      }
       let err: Error = e as Error;
       if (!abortSignal.aborted) {
         // 已经是分类错误(LoopError)就原样上抛: 网络中断/流截断是 transport, 必须留给

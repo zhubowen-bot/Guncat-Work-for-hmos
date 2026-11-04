@@ -50,18 +50,27 @@ export class SessionLogService {
         while (SessionLogService.openOrder.length >= SessionLogService.MAX_OPEN_FILES) {
           SessionLogService.closeOldest();
         }
+        // 只有真正的新文件才写 header。LRU 关闭后重开同一个日志时再写一次
+        // 会把 session header 插到 JSONL 中间, 解析方会以为这是新会话。
+        let headerNeeded: boolean = false;
+        try {
+          headerNeeded = !fileIo.accessSync(abs) || fileIo.statSync(abs).size === 0;
+        } catch (e) {
+          headerNeeded = true;
+        }
         file = fileIo.openSync(abs,
           fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.APPEND);
         SessionLogService.openFiles.set(convId, file);
         SessionLogService.openOrder.push(convId);
-        // 新文件写 header
-        let header: Record<string, Object> = {
-          'type': 'session',
-          'version': 1,
-          'id': convId,
-          'createdAt': Date.now()
-        };
-        SessionLogService.writeLine(file, header);
+        if (headerNeeded) {
+          let header: Record<string, Object> = {
+            'type': 'session',
+            'version': 1,
+            'id': convId,
+            'createdAt': Date.now()
+          };
+          SessionLogService.writeLine(file, header);
+        }
       }
       let event: Record<string, Object> = { 'type': type, 'ts': Date.now() };
       let keys: string[] = Object.keys(payload);

@@ -147,10 +147,10 @@ export class IecShellService {
       cwd: cwd,
       stdin: stdin,
       timeoutMs: timeoutMs,
-      // 留够余量：超过 60KB 的部分要落 .spill，被引擎的 cap 丢掉就写不回去了。
-      // 上限从 8MB 降到 2MB: 2MB 已经覆盖 20k 正文 + 全部 .spill 尾巴的常见场景,
-      // 而 8MB 输出在解码/落盘/拼装正文时会产生数倍峰值内存, 是 `cat` 大文件
-      // 直接闪退的主要原因。真的更大的输出请让命令自己重定向到文件再 read_file。
+      // 上限从 8MB 降到 2MB: 更大的输出会在解码/落盘/拼装正文时产生数倍峰值内存,
+      // 是 `cat` 大文件直接闪退的主要原因。**注意**: 超过 2MB 的部分会被引擎 cap
+      // 丢弃, .spill 也只能保存这 2MB; 结果正文会明确标注 dropped 字节数。
+      // 需要完整大输出时, 请让命令自己重定向到工作区文件, 再用 read_file 分段读取。
       maxOutputBytes: Math.max(2 * 1024 * 1024, Constants.WORK_SHELL_MAX_OUTPUT_BYTES * 8),
       env: env
     });
