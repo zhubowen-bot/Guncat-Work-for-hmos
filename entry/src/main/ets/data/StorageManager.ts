@@ -211,7 +211,9 @@ export class StorageManager {
               recovered = temp;
               recoveredKind = 'tmp';
             } catch (e) {
+              // 半截 .tmp(写盘中途被杀)没有保留价值, 清掉避免每次启动都重试
               console.error('loadConversations: preferred tmp is partial/corrupt');
+              StorageManager.unlinkQuietly(tmpPath);
             }
           }
         }
@@ -305,6 +307,10 @@ export class StorageManager {
           StorageManager.unlinkQuietly(mainPath);
           StorageManager.writeConversationsFile(context, recovered);
         }
+      }
+      if (trusted && recoveredKind === '') {
+        // 主文件正常: 清掉比它旧的残留 .tmp(写盘/提交失败留下的)
+        StorageManager.unlinkQuietly(tmpPath);
       }
       // 空串 = 没有存档(全新安装), 不算"读成功"; 有内容且解析成数组 = 可信。
       // 从 .bak/.tmp 恢复时列表可能落后于崩溃前最后一次写入, 本次启动禁用
@@ -519,6 +525,21 @@ export class StorageManager {
         if (typeof r === 'string' && (r as string).length > Constants.REASONING_SAVE_MAX_CHARS) {
           m['reasoning'] = '…' +
             (r as string).slice((r as string).length - Constants.REASONING_SAVE_MAX_CHARS);
+        }
+        // write_file/append_file 的 argsJson 最大 512KB。旧调用参数对后续推理的
+        // 边际价值很低, 却会让单个会话存档膨胀到几十 MB(启动解析也一起变慢)。
+        // 只裁剪**落盘副本**: 内存里的完整参数仍可供当前会话展开查看;
+        // 重载后用合法 JSON 占位, 保证 tool_calls 协议仍能解析。
+        let callsObj: Object = m['toolCalls'];
+        if (callsObj !== undefined && callsObj instanceof Array) {
+          let calls: Object[] = callsObj as Object[];
+          for (let k: number = 0; k < calls.length; k++) {
+            let c: Record<string, Object> = calls[k] as Record<string, Object>;
+            let args: Object = c['argsJson'];
+            if (typeof args === 'string' && (args as string).length > 32768) {
+              c['argsJson'] = '{"_note":"早期调用参数体积过大, 已在存档中省略"}';
+            }
+          }
         }
       }
     }
