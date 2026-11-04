@@ -1,4 +1,5 @@
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
+import { SettingsSession } from '../viewmodel/SettingsSession';
 import { ChatBubbleView } from '../views/ChatBubbleView';
 import { MessageInputView } from '../views/MessageInputView';
 import { ToggleSwitch } from '../components/ToggleSwitch';
@@ -8,7 +9,6 @@ import { AskUserCard } from '../views/AskUserCard';
 import { FlyInLaunchView } from '../views/FlyInLaunchView';
 import { ToastView } from '../views/ToastView';
 import { ImageLightbox } from '../views/ImageLightbox';
-import { SettingsPanel } from '../views/SettingsPanel';
 import { PlayGuidePanel } from '../views/PlayGuidePanel';
 import { WorkspaceBar, WorkspaceFileIcons } from '../views/WorkspaceBar';
 import { WorkTurnView } from '../views/WorkTurnView';
@@ -23,9 +23,6 @@ import { ToolCallRecord } from '../model/ToolCallRecord';
 import { Agent } from '../model/Agent';
 import { Conversation } from '../model/Conversation';
 import { ConversationListItem } from '../model/ConversationListItem';
-import { ApiConfig } from '../model/ApiConfig';
-import { MultimodalConfig } from '../model/MultimodalConfig';
-import { SearchEngineSettings } from '../service/LocalWebSearch';
 import { ApiProfile } from '../model/ApiProfile';
 import { FileItem, PreviewData } from '../common/Types';
 import { WorkFileService, WorkspaceFileInfo } from '../service/WorkFileService';
@@ -39,7 +36,7 @@ import {
   TextReaderService
 } from '../service/TextReaderService';
 import { abilityAccessCtrl, common, PermissionRequestResult } from '@kit.AbilityKit';
-import { window } from '@kit.ArkUI';
+import { router, window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { DocxExporter } from '../export/DocxExporter';
 
@@ -65,7 +62,6 @@ struct ChatPage {
   private appForeground: boolean = true;
   @State private inputText: string = '';
   @State private drawerOpen: boolean = false;
-  @State private settingsOpen: boolean = false;
   @State private playGuideOpen: boolean = false;
   // ===== 桌面宽屏三栏布局(对齐 dsh AppFrame): 侧栏 | 会话 | 详情 =====
   @State private isWide: boolean = false;
@@ -497,6 +493,15 @@ struct ChatPage {
     }, 1000);
   }
 
+  // 设置页是独立路由页: 把当前 VM 交给设置页共享, 保存后由 VM 通知本页刷新。
+  // 不再常驻挂载整棵设置表单, 聊天页流式刷新时也不会重复求值配置项。
+  private openSettings(): void {
+    SettingsSession.bind(this.vm);
+    router.pushUrl({ url: 'pages/SettingsPage' }).catch((): void => {
+      this.showToast('无法打开设置');
+    });
+  }
+
   // 同步“是否贴底”到 UI 状态。只在值变化时写 @State, 避免滚动帧里反复触发重建。
   private setFollowBottom(follow: boolean): void {
     this.followBottom = follow;
@@ -653,7 +658,7 @@ struct ChatPage {
               });
             },
             onSettings: () => {
-              this.settingsOpen = true;
+              this.openSettings();
             },
             onPlayGuide: () => {
               this.playGuideOpen = true;
@@ -893,65 +898,6 @@ struct ChatPage {
           .transition(
             TransitionEffect.opacity(0).animation({ duration: 200, curve: Curve.EaseOut })
           )
-      }
-
-      // 设置: 只在打开时挂载。设置面板整棵树很大, 常驻挂载会让每次页面刷新
-      // (流式期间约 20 次/秒)都重新求值一遍全部配置项, 还会在 build 里做
-      // JSON.stringify(localSearchConfig)。关闭后本就需要重新读取初值, 无状态损失。
-      if (this.settingsOpen) {
-        SettingsPanel({
-          visible: true,
-        initProfileId: this.vm.currentApiProfileId,
-        initProfileName: this.vm.currentApiProfile !== null ? this.vm.currentApiProfile.name : '默认配置',
-        profileNames: this.getApiProfileNames(),
-        selectedProfileIndex: this.vm.currentApiProfileIndex,
-        canDeleteProfile: this.vm.currentApiProfile !== null && !this.vm.currentApiProfile.builtin,
-        initProvider: this.vm.apiConfig.provider,
-        initBaseUrl: this.vm.apiConfig.baseUrl,
-        initApiKey: this.vm.apiConfig.apiKey,
-        initModel: this.vm.apiConfig.model,
-        initModels: this.vm.apiConfig.modelList(),
-        initTemperature: this.vm.apiConfig.temperature !== null ? this.vm.apiConfig.temperature.toString() : '',
-        initTopP: this.vm.apiConfig.topP !== null ? this.vm.apiConfig.topP.toString() : '',
-        initMaxTokens: this.vm.apiConfig.maxTokens !== null ? this.vm.apiConfig.maxTokens.toString() : '',
-        initExtraBody: this.vm.apiConfig.extraBody,
-        initAutoSuffix: this.vm.apiConfig.autoSuffix,
-        initLocalSearchJson: JSON.stringify(this.vm.localSearchConfig.toJson()),
-        initMmBaseUrl: this.vm.multimodalConfig.baseUrl,
-        initMmApiKey: this.vm.multimodalConfig.apiKey,
-        initMmModel: this.vm.multimodalConfig.model,
-        initMmPreparseEnabled: this.vm.multimodalConfig.preparseEnabled,
-        initMmPreparseUserSet: this.vm.multimodalConfig.preparseUserSet,
-        onClose: () => {
-          this.settingsOpen = false;
-        },
-        onAddProfile: () => {
-          this.vm.addApiProfile().then(() => {
-            this.refreshTick++;
-          });
-        },
-        onDeleteProfile: () => {
-          this.vm.deleteApiProfile(this.vm.currentApiProfileId).then((deleted: boolean) => {
-            if (deleted) {
-              this.refreshTick++;
-            }
-          });
-        },
-        onSelectProfile: (index: number) => {
-          if (index >= 0 && index < this.vm.apiProfiles.length) {
-            this.vm.selectApiProfile(this.vm.apiProfiles[index].id);
-            this.refreshTick++;
-          }
-        },
-        onSave: (name: string, api: ApiConfig, mm: MultimodalConfig, search: SearchEngineSettings) => {
-          this.vm.saveLocalSearchConfig(search);
-          this.vm.saveCurrentApiProfile(name, api, mm).then(() => {
-            this.settingsOpen = false;
-            this.showToast('配置已保存');
-            this.refreshTick++;
-          });
-        },
-        })
       }
 
       // 玩转应用
@@ -1354,7 +1300,7 @@ struct ChatPage {
       .borderRadius(22)
       .backgroundColor(Color.Transparent)
       .onClick(() => {
-        this.settingsOpen = true;
+        this.openSettings();
       })
     }
     .width('100%')
@@ -2040,7 +1986,7 @@ struct ChatPage {
     }
     if (this.vm.apiConfig.apiKey === '') {
       this.showToast('请先配置 API Key');
-      this.settingsOpen = true;
+      this.openSettings();
       return;
     }
     if (this.vm.currentAgent === null) {
@@ -2286,23 +2232,6 @@ struct ChatPage {
       }
     }
     return list;
-  }
-
-  private getApiProfileOptions(): SelectOption[] {
-    let options: SelectOption[] = [];
-    for (let i: number = 0; i < this.vm.apiProfiles.length; i++) {
-      let profile: ApiProfile = this.vm.apiProfiles[i];
-      options.push({ value: profile.name });
-    }
-    return options;
-  }
-
-  private getApiProfileNames(): string[] {
-    let names: string[] = [];
-    for (let i: number = 0; i < this.vm.apiProfiles.length; i++) {
-      names.push(this.vm.apiProfiles[i].name);
-    }
-    return names;
   }
 
   private handleStop(): void {
