@@ -17,11 +17,23 @@ export class WorkStepFormat {
 
   // 参数概要: 优先展示 path/from/to/query, content 只取开头
   static summarizeArgs(call: ToolCallRecord): string {
+    // 大参数解析结果缓存: 流式期间每 80ms 就会重建一次工具行, write_file 的
+    // 512KB argsJson 反复 JSON.parse 是纯浪费。长度 + 是否收口足够作为缓存键
+    // (参数只会追加, 收口后不再变化)。
+    const cacheKey: string = call.argsJson.length.toString() + '#' +
+      (call.argsJson.endsWith('}') ? '1' : '0');
+    if (call.displaySummaryKey === cacheKey) {
+      return call.displaySummary;
+    }
+    let summary: string = '';
     // 流式生成中的参数不是完整 JSON: 大参数整段解析(失败也要扫到末尾)开销大,
     // 先用结尾字符廉价判断, 未收口直接回退原文展示
     let trimmed: string = call.argsJson.trim();
     if (trimmed !== '' && !trimmed.endsWith('}')) {
-      return WorkStepFormat.capText(call.argsJson, 80);
+      summary = WorkStepFormat.capText(call.argsJson, 80);
+      call.displaySummaryKey = cacheKey;
+      call.displaySummary = summary;
+      return summary;
     }
     try {
       let parsed: Object = JSON.parse(call.argsJson);
@@ -46,16 +58,23 @@ export class WorkStepFormat {
           if (parts.length === 1) {
             let eq: number = parts[0].indexOf('=');
             if (eq >= 0) {
-              return parts[0].substring(eq + 1);
+              summary = parts[0].substring(eq + 1);
             }
           }
-          return parts.join(', ');
+          if (summary === '') {
+            summary = parts.join(', ');
+          }
         }
       }
     } catch (e) {
       // 参数不是合法 JSON 时回退原文
     }
-    return WorkStepFormat.capText(call.argsJson, 80);
+    if (summary === '') {
+      summary = WorkStepFormat.capText(call.argsJson, 80);
+    }
+    call.displaySummaryKey = cacheKey;
+    call.displaySummary = summary;
+    return summary;
   }
 
   static formatDuration(ms: number): string {

@@ -26,6 +26,10 @@ export class ToolCallRecord {
   // (最大 512KB)下是 O(n²) 字符复制; 攒成分片后按节流 join 一次。
   // 不持久化, 重载/复制后由 argsJson 承载完整值。
   argsChunks: string[] = [];
+  // 运行态: UI 工具行摘要缓存。大参数(512KB write_file)在每次流式刷新时都
+  // JSON.parse 一次会明显卡顿; 输入长度/收口状态不变时直接复用。
+  displaySummary: string = '';
+  displaySummaryKey: string = '';
 
   static of(id: string, name: string, argsJson: string): ToolCallRecord {
     let rec: ToolCallRecord = new ToolCallRecord();
