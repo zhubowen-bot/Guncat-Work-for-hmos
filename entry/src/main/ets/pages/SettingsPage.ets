@@ -137,6 +137,8 @@ struct SettingsPage {
     .width('100%')
     .height('100%')
     .backgroundColor($r('app.color.sidebar_fill'))
+    // 只把页面底色延伸到屏幕底部导航条安全区；顶部状态栏保持原样
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
   @Builder
