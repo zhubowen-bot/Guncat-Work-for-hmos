@@ -19,7 +19,7 @@ struct SettingsPage {
   // 聊天页注入的 ViewModel(与聊天页共享, 保存后立即生效)
   private vm: ChatViewModel | null = null;
 
-  // 当前页面: root / model / advanced / search / multimodal / terminal
+  // 当前页面: root / model / advanced / search / multimodal / reading / terminal
   @State private view: string = 'root';
 
   // 自动保存: 修改后防抖落盘, 不阻塞输入; 切方案/离开页面前强制排队一次
@@ -184,6 +184,8 @@ struct SettingsPage {
         this.buildSearchView()
       } else if (this.view === 'multimodal') {
         this.buildMultimodalView()
+      } else if (this.view === 'reading') {
+        this.buildReadingView()
       } else if (this.view === 'terminal') {
         this.buildTerminalView()
       } else {
@@ -284,46 +286,10 @@ struct SettingsPage {
 
           this.buildSectionLabel('声音')
           Column() {
-            Row() {
-              Stack() {
-                SymbolGlyph($r('sys.symbol.speaker_wave_3'))
-                  .fontSize(23)
-                  .fontColor([$r('app.color.brand')])
-              }
-              .width(28)
-              .height(40)
-              .backgroundColor(Color.Transparent)
-
-              Column() {
-                Text('自动朗读')
-                  .fontSize(15)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor($r('app.color.text_primary'))
-                  .width('100%')
-                Text(this.autoReadEnabled ?
-                  '已开启：AI 回复结束后自动朗读' :
-                  '已关闭：可在对话页手动朗读回复')
-                  .fontSize(12)
-                  .fontColor($r('app.color.text_secondary'))
-                  .width('100%')
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .margin({ top: 3 })
-              }
-              .layoutWeight(1)
-              .alignItems(HorizontalAlign.Start)
-              .margin({ left: 14 })
-
-              Toggle({ type: ToggleType.Switch, isOn: this.autoReadEnabled })
-                .selectedColor($r('app.color.brand'))
-                .onChange((enabled: boolean) => {
-                  this.toggleAutoRead(enabled);
-                })
-            }
-            .width('100%')
-            .height(68)
-            .padding({ left: 14, right: 14 })
-            .alignItems(VerticalAlign.Center)
+            this.buildOptionRow($r('sys.symbol.speaker_wave_3'), '朗读',
+              this.readingSummary(), (): void => {
+                this.view = 'reading';
+              })
           }
           .width('100%')
           .backgroundColor($r('app.color.surface'))
@@ -1239,6 +1205,68 @@ struct SettingsPage {
     .edgeEffect(EdgeEffect.Spring)
   }
 
+  // ===== 朗读 =====
+  @Builder
+  private buildReadingView() {
+    Scroll() {
+      Column() {
+        this.buildSectionLabel('朗读设置')
+        Column() {
+          Row() {
+            Stack() {
+              SymbolGlyph($r('sys.symbol.speaker_wave_3'))
+                .fontSize(23)
+                .fontColor([$r('app.color.brand')])
+            }
+            .width(28)
+            .height(40)
+            .backgroundColor(Color.Transparent)
+
+            Column() {
+              Text('自动朗读')
+                .fontSize(15)
+                .fontWeight(FontWeight.Medium)
+                .fontColor($r('app.color.text_primary'))
+                .width('100%')
+              Text(this.autoReadEnabled ?
+                '已开启：AI 回复结束后自动朗读' :
+                '已关闭：可在对话页手动朗读回复')
+                .fontSize(11)
+                .fontColor($r('app.color.text_secondary'))
+                .width('100%')
+                .lineHeight(17)
+                .margin({ top: 4 })
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
+            .margin({ left: 14 })
+
+            Toggle({ type: ToggleType.Switch, isOn: this.autoReadEnabled })
+              .selectedColor($r('app.color.brand'))
+              .onChange((enabled: boolean) => {
+                this.toggleAutoRead(enabled);
+              })
+          }
+          .width('100%')
+          .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+          .alignItems(VerticalAlign.Center)
+        }
+        .width('100%')
+        .backgroundColor($r('app.color.surface'))
+        .borderRadius(22)
+        .border({ width: 1, color: $r('app.color.divider') })
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 720 })
+      .padding({ left: 16, right: 16, bottom: 24 })
+    }
+    .layoutWeight(1)
+    .width('100%')
+    .align(Alignment.Top)
+    .scrollBar(BarState.Off)
+    .edgeEffect(EdgeEffect.Spring)
+  }
+
   // ===== 终端环境(只读) =====
   @Builder
   private buildTerminalView() {
@@ -1401,6 +1429,9 @@ struct SettingsPage {
     }
     if (this.view === 'multimodal') {
       return '多模态解析';
+    }
+    if (this.view === 'reading') {
+      return '朗读';
     }
     if (this.view === 'terminal') {
       return '终端';
@@ -1600,6 +1631,10 @@ struct SettingsPage {
     }
     let model: string = this.mmModel.trim() !== '' ? this.mmModel.trim() : '默认模型';
     return '已开启 · ' + model;
+  }
+
+  private readingSummary(): string {
+    return this.autoReadEnabled ? '自动朗读已开启' : '自动朗读已关闭';
   }
 
   // ===== 模型字段操作 =====
