@@ -563,6 +563,10 @@ export class AgentLoopService {
         throw new LoopError(failedMsg, 0, 'protocol');
       }
     } finally {
+      // 错误/中断路径也要把参数分片拼回 argsJson: 这些 ToolCallRecord 已经
+      // 通过 onToolCalls 进了时间线并可能被存档, 缺最后 200ms 会让参数变成
+      // 非法 JSON, 下一轮请求直接 400。
+      callAcc.flushArgs(true);
       let idx: number = AgentLoopService.activeRequests.indexOf(httpRequest);
       if (idx >= 0) {
         AgentLoopService.activeRequests.splice(idx, 1);

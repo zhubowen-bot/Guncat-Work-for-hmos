@@ -1631,6 +1631,8 @@ export class ChatService {
         throw new LoopError(failedMsg, 0, 'protocol');
       }
     } finally {
+      // 错误/中断路径也把工具参数分片拼完整(见 AgentLoopService 同名处理)
+      callAcc.flushArgs(true);
       ChatService.activeRequest = null;
       try {
         httpRequest.off('dataReceive');

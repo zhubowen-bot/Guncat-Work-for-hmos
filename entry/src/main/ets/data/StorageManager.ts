@@ -39,6 +39,7 @@ export class StorageManager {
   // flushConversations()(停止生成/切后台/退出)仍需要能强制再写一次 ——
   // 否则"最后一次写盘之后追加的流式内容"会因为 pending 为空而永远不落盘。
   private static latestConversations: Conversation[] | undefined = undefined;
+  private static latestContext: Context | undefined = undefined;
   private static writeInFlight: boolean = false;
   private static writeAgain: boolean = false;
 
@@ -52,6 +53,7 @@ export class StorageManager {
     // 只记下最新引用, 真正序列化交给合并写。convs 是内存中的会话数组,
     // 稍后写盘时拿到的就是最新状态, 不会写入过期快照。
     StorageManager.pendingContext = context;
+    StorageManager.latestContext = context;
     StorageManager.pendingConversations = convs;
     StorageManager.latestConversations = convs;
     if (StorageManager.saveTimer !== -1) {
@@ -67,6 +69,10 @@ export class StorageManager {
   static async flushConversations(context?: Context): Promise<void> {
     if (context !== undefined) {
       StorageManager.pendingContext = context;
+      StorageManager.latestContext = context;
+    } else if (StorageManager.pendingContext === undefined &&
+      StorageManager.latestContext !== undefined) {
+      StorageManager.pendingContext = StorageManager.latestContext;
     }
     if (StorageManager.saveTimer !== -1) {
       clearTimeout(StorageManager.saveTimer);
@@ -112,6 +118,31 @@ export class StorageManager {
     }
   }
 
+  // 写完整字符串并校验实际写入字节数。fileIo.writeSync 返回写入长度,
+  // 磁盘压力/配额下可能短写而不抛异常; 短写必须当作失败, 绝不能提交半截存档。
+  private static writeTextToFd(fd: number, text: string): boolean {
+    try {
+      const bytes: Uint8Array = new util.TextEncoder().encodeInto(text);
+      const raw: ArrayBuffer = bytes.buffer as ArrayBuffer;
+      let payload: ArrayBuffer = raw;
+      if (bytes.byteOffset !== 0 || bytes.byteLength !== raw.byteLength) {
+        payload = bytes.slice().buffer as ArrayBuffer;
+      }
+      let written: number = 0;
+      while (written < payload.byteLength) {
+        const piece: ArrayBuffer = written === 0 ? payload : payload.slice(written);
+        const n: number = fileIo.writeSync(fd, piece);
+        if (n <= 0) {
+          return false;
+        }
+        written += n;
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   private static writeStore(context: Context, convs: Conversation[]): void {
     // 逐会话序列化写入, 而不是先构造完整 Object[] + 再 JSON.stringify 成一个大字符串。
     // 旧写法在长历史下会同时持有 "全部会话对象图 + 完整 JSON 字符串",
@@ -130,8 +161,8 @@ export class StorageManager {
     try {
       file = fileIo.openSync(tmpPath,
         fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
-      fileIo.writeSync(file.fd, '[');
-      for (let i: number = 0; i < convs.length; i++) {
+      wrote = StorageManager.writeTextToFd(file.fd, '[');
+      for (let i: number = 0; i < convs.length && wrote; i++) {
         let item: Object = convs[i].toJson();
         if (heavy) {
           item = StorageManager.sanitizeConversations([item])[0];
@@ -140,13 +171,17 @@ export class StorageManager {
         // 工作模式长任务的 reasoning 会无限增长, 落盘前只保留末尾(原有行为, 不丢会话)
         StorageManager.capReasoning(one);
         if (i > 0) {
-          fileIo.writeSync(file.fd, ',');
+          wrote = StorageManager.writeTextToFd(file.fd, ',');
         }
-        fileIo.writeSync(file.fd, JSON.stringify(one[0]));
+        if (wrote) {
+          wrote = StorageManager.writeTextToFd(file.fd, JSON.stringify(one[0]));
+        }
       }
-      fileIo.writeSync(file.fd, ']');
-      wrote = true;
+      if (wrote) {
+        wrote = StorageManager.writeTextToFd(file.fd, ']');
+      }
     } catch (e) {
+      wrote = false;
       console.error('writeStore failed: ' + JSON.stringify(e));
     } finally {
       if (file !== null) {
@@ -158,7 +193,9 @@ export class StorageManager {
       }
     }
     if (!wrote) {
-      StorageManager.unlinkQuietly(tmpPath);
+      // 不删除可能已存在的旧 .tmp: 打开失败时它可能还是上一轮完整存档;
+      // 本次半截写入则会在下次启动解析失败后自动清理。
+      console.error('writeStore: write failed, keep tmp for validation on next launch');
       return;
     }
     if (!StorageManager.commitTempFile(context, tmpPath)) {
@@ -194,27 +231,21 @@ export class StorageManager {
       let recovered: string = '';
       let recoveredKind: string = '';
       if (tmpExists) {
-        let tmpNewer: boolean = !mainExists;
-        if (mainExists) {
+        // .tmp 只在完整写完准备提交时才会保留(失败的写入会删掉; 进程被杀
+        // 留下的半截文件解析会失败)。只要它能解析, 就是最近一次尝试保存的
+        // 完整数据, 直接优先采用 —— 不比较 mtime: HarmonyOS 的 mtime 只到秒,
+        // 800ms 合并写的两个文件经常落在同一秒, 比较会错误地选中旧主文件。
+        const temp: string = StorageManager.readTextFile(tmpPath);
+        if (temp !== '') {
           try {
-            tmpNewer = fileIo.statSync(tmpPath).mtime > fileIo.statSync(mainPath).mtime;
+            convs = StorageManager.parseConversations(temp);
+            trusted = true;
+            recovered = temp;
+            recoveredKind = 'tmp';
           } catch (e) {
-            tmpNewer = false;
-          }
-        }
-        if (tmpNewer) {
-          const temp: string = StorageManager.readTextFile(tmpPath);
-          if (temp !== '') {
-            try {
-              convs = StorageManager.parseConversations(temp);
-              trusted = true;
-              recovered = temp;
-              recoveredKind = 'tmp';
-            } catch (e) {
-              // 半截 .tmp(写盘中途被杀)没有保留价值, 清掉避免每次启动都重试
-              console.error('loadConversations: preferred tmp is partial/corrupt');
-              StorageManager.unlinkQuietly(tmpPath);
-            }
+            // 半截 .tmp 没有保留价值, 清掉避免每次启动都重试
+            console.error('loadConversations: preferred tmp is partial/corrupt');
+            StorageManager.unlinkQuietly(tmpPath);
           }
         }
       }
@@ -223,15 +254,30 @@ export class StorageManager {
       if (!trusted && mainExists) {
         jsonStr = StorageManager.readConversationsFile(context);
       }
-      if (!trusted && jsonStr === '') {
-        // 首次升级到文件存储: 从 Preferences 迁移旧对话数据
+      let bakExists: boolean = false;
+      try {
+        bakExists = fileIo.accessSync(mainPath + '.bak');
+      } catch (e) {
+        bakExists = false;
+      }
+      let legacyUnpersisted: boolean = false;
+      if (!trusted && jsonStr === '' && !mainExists && !tmpExists && !bakExists) {
+        // 首次升级到文件存储: 从 Preferences 迁移旧对话数据。
+        // 只在磁盘上**确实没有任何存档**时迁移, 避免把空/暂时读不到的主文件
+        // 当成"全新安装"并用旧 Preferences 覆盖。
         let legacy: string = await StorageManager.readLegacyConversations(context);
         if (legacy !== '') {
           try {
             let parsed: Object = JSON.parse(legacy);
             if (parsed instanceof Array) {
-              StorageManager.writeConversationsFile(context, legacy);
-              await StorageManager.clearLegacyConversations(context);
+              const persisted: boolean = StorageManager.writeConversationsFile(context, legacy);
+              if (persisted) {
+                await StorageManager.clearLegacyConversations(context);
+              } else {
+                // 写盘失败时绝不能删 Preferences 里的唯一副本; 本次仍可继续使用内存数据,
+                // 但要禁用孤儿清扫(列表尚未落盘)。
+                legacyUnpersisted = true;
+              }
               jsonStr = legacy;
             }
           } catch (e) {
@@ -294,12 +340,9 @@ export class StorageManager {
       }
       if (recovered !== '') {
         if (recoveredKind === 'tmp') {
-          // .tmp 已是最新完整数据: 直接改名成主文件, 不再重写一遍。
-          // 失败时保持 .tmp 原样, 下次启动还会走同一条恢复路径。
-          try {
-            StorageManager.unlinkQuietly(mainPath);
-            fileIo.renameSync(tmpPath, mainPath);
-          } catch (e) {
+          // .tmp 已是最新完整数据: 走标准提交(旧主文件转 .bak, tmp 改名为主文件),
+          // 不再重写一遍。失败时保持 .tmp 原样, 下次启动还会走同一条恢复路径。
+          if (!StorageManager.commitTempFile(context, tmpPath)) {
             console.error('loadConversations: promote tmp failed, keep it for next launch');
           }
         } else {
@@ -315,7 +358,7 @@ export class StorageManager {
       // 空串 = 没有存档(全新安装), 不算"读成功"; 有内容且解析成数组 = 可信。
       // 从 .bak/.tmp 恢复时列表可能落后于崩溃前最后一次写入, 本次启动禁用
       // 孤儿清扫, 否则会把"只存在于丢失存档里的会话"的工作区/日志删掉。
-      StorageManager.loadOk = trusted && recoveredKind === '';
+      StorageManager.loadOk = trusted && recoveredKind === '' && !legacyUnpersisted;
       return convs;
     } catch (error) {
       // 读取失败(如文件损坏)不阻塞启动, 按无历史处理
@@ -370,44 +413,49 @@ export class StorageManager {
   // **不再先删主文件**: 旧实现 rename 失败时会 unlink 主文件再改名, 若进程在这两步
   // 之间被杀, 存档就彻底消失(用户看到的"闪退后对话没了")。保留 .bak 后,
   // loadConversations 可以在主文件缺失/损坏时恢复上一次成功存档。
-  private static writeConversationsFile(context: Context, jsonStr: string): void {
+  private static writeConversationsFile(context: Context, jsonStr: string): boolean {
     const abs: string = StorageManager.conversationsFilePath(context);
     const tmpPath: string = abs + '.tmp';
     let wroteTmp: boolean = false;
     try {
-      // fileIo.writeSync 直接接受 string, 省掉 TextEncoder + ArrayBuffer 的整份复制
-      // (长历史下这曾是数 MB 的额外峰值内存)。
       const tmp: fileIo.File = fileIo.openSync(tmpPath,
         fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
       try {
-        fileIo.writeSync(tmp.fd, jsonStr);
+        wroteTmp = StorageManager.writeTextToFd(tmp.fd, jsonStr);
       } finally {
         fileIo.closeSync(tmp.fd);
       }
-      wroteTmp = true;
     } catch (e) {
-      StorageManager.unlinkQuietly(tmpPath);
+      wroteTmp = false;
     }
     if (!wroteTmp) {
-      // 连临时文件都写不了(空间不足等): 不覆盖现有存档, 保留上一份可用数据。
+      // 连临时文件都写不了(空间不足/短写): 不覆盖现有存档, 保留上一份可用数据。
+      // .tmp 不删除: 打开失败时它可能还是上一轮完整存档, 由下次启动解析校验。
       console.error('writeConversationsFile: cannot write temp file');
-      return;
+      return false;
     }
-    if (!StorageManager.commitTempFile(context, tmpPath)) {
-      // 最后兜底: 原地截断写(仍然保留刚才的 .bak)
+    if (StorageManager.commitTempFile(context, tmpPath)) {
+      return true;
+    }
+    // 最后兜底: 原地截断写(仍然保留刚才的 .bak)。只有确认写完才删 .tmp。
+    let fallbackOk: boolean = false;
+    try {
+      const file: fileIo.File = fileIo.openSync(abs,
+        fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
       try {
-        const file: fileIo.File = fileIo.openSync(abs,
-          fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
-        try {
-          fileIo.writeSync(file.fd, jsonStr);
-        } finally {
-          fileIo.closeSync(file.fd);
-        }
-        StorageManager.unlinkQuietly(tmpPath);
-      } catch (e) {
-        console.error('writeConversationsFile: fallback write failed');
+        fallbackOk = StorageManager.writeTextToFd(file.fd, jsonStr);
+      } finally {
+        fileIo.closeSync(file.fd);
       }
+    } catch (e) {
+      fallbackOk = false;
     }
+    if (fallbackOk) {
+      StorageManager.unlinkQuietly(tmpPath);
+      return true;
+    }
+    console.error('writeConversationsFile: fallback write failed');
+    return false;
   }
 
   // 把已经写好的 .tmp 提交为主文件: 旧主文件转 .bak -> tmp 改名为主文件。
@@ -493,15 +541,9 @@ export class StorageManager {
       if (stat.size <= 0) {
         return '';
       }
-      const buffer: ArrayBuffer = new ArrayBuffer(stat.size);
-      const file: fileIo.File = fileIo.openSync(abs, fileIo.OpenMode.READ_ONLY);
-      try {
-        fileIo.readSync(file.fd, buffer, { offset: 0 });
-      } finally {
-        fileIo.closeSync(file.fd);
-      }
-      const decoder: util.TextDecoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
-      return decoder.decodeToString(new Uint8Array(buffer), { stream: false });
+      // readTextSync 内部处理完整读取与 UTF-8 BOM; 手写 readSync 忽略返回值,
+      // 短读会在尾部留下 NUL, 让一份好存档被误判成损坏。
+      return fileIo.readTextSync(abs);
     } catch (e) {
       return '';
     }

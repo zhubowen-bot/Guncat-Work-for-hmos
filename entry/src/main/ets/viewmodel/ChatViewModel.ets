@@ -618,6 +618,9 @@ export class ChatViewModel {
     }
     this.deleteConversationData(convId);
     this.conversations = this.conversations.filter((c: Conversation): boolean => c.id !== convId);
+    // 立刻把新数组交给合并写: 下面还有 await, 若此时定时器/切后台先触发,
+    // latestConversations 仍指向旧数组, 会把刚删的会话又写回磁盘。
+    this.persistConversations();
     if (this.currentConversationId === convId) {
       this.currentConversationId = '';
       if (this.conversations.length > 0) {
