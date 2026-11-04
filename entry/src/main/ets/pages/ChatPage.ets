@@ -152,6 +152,11 @@ struct ChatPage {
   private readerDragStartY: number = 0;
   // 消息列表滚动控制器 + 自动置底
   private messageScroller: Scroller = new Scroller();
+  // 是否仍处于“贴底跟随”状态。只有停在底部时才跟随流式内容继续下滚；
+  // 用户一旦手动上翻就立刻脱离，回到底部后自动恢复。
+  private followBottom: boolean = true;
+  // 手动上翻后显示“回到底部”胶囊按钮(仅状态切换时赋值, 不在滚动帧里反复刷新)
+  @State private showScrollToBottom: boolean = false;
   private toastTimer: number = -1;
   // 会话工作时间计时: 工作模式任务执行期间每秒累计(秒数存 VM 供工作区面板显示), 切换/新建会话归零
   private workTickTimer: number = -1;
@@ -159,9 +164,16 @@ struct ChatPage {
   // 上一次流式状态: 用于任务结束瞬间自动滚到底部, 让刚生成的产物卡片直接可见
   private lastStreamingState: boolean = false;
   private voiceInputService: VoiceInputService = new VoiceInputService();
-  // 用户手指触摸滚动期间暂停自动置底, 松手后恢复
-  // (避免 scrollTo 与进行中的手势冲突导致白屏)
+  // 用户手指触摸/惯性滚动期间暂停自动置底。
+  // 注意不能在 TouchType.Up 时立刻放开：Fling 惯性还在继续，自动置底会把它
+  // 反复拽回底部，表现就是用户上翻时页面持续抖动。这里等 onScrollStop 再释放。
   private userScrolling: boolean = false;
+  // 当前是否有触摸/惯性滚动事件在进行(用于区分“轻点”和“真的在滚”)
+  private scrollGestureActive: boolean = false;
+  // 轻点后手指已抬起、但没有产生滚动时的兜底释放定时器
+  private scrollReleaseTimer: number = -1;
+  // 自动置底的合并定时器: VM 一刷新就立刻滚动会在同一帧堆多个 scrollTo
+  private scrollToBottomTimer: number = -1;
   // 流式自动置底定时器句柄(页面销毁时需清理)
   private streamScrollTimer: number = -1;
   // VM 通知合并: 工具步骤边界可能一次触发多条 notifyUIChange, 原先每条都重建
@@ -211,7 +223,9 @@ struct ChatPage {
       this.consumeSharedFiles();
       setTimeout(() => {
         if (!this.userScrolling) {
-          this.messageScroller.scrollTo({ xOffset: 0, yOffset: 999999, animation: { duration: 0 } });
+          this.followBottom = true;
+          this.showScrollToBottom = false;
+          this.scrollToBottomNow(true);
         }
       }, 100);
     });
@@ -252,16 +266,32 @@ struct ChatPage {
         this.rebuildWorkStats();
       }
     }, 1000);
-    // 流式期间每 100ms 置底一次 (revealedCount 在 ChatBubbleView 内部定时推进,
-    // ChatPage 需要通过此 timer 确保 Scroll 跟随新字符出现)
+    // 流式期间每 100ms 检查一次: 只有仍在“贴底跟随”时才置底。
+    // 用户手动上翻后 followBottom=false, 这里完全不动滚动位置, 因此不会和
+    // 手势/惯性抢滚动、也不会出现页面被反复拽回的抖动。
+    this.startStreamScrollTimer();
+  }
+
+  // 100ms 跟随定时器只在前后台前台运行: 后台不需要滚动, 停掉可减少唤醒与 CPU 占用。
+  private startStreamScrollTimer(): void {
+    if (this.streamScrollTimer !== -1) {
+      return;
+    }
     this.streamScrollTimer = setInterval(() => {
       if (AppStorage.get<boolean>('appForeground') === false) {
         return;
       }
-      if (this.vm.isStreaming && !this.userScrolling) {
-        this.messageScroller.scrollTo({ xOffset: 0, yOffset: 999999, animation: { duration: 0 } });
+      if (this.vm.isStreaming && !this.userScrolling && this.followBottom) {
+        this.scrollToBottomNow(false);
       }
     }, 100);
+  }
+
+  private stopStreamScrollTimer(): void {
+    if (this.streamScrollTimer !== -1) {
+      clearInterval(this.streamScrollTimer);
+      this.streamScrollTimer = -1;
+    }
   }
 
   private onAppForegroundChanged(): void {
@@ -269,10 +299,12 @@ struct ChatPage {
       // 后台期间积压的 VM 变更没有刷新, 回前台补一次。
       // 是否置底由 runUiRefresh 依据"是否刚结束流式/是否有新产物"决定,
       // 不在这里无条件滚动, 避免用户回前台时丢失原来的阅读位置。
+      this.startStreamScrollTimer();
       this.scheduleUiRefresh();
       return;
     }
     // 切后台: 取消尚未执行的刷新, 不让整页重建在后台发生
+    this.stopStreamScrollTimer();
     if (this.uiRefreshTimer !== -1) {
       clearTimeout(this.uiRefreshTimer);
       this.uiRefreshTimer = -1;
@@ -325,13 +357,12 @@ struct ChatPage {
     this.convListItems = this.vm.getConversationListItems();
     this.lastStreamingState = this.vm.isStreaming;
     this.refreshTick++;
-    // 流式期间跟随置底(流式中的常态跟随由 100ms 定时器负责)。
-    // 任务刚结束或产物卡刚出现时, 也要自动滚到底部, 避免用户手动下翻才能看到产物。
-    if (this.vm.isStreaming && !this.userScrolling) {
-      this.scrollToBottomDelayed();
-    } else if (!this.vm.isStreaming && !this.userScrolling &&
+    // 流式中的常态跟随由 100ms 定时器负责, 这里不重复排队。
+    // 任务刚结束或产物卡刚出现时, 补一次置底, 避免用户手动下翻才能看到产物；
+    // 只有仍在贴底跟随时才滚动: 用户上翻后不能被 60ms 的 VM 刷新反复拽回底部。
+    if (this.followBottom && !this.userScrolling && !this.vm.isStreaming &&
       (wasStreaming || (this.workArtifacts.length > 0 && prevArtifacts === 0))) {
-      this.scrollToBottomDelayed();
+      this.scrollToBottomDelayed(false);
     }
   }
 
@@ -385,8 +416,15 @@ struct ChatPage {
       this.workTickTimer = -1;
     }
     if (this.streamScrollTimer !== -1) {
-      clearInterval(this.streamScrollTimer);
-      this.streamScrollTimer = -1;
+      this.stopStreamScrollTimer();
+    }
+    if (this.scrollToBottomTimer !== -1) {
+      clearTimeout(this.scrollToBottomTimer);
+      this.scrollToBottomTimer = -1;
+    }
+    if (this.scrollReleaseTimer !== -1) {
+      clearTimeout(this.scrollReleaseTimer);
+      this.scrollReleaseTimer = -1;
     }
     if (this.uiRefreshTimer !== -1) {
       clearTimeout(this.uiRefreshTimer);
@@ -459,12 +497,115 @@ struct ChatPage {
     }, 1000);
   }
 
+  // 同步“是否贴底”到 UI 状态。只在值变化时写 @State, 避免滚动帧里反复触发重建。
+  private setFollowBottom(follow: boolean): void {
+    this.followBottom = follow;
+    const shouldShow: boolean = !follow;
+    if (this.showScrollToBottom !== shouldShow) {
+      this.showScrollToBottom = shouldShow;
+    }
+  }
+
+  private isMessageAtEnd(): boolean {
+    try {
+      return this.messageScroller.isAtEnd();
+    } catch (e) {
+      // Scroller 尚未和 Scroll 绑定(启动瞬间/页面销毁)时按“已到底”处理,
+      // 避免误显示回到底部按钮。
+      return true;
+    }
+  }
+
+  // 立即滚到消息底部。force=false 用于自动跟随: 已经贴底时跳过, 省掉无意义的
+  // scrollTo 调用; force=true 用于发送/切换会话/点击回到底部等显式动作。
+  private scrollToBottomNow(force: boolean): void {
+    if (!force) {
+      if (this.isMessageAtEnd()) {
+        return;
+      }
+    }
+    try {
+      this.messageScroller.scrollTo({
+        xOffset: 0,
+        yOffset: 999999,
+        animation: { duration: 0 }
+      });
+    } catch (e) {
+      // 控制器未绑定(首帧/销毁中): 下一轮定时器会重试, 不在这里抛错
+    }
+  }
+
   // 滚动到消息底部(延迟到布局更新后执行)。
-  // 仅在用户主动动作后调用: 发送消息 / 切换·新建会话; 空闲期状态变化一律不动滚动位置
-  private scrollToBottomDelayed(): void {
-    setTimeout((): void => {
-      this.messageScroller.scrollTo({ xOffset: 0, yOffset: 999999, animation: { duration: 0 } });
-    }, 100);
+  // force=true: 发送消息 / 切换·新建会话等用户显式动作, 同时恢复贴底跟随;
+  // force=false: 流式/VM 刷新触发的自动跟随, 用户已上翻时直接放弃。
+  private scrollToBottomDelayed(force: boolean = true): void {
+    if (force) {
+      this.userScrolling = false;
+      this.scrollGestureActive = false;
+      this.setFollowBottom(true);
+      if (this.scrollReleaseTimer !== -1) {
+        clearTimeout(this.scrollReleaseTimer);
+        this.scrollReleaseTimer = -1;
+      }
+      // 作废之前排队的自动置底，改为在最新布局完成后重新滚一次
+      if (this.scrollToBottomTimer !== -1) {
+        clearTimeout(this.scrollToBottomTimer);
+        this.scrollToBottomTimer = -1;
+      }
+    } else if (this.userScrolling || !this.followBottom) {
+      return;
+    }
+    // 合并同一帧内的多次请求: 60ms 的 VM 刷新 + 100ms 流式定时器可能同时到达
+    if (this.scrollToBottomTimer !== -1) {
+      return;
+    }
+    this.scrollToBottomTimer = setTimeout((): void => {
+      this.scrollToBottomTimer = -1;
+      if (!force && (this.userScrolling || !this.followBottom)) {
+        return;
+      }
+      this.scrollToBottomNow(force);
+    }, 80);
+  }
+
+  // 用户手指抬起后，等一小段时间确认没有进入惯性滚动再恢复自动跟随。
+  // 真正有 Fling 时 onDidScroll 会先把 scrollGestureActive 置 true，这里不抢跑。
+  private scheduleScrollRelease(): void {
+    if (this.scrollReleaseTimer !== -1) {
+      clearTimeout(this.scrollReleaseTimer);
+    }
+    this.scrollReleaseTimer = setTimeout((): void => {
+      this.scrollReleaseTimer = -1;
+      if (!this.scrollGestureActive) {
+        // 只是轻点/长按，没有产生滚动: 恢复触摸前的跟随状态。
+        // 不能在这里重新判断 isAtEnd —— 流式内容可能刚好把底部顶高，
+        // 轻点一下消息就会被误判成“用户上翻”并弹出回到底部按钮。
+        this.userScrolling = false;
+        this.scrollGestureActive = false;
+      }
+    }, 180);
+  }
+
+  private finishUserScroll(): void {
+    if (this.scrollReleaseTimer !== -1) {
+      clearTimeout(this.scrollReleaseTimer);
+      this.scrollReleaseTimer = -1;
+    }
+    this.userScrolling = false;
+    this.scrollGestureActive = false;
+    this.setFollowBottom(this.isMessageAtEnd());
+  }
+
+  // 点击“回到底部”: 恢复贴底跟随并立刻追上最新内容
+  private jumpToBottom(): void {
+    this.userScrolling = false;
+    this.scrollGestureActive = false;
+    if (this.scrollReleaseTimer !== -1) {
+      clearTimeout(this.scrollReleaseTimer);
+      this.scrollReleaseTimer = -1;
+    }
+    this.setFollowBottom(true);
+    this.scrollToBottomNow(true);
   }
 
   // 把某条消息内容原样填回输入框(用户消息下方的"重新编辑"入口, 对齐主流 Agent)
@@ -1459,8 +1600,9 @@ struct ChatPage {
 
   @Builder
   buildMessageList() {
-    Scroll(this.messageScroller) {
-      Column() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Scroll(this.messageScroller) {
+        Column() {
         if (this.visibleMessageStart() > 0) {
           this.buildEarlierMessagesHint()
         }
@@ -1532,29 +1674,79 @@ struct ChatPage {
         }
 
         Blank().height(8)
+        }
+        .width('100%')
+        .padding({ top: 16, bottom: 16, left: 12, right: 12 })
       }
       .width('100%')
-      .padding({ top: 16, bottom: 16, left: 12, right: 12 })
+      .height('100%')
+      .edgeEffect(EdgeEffect.Spring)
+      .scrollBar(BarState.Off)
+      // 单击消息区(含气泡内点击冒泡至此): 广播复位信号, 让发生过拖选的回答取消文本选区
+      .onClick(() => {
+        AppStorage.setOrCreate('richSelectionResetTick',
+          ((AppStorage.get<number>('richSelectionResetTick') ?? 0) + 1));
+      })
+      // 只有用户主动滚动才改变跟随状态。程序化 scrollTo 的 scrollState 是 Idle,
+      // 不会被误判成“用户上翻”; Fling 惯性期间仍算用户滚动, 因此不会中途恢复跟随。
+      .onDidScroll((_x: number, _y: number, state: ScrollState) => {
+        if (state !== ScrollState.Scroll && state !== ScrollState.Fling) {
+          return;
+        }
+        this.scrollGestureActive = true;
+        this.userScrolling = true;
+        this.setFollowBottom(this.isMessageAtEnd());
+      })
+      .onScrollStop(() => {
+        this.scrollGestureActive = false;
+        if (this.userScrolling) {
+          this.finishUserScroll();
+        }
+      })
+      // 触摸/惯性期间暂停自动置底; 松手后先等 180ms, 确认没有 Fling 再恢复。
+      // 这样上翻过程中不会被 100ms 自动置底定时器反复拽回，页面不会抖动。
+      .onTouch((event: TouchEvent) => {
+        if (event.type === TouchType.Down || event.type === TouchType.Move) {
+          this.userScrolling = true;
+          if (this.scrollReleaseTimer !== -1) {
+            clearTimeout(this.scrollReleaseTimer);
+            this.scrollReleaseTimer = -1;
+          }
+        } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+          this.scheduleScrollRelease();
+        }
+      })
+      // 宽屏三栏时加宽留白, 会话内容保持舒适阅读宽度
+      .padding({ left: this.isWide ? 28 : 0, right: this.isWide ? 28 : 0 })
+
+      // 用户上翻后显示的“回到底部”小圆钮: 贴在消息区底部(输入框上方),
+      // 点击后立刻恢复贴底跟随。符号使用系统 SymbolGlyph, 不使用 emoji。
+      if (this.showScrollToBottom) {
+        Button() {
+          SymbolGlyph($r('sys.symbol.chevron_down'))
+            .fontSize(18)
+            .fontColor([$r('app.color.text_primary')])
+        }
+        .type(ButtonType.Circle)
+        .width(34)
+        .height(34)
+        .backgroundColor($r('app.color.surface'))
+        .border({ width: 1, color: $r('app.color.divider') })
+        .shadow({ radius: 12, color: '#1A000000', offsetX: 0, offsetY: 2 })
+        .margin({ bottom: 12 })
+        .accessibilityText('回到底部')
+        .onClick(() => {
+          this.jumpToBottom();
+        })
+        .transition(
+          TransitionEffect.OPACITY
+            .combine(TransitionEffect.scale({ x: 0.85, y: 0.85 }))
+            .animation({ duration: 150, curve: Curve.EaseOut })
+        )
+      }
     }
     .layoutWeight(1)
     .width('100%')
-    .edgeEffect(EdgeEffect.Spring)
-    .scrollBar(BarState.Off)
-    // 单击消息区(含气泡内点击冒泡至此): 广播复位信号, 让发生过拖选的回答取消文本选区
-    .onClick(() => {
-      AppStorage.setOrCreate('richSelectionResetTick',
-        ((AppStorage.get<number>('richSelectionResetTick') ?? 0) + 1));
-    })
-    // 触摸期间标记 userScrolling, 暂停自动置底; 松手后恢复自动置底
-    .onTouch((event: TouchEvent) => {
-      if (event.type === TouchType.Down || event.type === TouchType.Move) {
-        this.userScrolling = true;
-      } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
-        this.userScrolling = false;
-      }
-    })
-    // 宽屏三栏时加宽留白, 会话内容保持舒适阅读宽度
-    .padding({ left: this.isWide ? 28 : 0, right: this.isWide ? 28 : 0 })
   }
 
   // ===== 交互模式: 把"一个用户任务"之后的连续若干轮 assistant 消息看成一个回合 =====
