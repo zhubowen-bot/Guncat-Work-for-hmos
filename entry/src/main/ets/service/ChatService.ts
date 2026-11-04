@@ -1601,6 +1601,7 @@ export class ChatService {
       });
       // 结构化产出: 累积的工具调用/思考块签名随流结束返回给调用方
       flushPending();
+      callAcc.flushArgs(true);
       streamResult.toolCalls = ChatService.normalizeChatToolCalls(callAcc.calls);
       streamResult.thinkingSignature = thinkingSignature;
       streamResult.redactedThinking = redactedThinking;

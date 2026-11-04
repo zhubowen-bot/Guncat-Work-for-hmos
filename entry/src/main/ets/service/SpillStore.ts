@@ -2,7 +2,6 @@
 // 超过送回字符上限的工具结果全文落盘到工作区 .spill/, 模型侧只收头尾节选 + 定位提示,
 // 需要原文时用 read_file 读回 —— "截断不丢失" 是 dsh 的核心原则之一。
 import { fileIo } from '@kit.CoreFileKit';
-import { util } from '@kit.ArkTS';
 import { Constants } from '../common/Constants';
 
 export class SpillStore {
@@ -22,16 +21,11 @@ export class SpillStore {
       let name: string = safeLabel + '_' + Date.now().toString() + '_' +
         (SpillStore.seq++).toString() + '.txt';
       let abs: string = dir + '/' + name;
-      let encoder: util.TextEncoder = new util.TextEncoder();
-      let bytes: Uint8Array = encoder.encode(content);
-      let buffer: ArrayBuffer = bytes.buffer as ArrayBuffer;
-      if (bytes.byteOffset !== 0 || bytes.byteLength !== buffer.byteLength) {
-        buffer = bytes.slice().buffer as ArrayBuffer;
-      }
       let file: fileIo.File = fileIo.openSync(abs,
         fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
       try {
-        fileIo.writeSync(file.fd, buffer);
+        // 直接写 string, 避免 TextEncoder + ArrayBuffer 再复制一份大输出
+        fileIo.writeSync(file.fd, content);
       } finally {
         fileIo.closeSync(file.fd);
       }

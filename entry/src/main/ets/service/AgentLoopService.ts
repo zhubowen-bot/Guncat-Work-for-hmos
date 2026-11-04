@@ -577,6 +577,7 @@ export class AgentLoopService {
     }
     // 把最后一个不足 80ms 的批次交给 UI/调用方, 保证返回的 content/reasoning 完整
     flushPending();
+    callAcc.flushArgs(true);
     result.toolCalls = AgentLoopService.normalizeCalls(callAcc.calls);
     return result;
   }

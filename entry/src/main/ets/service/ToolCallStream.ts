@@ -10,6 +10,33 @@ export class ToolCallAccumulator {
   calls: ToolCallRecord[] = [];
   // 协议内 index(completions 的 delta.index / anthropic 的 block index) → calls 下标
   keyMap: number[] = [];
+  // 参数分片 join 的节流时间戳。80ms 一次既能让 UI 看到参数在增长,
+  // 又避免每个 token 都复制整段 argsJson。
+  private lastArgsFlushMs: number = 0;
+
+  // 追加一段工具参数(不立即拼接)
+  appendArgs(call: ToolCallRecord, text: string): void {
+    if (text !== '') {
+      call.argsChunks.push(text);
+    }
+  }
+
+  // 把已攒下的分片拼进 argsJson。force=true 用于流结束/工具执行前。
+  flushArgs(force: boolean = false): void {
+    const now: number = Date.now();
+    if (!force && now - this.lastArgsFlushMs < 80) {
+      return;
+    }
+    this.lastArgsFlushMs = now;
+    for (let i: number = 0; i < this.calls.length; i++) {
+      const call: ToolCallRecord = this.calls[i];
+      if (call.argsChunks.length === 0) {
+        continue;
+      }
+      call.argsJson += call.argsChunks.join('');
+      call.argsChunks = [];
+    }
+  }
 
   // 取 key 对应的记录, 不存在则用 maker 创建并登记
   patch(key: number, maker: () => ToolCallRecord): ToolCallRecord {
@@ -91,10 +118,11 @@ export function collectCompletionsToolDelta(sseData: string, acc: ToolCallAccumu
         }
         let args: Object = fnRec['arguments'];
         if (typeof args === 'string') {
-          call.argsJson += args as string;
+          acc.appendArgs(call, args as string);
         }
       }
     }
+    acc.flushArgs();
   } catch (e) {
     // 单条 SSE 解析失败忽略
   }
@@ -187,7 +215,8 @@ export function collectAnthropicToolEvent(sseData: string, acc: ToolCallAccumula
       }
       let partial: Object = deltaRec['partial_json'];
       if (typeof partial === 'string') {
-        call.argsJson += partial as string;
+        acc.appendArgs(call, partial as string);
+        acc.flushArgs();
       }
     }
   } catch (e) {

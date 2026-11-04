@@ -22,6 +22,10 @@ export class ToolCallRecord {
   schemaError: boolean = false;
   // 请求级 traceId(持久化): 跨会话归因单次工具调用
   traceId: string = '';
+  // 运行态: 流式工具参数的分片。直接对 argsJson 做 += 在写文件类调用
+  // (最大 512KB)下是 O(n²) 字符复制; 攒成分片后按节流 join 一次。
+  // 不持久化, 重载/复制后由 argsJson 承载完整值。
+  argsChunks: string[] = [];
 
   static of(id: string, name: string, argsJson: string): ToolCallRecord {
     let rec: ToolCallRecord = new ToolCallRecord();
