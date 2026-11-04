@@ -133,6 +133,8 @@ export default class EntryAbility extends UIAbility {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onDestroy');
     // 进程被回收前把合并窗口里的会话落盘, 避免"退出后最后几条对话消失"
     StorageManager.flushConversations(this.context).catch((): void => {});
+    // 释放长时/短时任务，避免进程退出后系统侧还留着通知或配额占用
+    BackgroundTaskService.stop(this.context);
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {

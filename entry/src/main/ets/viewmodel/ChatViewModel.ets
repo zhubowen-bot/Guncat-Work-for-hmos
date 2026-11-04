@@ -4042,8 +4042,13 @@ if (this.abortSignal.aborted) {
     // 任务可能是在应用已经处于后台时由定时提醒/分享入口启动的 —— 这时不会再收到
     // onBackground 回调, 必须主动申请长时任务, 否则进程随时可能被挂起, 表现为
     // "后台跑久了回来卡死/任务没跑完"。前台启动时 onBackground 仍会兜底。
-    if (this.context !== null && AppStorage.get<boolean>('appForeground') === false) {
-      BackgroundTaskService.start(this.context);
+    if (this.context !== null) {
+      // 前台也预申请短时任务: 只有真正退后台才会计时/消耗配额, 但能把 3 分钟硬窗口
+      // 提前挂好, 不依赖 onBackground 的到达时机。
+      BackgroundTaskService.prepare(this.context);
+      if (AppStorage.get<boolean>('appForeground') === false) {
+        BackgroundTaskService.start(this.context);
+      }
     }
   }
 

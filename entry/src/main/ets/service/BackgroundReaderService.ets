@@ -5,6 +5,8 @@ import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 export class BackgroundReaderService {
   private static session: avSession.AVSession | null = null;
   private static running: boolean = false;
+  // 朗读自己的长时任务 id: 停止时只停这一条, 避免把 AI 任务的 dataTransfer 一起停掉
+  private static taskId: number = -1;
 
   static async start(context: common.UIAbilityContext): Promise<void> {
     if (BackgroundReaderService.running) {
@@ -22,23 +24,35 @@ export class BackgroundReaderService {
     await BackgroundReaderService.session.setAVPlaybackState(playbackState);
     let agentInfo: wantAgent.WantAgentInfo = {
       wants: [{
-        bundleName: 'com.bowenapp.guncataibeta',
-        abilityName: 'EntryAbility'
+        bundleName: context.abilityInfo.bundleName,
+        abilityName: context.abilityInfo.name
       }],
-      operationType: wantAgent.OperationType.START_ABILITY,
+      actionType: wantAgent.OperationType.START_ABILITY,
       requestCode: 1001,
-      wantAgentFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
+      actionFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
     };
     let agent: WantAgent = await wantAgent.getWantAgent(agentInfo);
-    await backgroundTaskManager.startBackgroundRunning(
-      context, backgroundTaskManager.BackgroundMode.AUDIO_PLAYBACK, agent);
+    const notification: backgroundTaskManager.ContinuousTaskNotification =
+      await backgroundTaskManager.startBackgroundRunning(context, ['audioPlayback'], agent);
+    BackgroundReaderService.taskId =
+      notification.continuousTaskId !== undefined ? notification.continuousTaskId : -1;
     BackgroundReaderService.running = true;
   }
 
   static async stop(context: common.UIAbilityContext): Promise<void> {
     if (BackgroundReaderService.running) {
-      await backgroundTaskManager.stopBackgroundRunning(context);
+      const taskId: number = BackgroundReaderService.taskId;
+      BackgroundReaderService.taskId = -1;
       BackgroundReaderService.running = false;
+      try {
+        if (taskId >= 0) {
+          await backgroundTaskManager.stopBackgroundRunning(context, taskId);
+        } else {
+          await backgroundTaskManager.stopBackgroundRunning(context);
+        }
+      } catch (e) {
+        // 任务可能已被系统/用户取消: 继续释放 AVSession, 不阻塞朗读停止
+      }
     }
     if (BackgroundReaderService.session !== null) {
       let playbackState: avSession.AVPlaybackState = {
