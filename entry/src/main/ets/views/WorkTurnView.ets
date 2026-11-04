@@ -207,10 +207,13 @@ export struct WorkTurnView {
     let stableSamples: number = 0;
     let lastSample: string = this.message.content;
     this.uiSettleTimer = setInterval((): void => {
+      if (AppStorage.get<boolean>('appForeground') === false) {
+        return;
+      }
       waited += 250;
       let content: string = this.message.content;
       if (!GuncatUiParts.hasProgram(content)) {
-        if (waited >= 8000) {
+        if (waited >= 3000) {
           this.stopUiSettleTimer();
         }
         return;
@@ -248,11 +251,17 @@ export struct WorkTurnView {
     this.visibleText = this.message.content;
     this.visibleReasoning = this.message.reasoning;
     this.refreshUiParts();
-    // 无论父组件是否通知"流式结束", 组件自己兜底完成收尾重建
-    this.startUiSettleTimer();
+    // 无论父组件是否通知"流式结束", 组件自己兜底完成收尾重建。
+    // 仅流式中的消息需要: 历史消息在这里已按 finalized 构建完毕。
+    if (this.isStreaming) {
+      this.startUiSettleTimer();
+    }
     if (this.isStreaming && this.flushTimer === -1) {
       this.flushTimer = setInterval(() => {
         if (this.isStreaming) {
+          if (AppStorage.get<boolean>('appForeground') === false) {
+            return;
+          }
           const current: string = this.message.content;
           if (current !== this.visibleText) {
             this.visibleText = current;
@@ -280,7 +289,7 @@ export struct WorkTurnView {
           // 交互界面块随流式文本渐进成形
           this.refreshUiParts();
         }
-      }, 33);
+      }, 50);
     }
   }
 

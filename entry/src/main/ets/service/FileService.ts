@@ -3,6 +3,7 @@ import { picker } from '@kit.CoreFileKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { FileItem } from '../common/Types';
 import { generateFileId } from '../common/Utils';
+import { Constants } from '../common/Constants';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 const DOMAIN: number = 0x0000;
@@ -39,10 +40,28 @@ export class FileService {
     return files;
   }
 
+  // 单个附件的硬上限。必须在 new ArrayBuffer / base64 之前判断: 读入后再检查
+  // 已经晚了, 5 个 100MB 文件会在 attach 阶段直接把共享堆打爆。
+  private static maxFileBytes(): number {
+    return Constants.MAX_FILE_SIZE_MB * 1024 * 1024;
+  }
+
+  private static rejectTooLarge(size: number): boolean {
+    const max: number = FileService.maxFileBytes();
+    if (size > max) {
+      hilog.warn(DOMAIN, TAG, 'file too large: %{public}d > %{public}d', size, max);
+      return true;
+    }
+    return false;
+  }
+
   // 按 URI 读取单个文件(拍照/分享等场景), 失败返回 null
   static async readUri(uri: string, fallbackName: string): Promise<PickedFile | null> {
     try {
       let stat: fileIo.Stat = fileIo.statSync(uri);
+      if (FileService.rejectTooLarge(stat.size)) {
+        return null;
+      }
       let file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
       let buffer: ArrayBuffer = new ArrayBuffer(stat.size);
       fileIo.readSync(file.fd, buffer, { offset: 0 });
@@ -77,6 +96,9 @@ export class FileService {
         let uri: string = result[i];
         let stat: fileIo.Stat = fileIo.statSync(uri);
         let size: number = stat.size;
+        if (FileService.rejectTooLarge(size)) {
+          continue;
+        }
         let file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
         let buf: ArrayBuffer = new ArrayBuffer(size);
         fileIo.readSync(file.fd, buf, { offset: 0 });
@@ -108,6 +130,9 @@ export class FileService {
         let uri: string = uris[i];
         let stat: fileIo.Stat = fileIo.statSync(uri);
         let size: number = stat.size;
+        if (FileService.rejectTooLarge(size)) {
+          continue;
+        }
         let file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
         let buf: ArrayBuffer = new ArrayBuffer(size);
         fileIo.readSync(file.fd, buf, { offset: 0 });

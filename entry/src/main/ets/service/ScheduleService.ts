@@ -18,13 +18,37 @@ export class ScheduleItem {
 
 export class ScheduleService {
   private static readonly FILE: string = '.schedule.json';
+  // list() 每秒被 tick 调用一次。以前每次都 access+stat+open+read+decode+JSON.parse,
+  // 后台待机时也照跑, 是"回前台前白白耗电/占 IO"的一部分。这里按文件
+  // size+mtime 做缓存: 文件没变就直接返回上次解析结果。
+  private static cacheSig: Map<string, string> = new Map<string, string>();
+  private static cacheItems: Map<string, ScheduleItem[]> = new Map<string, ScheduleItem[]>();
+
+  private static fileSig(abs: string): string {
+    try {
+      const stat: fileIo.Stat = fileIo.statSync(abs);
+      return stat.size.toString() + '/' + Math.floor(stat.mtime).toString();
+    } catch (e) {
+      return '';
+    }
+  }
 
   // 读取全部提醒(文件损坏/不存在返回空数组)
   static list(root: string): ScheduleItem[] {
     try {
       let abs: string = root + '/' + ScheduleService.FILE;
       if (!fileIo.accessSync(abs)) {
+        ScheduleService.cacheSig.set(root, '');
+        ScheduleService.cacheItems.set(root, []);
         return [];
+      }
+      const sig: string = ScheduleService.fileSig(abs);
+      const cachedSig: string | undefined = ScheduleService.cacheSig.get(root);
+      if (sig !== '' && cachedSig === sig) {
+        const cached: ScheduleItem[] | undefined = ScheduleService.cacheItems.get(root);
+        if (cached !== undefined) {
+          return cached.slice();
+        }
       }
       let stat: fileIo.Stat = fileIo.statSync(abs);
       if (stat.size <= 0) {
@@ -57,8 +81,12 @@ export class ScheduleService {
           out.push(item);
         }
       }
+      ScheduleService.cacheSig.set(root, sig);
+      ScheduleService.cacheItems.set(root, out);
       return out;
     } catch (e) {
+      ScheduleService.cacheSig.delete(root);
+      ScheduleService.cacheItems.delete(root);
       return [];
     }
   }
@@ -77,19 +105,17 @@ export class ScheduleService {
       arr.push(rec);
     }
     let abs: string = root + '/' + ScheduleService.FILE;
-    let encoder: util.TextEncoder = new util.TextEncoder();
-    let bytes: Uint8Array = encoder.encode(JSON.stringify(arr));
-    let buffer: ArrayBuffer = bytes.buffer as ArrayBuffer;
-    if (bytes.byteOffset !== 0 || bytes.byteLength !== buffer.byteLength) {
-      buffer = bytes.slice().buffer as ArrayBuffer;
-    }
     let file: fileIo.File = fileIo.openSync(abs,
       fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
     try {
-      fileIo.writeSync(file.fd, buffer);
+      // 直接写 string, 省掉 TextEncoder + ArrayBuffer 的整份复制
+      fileIo.writeSync(file.fd, JSON.stringify(arr));
     } finally {
       fileIo.closeSync(file.fd);
     }
+    // 写成功后同步缓存签名, 避免下一秒 tick 又读一遍刚写的文件
+    ScheduleService.cacheSig.set(root, ScheduleService.fileSig(abs));
+    ScheduleService.cacheItems.set(root, items.slice());
   }
 
   // 新建提醒: atMs(绝对到期) 或 everySeconds(相对 + 循环, 有最小间隔)

@@ -76,6 +76,46 @@ class ExecDropped {
   err: number = 0;
 }
 
+// 单条输出流的增量解码器。
+//
+// 旧实现把每个 poll 的原始字节都存进 Uint8Array[], 结束时再合并成一个大 buffer
+// 解码: 8MB 上限时峰值大约是"8MB 字节块 + 8MB 合并副本 + 16MB UTF-16 字符串"。
+// 大输出(例如 `cat` 一个日志、`find /` 全盘)正好是用户报的闪退场景。
+// 这里改成边收边解码: 只保留字符串片段, 结束时 join 一次; 二进制/NUL 检测也在这里
+// 顺便完成, 不再需要为扫描保留整份字节。
+class ExecStream {
+  private decoder: util.TextDecoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
+  private parts: string[] = [];
+  // 输出里出现了非法 UTF-8(U+FFFD)或 NUL 字节
+  binary: boolean = false;
+
+  add(encoded: string): void {
+    if (encoded === '') {
+      return;
+    }
+    const bytes: Uint8Array = new util.Base64Helper().decodeSync(encoded);
+    for (let i: number = 0; i < bytes.length; i++) {
+      if (bytes[i] === 0) {
+        this.binary = true;
+        break;
+      }
+    }
+    const text: string = this.decoder.decodeToString(bytes, { stream: true });
+    if (text.indexOf('\uFFFD') !== -1) {
+      this.binary = true;
+    }
+    this.parts.push(text);
+  }
+
+  text(): string {
+    // 冲刷解码器里可能残留的半个多字节字符
+    this.parts.push(this.decoder.decodeToString(new Uint8Array(0), { stream: false }));
+    const joined: string = this.parts.join('');
+    this.parts = [];
+    return joined;
+  }
+}
+
 // `toybox` 无参输出的解析结果。complete=false 表示进程没正常退出（超时/被杀）、
 // 或输出可能在退出瞬间被截断，这份清单不能写进缓存长期沿用。
 interface IecToyboxApplets {
@@ -847,8 +887,8 @@ export class IecRuntime {
     }
 
     await IecRuntime.acquireSlot();
-    const outChunks: Uint8Array[] = [];
-    const errChunks: Uint8Array[] = [];
+    const outStream: ExecStream = new ExecStream();
+    const errStream: ExecStream = new ExecStream();
     const dropped: ExecDropped = new ExecDropped();
     let handleId: number = -1;
     let code: number = -1;
@@ -901,8 +941,8 @@ export class IecRuntime {
       const deadline: number = Date.now() + options.timeoutMs + 5000;
       while (true) {
         const poll = execPoll(id, 64 * 1024, 64 * 1024, 'base64');
-        IecRuntime.collect(outChunks, poll.out);
-        IecRuntime.collect(errChunks, poll.err);
+        outStream.add(poll.out);
+        errStream.add(poll.err);
         IecRuntime.observeDropped(dropped, poll.outDropped, poll.errDropped);
         if (poll.exited) {
           code = poll.code;
@@ -933,8 +973,8 @@ export class IecRuntime {
           const reclaimUntil: number = Date.now() + 500;
           while (Date.now() < reclaimUntil) {
             const tail = execPoll(id, 64 * 1024, 64 * 1024, 'base64');
-            IecRuntime.collect(outChunks, tail.out);
-            IecRuntime.collect(errChunks, tail.err);
+            outStream.add(tail.out);
+            errStream.add(tail.err);
             IecRuntime.observeDropped(dropped, tail.outDropped, tail.errDropped);
             if (tail.exited) {
               code = tail.code;
@@ -956,7 +996,7 @@ export class IecRuntime {
 
       // 子进程退出不等于管道读干净了：把退出瞬间还在管道里的字节收完。
       if (graceful && failure === '') {
-        await IecRuntime.drainToEof(id, outChunks, errChunks, dropped, 1000);
+        await IecRuntime.drainToEof(id, outStream, errStream, dropped, 1000);
       }
     } catch (e) {
       failure = IecRuntime.describeFailure(e);
@@ -992,16 +1032,15 @@ export class IecRuntime {
     result.startFailed = failure !== '';
     result.outDropped = dropped.out;
     result.errDropped = dropped.err;
-    result.out = IecRuntime.decodeChunks(outChunks);
-    result.err = IecRuntime.decodeChunks(errChunks);
+    result.out = outStream.text();
+    result.err = errStream.text();
     if (failure !== '') {
       result.err = result.err === '' ? failure : result.err + '\n' + failure;
     }
     // 非 UTF-8 字节在解码时变成 U+FFFD；NUL 是合法 UTF-8，解码看不出来，得看
     // 原始字节。两者任一命中就把"输出已损坏"变成显式标记，而不是让调用方把乱码
-    // 当内容用（二进制请重定向到文件，或用 base64）。
-    result.binary = IecRuntime.hasNulByte(outChunks) || IecRuntime.hasNulByte(errChunks) ||
-      result.out.indexOf('\uFFFD') !== -1 || result.err.indexOf('\uFFFD') !== -1;
+    // 当内容用（二进制请重定向到文件，或用 base64）。检测在 ExecStream.add 里做。
+    result.binary = outStream.binary || errStream.binary;
     return result;
   }
 
@@ -1012,46 +1051,6 @@ export class IecRuntime {
     errDropped: number): void {
     dropped.out = outDropped;
     dropped.err = errDropped;
-  }
-
-  // 原始字节里有没有 NUL。只靠解码后的 U+FFFD 判二进制会漏掉"全是 NUL 或
-  // ASCII+NUL"的内容，那种输出在使用者眼里仍是二进制，当文本交给模型就是乱码。
-  private static hasNulByte(chunks: Uint8Array[]): boolean {
-    for (const chunk of chunks) {
-      for (let i: number = 0; i < chunk.length; i++) {
-        if (chunk[i] === 0) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
-  // 收一次 poll 的字节块。走 base64 而不是让 NAPI 直接把每个 64KB 块解成
-  // UTF-8：块边界落在多字节字符中间时两边都会变成 U+FFFD，超过 64KB 的中文
-  // 输出会被误判成"二进制"，而且落盘内容也坏了。整条流只在最后解码一次。
-  private static collect(chunks: Uint8Array[], encoded: string): void {
-    if (encoded === '') {
-      return;
-    }
-    chunks.push(new util.Base64Helper().decodeSync(encoded));
-  }
-
-  private static decodeChunks(chunks: Uint8Array[]): string {
-    if (chunks.length === 0) {
-      return '';
-    }
-    let total: number = 0;
-    for (const chunk of chunks) {
-      total += chunk.byteLength;
-    }
-    const merged: Uint8Array = new Uint8Array(total);
-    let off: number = 0;
-    for (const chunk of chunks) {
-      merged.set(chunk, off);
-      off += chunk.byteLength;
-    }
-    return util.TextDecoder.create('utf-8', { ignoreBOM: true }).decodeToString(merged);
   }
 
   // 等到两条管道都 EOF **且会话缓冲取空**。execPoll().exited 只表示**直接
@@ -1069,15 +1068,15 @@ export class IecRuntime {
   // dropped 也要在这里更新：退出瞬间读线程可能还在把管道里的尾巴搬进会话缓冲，
   // 上限已经用光时那部分同样算"读掉丢弃"。只在主循环记最后一次值会少报，正文
   // 里"丢弃 N 字节"就和实际丢弃量对不上。
-  private static async drainToEof(id: number, outChunks: Uint8Array[],
-    errChunks: Uint8Array[], dropped: ExecDropped, waitMs: number): Promise<void> {
+  private static async drainToEof(id: number, outStream: ExecStream,
+    errStream: ExecStream, dropped: ExecDropped, waitMs: number): Promise<void> {
     const until: number = Date.now() + waitMs;
     let polls: number = 0;
     while (Date.now() < until) {
       const poll = execPoll(id, 64 * 1024, 64 * 1024, 'base64');
       const gotData: boolean = poll.out !== '' || poll.err !== '';
-      IecRuntime.collect(outChunks, poll.out);
-      IecRuntime.collect(errChunks, poll.err);
+      outStream.add(poll.out);
+      errStream.add(poll.err);
       IecRuntime.observeDropped(dropped, poll.outDropped, poll.errDropped);
       if (poll.outEof && poll.errEof && !gotData) {
         return;

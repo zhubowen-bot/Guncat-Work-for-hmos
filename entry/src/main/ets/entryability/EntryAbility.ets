@@ -20,6 +20,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { systemShare } from '@kit.ShareKit';
 import { window } from '@kit.ArkUI';
 import { BackgroundTaskService } from '../service/BackgroundTaskService';
+import { StorageManager } from '../data/StorageManager';
 import { HarnessTools } from '../service/HarnessTools';
 import { IecShellService } from '../service/IecShellService';
 import { ToolExecResult } from '../service/WorkFileService';
@@ -40,6 +41,8 @@ export default class EntryAbility extends UIAbility {
     // 优先用 onConfigurationUpdate 写入, 启动时也兜底读取一次
     AppStorage.setOrCreate<boolean>('systemColorMode', false);
     AppStorage.setOrCreate<string>('sharedFileUris', '');
+    // 前后台状态: 页面用它暂停 1s/100ms 轮询, VM 用它判断后台启动的任务要不要保活
+    AppStorage.setOrCreate<boolean>('appForeground', true);
     this.publishSharedFiles(want);
     // shell 工具走设备内原生执行核（IEC）：不启虚拟机、不需要 JIT 权限。
     // 钩子由 .ets 侧注入，HarnessTools(.ts) 只负责调用。
@@ -128,6 +131,8 @@ export default class EntryAbility extends UIAbility {
 
   onDestroy(): void {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onDestroy');
+    // 进程被回收前把合并窗口里的会话落盘, 避免"退出后最后几条对话消失"
+    StorageManager.flushConversations(this.context).catch((): void => {});
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
@@ -168,6 +173,7 @@ export default class EntryAbility extends UIAbility {
   onForeground(): void {
     // Ability has brought to foreground
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onForeground');
+    AppStorage.set<boolean>('appForeground', true);
     // 回到前台后进程不再受挂起限制, 立即释放后台保活任务(若切后台期间流式已结束, stop 为空操作)
     BackgroundTaskService.stop(this.context);
   }
@@ -175,6 +181,9 @@ export default class EntryAbility extends UIAbility {
   onBackground(): void {
     // Ability has back to background
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
+    AppStorage.set<boolean>('appForeground', false);
+    // 切后台前先落盘: 系统随时可能回收后台进程, 合并写窗口里的内容不能丢
+    StorageManager.flushConversations(this.context).catch((): void => {});
     // 切后台时若流式长程任务(AI 回复/Agent 循环)仍在进行, 申请 dataTransfer 长时任务保活
     if (AppStorage.get<boolean>('chatStreamingActive') === true) {
       BackgroundTaskService.start(this.context);

@@ -19,6 +19,7 @@ import { GuncatUiEvent } from '../common/GuncatUiRuntime';
 import { GuncatUiParts } from '../common/GuncatUiParts';
 import { SendRoute } from '../common/SteerQueue';
 import { Message } from '../model/Message';
+import { ToolCallRecord } from '../model/ToolCallRecord';
 import { Agent } from '../model/Agent';
 import { Conversation } from '../model/Conversation';
 import { ConversationListItem } from '../model/ConversationListItem';
@@ -160,6 +161,19 @@ struct ChatPage {
   private userScrolling: boolean = false;
   // 流式自动置底定时器句柄(页面销毁时需清理)
   private streamScrollTimer: number = -1;
+  // VM 通知合并: 工具步骤边界可能一次触发多条 notifyUIChange, 原先每条都重建
+  // 预览条/统计/产物/侧栏并整页刷新。60ms 合并窗口把一轮工具事件压成一次刷新。
+  private uiRefreshTimer: number = -1;
+  // 产物汇总的输入签名: 消息/工具结果没变时跳过 JSON.parse 全量扫描
+  private artifactsSig: string = '';
+  // 消息时间线窗口: 只渲染最近 N 条(可点顶部按钮向前扩展)。
+  // 长会话里每条历史消息都会实例化 ChatBubbleView/RichTextView(以及交互模式的
+  // GuncatUiView), 打开一个几百轮的会话等于在主线程一次性解析几百份 Markdown,
+  // 这正是"历史对话积累过多"后闪退/卡死的直接原因。窗口化后渲染成本与历史总长
+  // 解耦, 仍可按需回看更早内容。
+  private static readonly MESSAGE_WINDOW_STEP: number = 60;
+  @State private messageWindowSize: number = ChatPage.MESSAGE_WINDOW_STEP;
+  private lastWindowConvId: string = '';
 
   aboutToAppear(): void {
     let context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
@@ -183,38 +197,12 @@ struct ChatPage {
       await TextReaderService.stop();
     };
     this.vm.setStateChangeListener(() => {
-      // 记录本次回调前的流式状态与产物数量, 用于判断“任务刚结束/产物卡刚出现”时需要置底
-      const wasStreaming: boolean = this.lastStreamingState;
-      const prevArtifacts: number = this.workArtifacts.length;
-      // 切到非 Agent Loop 模式的智能体/会话时收起工作区弹层
-      if (!this.vm.agentLoopMode && this.workspacePopupOpen) {
-        this.workspacePopupOpen = false;
-      }
-      // 切换/新建会话时工作时间归零
-      if (this.vm.currentConversationId !== this.lastWorkConvId) {
-        this.lastWorkConvId = this.vm.currentConversationId;
-        this.vm.workElapsedSec = 0;
-      }
-      this.rebuildPreviewItems();
-      // 详情面板统计快照随 VM 状态变化重建(工具结果/流式统计到达后立刻反映)
-      this.rebuildWorkStats();
-      // 产物汇总卡同样随工具结果/工作区刷新即时重建
-      this.rebuildWorkArtifacts();
-      // 侧栏/抽屉的会话列表轻量投影(新增/删除/改名后同步)
-      this.convListItems = this.vm.getConversationListItems();
-      this.lastStreamingState = this.vm.isStreaming;
-      this.refreshTick++;
-      // 流式期间跟随置底(流式中的常态跟随由 100ms 定时器负责)。
-      // 任务刚结束或产物卡刚出现时, 也要自动滚到底部, 避免用户手动下翻才能看到产物。
-      if (this.vm.isStreaming && !this.userScrolling) {
-        this.scrollToBottomDelayed();
-      } else if (!this.vm.isStreaming && !this.userScrolling &&
-        (wasStreaming || (this.workArtifacts.length > 0 && prevArtifacts === 0))) {
-        this.scrollToBottomDelayed();
-      }
+      this.scheduleUiRefresh();
     });
     this.vm.init().then(() => {
       this.refreshTick++;
+      this.lastWindowConvId = this.vm.currentConversationId;
+      this.messageWindowSize = ChatPage.MESSAGE_WINDOW_STEP;
       this.convListItems = this.vm.getConversationListItems();
       this.rebuildWorkArtifacts();
       this.consumeSharedFiles();
@@ -226,6 +214,15 @@ struct ChatPage {
     });
     // 工作模式工作时间计时: 面板随开随关, 计时必须挂在常驻的 ChatPage 上才不中断
     this.workTickTimer = setInterval((): void => {
+      // 后台时只保留计时, 不做任何文件 IO / UI 投影。系统在后台本来就会限制
+      // 进程调度, 这里每秒读 .schedule.json + 每 3 秒全量扫工作区会显著放大
+      // "后台待久了回来卡死"的概率。
+      if (AppStorage.get<boolean>('appForeground') === false) {
+        if (this.vm.agentLoopMode && this.vm.isStreaming) {
+          this.vm.workElapsedSec++;
+        }
+        return;
+      }
       if (!this.vm.agentLoopMode) {
         return;
       }
@@ -255,10 +252,61 @@ struct ChatPage {
     // 流式期间每 100ms 置底一次 (revealedCount 在 ChatBubbleView 内部定时推进,
     // ChatPage 需要通过此 timer 确保 Scroll 跟随新字符出现)
     this.streamScrollTimer = setInterval(() => {
+      if (AppStorage.get<boolean>('appForeground') === false) {
+        return;
+      }
       if (this.vm.isStreaming && !this.userScrolling) {
         this.messageScroller.scrollTo({ xOffset: 0, yOffset: 999999, animation: { duration: 0 } });
       }
     }, 100);
+  }
+
+  // 合并多次 VM 通知, 60ms 内只做一次重投影 + 整页刷新。
+  private scheduleUiRefresh(): void {
+    if (this.uiRefreshTimer !== -1) {
+      return;
+    }
+    this.uiRefreshTimer = setTimeout((): void => {
+      this.uiRefreshTimer = -1;
+      this.runUiRefresh();
+    }, 60);
+  }
+
+  private runUiRefresh(): void {
+    // 记录本次回调前的流式状态与产物数量, 用于判断“任务刚结束/产物卡刚出现”时需要置底
+    const wasStreaming: boolean = this.lastStreamingState;
+    const prevArtifacts: number = this.workArtifacts.length;
+    // 切到非 Agent Loop 模式的智能体/会话时收起工作区弹层
+    if (!this.vm.agentLoopMode && this.workspacePopupOpen) {
+      this.workspacePopupOpen = false;
+    }
+    // 切换/新建会话时工作时间归零
+    if (this.vm.currentConversationId !== this.lastWorkConvId) {
+      this.lastWorkConvId = this.vm.currentConversationId;
+      this.vm.workElapsedSec = 0;
+    }
+    // 切会话时把消息窗口收回默认大小: 新会话不应继承上一个会话"展开了 300 条"的状态
+    if (this.vm.currentConversationId !== this.lastWindowConvId) {
+      this.lastWindowConvId = this.vm.currentConversationId;
+      this.messageWindowSize = ChatPage.MESSAGE_WINDOW_STEP;
+    }
+    this.rebuildPreviewItems();
+    // 详情面板统计快照随 VM 状态变化重建(工具结果/流式统计到达后立刻反映)
+    this.rebuildWorkStats();
+    // 产物汇总卡同样随工具结果/工作区刷新即时重建
+    this.rebuildWorkArtifacts();
+    // 侧栏/抽屉的会话列表轻量投影(新增/删除/改名后同步)
+    this.convListItems = this.vm.getConversationListItems();
+    this.lastStreamingState = this.vm.isStreaming;
+    this.refreshTick++;
+    // 流式期间跟随置底(流式中的常态跟随由 100ms 定时器负责)。
+    // 任务刚结束或产物卡刚出现时, 也要自动滚到底部, 避免用户手动下翻才能看到产物。
+    if (this.vm.isStreaming && !this.userScrolling) {
+      this.scrollToBottomDelayed();
+    } else if (!this.vm.isStreaming && !this.userScrolling &&
+      (wasStreaming || (this.workArtifacts.length > 0 && prevArtifacts === 0))) {
+      this.scrollToBottomDelayed();
+    }
   }
 
   private onSharedFileUrisChanged(): void {
@@ -311,6 +359,10 @@ struct ChatPage {
     if (this.streamScrollTimer !== -1) {
       clearInterval(this.streamScrollTimer);
       this.streamScrollTimer = -1;
+    }
+    if (this.uiRefreshTimer !== -1) {
+      clearTimeout(this.uiRefreshTimer);
+      this.uiRefreshTimer = -1;
     }
   }
 
@@ -674,9 +726,12 @@ struct ChatPage {
           )
       }
 
-      // 设置
-      SettingsPanel({
-        visible: this.settingsOpen,
+      // 设置: 只在打开时挂载。设置面板整棵树很大, 常驻挂载会让每次页面刷新
+      // (流式期间约 20 次/秒)都重新求值一遍全部配置项, 还会在 build 里做
+      // JSON.stringify(localSearchConfig)。关闭后本就需要重新读取初值, 无状态损失。
+      if (this.settingsOpen) {
+        SettingsPanel({
+          visible: true,
         initProfileId: this.vm.currentApiProfileId,
         initProfileName: this.vm.currentApiProfile !== null ? this.vm.currentApiProfile.name : '默认配置',
         profileNames: this.getApiProfileNames(),
@@ -727,7 +782,8 @@ struct ChatPage {
             this.refreshTick++;
           });
         },
-      })
+        })
+      }
 
       // 玩转应用
       PlayGuidePanel({
@@ -1337,14 +1393,49 @@ struct ChatPage {
     })
   }
 
+  private visibleMessageStart(): number {
+    const total: number = this.vm.currentMessages.length;
+    return Math.max(0, total - this.messageWindowSize);
+  }
+
+  private visibleMessages(): Message[] {
+    const msgs: Message[] = this.vm.currentMessages;
+    const start: number = this.visibleMessageStart();
+    return start === 0 ? msgs : msgs.slice(start);
+  }
+
+  private loadEarlierMessages(): void {
+    this.messageWindowSize += ChatPage.MESSAGE_WINDOW_STEP;
+  }
+
+  // 列表顶部的"加载更早消息"入口(仅在窗口截断了历史时出现)
+  @Builder
+  buildEarlierMessagesHint() {
+    Row({ space: 6 }) {
+      SymbolGlyph($r('sys.symbol.chevron_up'))
+        .fontSize(12)
+        .fontColor([$r('app.color.text_tertiary')])
+      Text('加载更早的消息')
+        .fontSize(12)
+        .fontColor($r('app.color.text_tertiary'))
+    }
+    .padding({ top: 4, bottom: 8 })
+    .onClick(() => {
+      this.loadEarlierMessages();
+    })
+  }
+
   @Builder
   buildMessageList() {
     Scroll(this.messageScroller) {
       Column() {
+        if (this.visibleMessageStart() > 0) {
+          this.buildEarlierMessagesHint()
+        }
         if (this.vm.agentLoopMode) {
           this.buildWorkTimeline()
         } else {
-          ForEach(this.vm.currentMessages, (msg: Message) => {
+          ForEach(this.visibleMessages(), (msg: Message) => {
             ChatBubbleView({
               message: msg,
               isStreaming: this.vm.isStreaming &&
@@ -1479,7 +1570,10 @@ struct ChatPage {
     while (lead > 0 && msgs[lead - 1].role === 'assistant') {
       lead--;
     }
-    for (let i: number = lead; i < index && i < msgs.length; i++) {
+    // 折叠栏只展示最近的活动即可; 极端长回合(几十轮工具)时把整段历史塞进
+    // @Prop 会带来一次深拷贝, 这里限制在最近 40 条。
+    const from: number = Math.max(lead, index - 40);
+    for (let i: number = from; i < index && i < msgs.length; i++) {
       out.push(msgs[i]);
     }
     return out;
@@ -1514,17 +1608,19 @@ struct ChatPage {
       .width('100%')
       .alignItems(VerticalAlign.Center)
 
-      ForEach(this.vm.currentMessages, (msg: Message, i: number) => {
+      ForEach(this.visibleMessages(), (msg: Message, i: number) => {
+        // i 是窗口内相对下标, 语义判断(回合分组/前序历史)要用绝对下标。
+        // 注意: @Builder 体里不能声明局部变量(ArkTS 只认 UI 语法), 所以直接内联换算。
         if (msg.role === 'user') {
           this.buildWorkTaskCard(msg)
-        } else if (this.shouldRenderTurn(msg, i)) {
+        } else if (this.shouldRenderTurn(msg, this.visibleMessageStart() + i)) {
           WorkTurnView({
             message: msg,
             // 工作模式一輪一条(思考条 + 正文 + 工具行);
             // 交互模式按"一个用户任务 = 一个回合"合并: 只有回合最后一条出活动折叠栏,
             // 历史轮只出正文(没有正文就整条不渲染, 它的思考/工具已收进折叠栏)
-            section: this.turnSection(msg, i),
-            priorMessages: this.priorRunMessages(i),
+            section: this.turnSection(msg, this.visibleMessageStart() + i),
+            priorMessages: this.priorRunMessages(this.visibleMessageStart() + i),
             isStreaming: this.vm.isStreaming &&
               msg === this.vm.currentMessages[this.vm.currentMessages.length - 1],
             isLastAssistant: msg === this.vm.currentMessages[this.vm.currentMessages.length - 1] &&
@@ -2112,14 +2208,43 @@ struct ChatPage {
     this.workStats = s;
   }
 
+  // 产物汇总的输入指纹: 会话 + 消息数 + 每次工具调用的完成态 + 工作区文件数。
+  // 只做 O(调用数) 的整数拼接, 比 JSON.parse 全量扫描便宜一个数量级。
+  private workArtifactsSignature(): string {
+    const msgs: Message[] = this.vm.currentMessages;
+    let parts: string[] = [this.vm.currentConversationId, msgs.length.toString()];
+    for (let i: number = 0; i < msgs.length; i++) {
+      const calls: ToolCallRecord[] = msgs[i].toolCalls;
+      if (calls.length === 0) {
+        continue;
+      }
+      parts.push('m' + i.toString() + ':' + calls.length.toString());
+      for (let j: number = 0; j < calls.length; j++) {
+        const c: ToolCallRecord = calls[j];
+        parts.push(c.name + ':' + c.argsJson.length.toString() + ':' +
+          c.result.length.toString() + ':' + c.durationMs.toString());
+      }
+    }
+    parts.push('w' + this.vm.workspaceFiles.length.toString());
+    return parts.join('|');
+  }
+
   // 重建 Agent Loop 模式产物汇总卡: 从消息工具调用中聚合改动文件, 并只保留工作区仍存在的文件
   private rebuildWorkArtifacts(): void {
     if (!this.vm.agentLoopMode) {
       this.workArtifacts = [];
       this.workArtifactAdds = 0;
       this.workArtifactDels = 0;
+      this.artifactsSig = '';
       return;
     }
+    // 产物汇总要遍历所有消息、对每个写文件调用 JSON.parse(argsJson/meta)。
+    // 工具步骤边界和秒级刷新会重复调用, 输入没变时直接复用上一次结果。
+    const sig: string = this.workArtifactsSignature();
+    if (sig === this.artifactsSig) {
+      return;
+    }
+    this.artifactsSig = sig;
     let summary: WorkArtifactSummary = WorkArtifactUtil.collect(this.vm.currentMessages);
     let existing: Map<string, boolean> = new Map<string, boolean>();
     let files: WorkspaceFileInfo[] = this.vm.workspaceFiles;

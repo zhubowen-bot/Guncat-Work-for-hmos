@@ -26,19 +26,15 @@ import { LOCAL_SEARCH_TOOL_NAME, LOCAL_SEARCH_TOOL_DESC_CHAT, LOCAL_SEARCH_TOOL_
 import { HarnessTools } from './HarnessTools';
 
 export class StreamAccumulator {
-  buffer: ArrayBuffer = new ArrayBuffer(0);
   decoder: util.TextDecoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
   fullContent: string = '';
 
   append(data: ArrayBuffer): string {
-    let newBuffer: ArrayBuffer = new ArrayBuffer(this.buffer.byteLength + data.byteLength);
-    let src: Uint8Array = new Uint8Array(this.buffer);
-    let add: Uint8Array = new Uint8Array(data);
-    let dst: Uint8Array = new Uint8Array(newBuffer);
-    dst.set(src, 0);
-    dst.set(add, this.buffer.byteLength);
-    this.buffer = newBuffer;
-    return this.decoder.decodeToString(add, { stream: true });
+    // 旧实现每来一个 chunk 都把"已累积的全部字节 + 新 chunk"重新拷进新 ArrayBuffer,
+    // 且这份 buffer 之后从未被读取过。长回复(几百 KB)下等于 O(n²) 的纯内存拷贝,
+    // 是流式输出时 GC 抖动和共享堆 OOM 的来源之一。TextDecoder 本身带 stream 状态,
+    // 跨 chunk 的多字节字符也不会被截断, 所以直接解码即可。
+    return this.decoder.decodeToString(new Uint8Array(data), { stream: true });
   }
 }
 
@@ -136,9 +132,59 @@ export function resolveEndpointUrl(config: ApiConfig, protocol: string): string 
   return LLMProtocol.resolveEndpoint(config.baseUrl, protocol, config.autoSuffix);
 }
 
+// 聊天模式请求历史的硬预算。聊天模式原先**完全不做裁剪**: 会话越长, 历史里
+// 每条消息的正文/思考/工具结果/历史图片 dataUrl 都会被重新拼进请求体。几百轮后
+// 单次 JSON.stringify 就是几十 MB, 既容易触发上下文 400, 也会在请求构造阶段
+// 撑爆内存。这里按字符估算做滑动窗口: 超过预算时从最早的消息开始丢, 但至少
+// 保留最近 MIN 条, 并从 user 消息边界开始(避免拆散 assistant(tool_calls)+tool 组)。
+const CHAT_HISTORY_MAX_CHARS: number = 300000;
+const CHAT_HISTORY_KEEP_MIN_MESSAGES: number = 12;
+
+function chatHistoryMessageCost(m: Message): number {
+  let cost: number = m.content.length + m.reasoning.length;
+  for (let i: number = 0; i < m.toolCalls.length; i++) {
+    cost += m.toolCalls[i].argsJson.length + m.toolCalls[i].result.length;
+  }
+  for (let i: number = 0; i < m.attachments.length; i++) {
+    // dataUrl 是 base64 内联图片, 必须计入预算, 否则"历史图片反复上传"这一项
+    // 根本不会触发裁剪。
+    cost += m.attachments[i].parsedText.length + m.attachments[i].dataUrl.length;
+  }
+  return cost;
+}
+
+export function trimChatHistoryForRequest(history: Message[]): Message[] {
+  if (history.length <= CHAT_HISTORY_KEEP_MIN_MESSAGES) {
+    return history;
+  }
+  let total: number = 0;
+  let cut: number = -1;
+  for (let i: number = history.length - 1; i >= 0; i--) {
+    total += chatHistoryMessageCost(history[i]);
+    if (total > CHAT_HISTORY_MAX_CHARS &&
+      history.length - i >= CHAT_HISTORY_KEEP_MIN_MESSAGES) {
+      cut = i;
+      break;
+    }
+  }
+  if (cut <= 0) {
+    return history;
+  }
+  // 向前对齐到最近的 user 消息: 保留的窗口必须从一轮对话的开头开始,
+  // 否则第一批 assistant(tool_calls) 可能缺少对应的 tool 结果, 服务端直接 400。
+  while (cut > 0 && history[cut].role !== 'user') {
+    cut--;
+  }
+  if (cut <= 0) {
+    return history;
+  }
+  return history.slice(cut);
+}
+
 function buildChatCompletionsBody(config: ApiConfig, agent: Agent | null,
   history: Message[], userText: string,
   thinkingEnabled: boolean, webSearchEnabled: boolean): Record<string, Object> {
+  history = trimChatHistoryForRequest(history);
   let messages: Record<string, Object>[] = [];
   if (agent !== null && agent.systemPrompt !== '') {
     messages.push({ role: 'system', content: agent.systemPrompt });
@@ -321,6 +367,7 @@ export function responsesReasoningItems(reasoningItemsJson: string, reasoningTex
 function buildResponsesBody(config: ApiConfig, agent: Agent | null,
   history: Message[], userText: string,
   thinkingEnabled: boolean, webSearchEnabled: boolean): Record<string, Object> {
+  history = trimChatHistoryForRequest(history);
   let input: Record<string, Object>[] = [];
   // Responses 没有 reasoning_content 字段: 思考以 reasoning input item 回传(见 responsesReasoningItems)
   let allowPlainReasoning: boolean = !LLMProtocol.isOfficialOpenAI(config.baseUrl);
@@ -508,6 +555,7 @@ function appendAnthropicMessage(messages: Record<string, Object>[], role: string
 function buildAnthropicBody(config: ApiConfig, agent: Agent | null,
   history: Message[], userText: string,
   thinkingEnabled: boolean, webSearchEnabled: boolean): Record<string, Object> {
+  history = trimChatHistoryForRequest(history);
   let messages: Record<string, Object>[] = [];
   for (let i: number = 0; i < history.length; i++) {
     let m: Message = history[i];
@@ -1310,6 +1358,26 @@ export class ChatService {
     // 对齐 web 版本: SSE 解析出一个 delta 就立即 onToken 全量累积,
     // UI 端 50ms 节流刷新. 不做应用层字符拆分 (避免 setTimeout 队列过长 OOM)
 
+    // 文本/思考批量上抛(见 AgentLoopService 同名实现): 把逐 token 的 O(n²) 字符串
+    // 复制和 UI 通知压到约 80ms 一次。
+    let pendingContent: string = '';
+    let pendingReasoning: string = '';
+    let lastEmitMs: number = Date.now();
+    let flushPending = (): void => {
+      if (pendingContent !== '') {
+        acc.fullContent += pendingContent;
+        let batch: string = pendingContent;
+        pendingContent = '';
+        callbacks.onToken(batch);
+      }
+      if (pendingReasoning !== '') {
+        fullReasoning += pendingReasoning;
+        pendingReasoning = '';
+        callbacks.onReasoning(fullReasoning);
+      }
+      lastEmitMs = Date.now();
+    };
+
     // 单条 SSE 数据分发(数据流与 dataEnd 兜底共用): 协议适配器统一解析文本/思考/工具调用/usage
     let processSseData = (sseData: string): void => {
       let ctx: SSEParseContext = new SSEParseContext();
@@ -1318,12 +1386,16 @@ export class ChatService {
         throw new Error(msg);
       };
       ctx.onToken = (delta: string): void => {
-        acc.fullContent += delta;
-        callbacks.onToken(delta);
+        pendingContent += delta;
+        if (Date.now() - lastEmitMs >= 80) {
+          flushPending();
+        }
       };
       ctx.onReasoning = (text: string): void => {
-        fullReasoning += text;
-        callbacks.onReasoning(fullReasoning);
+        pendingReasoning += text;
+        if (Date.now() - lastEmitMs >= 80) {
+          flushPending();
+        }
       };
       ctx.onSignature = (signature: string): void => {
         thinkingSignature += signature;
@@ -1528,6 +1600,7 @@ export class ChatService {
         });
       });
       // 结构化产出: 累积的工具调用/思考块签名随流结束返回给调用方
+      flushPending();
       streamResult.toolCalls = ChatService.normalizeChatToolCalls(callAcc.calls);
       streamResult.thinkingSignature = thinkingSignature;
       streamResult.redactedThinking = redactedThinking;

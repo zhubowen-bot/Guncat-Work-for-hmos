@@ -88,6 +88,10 @@ class WorkspaceSyncOutcome {
 export class ChatViewModel {
   agents: Agent[] = [];
   conversations: Conversation[] = [];
+  // 当前会话指针缓存: 页面 build 里 currentConversation/currentMessages 会被读取
+  // 几十次, 每次都线性扫 conversations(长会话列表下是 O(消息数 × 会话数))。
+  // 按 id 命中即可, 会话对象本身在内存里不会被同 id 替换。
+  private cachedConversation: Conversation | null = null;
   currentAgent: Agent | null = null;
   currentConversationId: string = '';
   isStreaming: boolean = false;
@@ -189,13 +193,20 @@ export class ChatViewModel {
 
   get currentConversation(): Conversation | null {
     if (this.currentConversationId === '') {
+      this.cachedConversation = null;
       return null;
+    }
+    if (this.cachedConversation !== null &&
+      this.cachedConversation.id === this.currentConversationId) {
+      return this.cachedConversation;
     }
     for (let i: number = 0; i < this.conversations.length; i++) {
       if (this.conversations[i].id === this.currentConversationId) {
-        return this.conversations[i];
+        this.cachedConversation = this.conversations[i];
+        return this.cachedConversation;
       }
     }
+    this.cachedConversation = null;
     return null;
   }
 
@@ -2133,6 +2144,34 @@ export class ChatViewModel {
     }
   }
 
+  // 从会话历史组装循环请求时必须复制工具调用对象, 不能把 conv.messages 里的
+  // ToolCallRecord 直接挂到 LoopMessage 上: 上下文压缩(pruneOldToolResults)会原地
+  // 改写 call.result, 共享引用等于把用户唯一的历史记录也永久截断(UI 时间线、
+  // 下一次存档、之后的每一轮请求都会看到被裁剪的版本)。字符串本身不可变,
+  // 这里只复制对象外壳, 内存开销很小。
+  private cloneToolCallsForLoop(calls: ToolCallRecord[]): ToolCallRecord[] {
+    let out: ToolCallRecord[] = [];
+    for (let i: number = 0; i < calls.length; i++) {
+      let src: ToolCallRecord = calls[i];
+      let dst: ToolCallRecord = new ToolCallRecord();
+      dst.id = src.id;
+      dst.name = src.name;
+      dst.argsJson = src.argsJson;
+      dst.result = src.result;
+      dst.isError = src.isError;
+      dst.durationMs = src.durationMs;
+      dst.meta = src.meta;
+      dst.timeout = src.timeout;
+      dst.cancelled = src.cancelled;
+      dst.schemaError = src.schemaError;
+      dst.traceId = src.traceId;
+      dst.preparing = src.preparing;
+      dst.started = src.started;
+      out.push(dst);
+    }
+    return out;
+  }
+
   private async executeWorkLoop(conv: Conversation): Promise<void> {
     // 先登记"这次运行属于哪个会话": 两套循环(驱动/旧路径)都从这里进,
     // 插话与停止按钮据此判断归属, 避免 A 会话的任务吃掉 B 会话里发的消息。
@@ -2179,8 +2218,10 @@ export class ChatViewModel {
           this.pushUserImageMessages(messages, m);
         } else if (m.role === 'assistant' &&
           (m.content !== '' || m.toolCalls.length > 0 || m.reasoning !== '')) {
-          // 中断遗留的空结果标记为已中断, 避免模型把空串当成功
-          let calls: ToolCallRecord[] = m.toolCalls;
+          // 中断遗留的空结果标记为已中断, 避免模型把空串当成功。
+          // 用副本进请求, 只把这几个"确实是空"的修复同步回会话(不是压缩)。
+          let sourceCalls: ToolCallRecord[] = m.toolCalls;
+          let calls: ToolCallRecord[] = this.cloneToolCallsForLoop(sourceCalls);
           for (let c: number = 0; c < calls.length; c++) {
             if (calls[c].result === '') {
               calls[c].result = '(执行被中断, 无结果)';
@@ -2188,6 +2229,14 @@ export class ChatViewModel {
               calls[c].cancelled = true;
               if (calls[c].durationMs < 0) {
                 calls[c].durationMs = 0;
+              }
+              if (c < sourceCalls.length) {
+                sourceCalls[c].result = calls[c].result;
+                sourceCalls[c].isError = true;
+                sourceCalls[c].cancelled = true;
+                if (sourceCalls[c].durationMs < 0) {
+                  sourceCalls[c].durationMs = 0;
+                }
               }
             }
           }
@@ -2688,8 +2737,10 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
           this.pushUserImageMessages(messages, m);
         } else if (m.role === 'assistant' &&
           (m.content !== '' || m.toolCalls.length > 0 || m.reasoning !== '')) {
-          // 中断遗留的空结果标记为已中断, 避免模型把空串当成功
-          let calls: ToolCallRecord[] = m.toolCalls;
+          // 中断遗留的空结果标记为已中断, 避免模型把空串当成功。
+          // 用副本进请求, 只把这几个"确实是空"的修复同步回会话(不是压缩)。
+          let sourceCalls: ToolCallRecord[] = m.toolCalls;
+          let calls: ToolCallRecord[] = this.cloneToolCallsForLoop(sourceCalls);
           for (let c: number = 0; c < calls.length; c++) {
             if (calls[c].result === '') {
               calls[c].result = '(执行被中断, 无结果)';
@@ -2697,6 +2748,14 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
               calls[c].cancelled = true;
               if (calls[c].durationMs < 0) {
                 calls[c].durationMs = 0;
+              }
+              if (c < sourceCalls.length) {
+                sourceCalls[c].result = calls[c].result;
+                sourceCalls[c].isError = true;
+                sourceCalls[c].cancelled = true;
+                if (sourceCalls[c].durationMs < 0) {
+                  sourceCalls[c].durationMs = 0;
+                }
               }
             }
           }
@@ -3819,7 +3878,8 @@ if (this.abortSignal.aborted) {
       clearTimeout(this.streamTimer);
       this.streamTimer = -1;
     }
-    this.persistConversations();
+    // 失败也要立刻落盘: 这是用户最可能直接退出应用的时刻
+    this.flushConversations();
   }
 
   private handleStreamDone(msg: Message, conv: Conversation): void {
@@ -3836,7 +3896,8 @@ if (this.abortSignal.aborted) {
       // 中断且无内容, 移除 assistant
       conv.messages = conv.messages.filter((m: Message): boolean => m !== msg);
     }
-    this.persistConversations();
+    // 一轮结束立刻落盘, 不等合并窗口: 用户此时切后台/杀进程的概率最高
+    this.flushConversations();
     if (this.autoReadEnabled && !this.abortSignal.aborted && msg.content !== '') {
       this.readText(msg.id, msg.content);
     }
@@ -3883,6 +3944,12 @@ if (this.abortSignal.aborted) {
   private markStreamStart(): void {
     this.isStreaming = true;
     AppStorage.setOrCreate<boolean>('chatStreamingActive', true);
+    // 任务可能是在应用已经处于后台时由定时提醒/分享入口启动的 —— 这时不会再收到
+    // onBackground 回调, 必须主动申请长时任务, 否则进程随时可能被挂起, 表现为
+    // "后台跑久了回来卡死/任务没跑完"。前台启动时 onBackground 仍会兜底。
+    if (this.context !== null && AppStorage.get<boolean>('appForeground') === false) {
+      BackgroundTaskService.start(this.context);
+    }
   }
 
   // 流式任务结束: 同步标记并释放后台保活(前台期间未申请时为空操作)
@@ -3915,6 +3982,9 @@ if (this.abortSignal.aborted) {
       this.streamTimer = -1;
     }
     this.streamTarget = null;
+    // 停止生成后把已收到的内容立刻保存: 旧实现只清定时器不落盘,
+    // 紧接着杀进程就会丢掉最后一段回复。
+    this.flushConversations();
     this.notifyUIChange();
   }
 
@@ -4073,13 +4143,25 @@ if (this.abortSignal.aborted) {
     }
   }
 
-  // 持久化
+  // 持久化(合并写): 工具步骤边界会连续请求, StorageManager 会在 800ms 内合并成一次。
   private async persistConversations(): Promise<void> {
     if (this.context === null) {
       return;
     }
     try {
       await StorageManager.saveConversations(this.context, this.conversations);
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  /** 立即落盘(停止生成/切后台/退出前调用), 不等待合并窗口。 */
+  async flushConversations(): Promise<void> {
+    if (this.context === null) {
+      return;
+    }
+    try {
+      await StorageManager.flushConversations(this.context);
     } catch (e) {
       // ignore
     }
@@ -4136,6 +4218,13 @@ function pruneOldToolResults(messages: LoopMessage[], from: number, to: number):
     }
     for (let c: number = 0; c < m.toolCalls.length; c++) {
       let call: ToolCallRecord = m.toolCalls[c];
+      // 旧调用的参数同样会永久占上下文: write_file/append_file 的 argsJson 最大
+      // 512KB, 几次之后就能把一轮请求推到几十 MB。参数本身对后续推理的边际价值
+      // 很低, 超过阈值后替换成合法 JSON 占位(保持 tool_calls 协议可解析)。
+      if (call.argsJson.length > 16384) {
+        call.argsJson = '{"_note":"早期调用参数已在历史压缩中省略"}';
+        pruned = true;
+      }
       if (call.result.length <= Constants.WORK_PRUNE_RESULT_MAX_CHARS) {
         continue;
       }

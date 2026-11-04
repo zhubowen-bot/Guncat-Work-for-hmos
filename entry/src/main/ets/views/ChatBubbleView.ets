@@ -258,6 +258,9 @@ export struct ChatBubbleView {
   // "卡片停在骨架态, 切走再切回会话(组件重建)才正常"。这是本功能的关键坑, 勿改回。
   @State private uiSegs: GuncatUiSeg[] = [];
   private flushTimer: number = -1;
+  // 工具行状态签名: 只有调用状态真的变化才递增 stepsTick, 避免流式期间每 33ms
+  // 把所有工具行 key 都换掉(销毁重建 LoadingProgress + 重新解析 argsJson)。
+  private lastCallsSig: string = '';
   // 收尾自愈状态: uiBuildFinalized 记录当前 uiSegs 是否按"已结束"语义构建
   private uiSettleTimer: number = -1;
   private uiBuildFinalized: boolean = false;
@@ -279,6 +282,7 @@ export struct ChatBubbleView {
       this.visibleText = this.message.content;
       this.visibleReasoning = this.message.reasoning;
       this.stepsTick++;
+      this.stopUiSettleTimer();
       this.refreshUiParts();
     }
   }
@@ -386,10 +390,15 @@ export struct ChatBubbleView {
     let stableSamples: number = 0;
     let lastSample: string = this.message.content;
     this.uiSettleTimer = setInterval((): void => {
+      // 后台不采样; 前台恢复后继续, 不会丢失收尾
+      if (AppStorage.get<boolean>('appForeground') === false) {
+        return;
+      }
       waited += 250;
       let content: string = this.message.content;
       if (!GuncatUiParts.hasProgram(content)) {
-        if (waited >= 8000) {
+        // 纯文本消息不需要等满 8 秒: 前 3 秒没有程序片段就认为不会再有
+        if (waited >= 3000) {
           this.stopUiSettleTimer();
         }
         return;
@@ -427,10 +436,18 @@ export struct ChatBubbleView {
     this.visibleText = this.message.content;
     this.visibleReasoning = this.message.reasoning;
     this.refreshUiParts();
-    this.startUiSettleTimer();
+    // 只有流式消息才需要"等正文稳定后收尾重建"。历史消息在 refreshUiParts 里
+    // 已经按 finalized 构建过, 再给每条消息开 8 秒 × 250ms 定时器纯属浪费:
+    // 打开一个 50 条消息的会话会产生上千次无意义唤醒和全串扫描。
+    if (this.isStreaming) {
+      this.startUiSettleTimer();
+    }
     if (this.isStreaming && this.flushTimer === -1) {
       this.flushTimer = setInterval(() => {
         if (this.isStreaming) {
+          if (AppStorage.get<boolean>('appForeground') === false) {
+            return;
+          }
           const current: string = this.message.content;
           if (current !== this.visibleText) {
             this.visibleText = current;
@@ -449,15 +466,34 @@ export struct ChatBubbleView {
               });
             }, 0);
           }
-          // 工具步骤状态(执行中→完成)由 VM 原地更新, 用 tick 驱动卡片重渲染
+          // 工具步骤状态(执行中→完成)由 VM 原地更新。只有签名变化才换 key,
+          // 否则每帧销毁重建所有工具行(参数 JSON 也会被反复解析)。
           if (this.message.toolCalls.length > 0) {
-            this.stepsTick++;
+            const sig: string = this.callsSignature();
+            if (sig !== this.lastCallsSig) {
+              this.lastCallsSig = sig;
+              this.stepsTick++;
+            }
           }
           // 交互界面块随流式文本渐进成形(未闭合时按中间态渲染并禁用交互)
           this.refreshUiParts();
         }
-      }, 33);
+      }, 50);
     }
+  }
+
+  // 工具行状态签名: 调用数 + 每个调用的参数量/准备态/启动态/耗时/结果量
+  private callsSignature(): string {
+    let calls: ToolCallRecord[] = this.message.toolCalls;
+    let parts: string[] = [calls.length.toString()];
+    for (let i: number = 0; i < calls.length; i++) {
+      parts.push(calls[i].argsJson.length.toString() + ':' +
+        (calls[i].preparing ? 'p' : 'r') + ':' +
+        (calls[i].started ? 's' : '-') + ':' +
+        calls[i].durationMs.toString() + ':' +
+        calls[i].result.length.toString());
+    }
+    return parts.join('|');
   }
 
   aboutToDisappear(): void {

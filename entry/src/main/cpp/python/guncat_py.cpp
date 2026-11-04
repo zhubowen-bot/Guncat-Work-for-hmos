@@ -126,6 +126,81 @@ std::string ReadFile(const std::string& path) {
     return ss.str();
 }
 
+// 读用户输出(stdout/stderr)时的硬上限。脚本 `print` 出几百 MB 时, 旧实现先整份
+// 读进 std::string, 再经 NAPI 复制成 JS 字符串, 一层层叠加直接把共享堆撑爆。
+// 这里只保留头部 + 尾部(尾部通常是 traceback/错误原因), 中间用一行标记代替。
+// 注意: 只用于 stdout/stderr; code/meta/diag 这类小文件仍走 ReadFile。
+constexpr std::size_t kMaxCapturedOutputBytes = 2 * 1024 * 1024;
+
+// 去掉截断点落在多字节 UTF-8 字符中间产生的续字节(否则文本里会出现替换字符)
+void TrimUtf8Tail(std::string& s) {
+    std::size_t cut = s.size();
+    while (cut > 0 && (static_cast<unsigned char>(s[cut - 1]) & 0xC0) == 0x80) {
+        --cut;
+    }
+    if (cut > 0) {
+        const unsigned char lead = static_cast<unsigned char>(s[cut - 1]);
+        std::size_t need = 1;
+        if ((lead & 0xE0) == 0xC0) {
+            need = 2;
+        } else if ((lead & 0xF0) == 0xE0) {
+            need = 3;
+        } else if ((lead & 0xF8) == 0xF0) {
+            need = 4;
+        }
+        // 最后一个字符完整就原样保留; 不完整则把整个残缺序列删掉
+        cut = (s.size() - (cut - 1) < need) ? (cut - 1) : s.size();
+    }
+    s.resize(cut);
+}
+
+void TrimUtf8Head(std::string& s) {
+    std::size_t skip = 0;
+    while (skip < s.size() && (static_cast<unsigned char>(s[skip]) & 0xC0) == 0x80) {
+        ++skip;
+    }
+    s.erase(0, skip);
+}
+
+std::string ReadFileCapped(const std::string& path, std::size_t maxBytes = kMaxCapturedOutputBytes) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        return std::string();
+    }
+    in.seekg(0, std::ios::end);
+    const std::streamoff size = in.tellg();
+    if (size <= 0) {
+        return std::string();
+    }
+    if (static_cast<std::size_t>(size) <= maxBytes) {
+        in.seekg(0, std::ios::beg);
+        std::ostringstream ss;
+        ss << in.rdbuf();
+        return ss.str();
+    }
+    const std::size_t headBytes = maxBytes * 3 / 4;
+    const std::size_t tailBytes = maxBytes - headBytes;
+    std::string out;
+    out.resize(headBytes);
+    in.seekg(0, std::ios::beg);
+    in.read(&out[0], static_cast<std::streamsize>(headBytes));
+    out.resize(static_cast<std::size_t>(in.gcount()));
+    TrimUtf8Tail(out);
+    std::string tail;
+    tail.resize(tailBytes);
+    in.clear();
+    in.seekg(size - static_cast<std::streamoff>(tailBytes), std::ios::beg);
+    in.read(&tail[0], static_cast<std::streamsize>(tailBytes));
+    tail.resize(static_cast<std::size_t>(in.gcount()));
+    TrimUtf8Head(tail);
+    const std::size_t omitted = static_cast<std::size_t>(size) - out.size() - tail.size();
+    out += "\n\n... [输出过长, 已省略中间 " + std::to_string(omitted) +
+        " 字节 (上限 " + std::to_string(maxBytes) +
+        " 字节; 请把结果重定向到文件后用 read_file 分段读取)] ...\n\n";
+    out += tail;
+    return out;
+}
+
 bool WriteFile(const std::string& path, const std::string& content) {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     if (!out) {
@@ -1312,8 +1387,9 @@ PyRunOutcome RunPythonInner(const PyRunOptions& opt) {
         out.error.clear();
     }
     out.ok = (okFlag == "1");
-    out.stdoutText = ReadFile(outPath);
-    out.stderrText = ReadFile(errPath);
+    // stdout/stderr 走带上限的读取: 脚本一次 print 出几百 MB 时不再整份进内存
+    out.stdoutText = ReadFileCapped(outPath);
+    out.stderrText = ReadFileCapped(errPath);
     out.warning = Trim(ReadFile(warnPath));
     if (!out.warning.empty()) {
         OH_LOG_WARN(LOG_APP, "run_python memory warning: %{public}s", out.warning.c_str());

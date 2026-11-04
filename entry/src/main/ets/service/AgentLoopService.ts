@@ -298,6 +298,27 @@ export class AgentLoopService {
     let lastToolSig: string = '';
     // 非成功响应时累积响应体(仅前 8KB), 用于提取服务端错误详情(如上下文超限)
     let errorBody: string = '';
+    // 文本/思考按 ~80ms 批量上抛。逐 token 触发时, result.content/result.reasoning 的
+    // `+=` 每次都会复制整段已生成字符串(O(n²)), VM 那边还会再复制一次; 长回答
+    // (尤其是几百 KB 的思考)会持续制造大对象并推高 GC 峰值。批量后同样流畅,
+    // 但字符串拼接和 UI 通知次数都降一个数量级。
+    let pendingContent: string = '';
+    let pendingReasoning: string = '';
+    let lastEmitMs: number = Date.now();
+    let flushPending = (): void => {
+      if (pendingContent !== '') {
+        result.content += pendingContent;
+        let batch: string = pendingContent;
+        pendingContent = '';
+        callbacks.onToken(batch);
+      }
+      if (pendingReasoning !== '') {
+        result.reasoning += pendingReasoning;
+        pendingReasoning = '';
+        callbacks.onReasoning(result.reasoning);
+      }
+      lastEmitMs = Date.now();
+    };
 
     // 单条 SSE 数据分发: 协议适配器统一回调文本/思考/工具调用/usage; 协议失败抛错由外层 reject
     let handleSseLine = (sseData: string): void => {
@@ -307,12 +328,16 @@ export class AgentLoopService {
         throw new Error(msg);
       };
       ctx.onToken = (delta: string): void => {
-        result.content += delta;
-        callbacks.onToken(delta);
+        pendingContent += delta;
+        if (Date.now() - lastEmitMs >= 80) {
+          flushPending();
+        }
       };
       ctx.onReasoning = (text: string): void => {
-        result.reasoning += text;
-        callbacks.onReasoning(result.reasoning);
+        pendingReasoning += text;
+        if (Date.now() - lastEmitMs >= 80) {
+          flushPending();
+        }
       };
       ctx.onSignature = (signature: string): void => {
         result.thinkingSignature += signature;
@@ -544,6 +569,8 @@ export class AgentLoopService {
         // ignore
       }
     }
+    // 把最后一个不足 80ms 的批次交给 UI/调用方, 保证返回的 content/reasoning 完整
+    flushPending();
     result.toolCalls = AgentLoopService.normalizeCalls(callAcc.calls);
     return result;
   }

@@ -21,12 +21,34 @@ export class GoalItem {
 
 export class GoalService {
   private static readonly FILE: string = '.goal.json';
+  // 运行时快照每一步都会读一次目标文件; 每秒详情面板也会读。文件没变时直接复用,
+  // 避免在工具循环里反复 open/read/decode/parse 一个内容几乎不变的小 JSON。
+  private static cacheSig: Map<string, string> = new Map<string, string>();
+  private static cacheGoal: Map<string, GoalItem | null> = new Map<string, GoalItem | null>();
+
+  private static fileSig(abs: string): string {
+    try {
+      const stat: fileIo.Stat = fileIo.statSync(abs);
+      return stat.size.toString() + '/' + Math.floor(stat.mtime).toString();
+    } catch (e) {
+      return '';
+    }
+  }
 
   static read(root: string): GoalItem | null {
     try {
       let abs: string = root + '/' + GoalService.FILE;
       if (!fileIo.accessSync(abs)) {
+        GoalService.cacheSig.set(root, '');
+        GoalService.cacheGoal.set(root, null);
         return null;
+      }
+      const sig: string = GoalService.fileSig(abs);
+      if (GoalService.cacheSig.get(root) === sig) {
+        const hit: GoalItem | null | undefined = GoalService.cacheGoal.get(root);
+        if (hit !== undefined) {
+          return hit;
+        }
       }
       let stat: fileIo.Stat = fileIo.statSync(abs);
       if (stat.size <= 0) {
@@ -57,6 +79,8 @@ export class GoalService {
       if (goal.objective === '') {
         return null;
       }
+      GoalService.cacheSig.set(root, sig);
+      GoalService.cacheGoal.set(root, goal);
       return goal;
     } catch (e) {
       return null;
@@ -74,19 +98,15 @@ export class GoalService {
       'updatedAt': goal.updatedAt
     };
     let abs: string = root + '/' + GoalService.FILE;
-    let encoder: util.TextEncoder = new util.TextEncoder();
-    let bytes: Uint8Array = encoder.encode(JSON.stringify(rec));
-    let buffer: ArrayBuffer = bytes.buffer as ArrayBuffer;
-    if (bytes.byteOffset !== 0 || bytes.byteLength !== buffer.byteLength) {
-      buffer = bytes.slice().buffer as ArrayBuffer;
-    }
     let file: fileIo.File = fileIo.openSync(abs,
       fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
     try {
-      fileIo.writeSync(file.fd, buffer);
+      fileIo.writeSync(file.fd, JSON.stringify(rec));
     } finally {
       fileIo.closeSync(file.fd);
     }
+    GoalService.cacheSig.set(root, GoalService.fileSig(abs));
+    GoalService.cacheGoal.set(root, goal);
   }
 
   // 创建目标(已存在时覆盖为新一轮目标)
@@ -148,5 +168,7 @@ export class GoalService {
     } catch (e) {
       // ignore
     }
+    GoalService.cacheSig.delete(root);
+    GoalService.cacheGoal.delete(root);
   }
 }
