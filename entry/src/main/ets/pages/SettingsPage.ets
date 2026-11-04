@@ -73,6 +73,9 @@ struct SettingsPage {
   // 终端信息页展示用
   @State private systemName: string = 'HarmonyOS';
   @State private deviceLabel: string = '本机设备';
+  @State private abiList: string = '—';
+  @State private sdkApiVersion: string = '—';
+  @State private chipType: string = '—';
 
   aboutToAppear(): void {
     this.vm = SettingsSession.current();
@@ -99,6 +102,24 @@ struct SettingsPage {
       this.deviceLabel = this.deviceTypeLabel(deviceInfo.deviceType);
     } catch (e) {
       this.deviceLabel = '本机设备';
+    }
+    try {
+      let abi: string = deviceInfo.abiList;
+      this.abiList = abi !== '' ? abi : '—';
+    } catch (e) {
+      this.abiList = '—';
+    }
+    try {
+      let api: number = deviceInfo.sdkApiVersion;
+      this.sdkApiVersion = api > 0 ? api.toString() : '—';
+    } catch (e) {
+      this.sdkApiVersion = '—';
+    }
+    try {
+      let chip: string = deviceInfo.chipType;
+      this.chipType = chip !== '' ? chip : '—';
+    } catch (e) {
+      this.chipType = '—';
     }
   }
 
@@ -1326,16 +1347,6 @@ struct SettingsPage {
             .color($r('app.color.divider'))
           this.buildRuntimeRow('原生 CPython 3.12',
             '脚本在应用进程内执行，常用科学计算与文档处理库可离线使用。')
-          Divider()
-            .strokeWidth(0.5)
-            .color($r('app.color.divider'))
-          this.buildRuntimeRow('原生界面',
-            '界面由系统原生组件绘制，自动适配手机、平板与桌面。')
-          Divider()
-            .strokeWidth(0.5)
-            .color($r('app.color.divider'))
-          this.buildRuntimeRow('本机存储',
-            '配置、会话和工作区文件均保存在设备内。')
         }
         .width('100%')
         .padding({ left: 16, right: 16 })
@@ -1353,7 +1364,19 @@ struct SettingsPage {
           Divider()
             .strokeWidth(0.5)
             .color($r('app.color.divider'))
+          this.buildInfoRow('API 等级', this.sdkApiVersion)
+          Divider()
+            .strokeWidth(0.5)
+            .color($r('app.color.divider'))
           this.buildInfoRow('设备类型', this.deviceLabel)
+          Divider()
+            .strokeWidth(0.5)
+            .color($r('app.color.divider'))
+          this.buildInfoRow('芯片平台', this.chipType)
+          Divider()
+            .strokeWidth(0.5)
+            .color($r('app.color.divider'))
+          this.buildInfoRow('指令集', this.abiList)
           Divider()
             .strokeWidth(0.5)
             .color($r('app.color.divider'))
