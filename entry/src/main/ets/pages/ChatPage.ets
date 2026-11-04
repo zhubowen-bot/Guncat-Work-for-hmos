@@ -60,6 +60,9 @@ struct ChatPage {
   @State private vm: ChatViewModel = new ChatViewModel();
   @StorageLink('sharedFileUris') @Watch('onSharedFileUrisChanged')
   private sharedFileUris: string = '';
+  // 前后台状态(EntryAbility 写入): 后台期间不重建页面/不滚动态, 回前台补一次刷新
+  @StorageLink('appForeground') @Watch('onAppForegroundChanged')
+  private appForeground: boolean = true;
   @State private inputText: string = '';
   @State private drawerOpen: boolean = false;
   @State private settingsOpen: boolean = false;
@@ -261,8 +264,25 @@ struct ChatPage {
     }, 100);
   }
 
+  private onAppForegroundChanged(): void {
+    if (this.appForeground) {
+      // 后台期间积压的 VM 变更没有刷新, 回前台补一次
+      this.scheduleUiRefresh();
+      this.scrollToBottomDelayed();
+      return;
+    }
+    // 切后台: 取消尚未执行的刷新, 不让整页重建在后台发生
+    if (this.uiRefreshTimer !== -1) {
+      clearTimeout(this.uiRefreshTimer);
+      this.uiRefreshTimer = -1;
+    }
+  }
+
   // 合并多次 VM 通知, 60ms 内只做一次重投影 + 整页刷新。
   private scheduleUiRefresh(): void {
+    if (!this.appForeground) {
+      return;
+    }
     if (this.uiRefreshTimer !== -1) {
       return;
     }
@@ -273,6 +293,9 @@ struct ChatPage {
   }
 
   private runUiRefresh(): void {
+    if (!this.appForeground) {
+      return;
+    }
     // 记录本次回调前的流式状态与产物数量, 用于判断“任务刚结束/产物卡刚出现”时需要置底
     const wasStreaming: boolean = this.lastStreamingState;
     const prevArtifacts: number = this.workArtifacts.length;

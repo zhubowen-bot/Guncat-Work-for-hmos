@@ -102,17 +102,58 @@ export class StorageManager {
   }
 
   private static writeStore(context: Context, convs: Conversation[]): void {
-    // 只序列化一次; 附件图片字节超阈值时, 仍先剥离 dataUrl/thumbnail(保留文件名与解析文本)
-    let arr: Object[] = [];
-    for (let i: number = 0; i < convs.length; i++) {
-      arr.push(convs[i].toJson());
+    // 逐会话序列化写入, 而不是先构造完整 Object[] + 再 JSON.stringify 成一个大字符串。
+    // 旧写法在长历史下会同时持有 "全部会话对象图 + 完整 JSON 字符串",
+    // 两份都能到几十 MB; 现在是"一个会话的对象 + 一个会话的 JSON", 峰值与
+    // 最大单会话成正比, 而不是与全部历史之和成正比。
+    if (convs.length === 0) {
+      StorageManager.writeConversationsFile(context, '[]');
+      return;
     }
-    if (StorageManager.hasHeavyAttachments(convs)) {
-      arr = StorageManager.sanitizeConversations(arr);
+    const abs: string = StorageManager.conversationsFilePath(context);
+    const tmpPath: string = abs + '.tmp';
+    // 附件图片字节超阈值时, 仍先剥离 dataUrl/thumbnail(保留文件名与解析文本)
+    const heavy: boolean = StorageManager.hasHeavyAttachments(convs);
+    let wrote: boolean = false;
+    let file: fileIo.File | null = null;
+    try {
+      file = fileIo.openSync(tmpPath,
+        fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+      fileIo.writeSync(file.fd, '[');
+      for (let i: number = 0; i < convs.length; i++) {
+        let item: Object = convs[i].toJson();
+        if (heavy) {
+          item = StorageManager.sanitizeConversations([item])[0];
+        }
+        let one: Object[] = [item];
+        // 工作模式长任务的 reasoning 会无限增长, 落盘前只保留末尾(原有行为, 不丢会话)
+        StorageManager.capReasoning(one);
+        if (i > 0) {
+          fileIo.writeSync(file.fd, ',');
+        }
+        fileIo.writeSync(file.fd, JSON.stringify(one[0]));
+      }
+      fileIo.writeSync(file.fd, ']');
+      wrote = true;
+    } catch (e) {
+      console.error('writeStore failed: ' + JSON.stringify(e));
+    } finally {
+      if (file !== null) {
+        try {
+          fileIo.closeSync(file.fd);
+        } catch (e) {
+          // ignore
+        }
+      }
     }
-    // 工作模式长任务的 reasoning 会无限增长, 落盘前只保留末尾(原有行为, 不丢会话)
-    StorageManager.capReasoning(arr);
-    StorageManager.writeConversationsFile(context, JSON.stringify(arr));
+    if (!wrote) {
+      StorageManager.unlinkQuietly(tmpPath);
+      return;
+    }
+    if (!StorageManager.commitTempFile(context, tmpPath)) {
+      // rename 失败时保留 .tmp: loadConversations 会把它当作最后一次可用存档恢复
+      console.error('writeStore: commit failed, keep tmp for recovery');
+    }
   }
 
   static async loadConversations(context: Context): Promise<Conversation[]> {
@@ -243,7 +284,6 @@ export class StorageManager {
   private static writeConversationsFile(context: Context, jsonStr: string): void {
     const abs: string = StorageManager.conversationsFilePath(context);
     const tmpPath: string = abs + '.tmp';
-    const bakPath: string = abs + '.bak';
     let wroteTmp: boolean = false;
     try {
       // fileIo.writeSync 直接接受 string, 省掉 TextEncoder + ArrayBuffer 的整份复制
@@ -264,6 +304,28 @@ export class StorageManager {
       console.error('writeConversationsFile: cannot write temp file');
       return;
     }
+    if (!StorageManager.commitTempFile(context, tmpPath)) {
+      // 最后兜底: 原地截断写(仍然保留刚才的 .bak)
+      try {
+        const file: fileIo.File = fileIo.openSync(abs,
+          fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+        try {
+          fileIo.writeSync(file.fd, jsonStr);
+        } finally {
+          fileIo.closeSync(file.fd);
+        }
+        StorageManager.unlinkQuietly(tmpPath);
+      } catch (e) {
+        console.error('writeConversationsFile: fallback write failed');
+      }
+    }
+  }
+
+  // 把已经写好的 .tmp 提交为主文件: 旧主文件转 .bak -> tmp 改名为主文件。
+  // 返回是否成功。失败时尽量把 .bak 恢复成主文件, .tmp 留给下次启动恢复。
+  private static commitTempFile(context: Context, tmpPath: string): boolean {
+    const abs: string = StorageManager.conversationsFilePath(context);
+    const bakPath: string = abs + '.bak';
     let hasMain: boolean = false;
     try {
       hasMain = fileIo.accessSync(abs);
@@ -281,7 +343,7 @@ export class StorageManager {
     }
     try {
       fileIo.renameSync(tmpPath, abs);
-      return;
+      return true;
     } catch (e) {
       // 部分系统版本 rename 不覆盖已存在目标: 主文件还在时先让位再改名。
       try {
@@ -289,9 +351,9 @@ export class StorageManager {
           StorageManager.unlinkQuietly(abs);
         }
         fileIo.renameSync(tmpPath, abs);
-        return;
+        return true;
       } catch (e2) {
-        // 继续走恢复/兜底
+        // 继续走恢复
       }
     }
     // 改名失败: 把 .bak 恢复成主文件, 避免出现"没有任何主文件"的窗口。
@@ -304,19 +366,7 @@ export class StorageManager {
         // 恢复失败只能保留 .bak 给下次启动回退
       }
     }
-    // 最后兜底: 原地截断写(仍然保留刚才的 .bak)
-    try {
-      const file: fileIo.File = fileIo.openSync(abs,
-        fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
-      try {
-        fileIo.writeSync(file.fd, jsonStr);
-      } finally {
-        fileIo.closeSync(file.fd);
-      }
-      StorageManager.unlinkQuietly(tmpPath);
-    } catch (e) {
-      console.error('writeConversationsFile: fallback write failed');
-    }
+    return false;
   }
 
   private static unlinkQuietly(path: string): void {

@@ -697,8 +697,8 @@ export struct ChatBubbleView {
           // 消息内容: 普通文本片段走 Markdown, guncat-ui 块走原生交互渲染
           this.buildAIContent()
 
-          // 流式光标
-          if (this.isStreaming && this.message.content !== '') {
+          // 流式光标(读 visibleText, 避免每批 token 直接登记对 message.content 的依赖)
+          if (this.isStreaming && this.visibleText !== '') {
             Row() {
               Stack()
                 .width(2)
