@@ -1,4 +1,4 @@
-# ArkTS 真实编译校验(使用 DevEco 自带 hvigor 工具链)
+﻿# ArkTS 真实编译校验(使用 DevEco 自带 hvigor 工具链)
 #
 # 为什么需要它: 项目里的 node 侧 harness(test/guncat-harness)只能验证纯逻辑模块,
 # 覆盖不到 .ets 视图/页面/视图模型。ArkUI 有一批"只有编译器才知道"的规则, 例如:

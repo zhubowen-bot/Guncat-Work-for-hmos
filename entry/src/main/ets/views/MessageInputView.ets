@@ -52,9 +52,10 @@ export struct MessageInputView {
   private startRotation(): void {
     this.stopRotation();
     this.parsingAngle = 0;
+    // 40ms(25fps) 与 16ms 在视觉上没有区别, 但输入区重绘次数少 60%
     this.angleTimer = setInterval(() => {
-      this.parsingAngle = (this.parsingAngle + 6) % 360;
-    }, 16);
+      this.parsingAngle = (this.parsingAngle + 15) % 360;
+    }, 40);
   }
 
   private stopRotation(): void {

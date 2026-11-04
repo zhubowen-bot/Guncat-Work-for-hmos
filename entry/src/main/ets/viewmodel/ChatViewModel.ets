@@ -386,6 +386,7 @@ export class ChatViewModel {
       } else {
         this.currentConversationId = latest.id;
         LLMProtocol.bindConversationSession(latest.id);
+        this.releaseOldImagePayloads(latest);
         if (this.context !== null) {
           await StorageManager.saveString(this.context, Constants.LS_KEY_CURRENT_CONV_ID, latest.id);
         }
@@ -451,6 +452,7 @@ export class ChatViewModel {
     }
     this.currentConversationId = convId;
     LLMProtocol.bindConversationSession(convId);
+    this.releaseOldImagePayloads(conv);
     // 立刻通知 UI (scrollTo bottom + rebuildPreviewItems), 不等 storage 落盘
     this.notifyUIChange();
     if (this.context !== null) {
@@ -2149,6 +2151,40 @@ export class ChatViewModel {
   // 改写 call.result, 共享引用等于把用户唯一的历史记录也永久截断(UI 时间线、
   // 下一次存档、之后的每一轮请求都会看到被裁剪的版本)。字符串本身不可变,
   // 这里只复制对象外壳, 内存开销很小。
+  // 释放历史消息里的内联图片大字符串(只保留缩略图/文件名/解析文本)。
+  //
+  // dataUrl 是 base64, 一张 4MB 照片在内存里约 5.3MB; 一个聊过几十张图的会话会长期
+  // 占着几十到上百 MB, 这也是鸿蒙侧内存余量小时最容易先崩的场景。策略保守:
+  // 总内联图片 < 12MB 不动; 超过后从最旧的消息开始释放, 始终保留最近 20 条,
+  // 并且只在 thumbnail 非空时释放(缩略图仍能显示和点开)。后续轮次不再重复上传
+  // 这些很早的图片, 请求体也随之变小。
+  private releaseOldImagePayloads(conv: Conversation): void {
+    const softLimit: number = 12 * 1024 * 1024;
+    const hardLimit: number = 8 * 1024 * 1024;
+    let total: number = 0;
+    for (let i: number = 0; i < conv.messages.length; i++) {
+      let atts: Attachment[] = conv.messages[i].attachments;
+      for (let j: number = 0; j < atts.length; j++) {
+        total += atts[j].dataUrl.length;
+      }
+    }
+    if (total <= softLimit) {
+      return;
+    }
+    let keepFrom: number = Math.max(0, conv.messages.length - 20);
+    for (let i: number = 0; i < keepFrom && total > hardLimit; i++) {
+      let atts: Attachment[] = conv.messages[i].attachments;
+      for (let j: number = 0; j < atts.length; j++) {
+        let att: Attachment = atts[j];
+        if (att.type !== 'image' || att.dataUrl === '' || att.thumbnail === '') {
+          continue;
+        }
+        total -= att.dataUrl.length;
+        att.dataUrl = '';
+      }
+    }
+  }
+
   private cloneToolCallsForLoop(calls: ToolCallRecord[]): ToolCallRecord[] {
     let out: ToolCallRecord[] = [];
     for (let i: number = 0; i < calls.length; i++) {
@@ -3896,6 +3932,8 @@ if (this.abortSignal.aborted) {
       // 中断且无内容, 移除 assistant
       conv.messages = conv.messages.filter((m: Message): boolean => m !== msg);
     }
+    // 长会话里释放早期图片的内联 base64(缩略图仍在), 防止图片随历史无限常驻
+    this.releaseOldImagePayloads(conv);
     // 一轮结束立刻落盘, 不等合并窗口: 用户此时切后台/杀进程的概率最高
     this.flushConversations();
     if (this.autoReadEnabled && !this.abortSignal.aborted && msg.content !== '') {

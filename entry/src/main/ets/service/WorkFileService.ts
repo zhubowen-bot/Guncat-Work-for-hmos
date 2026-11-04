@@ -395,6 +395,9 @@ export class WorkFileService {
     // 目录优先、按名称排序, 输出稳定便于模型与用户对照
     let dirs: string[] = [];
     let files: string[] = [];
+    // 每个条目只 stat 一次: 旧实现对每个文件先 stat(isDirectory) 再 stat(size),
+    // 400 个文件时一次刷新就是 800 次同步系统调用, 全发生在 UI 线程。
+    let sizes: Map<string, number> = new Map<string, number>();
     for (let i: number = 0; i < names.length; i++) {
       let name: string = names[i];
       if (name.endsWith(WorkFileService.IEC_LINK_SUFFIX) &&
@@ -408,16 +411,16 @@ export class WorkFileService {
         continue;   // 同名真实文件与标记并存时以链接为准（fs shim 同语义）
       }
       let abs: string = dir + '/' + name;
-      let isDir: boolean = false;
       try {
-        isDir = fileIo.statSync(abs).isDirectory();
+        let st: fileIo.Stat = fileIo.statSync(abs);
+        if (st.isDirectory()) {
+          dirs.push(name);
+        } else {
+          files.push(name);
+          sizes.set(name, st.size);
+        }
       } catch (e) {
         continue;
-      }
-      if (isDir) {
-        dirs.push(name);
-      } else {
-        files.push(name);
       }
     }
     linkSet.forEach((base: string): void => { files.push(base); });
@@ -456,11 +459,11 @@ export class WorkFileService {
           size = 0;   // 悬空链接照样列出
         }
       } else {
-        try {
-          size = fileIo.statSync(absFile).size;
-        } catch (e) {
+        const cachedSize: number | undefined = sizes.get(files[i]);
+        if (cachedSize === undefined) {
           continue;
         }
+        size = cachedSize;
       }
       let info: WorkspaceFileInfo = new WorkspaceFileInfo();
       info.path = WorkFileService.toRelative(root, absFile);

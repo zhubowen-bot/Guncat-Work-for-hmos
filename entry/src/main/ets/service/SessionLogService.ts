@@ -10,6 +10,26 @@ import { OrphanSweep } from '../common/OrphanSweep';
 
 export class SessionLogService {
   private static openFiles: Map<string, fileIo.File> = new Map();
+  // 打开顺序, 用于把常驻句柄限制在上限内。旧实现每个会话一个句柄且只在删除会话时
+  // 关闭, 用户浏览/切换几十个会话后 fd 会一直涨。
+  private static openOrder: string[] = [];
+  private static readonly MAX_OPEN_FILES: number = 8;
+
+  private static closeOldest(): void {
+    if (SessionLogService.openOrder.length === 0) {
+      return;
+    }
+    const oldest: string = SessionLogService.openOrder.shift() as string;
+    const file: fileIo.File | undefined = SessionLogService.openFiles.get(oldest);
+    if (file !== undefined) {
+      try {
+        fileIo.closeSync(file);
+      } catch (e) {
+        // ignore
+      }
+      SessionLogService.openFiles.delete(oldest);
+    }
+  }
 
   private static filePath(context: common.UIAbilityContext, convId: string): string {
     let safe: string = SessionLogService.logName(convId);
@@ -27,9 +47,13 @@ export class SessionLogService {
         if (!fileIo.accessSync(dir)) {
           fileIo.mkdirSync(dir, true);
         }
+        while (SessionLogService.openOrder.length >= SessionLogService.MAX_OPEN_FILES) {
+          SessionLogService.closeOldest();
+        }
         file = fileIo.openSync(abs,
           fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.APPEND);
         SessionLogService.openFiles.set(convId, file);
+        SessionLogService.openOrder.push(convId);
         // 新文件写 header
         let header: Record<string, Object> = {
           'type': 'session',
@@ -51,13 +75,8 @@ export class SessionLogService {
   }
 
   private static writeLine(file: fileIo.File, obj: Record<string, Object>): void {
-    let encoder: util.TextEncoder = new util.TextEncoder();
-    let bytes: Uint8Array = encoder.encode(JSON.stringify(obj) + '\n');
-    let buffer: ArrayBuffer = bytes.buffer as ArrayBuffer;
-    if (bytes.byteOffset !== 0 || bytes.byteLength !== buffer.byteLength) {
-      buffer = bytes.slice().buffer as ArrayBuffer;
-    }
-    fileIo.writeSync(file.fd, buffer);
+    // 直接写 string, 省掉 TextEncoder + ArrayBuffer 的整份复制(日志每步都在写)
+    fileIo.writeSync(file.fd, JSON.stringify(obj) + '\n');
   }
 
   // 读取指定会话的日志全文(会话日志检索工具用); 上限 2MB
@@ -96,6 +115,10 @@ export class SessionLogService {
         // ignore
       }
       SessionLogService.openFiles.delete(convId);
+      const at: number = SessionLogService.openOrder.indexOf(convId);
+      if (at >= 0) {
+        SessionLogService.openOrder.splice(at, 1);
+      }
     }
     if (deleteLog) {
       try {

@@ -348,6 +348,8 @@ struct ChatPage {
     if (this.isListening) {
       this.voiceInputService.cancel();
     }
+    // 页面销毁时把合并窗口里的存档落盘(不阻塞, flush 内部同步写)
+    this.vm.flushConversations();
     if (this.toastTimer !== -1) {
       clearTimeout(this.toastTimer);
       this.toastTimer = -1;
