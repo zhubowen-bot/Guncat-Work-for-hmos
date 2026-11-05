@@ -3,6 +3,7 @@ import { deviceInfo } from '@kit.BasicServicesKit';
 import { ApiConfig } from '../model/ApiConfig';
 import { ApiProfile } from '../model/ApiProfile';
 import { MultimodalConfig } from '../model/MultimodalConfig';
+import { TOOL_CATALOG, ToolCatalogGroup, ToolCatalogItem, toolCatalogCount } from '../model/ToolCatalog';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { SettingsSession } from '../viewmodel/SettingsSession';
 import { Constants } from '../common/Constants';
@@ -209,6 +210,8 @@ struct SettingsPage {
         this.buildReadingView()
       } else if (this.view === 'terminal') {
         this.buildTerminalView()
+      } else if (this.view === 'tools') {
+        this.buildToolsView()
       } else {
         this.buildRootView()
       }
@@ -323,6 +326,14 @@ struct SettingsPage {
             this.buildOptionRow($r('sys.symbol.code'), '终端',
               '原生 Shell 与 Python 运行环境', (): void => {
                 this.view = 'terminal';
+              })
+            Divider()
+              .strokeWidth(0.5)
+              .color($r('app.color.divider'))
+              .margin({ left: 56 })
+            this.buildOptionRow($r('sys.symbol.square_grid_2x2'), '工具',
+              toolCatalogCount().toString() + ' 项内置工具', (): void => {
+                this.view = 'tools';
               })
           }
           .width('100%')
@@ -1439,6 +1450,268 @@ struct SettingsPage {
     .alignItems(VerticalAlign.Center)
   }
 
+  // ===== 工具目录(只读) =====
+  @Builder
+  private buildToolsView() {
+    Scroll() {
+      Column() {
+        this.buildToolManagementCard()
+
+        Row() {
+          Text('工具目录')
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_secondary'))
+          Blank()
+          Text('按用途分组')
+            .fontSize(11)
+            .fontColor($r('app.color.text_tertiary'))
+        }
+        .width('100%')
+        .padding({ left: 4, right: 4 })
+        .margin({ top: 22, bottom: 8 })
+
+        ForEach(TOOL_CATALOG, (group: ToolCatalogGroup) => {
+          this.buildToolGroup(group)
+        }, (group: ToolCatalogGroup) => group.title)
+
+        Text('工具由软件在对话中自动选择，此页仅作展示。')
+          .fontSize(11)
+          .fontColor($r('app.color.text_tertiary'))
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .lineHeight(17)
+          .margin({ top: 8, bottom: 32 })
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 720 })
+      .padding({ left: 16, right: 16 })
+    }
+    .layoutWeight(1)
+    .width('100%')
+    .align(Alignment.Top)
+    .scrollBar(BarState.Off)
+    .edgeEffect(EdgeEffect.Spring)
+  }
+
+  @Builder
+  private buildToolManagementCard() {
+    Stack({ alignContent: Alignment.TopEnd }) {
+      SymbolGlyph($r('sys.symbol.wand_and_stars'))
+        .fontSize(132)
+        .fontColor([$r('app.color.brand')])
+        .opacity(0.05)
+        .offset({ x: 26, y: -34 })
+        .hitTestBehavior(HitTestMode.None)
+
+      Column() {
+        Row() {
+          Stack() {
+            SymbolGlyph($r('sys.symbol.wand_and_stars'))
+              .fontSize(21)
+              .fontColor([$r('app.color.brand')])
+          }
+          .width(42)
+          .height(42)
+          .borderRadius(14)
+          .backgroundColor($r('app.color.brand_light'))
+
+          Column() {
+            Text('工具自动管理')
+              .fontSize(16)
+              .fontWeight(FontWeight.Medium)
+              .fontColor($r('app.color.text_primary'))
+              .width('100%')
+            Text('全部工具由软件统一调度，按需加载。')
+              .fontSize(12)
+              .fontColor($r('app.color.text_secondary'))
+              .lineHeight(18)
+              .margin({ top: 3 })
+              .width('100%')
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          .margin({ left: 12 })
+
+          Column() {
+            this.buildLockedSwitch()
+            Text('已锁定')
+              .fontSize(10)
+              .fontColor($r('app.color.text_tertiary'))
+              .margin({ top: 5 })
+          }
+          .alignItems(HorizontalAlign.Center)
+          .margin({ left: 8 })
+          .hitTestBehavior(HitTestMode.None)
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        Row() {
+          this.buildToolStat(toolCatalogCount().toString(), '项工具')
+          Divider()
+            .vertical(true)
+            .height(24)
+            .strokeWidth(0.5)
+            .color($r('app.color.divider'))
+          this.buildToolStat(TOOL_CATALOG.length.toString(), '个分组')
+          Divider()
+            .vertical(true)
+            .height(24)
+            .strokeWidth(0.5)
+            .color($r('app.color.divider'))
+          this.buildToolStat('自动', '调度方式')
+        }
+        .width('100%')
+        .margin({ top: 16 })
+        .padding({ top: 14 })
+        .border({ width: { top: 0.5 }, color: { top: $r('app.color.divider') } })
+        .alignItems(VerticalAlign.Center)
+      }
+      .width('100%')
+      .padding(18)
+    }
+    .width('100%')
+    .borderRadius(24)
+    .backgroundColor($r('app.color.surface'))
+    .border({ width: 1, color: $r('app.color.divider') })
+    .shadow({ radius: 20, color: '#0F000000', offsetX: 0, offsetY: 6 })
+    .clip(true)
+    .margin({ top: 16 })
+  }
+
+  @Builder
+  private buildLockedSwitch() {
+    Row() {
+      SymbolGlyph($r('sys.symbol.lock'))
+        .fontSize(9)
+        .fontColor([Color.White])
+      Blank()
+      Column()
+        .width(22)
+        .height(22)
+        .borderRadius(11)
+        .backgroundColor(Color.White)
+        .shadow({ radius: 4, color: '#24000000', offsetX: 0, offsetY: 1 })
+    }
+    .width(50)
+    .height(28)
+    .borderRadius(14)
+    .padding({ left: 9, right: 3 })
+    .backgroundColor($r('app.color.brand'))
+    .alignItems(VerticalAlign.Center)
+    .hitTestBehavior(HitTestMode.None)
+  }
+
+  @Builder
+  private buildToolStat(value: string, label: string) {
+    Column() {
+      Text(value)
+        .fontSize(19)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.brand'))
+        .lineHeight(23)
+      Text(label)
+        .fontSize(10)
+        .fontColor($r('app.color.text_tertiary'))
+        .margin({ top: 2 })
+    }
+    .layoutWeight(1)
+    .alignItems(HorizontalAlign.Center)
+  }
+
+  @Builder
+  private buildToolGroup(group: ToolCatalogGroup) {
+    Column() {
+      Row() {
+        Stack() {
+          SymbolGlyph(this.toolGroupIcon(group.icon))
+            .fontSize(15)
+            .fontColor([$r('app.color.brand')])
+        }
+        .width(28)
+        .height(28)
+        .borderRadius(9)
+        .backgroundColor($r('app.color.brand_light'))
+
+        Text(group.title)
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_primary'))
+          .margin({ left: 10 })
+        Blank()
+        Text(group.tools.length.toString() + ' 项')
+          .fontSize(11)
+          .fontColor($r('app.color.text_tertiary'))
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 14, bottom: 12 })
+      .alignItems(VerticalAlign.Center)
+
+      Divider()
+        .strokeWidth(0.5)
+        .color($r('app.color.divider'))
+        .margin({ left: 16, right: 16 })
+
+      ForEach(group.tools, (tool: ToolCatalogItem, index: number) => {
+        Column() {
+          Column() {
+            Text(tool.name)
+              .fontSize(13)
+              .fontWeight(FontWeight.Medium)
+              .fontColor($r('app.color.text_primary'))
+              .width('100%')
+            Text(tool.summary)
+              .fontSize(11)
+              .fontColor($r('app.color.text_secondary'))
+              .lineHeight(16)
+              .width('100%')
+              .margin({ top: 2 })
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+          .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+
+          if (index < group.tools.length - 1) {
+            Divider()
+              .strokeWidth(0.5)
+              .color($r('app.color.divider'))
+              .margin({ left: 16, right: 16 })
+          }
+        }
+        .width('100%')
+      }, (tool: ToolCatalogItem) => tool.name)
+    }
+    .width('100%')
+    .backgroundColor($r('app.color.surface'))
+    .borderRadius(22)
+    .border({ width: 1, color: $r('app.color.divider') })
+    .clip(true)
+    .margin({ bottom: 12 })
+  }
+
+  private toolGroupIcon(kind: string): Resource {
+    if (kind === 'search') {
+      return $r('sys.symbol.magnifyingglass');
+    }
+    if (kind === 'edit') {
+      return $r('sys.symbol.doc_plaintext_and_pencil');
+    }
+    if (kind === 'code') {
+      return $r('sys.symbol.code');
+    }
+    if (kind === 'doc') {
+      return $r('sys.symbol.rectangle_stack');
+    }
+    if (kind === 'web') {
+      return $r('sys.symbol.link');
+    }
+    if (kind === 'task') {
+      return $r('sys.symbol.list_checkmark');
+    }
+    return $r('sys.symbol.list_book');
+  }
+
   // ===== 页面标题 =====
   private viewTitle(): string {
     if (this.view === 'model') {
@@ -1458,6 +1731,9 @@ struct SettingsPage {
     }
     if (this.view === 'terminal') {
       return '终端';
+    }
+    if (this.view === 'tools') {
+      return '工具';
     }
     return '设置';
   }
