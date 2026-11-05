@@ -285,7 +285,7 @@ struct SettingsPage {
               .strokeWidth(0.5)
               .color($r('app.color.divider'))
               .margin({ left: 56 })
-            this.buildOptionRow($r('sys.symbol.grid'), '用量与成本',
+            this.buildOptionRow($r('sys.symbol.text_alignleft'), '用量与成本',
               '每日 Token 热力图与成本估算', (): void => {
                 router.pushUrl({ url: 'pages/UsagePage' }).catch((): void => {});
               })
