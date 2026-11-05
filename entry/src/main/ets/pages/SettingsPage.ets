@@ -340,7 +340,7 @@ struct SettingsPage {
               .strokeWidth(0.5)
               .color($r('app.color.divider'))
               .margin({ left: 56 })
-            this.buildOptionRow($r('sys.symbol.arrow_clockwise'), '检查更新',
+            this.buildOptionRow($r('sys.symbol.arrowshape_up_frame'), '检查更新',
               '当前 ' + Constants.APP_VERSION + ' · 通过 AppTest 获取测试版', (): void => {
                 this.checkForUpdates();
               })
