@@ -1498,15 +1498,9 @@ struct SettingsPage {
 
       Column() {
         Row() {
-          Stack() {
-            SymbolGlyph($r('sys.symbol.wand_and_stars'))
-              .fontSize(21)
-              .fontColor([$r('app.color.brand')])
-          }
-          .width(42)
-          .height(42)
-          .borderRadius(14)
-          .backgroundColor($r('app.color.brand_light'))
+          SymbolGlyph($r('sys.symbol.wand_and_stars'))
+            .fontSize(24)
+            .fontColor([$r('app.color.brand')])
 
           Column() {
             Text('工具自动管理')
@@ -1616,15 +1610,9 @@ struct SettingsPage {
   private buildToolGroup(group: ToolCatalogGroup) {
     Column() {
       Row() {
-        Stack() {
-          SymbolGlyph(this.toolGroupIcon(group.icon))
-            .fontSize(15)
-            .fontColor([$r('app.color.brand')])
-        }
-        .width(28)
-        .height(28)
-        .borderRadius(9)
-        .backgroundColor($r('app.color.brand_light'))
+        SymbolGlyph(this.toolGroupIcon(group.icon))
+          .fontSize(17)
+          .fontColor([$r('app.color.brand')])
 
         Text(group.title)
           .fontSize(14)
