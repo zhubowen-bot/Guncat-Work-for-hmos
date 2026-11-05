@@ -24,6 +24,7 @@ import { StorageManager } from '../data/StorageManager';
 import { HarnessTools } from '../service/HarnessTools';
 import { IecShellService } from '../service/IecShellService';
 import { ToolExecResult } from '../service/WorkFileService';
+import { UsageMeter } from '../service/UsageMeter';
 import { startPyRunner } from 'iec';
 
 const DOMAIN = 0x0000;
@@ -43,6 +44,8 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate<string>('sharedFileUris', '');
     // 前后台状态: 页面用它暂停 1s/100ms 轮询, VM 用它判断后台启动的任务要不要保活
     AppStorage.setOrCreate<boolean>('appForeground', true);
+    // 用量账本只记住 filesDir, 不在这里读盘; 第一次记账/打开用量页时才懒加载。
+    UsageMeter.init(this.context);
     this.publishSharedFiles(want);
     // shell 工具走设备内原生执行核（IEC）：不启虚拟机、不需要 JIT 权限。
     // 钩子由 .ets 侧注入，HarnessTools(.ts) 只负责调用。
@@ -133,6 +136,8 @@ export default class EntryAbility extends UIAbility {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onDestroy');
     // 进程被回收前把合并窗口里的会话落盘, 避免"退出后最后几条对话消失"
     StorageManager.flushConversations(this.context).catch((): void => {});
+    // 用量账本同样落盘; 同步写几十 KB, 退出路径可以接受
+    UsageMeter.flush();
     // 释放长时/短时任务，避免进程退出后系统侧还留着通知或配额占用
     BackgroundTaskService.stop(this.context);
   }
@@ -192,6 +197,8 @@ export default class EntryAbility extends UIAbility {
     }
     // 切后台前落盘: 系统随时可能回收后台进程, 合并写窗口里的内容不能丢
     StorageManager.flushConversations(this.context).catch((): void => {});
+    // 用量账本通常只有几十 KB, 同步 flush 一次, 避免最后几笔统计丢在内存里
+    UsageMeter.flush();
     // 页面侧的 1s/100ms 轮询会在下一次 tick 看到 appForeground=false 后跳过重活
   }
 

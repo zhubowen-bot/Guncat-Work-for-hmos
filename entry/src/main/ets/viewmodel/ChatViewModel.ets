@@ -8,6 +8,7 @@ import { Attachment } from '../model/Attachment';
 import { ApiConfig } from '../model/ApiConfig';
 import { MultimodalConfig } from '../model/MultimodalConfig';
 import { ApiProfile } from '../model/ApiProfile';
+import { UsageSnapshot } from '../model/UsageModels';
 import { LLMProtocol } from '../common/LLMProtocol';
 import { FileItem, StreamCallbacks, AbortSignal, ParsedFileResult } from '../common/Types';
 import { ToolExecutionGuard } from '../common/ToolExecutionGuard';
@@ -129,6 +130,9 @@ export class ChatViewModel {
   // 用于推导本会话的字符→token 比例并做上下文预算判断; 0 表示未知)
   private lastWorkPromptTokens: number = 0;
   private lastWorkPromptChars: number = 0;
+  // 最近一次模型请求的真实 token 总量(仅当前运行期, 不落盘; 详情面板展示用)
+  lastTurnTokens: number = 0;
+  lastTurnCostText: string = '—';
   // @deprecated 重复调用防护已迁移到 RepeatDetector, 保留兼容
   private workRepeatKey: string = '';
   private workRepeatCount: number = 0;
@@ -1049,6 +1053,27 @@ export class ChatViewModel {
       return 0;
     }
     return WorkFileService.listWorkspace(this.context, convId).length;
+  }
+
+  // 详情面板"最近一轮费用": DeepSeek 显示人民币估算, OpenCode 显示美元额度/成本。
+  private static formatUsageCost(s: UsageSnapshot): string {
+    if (s.costCny > 0) {
+      if (s.costCny < 0.01) {
+        return '¥' + s.costCny.toFixed(4);
+      }
+      return '¥' + s.costCny.toFixed(3);
+    }
+    let usd: number = s.costUsd > 0 ? s.costUsd : s.listCostUsd;
+    if (usd > 0) {
+      if (usd < 0.01) {
+        return '$' + usd.toFixed(4);
+      }
+      return '$' + usd.toFixed(3);
+    }
+    if (s.allowanceUsd > 0) {
+      return '$' + s.allowanceUsd.toFixed(3);
+    }
+    return '—';
   }
 
   // 删除会话且工作区非空时的人工确认: 说清"会话记录与工作区文件一起删、不可恢复"。
@@ -2544,6 +2569,8 @@ export class ChatViewModel {
           this.lastWorkPromptTokens = turn.promptTokens;
           this.lastWorkPromptChars = requestChars;
         }
+        this.lastTurnTokens = turn.usage.totalTokens();
+        this.lastTurnCostText = ChatViewModel.formatUsageCost(turn.usage);
         // 步骤事件留痕(assistant 内容 + 思考摘要 + 调用清单)
         if (ctx !== null) {
           let callsForLog: Object[] = [];
@@ -3267,6 +3294,8 @@ if (this.abortSignal.aborted) {
           this.lastWorkPromptTokens = turn.promptTokens;
           this.lastWorkPromptChars = requestChars;
         }
+        this.lastTurnTokens = turn.usage.totalTokens();
+        this.lastTurnCostText = ChatViewModel.formatUsageCost(turn.usage);
         // 步骤事件留痕(assistant 内容 + 思考摘要 + 调用清单)
         if (ctx !== null) {
           let callsForLog: Object[] = [];
@@ -3913,6 +3942,8 @@ if (this.abortSignal.aborted) {
       let result: ChatStreamResult = await ChatService.streamChat(
         this.apiConfig, this.currentAgent, currentHistory, currentUserText,
         this.thinkingEnabled, this.webSearchEnabled, callbacks, this.abortSignal);
+      this.lastTurnTokens = result.usage.totalTokens();
+      this.lastTurnCostText = ChatViewModel.formatUsageCost(result.usage);
       assistantMsg.thinkingSignature = result.thinkingSignature;
       assistantMsg.redactedThinking = result.redactedThinking;
       assistantMsg.reasoningItems = result.reasoningItems;

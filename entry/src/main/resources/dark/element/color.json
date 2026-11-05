@@ -147,6 +147,30 @@
     {
       "name": "stop_btn",
       "value": "#F25A5A"
+    },
+    {
+      "name": "heat_0",
+      "value": "#2A2B2D"
+    },
+    {
+      "name": "heat_1",
+      "value": "#26354D"
+    },
+    {
+      "name": "heat_2",
+      "value": "#2F4B7A"
+    },
+    {
+      "name": "heat_3",
+      "value": "#3F67AC"
+    },
+    {
+      "name": "heat_4",
+      "value": "#6D95F5"
+    },
+    {
+      "name": "heat_selected",
+      "value": "#FFA94D"
     }
   ]
 }

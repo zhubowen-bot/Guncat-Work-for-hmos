@@ -8,6 +8,9 @@ import { Agent } from '../model/Agent';
 import { Message } from '../model/Message';
 import { Attachment } from '../model/Attachment';
 import { ToolCallRecord } from '../model/ToolCallRecord';
+import { UsageSnapshot } from '../model/UsageModels';
+import { UsageNormalizer } from '../common/UsageNormalizer';
+import { UsageMeter } from './UsageMeter';
 import { StreamCallbacks, AbortSignal } from '../common/Types';
 import { Constants } from '../common/Constants';
 import { LLMProtocol } from '../common/LLMProtocol';
@@ -53,6 +56,8 @@ export class ChatStreamResult {
   reasoningItems: string = '';
   // 本轮累积的正文(供重试层判断"空响应", 也供 onDone 收尾)
   content: string = '';
+  // 本轮 usage 归一化快照(缓存命中/未命中/输出/OpenCode 额度)
+  usage: UsageSnapshot = new UsageSnapshot();
 }
 
 // 本地内置联网搜索 search_web 的 function tool 定义(协议相关形态):
@@ -292,7 +297,10 @@ function buildChatCompletionsBody(config: ApiConfig, agent: Agent | null,
   let body: Record<string, Object> = {
     model: config.model,
     messages: messages,
-    stream: true
+    stream: true,
+    // 流式 usage 默认可能不返回; DeepSeek/OpenAI 兼容端点加上后会在最后一块带 usage,
+    // 用于缓存命中/成本统计。部分老网关会忽略未知字段。
+    stream_options: { include_usage: true }
   };
 
   // 本地内置联网搜索 search_web 强制注入(由模型决定是否调用); 服务端联网搜索按开关并存
@@ -1142,11 +1150,25 @@ export function extractAnthropicUsage(sseData: string): Record<string, Object> |
     if (typeof json !== 'object' || json === null) {
       return null;
     }
-    let type: Object = (json as Record<string, Object>)['type'];
-    if (typeof type !== 'string' || type !== 'message_delta') {
+    let rec: Record<string, Object> = json as Record<string, Object>;
+    let type: Object = rec['type'];
+    if (typeof type !== 'string') {
       return null;
     }
-    let usage: Object = (json as Record<string, Object>)['usage'];
+    if ((type as string) === 'message_start') {
+      let message: Object | undefined = rec['message'];
+      if (typeof message === 'object' && message !== null) {
+        let usage: Object | undefined = (message as Record<string, Object>)['usage'];
+        if (typeof usage === 'object' && usage !== null) {
+          return usage as Record<string, Object>;
+        }
+      }
+      return null;
+    }
+    if ((type as string) !== 'message_delta') {
+      return null;
+    }
+    let usage: Object | undefined = rec['usage'];
     if (typeof usage === 'object' && usage !== null) {
       return usage as Record<string, Object>;
     }
@@ -1355,6 +1377,7 @@ export class ChatService {
     let redactedThinking: string = '';
     let reasoningItems: string = '';
     let streamResult: ChatStreamResult = new ChatStreamResult();
+    let sawUsage: boolean = false;
     // 对齐 web 版本: SSE 解析出一个 delta 就立即 onToken 全量累积,
     // UI 端 50ms 节流刷新. 不做应用层字符拆分 (避免 setTimeout 队列过长 OOM)
 
@@ -1408,6 +1431,14 @@ export class ChatService {
       };
       ctx.onUsage = (usageObj: Record<string, Object> | null): void => {
         let stats: number[] = deriveStreamStats(usageObj, Date.now() - startTime);
+        if (usageObj !== null) {
+          sawUsage = true;
+          try {
+            streamResult.usage.mergeFrom(UsageNormalizer.normalize(usageObj, protocol));
+          } catch (usageError) {
+            // 统计异常不能影响流式主流程
+          }
+        }
         callbacks.onUsage(stats[0], stats[1]);
       };
       ctx.onComplete = (): void => {
@@ -1633,6 +1664,19 @@ export class ChatService {
     } finally {
       // 错误/中断路径也把工具参数分片拼完整(见 AgentLoopService 同名处理)
       callAcc.flushArgs(true);
+      // 用量记账(成功/失败/中断都覆盖): 有 usage 记真实值; 正常结束但网关没回 usage
+      // 只记一次 missing, 不把网络失败的请求也算进"缺失"。
+      try {
+        if (sawUsage) {
+          UsageMeter.recordSnapshot(config, startTime, streamResult.usage);
+        } else if (sawComplete) {
+          let missing: UsageSnapshot = new UsageSnapshot();
+          missing.missingUsage = 1;
+          UsageMeter.recordSnapshot(config, startTime, missing);
+        }
+      } catch (usageError) {
+        // 统计失败不影响聊天
+      }
       ChatService.activeRequest = null;
       try {
         httpRequest.off('dataReceive');

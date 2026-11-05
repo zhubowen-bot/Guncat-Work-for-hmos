@@ -2,6 +2,7 @@
   "src": [
     "pages/ChatPage",
     "pages/SettingsPage",
-    "pages/TableOcrPage"
+    "pages/TableOcrPage",
+    "pages/UsagePage"
   ]
 }

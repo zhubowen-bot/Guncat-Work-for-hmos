@@ -17,6 +17,7 @@ export struct DswSidebar {
   private onDeleteConversation: (id: string) => void = (_id: string): void => {};
   private onNewConversation: () => void = (): void => {};
   private onSettings: () => void = (): void => {};
+  private onUsage: () => void = (): void => {};
   private onPlayGuide: () => void = (): void => {};
   private onOpenDetails: () => void = (): void => {};
 
@@ -65,6 +66,7 @@ export struct DswSidebar {
           this.buildRailButton($r('sys.symbol.doc_text'), (): void => this.onOpenDetails())
           Blank()
           this.buildRailAvatar((): void => this.onPlayGuide())
+          this.buildRailButton($r('sys.symbol.grid'), (): void => this.onUsage())
           this.buildRailButton($r('sys.symbol.gearshape'), (): void => this.onSettings())
         }
         .width('100%')
@@ -148,6 +150,7 @@ export struct DswSidebar {
         Row({ space: 4 }) {
           this.buildFootButton($r('sys.symbol.info_circle'), '玩转应用', (): void => this.onPlayGuide())
           this.buildFootButton($r('sys.symbol.doc_text'), '工作区', (): void => this.onOpenDetails())
+          this.buildFootButton($r('sys.symbol.grid'), '用量', (): void => this.onUsage())
           this.buildFootButton($r('sys.symbol.gearshape'), '设置', (): void => this.onSettings())
         }
         .width('100%')

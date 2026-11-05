@@ -14,6 +14,9 @@ export class Constants {
   static readonly LS_KEY_API_PROFILES: string = 'guncat_api_profiles';
   static readonly LS_KEY_CURRENT_API_PROFILE_ID: string = 'guncat_current_api_profile';
   static readonly LS_KEY_THINKING_ENABLED: string = 'guncat_thinking_enabled';
+  // 用量与成本页的用户参数(JSON: 汇率/月预算/OpenCode 套餐额度)与 DeepSeek 余额快照
+  static readonly LS_KEY_USAGE_SETTINGS: string = 'guncat_usage_settings';
+  static readonly LS_KEY_USAGE_BALANCE: string = 'guncat_usage_balance';
   // 本地内置联网搜索配置(JSON: 引擎选择 + 各引擎 API Key/BaseUrl), 与服务端联网搜索开关独立
   static readonly LS_KEY_LOCAL_SEARCH_CONFIG: string = 'guncat_local_search_config';
   // 工作模式的推理强度('max' / 'high' / 'low'), 作为 reasoning 强度参数下发

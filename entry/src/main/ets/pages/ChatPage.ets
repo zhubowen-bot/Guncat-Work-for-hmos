@@ -49,6 +49,8 @@ class WorkPanelStats {
   cacheText: string = '—';
   toolCalls: number = 0;
   goalText: string = '';
+  turnTokensText: string = '—';
+  turnCostText: string = '—';
 }
 
 @Entry
@@ -502,6 +504,13 @@ struct ChatPage {
     });
   }
 
+  // 用量页独立路由: 只读取本地日聚合账本, 不把统计对象挂到聊天页状态里。
+  private openUsage(): void {
+    router.pushUrl({ url: 'pages/UsagePage' }).catch((): void => {
+      this.showToast('无法打开用量统计');
+    });
+  }
+
   // 同步“是否贴底”到 UI 状态。只在值变化时写 @State, 避免滚动帧里反复触发重建。
   private setFollowBottom(follow: boolean): void {
     this.followBottom = follow;
@@ -659,6 +668,9 @@ struct ChatPage {
             },
             onSettings: () => {
               this.openSettings();
+            },
+            onUsage: () => {
+              this.openUsage();
             },
             onPlayGuide: () => {
               this.playGuideOpen = true;
@@ -2360,7 +2372,19 @@ struct ChatPage {
       Math.round(last.cacheHitRate * 100).toString() + '%' : '—';
     s.toolCalls = this.detailToolCallTotal();
     s.goalText = this.detailGoalText();
+    s.turnTokensText = this.vm.lastTurnTokens > 0 ? this.formatUsageTokens(this.vm.lastTurnTokens) : '—';
+    s.turnCostText = this.vm.lastTurnCostText;
     this.workStats = s;
+  }
+
+  private formatUsageTokens(v: number): string {
+    if (v >= 1000000) {
+      return (v / 1000000).toFixed(2) + 'M';
+    }
+    if (v >= 1000) {
+      return (v / 1000).toFixed(1) + 'K';
+    }
+    return Math.round(v).toString();
   }
 
   // 产物汇总的输入指纹: 会话 + 消息数 + 每次工具调用的完成态 + 工作区文件数。
@@ -2547,6 +2571,28 @@ struct ChatPage {
                 .fontColor($r('app.color.text_secondary'))
                 .layoutWeight(1)
               Text(this.workStats.toolCalls.toString())
+                .fontSize(13)
+                .fontWeight(FontWeight.Medium)
+                .fontColor($r('app.color.text_primary'))
+            }
+            .width('100%')
+            Row() {
+              Text('最近一轮 Token')
+                .fontSize(13)
+                .fontColor($r('app.color.text_secondary'))
+                .layoutWeight(1)
+              Text(this.workStats.turnTokensText)
+                .fontSize(13)
+                .fontWeight(FontWeight.Medium)
+                .fontColor($r('app.color.text_primary'))
+            }
+            .width('100%')
+            Row() {
+              Text('最近一轮费用')
+                .fontSize(13)
+                .fontColor($r('app.color.text_secondary'))
+                .layoutWeight(1)
+              Text(this.workStats.turnCostText)
                 .fontSize(13)
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('app.color.text_primary'))

@@ -19,6 +19,9 @@ import { WorkFileService } from './WorkFileService';
 import { WorkSkillService } from './WorkSkillService';
 import { ApiConfig } from '../model/ApiConfig';
 import { ToolCallRecord } from '../model/ToolCallRecord';
+import { UsageSnapshot } from '../model/UsageModels';
+import { UsageNormalizer } from '../common/UsageNormalizer';
+import { UsageMeter } from './UsageMeter';
 import { AbortSignal } from '../common/Types';
 import { Constants } from '../common/Constants';
 import { PromptBuilder } from '../common/PromptBuilder';
@@ -116,6 +119,8 @@ export class LoopTurnResult {
   toolCalls: ToolCallRecord[] = [];
   tokenSpeed: number = -1;
   cacheHitRate: number = -1;
+  // 本请求真实 usage 归一化快照(含缓存命中/未命中/输出/服务端搜索与 OpenCode 额度)
+  usage: UsageSnapshot = new UsageSnapshot();
   // 本请求真实 prompt tokens(usage 锚定, 未知为 0); 用于上下文预算判断
   promptTokens: number = 0;
   // 结束原因('stop' | 'tool-calls' | 'max_tokens' | ''); max_tokens 触发粘性收尾
@@ -291,6 +296,7 @@ export class AgentLoopService {
     let sawComplete: boolean = false;
     let failedMsg: string = '';
     let startTime: number = Date.now();
+    let sawUsage: boolean = false;
     let result: LoopTurnResult = new LoopTurnResult();
     let callAcc: ToolCallAccumulator = new ToolCallAccumulator();
     let sseAdapter: SSEProtocolAdapter = AgentLoopService.buildSseAdapter(protocol, callAcc);
@@ -352,7 +358,17 @@ export class AgentLoopService {
         let stats: number[] = deriveStreamStats(usageObj, Date.now() - startTime);
         result.tokenSpeed = stats[0];
         result.cacheHitRate = stats[1];
-        result.promptTokens = AgentLoopService.extractPromptTokens(usageObj);
+        if (usageObj !== null) {
+          sawUsage = true;
+          try {
+            // Anthropic 的 message_start 只给输入, message_delta 给累计输出;
+            // mergeFrom 用 max 合并, 两种网关(全量/分段)都能得到正确总量。
+            result.usage.mergeFrom(UsageNormalizer.normalize(usageObj, protocol));
+          } catch (usageError) {
+            // 统计异常不能影响流式主流程
+          }
+          result.promptTokens = result.usage.totalInput();
+        }
         callbacks.onUsage(stats[0], stats[1]);
       };
       ctx.onFinishReason = (finish: string): void => {
@@ -567,6 +583,19 @@ export class AgentLoopService {
       // 通过 onToolCalls 进了时间线并可能被存档, 缺最后 200ms 会让参数变成
       // 非法 JSON, 下一轮请求直接 400。
       callAcc.flushArgs(true);
+      // 用量记账放在 finally: 成功、失败、用户中断都覆盖; 有 usage 记真实值,
+      // 正常结束但网关没回 usage 的只记一次 missing, 方便界面提示"统计可能偏低"。
+      try {
+        if (sawUsage) {
+          UsageMeter.recordSnapshot(config, startTime, result.usage);
+        } else if (sawComplete) {
+          let missing: UsageSnapshot = new UsageSnapshot();
+          missing.missingUsage = 1;
+          UsageMeter.recordSnapshot(config, startTime, missing);
+        }
+      } catch (usageError) {
+        // 统计失败不影响聊天
+      }
       let idx: number = AgentLoopService.activeRequests.indexOf(httpRequest);
       if (idx >= 0) {
         AgentLoopService.activeRequests.splice(idx, 1);
@@ -722,19 +751,6 @@ export class AgentLoopService {
         resolve();
       }, ms);
     });
-  }
-
-  // 从 usage 中提取真实 prompt tokens(completions 用 prompt_tokens, responses/anthropic 用 input_tokens)
-  private static extractPromptTokens(usage: Record<string, Object>): number {
-    let pt: Object = usage['prompt_tokens'];
-    if (typeof pt === 'number') {
-      return pt as number;
-    }
-    let it: Object = usage['input_tokens'];
-    if (typeof it === 'number') {
-      return it as number;
-    }
-    return 0;
   }
 
   // 提取结束原因(统一词表: 'max_tokens' 需要粘性收尾; 其余返回空串/非关键值):
@@ -1068,7 +1084,9 @@ export class AgentLoopService {
     let body: Record<string, Object> = {
       model: config.model,
       messages: msgs,
-      stream: true
+      stream: true,
+      // 与 ChatService 同口径: 让兼容端点返回最后一块 usage
+      stream_options: { include_usage: true }
     };
     let finalTools: Record<string, Object>[] = ToolDefAdapter.completionsTools(tools);
     if (webSearchEnabled) {

@@ -281,6 +281,14 @@ struct SettingsPage {
               this.advancedSummary(), (): void => {
                 this.view = 'advanced';
               })
+            Divider()
+              .strokeWidth(0.5)
+              .color($r('app.color.divider'))
+              .margin({ left: 56 })
+            this.buildOptionRow($r('sys.symbol.grid'), '用量与成本',
+              '每日 Token 热力图与成本估算', (): void => {
+                router.pushUrl({ url: 'pages/UsagePage' }).catch((): void => {});
+              })
           }
           .width('100%')
           .backgroundColor($r('app.color.surface'))
@@ -341,7 +349,7 @@ struct SettingsPage {
               .color($r('app.color.divider'))
               .margin({ left: 56 })
             this.buildOptionRow($r('sys.symbol.arrowshape_up_frame'), '检查更新',
-              '当前 ' + Constants.APP_VERSION , (): void => {
+              '当前版本 Version ' + Constants.APP_VERSION , (): void => {
                 this.checkForUpdates();
               })
           }

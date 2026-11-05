@@ -21,6 +21,7 @@ test/*/png.b64
 test/*/_check.txt
 test/*/_docsize.txt
 test/.npm-cache/
+test/usage-harness/out/
 __pycache__/
 *.pyc
 

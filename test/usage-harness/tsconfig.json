@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "strict": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "outDir": "out",
+    "rootDir": "../..",
+    "lib": ["ES2020", "DOM"]
+  },
+  "include": [
+    "usage-test.ts",
+    "../../entry/src/main/ets/common/UsageTime.ts",
+    "../../entry/src/main/ets/common/UsagePricing.ts",
+    "../../entry/src/main/ets/common/UsageNormalizer.ts",
+    "../../entry/src/main/ets/model/UsageModels.ts"
+  ]
+}
