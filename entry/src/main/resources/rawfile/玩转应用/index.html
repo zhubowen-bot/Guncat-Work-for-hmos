@@ -20,8 +20,9 @@
   5. 换图标 ──── 顶部应用图标是 assets/app-icon.png, 直接替换图片文件。
                  列表里的图标是单色实心 SVG, 换新图标去
                  https://fonts.google.com/icons 选 Filled 风格复制路径即可。
-  6. 图片说明 ── Version 7.0 新功能体验 (view-011) 的 011-1.png ~ 011-10.png 是这一页的
-                 正式配图, 与下方介绍卡一一对应 (第 N 张图 ↔ 第 N 张卡);
+  6. 图片说明 ── Version 7.2 新功能体验 (view-012) 的 012-1.png ~ 012-8.png 与
+                  Version 7.0 (view-011) 的 011-1.png ~ 011-10.png 都是正式配图，
+                 与下方介绍卡一一对应 (第 N 张图 ↔ 第 N 张卡);
                  想换图时用同名文件覆盖 assets/ 里的图片即可, 页面代码不用改。
                  交互模式 (view-009) 与 Version 6.3 (view-010) 仍是空占位文件名
                  (009-N.png / 010-N.png), 每页顶部注释写明「第 N 张该放什么」。
@@ -50,9 +51,20 @@
         <p class="hero-sub">Version 7.2.0 (720_1)</p>
       </header>
 
-      <!-- 新功能体验面板: 首页入口卡, 点击分别进入 Version 7.0 / 6.3 / 6.2 新功能子页 -->
+      <!-- 新功能体验面板: 首页入口卡, 点击分别进入 Version 7.2 / 7.0 / 6.3 / 6.2 新功能子页 -->
       <section class="toc toc-gap">
         <div class="toc-header">新功能体验</div>
+
+        <a class="card" href="#/012">
+          <div class="card-icon">
+            <svg viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></svg>
+          </div>
+          <div class="card-body">
+            <div class="card-title">感受 Version 7.2 的顺手升级</div>
+            <div class="card-text">用量与成本一眼看清，设置拆成独立页面并自动保存，切换模式不再被带进旧对话；闪退、后台与长会话也做了一轮扎实的稳定性和性能修补。</div>
+          </div>
+          <div class="card-arrow"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
+        </a>
 
         <a class="card" href="#/011">
           <div class="card-icon">
@@ -1637,6 +1649,129 @@
             <div class="card-text">提问不再白答：ask_user_question 的卡片等 5 分钟，外层护栏却只给 180 秒，第 3~5 分钟作答会被丢掉；护栏提到 360 秒。</div>
             <div class="card-text">工作区不留孤儿：删会话前先停任务、收尾再补删，启动时清扫「磁盘上有、会话列表里没有」的目录；工作区里还有文件时，删之前会先问你一句。</div>
             <div class="card-text">交互模式不会再掉回代码块，工作模式也不会再冒出不属于它的交互卡片。</div>
+          </div>
+        </div>
+
+      </div>
+
+    </main>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       子页 · Version 7.2 新功能体验
+       ═══════════════════════════════════════════════════ -->
+  <section class="view" id="view-012">
+    <main class="page">
+
+      <div class="pagebar">
+        <a class="back" href="#/" aria-label="返回目录">
+          <svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg>
+        </a>
+        <div class="pagebar-title">Version 7.2 新功能体验</div>
+      </div>
+
+      <!-- 顶部图片轮播: 本页共 8 张图, 文件名 012-1.png ~ 012-8.png (本页配套插图);
+           每张图对应下面一张介绍卡, 增删时图和卡必须成对同步修改。
+           图片对应内容:
+           012-1 用量与成本   012-2 设置页改版   012-3 检查更新   012-4 工具目录
+           012-5 模式切换     012-6 稳定性专项   012-7 消息跟随   012-8 终端环境 -->
+      <div class="gallery">
+        <div class="gallery-track">
+          <img src="assets/012-1.png" alt="每一笔花销，都有数">
+          <img src="assets/012-2.png" alt="设置不再挤在一页">
+          <img src="assets/012-3.png" alt="新版本，一点就知道">
+          <img src="assets/012-4.png" alt="助手会什么，一眼看清">
+          <img src="assets/012-5.png" alt="换模式，从新对话开始">
+          <img src="assets/012-6.png" alt="闪退、卡顿，都少一点">
+          <img src="assets/012-7.png" alt="往上翻，不再被拽回去">
+          <img src="assets/012-8.png" alt="运行环境，随时可查">
+        </div>
+        <div class="gallery-dots"></div>
+      </div>
+
+      <!-- 与轮播联动的介绍卡: 第 N 张图对应第 N 张卡, 只显示当前那张 -->
+      <div class="gallery-cards">
+
+        <!-- 1 用量与成本 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">每一笔花销，都有数</div>
+            <div class="card-text">新增「用量与成本」页：本月花了多少、今天用了多少、近 7 天是什么走势，打开就能看到；费用、Token 和请求数可以随时切换。</div>
+            <div class="card-text">53 周热力图按天记录用量，颜色越深用得越多；点某一天，还能看当天按模型拆分的明细、高峰与空闲时段的消耗。</div>
+            <div class="card-text">DeepSeek 和 OpenCode Go 各有一张卡片：填了 Key 就能看余额、额度与折算后的成本；没填会明确标注「未启用」，不会显示成 0 让人误会。DeepSeek 余额需要手动刷新，只作对账，不计入热力图。</div>
+            <div class="card-text">支持设置月预算、导出 CSV、清空统计。账本只存在本机，不上传；工作区详情里也能直接看到最近一轮的 Token 与费用。</div>
+          </div>
+        </div>
+
+        <!-- 2 设置页改版 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">设置不再挤在一个弹窗里</div>
+            <div class="card-text">设置改成了独立页面：模型配置、高级参数、本地联网搜索、多模态解析各自成页，声音和系统也单独分组，找一项设置不用再翻一长串折叠框。</div>
+            <div class="card-text">模型配置把配置方案、名称、接入方式、Base URL、API Key 和模型列表放在同一页，切换、新建、删除方案都在这里完成。</div>
+            <div class="card-text">改完不用再点保存：输入停顿后会自动写入当前方案；切换方案或离开页面前，也会先把还没写完的内容存好。</div>
+            <div class="card-text">朗读、终端、工具、检查更新这些入口也都收进了新的设置页，常用配置和系统信息各有各的位置。</div>
+          </div>
+        </div>
+
+        <!-- 3 检查更新 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">有没有新版本，点一下就知道</div>
+            <div class="card-text">设置「系统」分组底部新增「检查更新」，入口旁会显示当前版本。</div>
+            <div class="card-text">点一下会优先打开 AppTest 的公开测试页：装了 AppTest 就直接拉起；没装则打开官方公开链接，不会再只弹一句「链接无法打开」。</div>
+            <div class="card-text">更新完回到应用，版本号对得上就说明已经是最新版本。</div>
+          </div>
+        </div>
+
+        <!-- 4 工具目录 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">助手会什么，现在能一眼看清</div>
+            <div class="card-text">设置「系统」分组新增只读的「工具」目录，把 47 项工具按阅读与检索、写入与编辑、计算与执行、文档产出、联网与上下文、任务与协作、技能分成七组。</div>
+            <div class="card-text">每项只保留名称和一句用途说明，想确认助手能不能做某件事，翻一遍就够，不用去猜。</div>
+            <div class="card-text">页首的「工具自动管理」只是状态说明：工具仍由应用统一调度、按需加载，这里不提供开关，也不会改变现有行为。</div>
+          </div>
+        </div>
+
+        <!-- 5 模式切换 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">换模式，从一条新对话开始</div>
+            <div class="card-text">以前在交互模式的新建页切到工作模式，如果工作模式有历史会话，会直接打开最近那条，人还没开始新任务就被带进旧上下文。</div>
+            <div class="card-text">现在切换模式会优先复用目标模式下还没用过的空对话，没有才新建；两个模式各留一份新对话，来回切换始终停在同一份草稿上。</div>
+            <div class="card-text">从侧边栏或抽屉点历史会话，仍然是打开那条会话，看旧记录的入口没有变。</div>
+          </div>
+        </div>
+
+        <!-- 6 稳定性与性能 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">闪退、卡顿，都少一点</div>
+            <div class="card-text">会话存档会多留一份备份：闪退或应用被系统结束时，已经生成的内容尽量能找回；主存档损坏时也会自动回退到备份。</div>
+            <div class="card-text">切后台继续跑任务时，应用会按系统允许的方式申请保活；回前台补一次刷新，长时间挂后台再回来不容易卡死。</div>
+            <div class="card-text">聊天记录先显示最近 40 条，往上翻再继续加载；超大的工具输出也不再一股脑占满内存。</div>
+            <div class="card-text">这些改动不改变日常操作，目标是把「跑着跑着闪退」「历史多了就卡」这类问题压下去。</div>
+          </div>
+        </div>
+
+        <!-- 7 消息跟随 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">往上翻，不再被拽回底部</div>
+            <div class="card-text">以前生成回答时，只要手指往上翻，界面会不停把你拉回最新一条；现在改成贴底才跟随，离开底部后就彻底停下。</div>
+            <div class="card-text">惯性滑动还没停时不会恢复跟随，回到底部才重新跟上，生成过程中翻记录不再和手势打架。</div>
+            <div class="card-text">消息区右下角新增圆形的「回到底部」按钮，想跳回最新内容点一下就行。</div>
+          </div>
+        </div>
+
+        <!-- 8 终端环境 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">运行环境，随时都能查</div>
+            <div class="card-text">设置「系统」分组新增「终端」页，用只读列表展示应用内的运行组件：原生 Shell、原生 CPython 3.12 等。</div>
+            <div class="card-text">同一页还能看到应用版本、系统版本、API 等级、设备类型、芯片平台与指令集，排查兼容性问题时不用再靠猜。</div>
+            <div class="card-text">页面只展示信息，不提供修改入口，也不会影响终端和 Python 的现有行为。</div>
           </div>
         </div>
 
