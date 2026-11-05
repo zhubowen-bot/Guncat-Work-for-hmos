@@ -1,4 +1,5 @@
 import { router, promptAction } from '@kit.ArkUI';
+import { bundleManager, common, OpenLinkOptions } from '@kit.AbilityKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { ApiConfig } from '../model/ApiConfig';
 import { ApiProfile } from '../model/ApiProfile';
@@ -334,6 +335,14 @@ struct SettingsPage {
             this.buildOptionRow($r('sys.symbol.square_grid_2x2'), '工具',
               toolCatalogCount().toString() + ' 项内置工具', (): void => {
                 this.view = 'tools';
+              })
+            Divider()
+              .strokeWidth(0.5)
+              .color($r('app.color.divider'))
+              .margin({ left: 56 })
+            this.buildOptionRow($r('sys.symbol.arrow_clockwise'), '检查更新',
+              '当前 ' + Constants.APP_VERSION + ' · 通过 AppTest 获取测试版', (): void => {
+                this.checkForUpdates();
               })
           }
           .width('100%')
@@ -1906,6 +1915,28 @@ struct SettingsPage {
 
   private readingSummary(): string {
     return this.autoReadEnabled ? '自动朗读已开启' : '自动朗读已关闭';
+  }
+
+  // 检查更新: 已安装 AppTest 时用 Deep Linking 直达公开测试页;
+  // 未安装时回退到官方公开链接, 由页面引导安装 AppTest。
+  private async checkForUpdates(): Promise<void> {
+    await this.flushSave();
+    let context: common.UIAbilityContext =
+      this.getUIContext().getHostContext() as common.UIAbilityContext;
+    let options: OpenLinkOptions = { appLinkingOnly: false };
+    let target: string = Constants.APP_TEST_PUBLIC_URL;
+    try {
+      if (bundleManager.canOpenLink(Constants.APP_TEST_DEEPLINK)) {
+        target = Constants.APP_TEST_DEEPLINK;
+      }
+    } catch (e) {
+      // canOpenLink 不可用时直接走公开链接
+    }
+    try {
+      await context.openLink(target, options);
+    } catch (e) {
+      promptAction.showToast({ message: '无法打开 AppTest，请稍后重试', duration: 2000 });
+    }
   }
 
   // ===== 模型字段操作 =====

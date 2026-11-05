@@ -7,6 +7,12 @@
 > 关于 QEMU / Alpine / `npy` / `tooling/linux-vm` 的描述仅代表当时状态；当前实现见
 > [docs/architecture/iec-runtime.md](docs/architecture/iec-runtime.md)。
 
+## 未发布：设置页新增检查更新
+
+- **检查更新入口**：设置「系统」分组底部新增「检查更新」，点击优先通过 `apptest://` Deep Linking 直达 AppTest 公开测试页；未安装 AppTest 时回退到官方公开链接，由页面引导安装或查看测试版本。
+- **安装检测**：声明 `apptest` scheme 查询能力，已安装 AppTest 时直接拉起，未安装时打开公开链接，避免只弹出“链接无法打开”。
+- **样式一致**：入口沿用设置页的系统 SymbolGlyph 图标、品牌色、圆角卡片与分隔线，副标题展示当前应用版本，不使用 emoji。
+
 ## 未发布：设置页新增工具目录
 
 - **工具入口**：设置「系统」分组新增「工具」，进入只读目录页，按阅读与检索、写入与编辑、

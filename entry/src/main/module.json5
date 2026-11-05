@@ -12,6 +12,9 @@
     "deliveryWithInstall": true,
     "installationFree": false,
     "pages": "$profile:main_pages",
+    "querySchemes": [
+      "apptest"
+    ],
     "requestPermissions": [
       {
         "name": "ohos.permission.INTERNET",

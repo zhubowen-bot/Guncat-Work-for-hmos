@@ -2,6 +2,10 @@ export class Constants {
   // App info
   static readonly APP_NAME: string = 'Guncat Work';
   static readonly APP_VERSION: string = '7.1.0';
+  // 检查更新: 公开链接用于未安装 AppTest 时兜底, Deep Linking 用于已安装时直达
+  static readonly APP_TEST_PUBLIC_URL: string = 'https://appgallery.huawei.com/apptest/955nTWBlvx0';
+  static readonly APP_TEST_DEEPLINK: string =
+    'apptest://appgallery.huawei.com/apptest?inviteCode=955nTWBlvx0';
 
   // LocalStorage keys (统一存放在 Preferences 中, key 名字符串)
   static readonly LS_KEY_CONVERSATIONS: string = 'guncat_conversations';
