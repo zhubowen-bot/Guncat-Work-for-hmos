@@ -78,6 +78,9 @@ for (const [relSrc, relDst, replaces] of [
   ['common/WorkLoopStepInfoBuilder.ts', 'WorkLoopStepInfoBuilder.ts', []],
   ['common/SteerQueue.ts', 'SteerQueue.ts', []],
   ['common/Types.ts', 'Types.ts', []],
+  ['common/UsageTime.ts', 'UsageTime.ts', []],
+  ['common/UsagePricing.ts', 'UsagePricing.ts', []],
+  ['common/UsageNormalizer.ts', 'UsageNormalizer.ts', []],
   ['common/GuncatUiLang.ts', 'GuncatUiLang.ts', []],
   ['common/GuncatUiLibrary.ts', 'GuncatUiLibrary.ts', []],
   ['common/GuncatUiRuntime.ts', 'GuncatUiRuntime.ts', []],
@@ -118,6 +121,7 @@ for (const [relSrc, relDst, replaces] of [
   ['model/Agent.ts', 'Agent.ts', []],
   ['model/Message.ts', 'Message.ts', [['@Observed', '']]],
   ['model/ToolCallRecord.ts', 'ToolCallRecord.ts', []],
+  ['model/UsageModels.ts', 'UsageModels.ts', []],
 ]) {
   port(relSrc, relDst, replaces);
 }
@@ -125,6 +129,7 @@ for (const [relSrc, relDst, replaces] of [
 // ===== 服务层(含 6.1 新增) =====
 for (const [relSrc, relDst, replaces] of [
   ['service/ChatService.ts', 'ChatService.ts', []],
+  ['service/UsageMeter.ts', 'UsageMeter.ts', []],
   ['service/SSEAdapterFactory.ts', 'SSEAdapterFactory.ts', []],
   ['service/AgentLoopService.ts', 'AgentLoopService.ts', []],
   ['service/WorkLoopDriverBridge.ts', 'WorkLoopDriverBridge.ts', []],

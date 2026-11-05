@@ -3,6 +3,7 @@ name: CI
 # 覆盖范围（边界是有意划定的，不是遗漏）
 #
 #   ✅ guncat-harness 纯逻辑单测 + 服务层 tsc 类型检查
+#   ✅ 用量纯逻辑回归（test/usage-harness：北京时间切日 / DeepSeek 峰谷 / usage 归一化）
 #   ✅ 交互界面文字可复制护栏（源码级扫描，见 check-ui-copy.mjs）
 #   ✅ 文档相对链接 + 随包第三方许可（docs-check / license-check）
 #   ✅ docx / pptx / xlsx 三个 Office 生成器离线验证（Node 构建 + Python 结构校验）
@@ -36,7 +37,7 @@ jobs:
     # 固定版本可避免某天构建毫无征兆地变化
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # 新鲜度检查要读每个文件"最后一次改动它的提交"的时间（git log -1 -- <path>）。
           # 默认的浅克隆只有 HEAD，历史里没碰过该文件的路径会查不到时间，正常产物
@@ -62,7 +63,7 @@ jobs:
       - name: IEC 随包 .so 一致性
         run: python3 tools/check-iec-libs.py
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
 
@@ -79,6 +80,12 @@ jobs:
           node check-setup.mjs
           npx -y -p typescript@5.5.4 tsc -p check/tsconfig.json
 
+      - name: 用量纯逻辑回归
+        working-directory: test/usage-harness
+        run: |
+          npx -y -p typescript@5.5.4 tsc -p tsconfig.json
+          node out/test/usage-harness/usage-test.js
+
       # 不需要 setup.mjs：这个脚本直接扫 entry/ 下的 .ets 源码，不移植也不编译。
       # 它守的是"交互界面里的内容文字都挂了 copyOption（长按自由复制）"，
       # 漏挂只表现为"那块字长按没反应"，编译和单测都拦不住。
@@ -93,7 +100,7 @@ jobs:
     # 入口见 third_party/bettersh/scripts/test_py_runner_host.sh。
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # Ubuntu 24.04 自带 python3.12 运行时；-dev 包确保有可被 dlopen 的
       # libpython3.12.so（run.py 会优先找 3.12）。
@@ -110,13 +117,13 @@ jobs:
     name: Office 生成器离线验证
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -166,7 +173,7 @@ jobs:
 
       - name: 失败时保留生成物以便排查
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: harness-output
           path: test/*/gen/out_*
