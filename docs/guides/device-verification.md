@@ -2,7 +2,7 @@
 
 > [← 返回 README](../../README.md)
 
-> 适用：**HarmonyOS arm64 真机 / 2in1**，应用版本 7.0.0（`com.bowenapp.guncataibeta`）。
+> 适用：**HarmonyOS arm64 真机 / 2in1**，应用版本 7.2.0（`com.bowenapp.guncataibeta`）。
 > 目标：只装一次包，逐项确认 `shell` 工具确实跑在 IEC 原生执行核上——随包命令、mksh 64 位算术、
 > CA、`python3` 独立 runner、npm 解包、git 硬链接 shim 都生效。
 >

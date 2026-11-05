@@ -68,7 +68,7 @@ body:
     attributes:
       label: 应用版本
       description: 设置页可见，或看 README 顶部的版本徽章
-      placeholder: 例如 6.3.0
+      placeholder: 例如 7.2.0
     validations:
       required: true
 

@@ -1,6 +1,6 @@
 # 后台保活策略
 
-> 适用版本：7.1.0 之后的性能专项。相关代码：
+> 适用版本：7.2.0 的性能专项。相关代码：
 > `entry/src/main/ets/service/BackgroundTaskService.ets`、`EntryAbility.onBackground/onForeground/onDestroy`、
 > `ChatViewModel.markStreamStart/markStreamEnd`。
 

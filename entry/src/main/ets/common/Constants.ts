@@ -1,7 +1,7 @@
 export class Constants {
   // App info
   static readonly APP_NAME: string = 'Guncat Work';
-  static readonly APP_VERSION: string = '7.1.0';
+  static readonly APP_VERSION: string = '7.2.0';
   // 检查更新: 公开链接用于未安装 AppTest 时兜底, Deep Linking 用于已安装时直达
   static readonly APP_TEST_PUBLIC_URL: string = 'https://appgallery.huawei.com/apptest/955nTWBlvx0';
   static readonly APP_TEST_DEEPLINK: string =
