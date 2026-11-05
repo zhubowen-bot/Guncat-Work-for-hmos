@@ -1474,18 +1474,10 @@ struct SettingsPage {
         ForEach(TOOL_CATALOG, (group: ToolCatalogGroup) => {
           this.buildToolGroup(group)
         }, (group: ToolCatalogGroup) => group.title)
-
-        Text('工具由软件在对话中自动选择，此页仅作展示。')
-          .fontSize(11)
-          .fontColor($r('app.color.text_tertiary'))
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .lineHeight(17)
-          .margin({ top: 8, bottom: 32 })
       }
       .width('100%')
       .constraintSize({ maxWidth: 720 })
-      .padding({ left: 16, right: 16 })
+      .padding({ left: 16, right: 16, bottom: 24 })
     }
     .layoutWeight(1)
     .width('100%')
@@ -1585,7 +1577,7 @@ struct SettingsPage {
     Row() {
       SymbolGlyph($r('sys.symbol.lock'))
         .fontSize(9)
-        .fontColor([Color.White])
+        .fontColor([$r('app.color.text_secondary')])
       Blank()
       Column()
         .width(22)
@@ -1598,7 +1590,7 @@ struct SettingsPage {
     .height(28)
     .borderRadius(14)
     .padding({ left: 9, right: 3 })
-    .backgroundColor($r('app.color.brand'))
+    .backgroundColor($r('app.color.toggle_inactive'))
     .alignItems(VerticalAlign.Center)
     .hitTestBehavior(HitTestMode.None)
   }
