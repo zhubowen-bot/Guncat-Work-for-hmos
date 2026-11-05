@@ -341,7 +341,7 @@ struct SettingsPage {
               .color($r('app.color.divider'))
               .margin({ left: 56 })
             this.buildOptionRow($r('sys.symbol.arrowshape_up_frame'), '检查更新',
-              '当前 ' + Constants.APP_VERSION + ' · 通过 AppTest 获取测试版', (): void => {
+              '当前 ' + Constants.APP_VERSION , (): void => {
                 this.checkForUpdates();
               })
           }
