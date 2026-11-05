@@ -1519,16 +1519,7 @@ struct SettingsPage {
           .alignItems(HorizontalAlign.Start)
           .margin({ left: 12 })
 
-          Column() {
-            this.buildLockedSwitch()
-            Text('已锁定')
-              .fontSize(10)
-              .fontColor($r('app.color.text_tertiary'))
-              .margin({ top: 5 })
-          }
-          .alignItems(HorizontalAlign.Center)
-          .margin({ left: 8 })
-          .hitTestBehavior(HitTestMode.None)
+          this.buildLockedSwitch()
         }
         .width('100%')
         .alignItems(VerticalAlign.Center)
@@ -1586,6 +1577,7 @@ struct SettingsPage {
     .padding({ left: 9, right: 3 })
     .backgroundColor($r('app.color.toggle_inactive'))
     .alignItems(VerticalAlign.Center)
+    .margin({ left: 8 })
     .hitTestBehavior(HitTestMode.None)
   }
 
