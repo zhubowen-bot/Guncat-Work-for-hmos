@@ -1,20 +1,19 @@
-// 消息输入区 (对齐 web 版本 .input-wrap + .upload-btn + .send-btn)
-// 文件预览条 + 工具开关行由父组件 ChatPage 直接在外部渲染
+// 消息输入区: 悬浮式输入容器(文本在上、操作按钮在下) + @文件引用候选
+// 文件预览条与工具开关行由父组件 ChatPage 直接在外部渲染
 import { MentionQuery, MentionQueryParser } from '../common/MentionQuery';
 
 // @文件引用候选弹层的最大条数(再多就盖住半个屏幕了)
 const MENTION_MAX_ROWS: number = 8;
 
-// 输入框字号: 正文与占位文字必须一致。
-// TextArea 的 placeholder 默认按 16fp 绘制, 不跟随 fontSize(15): 流式执行时输入行还要多挤一个
-// "停止"按钮, 可用宽度只剩 ~76vp, 16fp 的「描述问题…」放不下。中文断行里「…」不能出现在行首,
-// 于是「题…」被一起挤到第二行, 空输入框被撑成两行高。显式写 placeholderFont 与正文同为 15fp,
-// 再配合占位文案去掉末尾省略号(见 ChatViewModel.loopInputPlaceholder), 一行就能放下。
-const INPUT_FONT_SIZE: number = 15;
-// 单行输入框高度: 15fp 一行 + 上下 padding 8 + 8
-const INPUT_ONE_LINE_HEIGHT: number = 36;
+// 输入框正文字号: 16fp。此前压到 15fp 是为了在两侧小圆按钮夹击下把占位文字塞进一行;
+// 现在文本行独占输入容器整行宽度, 不必再为宽度牺牲字号。
+const INPUT_FONT_SIZE: number = 16;
+// 单行输入框高度: 16fp 一行(约 22) + 上下 padding 9 + 5 + 余量
+const INPUT_ONE_LINE_HEIGHT: number = 40;
 // 用户输入多行内容时输入框的展开上限
-const INPUT_EXPAND_MAX_HEIGHT: number = 120;
+const INPUT_EXPAND_MAX_HEIGHT: number = 140;
+// 容器底栏操作按钮的边长: 语音/拍照/附件/发送统一 40, 保证同一基线、同一触控面积
+const ACTION_BTN_SIZE: number = 40;
 
 @Component
 export struct MessageInputView {
@@ -124,22 +123,66 @@ export struct MessageInputView {
 
   build() {
     Column() {
-      // 候选层挂在输入区正上方(而不是糊在整个屏幕上): 手指还在输入框附近, 选完继续打字
+      // 候选层挂在输入容器正上方(而不是糊在整个屏幕上): 手指还在输入框附近, 选完继续打字
       if (this.mention !== null && this.mentionCandidates.length > 0) {
         this.buildMentionPopup()
       }
-      Row() {
-        this.buildVoiceButton()
-        this.buildCameraButton()
-        this.buildInputWrap()
-        this.buildUploadButton()
-        this.buildSendButton()
+      // 输入容器: 文本区独占一行, 操作按钮收进容器底栏。
+      // 整块只有一层圆角底板 + 一层柔和阴影, 不再让每个按钮各自带小圆底和阴影。
+      Column() {
+        TextArea({
+          placeholder: this.placeholder,
+          text: this.inputText,
+          controller: this.textCtl
+        })
+          .width('100%')
+          .backgroundColor(Color.Transparent)
+          .fontSize(INPUT_FONT_SIZE)
+          // 占位文字默认按 16fp 绘制且不跟随 fontSize, 这里显式对齐正文, 主题切换与缩放时才不会跳字号
+          .placeholderFont({ size: INPUT_FONT_SIZE })
+          .fontColor($r('app.color.text_primary'))
+          .placeholderColor($r('app.color.text_tertiary'))
+          // 空输入时锁死一行高度: 占位文字再长也不许把输入框撑成两行;
+          // 有内容时才放开, 保留多行草稿向上展开的能力。
+          .constraintSize({
+            minHeight: INPUT_ONE_LINE_HEIGHT,
+            maxHeight: this.inputText.length === 0 ? INPUT_ONE_LINE_HEIGHT : INPUT_EXPAND_MAX_HEIGHT
+          })
+          .padding({ left: 10, right: 10, top: 9, bottom: 5 })
+          .onChange((value: string) => {
+            this.inputText = value;
+            this.refreshMention(value);
+          })
+
+        // 容器底栏: 左侧是输入方式(语音/拍照/附件), 右侧是发送或停止
+        Row() {
+          Row({ space: 2 }) {
+            this.buildVoiceButton()
+            this.buildCameraButton()
+            this.buildUploadButton()
+          }
+          .alignItems(VerticalAlign.Center)
+
+          Blank()
+
+          this.buildSendButton()
+        }
+        .width('100%')
+        .height(ACTION_BTN_SIZE)
+        .alignItems(VerticalAlign.Center)
+        .padding({ left: 2 })
       }
       .width('100%')
-      .padding({ left: 14, right: 10, top: 2, bottom: 10 })
-      .alignItems(VerticalAlign.Bottom)
+      .padding({ left: 6, right: 6, top: 6, bottom: 4 })
+      .backgroundColor($r('app.color.raised_surface'))
+      .borderRadius(26)
+      // 浅色模式下页面与容器同为白色, 一圈 10% 黑描边给悬浮层收边; 深色模式是 12% 白
+      .border({ width: 1, color: $r('app.color.border') })
+      .shadow({ radius: 24, color: '#14000000', offsetX: 0, offsetY: 6 })
     }
     .width('100%')
+    // 与上方工具胶囊行使用同一组左右留白, 保证输入容器与胶囊左边对齐
+    .padding({ left: 12, right: 12, top: 2, bottom: 10 })
   }
 
   @Builder
@@ -186,27 +229,27 @@ export struct MessageInputView {
       .padding({ bottom: 6 })
     }
     .width('100%')
-    .margin({ left: 14, right: 10, bottom: 6 })
-    .backgroundColor($r('app.color.surface'))
-    .borderRadius(16)
-    .shadow({ radius: 18, color: '#1F000000', offsetX: 0, offsetY: 4 })
+    .margin({ bottom: 8 })
+    .backgroundColor($r('app.color.raised_surface'))
+    .border({ width: 1, color: $r('app.color.border') })
+    .borderRadius(18)
+    .shadow({ radius: 18, color: '#1A000000', offsetX: 0, offsetY: 4 })
     .alignItems(HorizontalAlign.Start)
   }
 
+  // 输入方式按钮(语音/拍照/附件): 只用图标本身, 不再套白色小圆底;
+  // 激活态(录音中 / 解析中)才给一层浅色圆底做提示。
   @Builder
   buildVoiceButton() {
     Button() {
       SymbolGlyph($r('sys.symbol.mic_fill'))
-        .fontSize(19)
-        .fontColor([this.isListening ? Color.White : $r('app.color.text_secondary')])
+        .fontSize(21)
+        .fontColor([this.isListening ? $r('app.color.brand') : $r('app.color.text_secondary')])
     }
-    .width(38)
-    .height(38)
-    .borderRadius(19)
-    .backgroundColor(this.isListening ? $r('app.color.brand') : $r('app.color.raised_surface'))
-    .shadow({ radius: 12, color: '#14000000', offsetX: 0, offsetY: 3 })
-    // 底部对齐的 Row 中 38 高按钮中心偏低 4vp, 用 bottom margin 上移与 42 高的右侧按钮对齐
-    .margin({ right: 6, bottom: 2 })
+    .width(ACTION_BTN_SIZE)
+    .height(ACTION_BTN_SIZE)
+    .borderRadius(ACTION_BTN_SIZE / 2)
+    .backgroundColor(this.isListening ? $r('app.color.brand_light') : Color.Transparent)
     .onClick(() => {
       if (!this.isStreaming && !this.isParsing) {
         this.onVoiceInput();
@@ -218,53 +261,18 @@ export struct MessageInputView {
   buildCameraButton() {
     Button() {
       SymbolGlyph($r('sys.symbol.camera_fill'))
-        .fontSize(19)
+        .fontSize(21)
         .fontColor([$r('app.color.text_secondary')])
     }
-    .width(38)
-    .height(38)
-    .borderRadius(19)
-    .backgroundColor($r('app.color.raised_surface'))
-    .shadow({ radius: 12, color: '#14000000', offsetX: 0, offsetY: 3 })
-    .margin({ left: 0, right: 8, bottom: 2 })
+    .width(ACTION_BTN_SIZE)
+    .height(ACTION_BTN_SIZE)
+    .borderRadius(ACTION_BTN_SIZE / 2)
+    .backgroundColor(Color.Transparent)
     .onClick(() => {
       if (!this.isStreaming && !this.isParsing && !this.isListening) {
         this.onCameraCapture();
       }
     })
-  }
-
-  @Builder
-  buildInputWrap() {
-    Row() {
-      TextArea({
-        placeholder: this.placeholder,
-        text: this.inputText,
-        controller: this.textCtl
-      })
-        .layoutWeight(1)
-        .backgroundColor(Color.Transparent)
-        .fontSize(INPUT_FONT_SIZE)
-        // 占位文字默认 16fp 且不跟随 fontSize, 这里显式对齐正文, 否则流式时会被挤成两行
-        .placeholderFont({ size: INPUT_FONT_SIZE })
-        .fontColor($r('app.color.text_primary'))
-        .placeholderColor($r('app.color.text_secondary'))
-        // 空输入时锁死一行高度: 占位文字再长也不许把输入框撑成两行(占位只是一行提示);
-        // 有内容时才放开, 保留多行草稿展开到 INPUT_EXPAND_MAX_HEIGHT 的能力。
-        .constraintSize({
-          minHeight: INPUT_ONE_LINE_HEIGHT,
-          maxHeight: this.inputText.length === 0 ? INPUT_ONE_LINE_HEIGHT : INPUT_EXPAND_MAX_HEIGHT
-        })
-        .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-        .onChange((value: string) => {
-          this.inputText = value;
-          this.refreshMention(value);
-        })
-    }
-    .layoutWeight(1)
-    .backgroundColor($r('app.color.input_bg'))
-    .borderRadius(20)
-    .alignItems(VerticalAlign.Center)
   }
 
   @Builder
@@ -277,16 +285,14 @@ export struct MessageInputView {
           .rotate({ angle: this.parsingAngle })
       } else {
         SymbolGlyph($r('sys.symbol.paperclip'))
-          .fontSize(20)
+          .fontSize(21)
           .fontColor([$r('app.color.text_secondary')])
       }
     }
-    .width(42)
-    .height(42)
-    .borderRadius(21)
-    .backgroundColor(this.isParsing ? $r('app.color.brand_light') : $r('app.color.raised_surface'))
-    .shadow({ radius: 12, color: '#14000000', offsetX: 0, offsetY: 3 })
-    .margin({ left: 8 })
+    .width(ACTION_BTN_SIZE)
+    .height(ACTION_BTN_SIZE)
+    .borderRadius(ACTION_BTN_SIZE / 2)
+    .backgroundColor(this.isParsing ? $r('app.color.brand_light') : Color.Transparent)
     .onClick(() => {
       if (!this.isStreaming && !this.isParsing && !this.isListening) {
         this.onFileUpload();
@@ -294,22 +300,23 @@ export struct MessageInputView {
     })
   }
 
+  // 发送/插话/停止: 唯一保留实心底的主操作键, 其余图标按钮都是透明底
   @Builder
   buildSendButton() {
     if (this.isStreaming) {
-      Row({ space: 8 }) {
+      Row({ space: 10 }) {
         if (this.allowSteer) {
           // 插话发送: 任务执行中把输入内容作为"用户补充"注入下一步
           Button() {
             SymbolGlyph($r('sys.symbol.paperplane'))
-              .fontSize(18)
-              .fontColor([Color.White])
+              .fontSize(19)
+              .fontColor([(this.inputText.trim() !== '') ? Color.White : $r('app.color.text_quaternary')])
           }
-          .width(42)
-          .height(42)
-          .borderRadius(21)
+          .width(ACTION_BTN_SIZE)
+          .height(ACTION_BTN_SIZE)
+          .borderRadius(ACTION_BTN_SIZE / 2)
           .backgroundColor((this.inputText.trim() !== '') ?
-            $r('app.color.brand') : $r('app.color.text_tertiary'))
+            $r('app.color.brand') : $r('app.color.surface_secondary'))
           .onClick(() => {
             if (this.inputText.trim() === '') {
               return;
@@ -320,19 +327,15 @@ export struct MessageInputView {
           })
         }
         Button() {
-          Stack() {
-            Stack()
-              .width(12)
-              .height(12)
-              .backgroundColor(Color.White)
-              .borderRadius(2)
-          }
-          .width(20)
-          .height(20)
+          Stack()
+            .width(11)
+            .height(11)
+            .backgroundColor(Color.White)
+            .borderRadius(2.5)
         }
-        .width(42)
-        .height(42)
-        .borderRadius(21)
+        .width(ACTION_BTN_SIZE)
+        .height(ACTION_BTN_SIZE)
+        .borderRadius(ACTION_BTN_SIZE / 2)
         .backgroundColor($r('app.color.stop_btn'))
         .onClick(() => {
           this.onStop();
@@ -341,15 +344,15 @@ export struct MessageInputView {
     } else {
       Button() {
         SymbolGlyph($r('sys.symbol.paperplane'))
-          .fontSize(18)
-          .fontColor([Color.White])
+          .fontSize(19)
+          .fontColor([(this.inputText.trim() !== '' && !this.isParsing && !this.isListening) ?
+            Color.White : $r('app.color.text_quaternary')])
       }
-      .width(42)
-      .height(42)
-      .borderRadius(21)
+      .width(ACTION_BTN_SIZE)
+      .height(ACTION_BTN_SIZE)
+      .borderRadius(ACTION_BTN_SIZE / 2)
       .backgroundColor((this.inputText.trim() !== '' && !this.isParsing && !this.isListening) ?
-        $r('app.color.brand') : $r('app.color.text_tertiary'))
-      .margin({ left: 8 })
+        $r('app.color.brand') : $r('app.color.surface_secondary'))
       .onClick(() => {
         // 只有在非解析中且有文本时,才真正发送并清空
         if (this.isParsing || this.isListening) {

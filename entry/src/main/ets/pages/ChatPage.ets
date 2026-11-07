@@ -36,7 +36,7 @@ import {
   TextReaderService
 } from '../service/TextReaderService';
 import { abilityAccessCtrl, common, PermissionRequestResult } from '@kit.AbilityKit';
-import { router, window } from '@kit.ArkUI';
+import { KeyboardAvoidMode, router, window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { DocxExporter } from '../export/DocxExporter';
 
@@ -187,6 +187,13 @@ struct ChatPage {
   private static readonly MESSAGE_WINDOW_STEP: number = 40;
   @State private messageWindowSize: number = ChatPage.MESSAGE_WINDOW_STEP;
   private lastWindowConvId: string = '';
+
+  // 输入区是"输入容器 + 底栏按钮"的复合块: 默认的键盘避让(OFFSET)只保证光标所在行可见,
+  // 键盘弹起后容器底栏(语音/拍照/附件/发送)会落到键盘下面点不到。改成 RESIZE 让页面整体
+  // 让出键盘高度, 输入时整块输入区都留在键盘上方; 空态 hero 图标由锚点 onAreaChange 跟随新落点。
+  onPageShow(): void {
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+  }
 
   aboutToAppear(): void {
     let context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
@@ -705,8 +712,8 @@ struct ChatPage {
         // 输入区(工具开关行 + 文件预览 + 输入行, 由 ChatPage 直接组合避免 @Prop 深拷)
         if (this.inputAreaVisible) {
           Column() {
-            // 工具开关行
-            Row() {
+            // 工具开关行: 输入容器上方的独立悬浮胶囊, 彼此留出间距(不再像一整条工具栏)
+            Row({ space: 8 }) {
               this.buildModelSelector()
               if (this.vm.agentLoopMode) {
                 // Agent Loop 模式(工作/交互): 联网搜索摆在原深度思考的位置; 深度思考默认开启不再显示开关
@@ -719,7 +726,6 @@ struct ChatPage {
                     this.refreshTick++;
                   }
                 })
-                  .margin({ left: 10 })
                 ToggleSwitch({
                   isOn: true,
                   label: this.vm.loopToolLabel,
@@ -733,7 +739,6 @@ struct ChatPage {
                     }
                   }
                 })
-                  .margin({ left: 10 })
                   .bindPopup(this.workspacePopupOpen, {
                     builder: this.buildWorkspacePopup,
                     placement: Placement.Top,
@@ -764,12 +769,10 @@ struct ChatPage {
                     this.refreshTick++;
                   }
                 })
-                  // 联网搜索胶囊左侧加 10vp 间距, 避免两个胶囊贴在一起
-                  .margin({ left: 10 })
               }
             }
             .width('100%')
-            .padding({ left: 12, right: 12, top: 8, bottom: 4 })
+            .padding({ left: 12, right: 12, top: 10, bottom: 8 })
             // 文件预览条
             if (this.vm.pendingFiles.length > 0) {
               this.buildFilePreview();
@@ -804,20 +807,21 @@ struct ChatPage {
             })
           }
           .width('100%')
-          .backgroundColor($r('app.color.surface'))
-          .shadow({ radius: 18, color: '#0D000000', offsetX: 0, offsetY: -2 })
+          // 输入区不再铺一层 surface 色块: 底部与页面同底色, 悬浮感交给
+          // 输入容器和上方胶囊各自的圆角/描边/阴影来表达
           // 从屏幕底部外滑入
           .transition(TransitionEffect.translate({ y: '100%' })
             .combine(TransitionEffect.OPACITY)
             .animation({ duration: 360, curve: Curve.EaseOut }))
-          // 底部 surface 色延伸到导航条安全区
+          // 底部安全区不再用 surface 色延伸, 直接保持页面底色
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
         } else {
           // 输入区出现前先用等高的占位保住消息区布局，
           // 避免空状态头像在 geometryTransition 过程中因布局变化而闪烁。
+          // 高度 = 胶囊行(34 + 10 + 8) + 输入容器(90 + 上 2 下 10), 与下面实际输入区一致。
           Column()
             .width('100%')
-            .height(105)
+            .height(154)
             .backgroundColor(Color.Transparent)
         }
       }
@@ -2020,9 +2024,9 @@ struct ChatPage {
     Row() {
       // 胶囊只显示模型名: 服务商只在下方弹层里显示, 不在这里拼 "· 服务商"
       Text(this.currentModelLabel())
-        // 字号固定 12, 与右侧 ToggleSwitch 完全一致(此前 13 且带 6~13 自适应缩放, 造成大小不一)
-        .fontSize(12)
-        .lineHeight(16)
+        // 与右侧 ToggleSwitch 完全一致(13fp / 行高 18), 输入区上方所有胶囊同一套字号
+        .fontSize(13)
+        .lineHeight(18)
         .fontColor($r('app.color.text_secondary'))
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -2033,14 +2037,12 @@ struct ChatPage {
     // 手机: 继续占满剩余宽度; 桌面宽屏: 按内容自适应(108~200), 避免胶囊吞掉整行
     .layoutWeight(this.isWide ? 0 : 1)
     .constraintSize(this.isWide ? { minWidth: 108, maxWidth: 200 } : { minWidth: 108 })
-    // 显式锁定与 ToggleSwitch 等高(上下 padding 7 + 行高 16 = 30): 宽屏下胶囊改为内容自适应宽度,
-    // Text 的 min/max 自适应字号测量会把行框撑得略高于 lineHeight, 固定高度保证两个平台都等高
-    .height(30)
-    .padding({ left: 10, right: 10, top: 7, bottom: 7 })
-    .borderRadius(15)
+    // 与 ToggleSwitch 等高(34): 上方一排悬浮胶囊大小统一, 行间距交给外层 Row({ space: 8 })
+    .height(34)
+    .padding({ left: 14, right: 14 })
+    .borderRadius(17)
     .backgroundColor($r('app.color.raised_surface'))
-    .shadow({ radius: 12, color: '#14000000', offsetX: 0, offsetY: 3 })
-    .margin({ right: 8 })
+    .shadow({ radius: 14, color: '#14000000', offsetX: 0, offsetY: 3 })
     .enabled(!this.vm.isStreaming && !this.vm.isParsing && !this.isListening)
     // bindPopup 是纯状态驱动(不像 bindMenu 点击自动弹出), 需自行点击置位开关
     .onClick(() => {
