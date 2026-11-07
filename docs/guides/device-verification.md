@@ -16,11 +16,12 @@
 | 项 | 值 |
 | --- | --- |
 | 签名包 | `entry/build/default/outputs/default/entry-default-signed.hap` |
-| 大小 | 约 452.7 MB（约 432 MiB；精确字节数随构建与签名变化） |
-| 包名 | `com.bowenapp.guncataibeta` |
+| 大小 | 约 420 MiB（未签名）/ 约 429 MiB（签名）；精确字节数随构建与签名变化 |
+| 包名 | Beta 包 `com.bowenapp.guncataibeta`；正式包 `com.bowenapp.guncatai`（以 `AppScope/app.json5` 当前配置为准） |
 | Ability | `EntryAbility` |
 
-必须装 **signed** 包；`entry-default-unsigned.hap` 不能直接 `hdc install`。重新构建时用：
+必须装 **signed** 包；`entry-default-unsigned.hap` 不能直接 `hdc install`。下文命令以 Beta 包名为例，
+正式包把 `com.bowenapp.guncataibeta` 换成 `com.bowenapp.guncatai`。重新构建时用：
 
 ```bash
 hvigorw --no-daemon assembleHap --mode module -p product=default
@@ -162,7 +163,7 @@ Windows 上用 `Select-String` 代替 `grep`，或直接在 Git Bash 里跑。
 
 ## 3. 自检已覆盖项
 
-下面命令与 `IecShellService.selfTest()` 的段一一对应，可先用 1.3 的 hilog 结果对照，
+下面命令覆盖 `IecShellService.selfTest()` 的主要段，可先用 1.3 的 hilog 结果对照，
 再单独复跑失败项。命令均由模型通过 `shell` 工具执行。
 
 ### 3.1 PATH 枚举
@@ -182,11 +183,15 @@ Windows 上用 `Select-String` 代替 `grep`，或直接在 Git Bash 里跑。
 | 工作目录 | `echo "PWD=$PWD"; pwd; /bin/pwd; ls -ld .; echo rel > _rel.txt && cat _rel.txt` | `PWD`/`pwd`/`/bin/pwd` 都是会话工作区；`rel` 打印 `rel`，`rel rc=0` | 若 `pwd` 为 `/` 或 `_rel.txt` 创建失败，检查 `IecRuntime` 的 `cwd` 守卫与 NCP cwd 路由 |
 | `$TMPDIR` 可写 / `/tmp` 不存在 | `echo x > "$TMPDIR/_t" && cat "$TMPDIR/_t" && rm -f "$TMPDIR/_t" \|\| echo "[FAIL] TMPDIR write"; [ -e /tmp ] && echo "[FAIL] /tmp should be absent" \|\| echo "ok /tmp absent"` | 打印 `x`；随后 `ok /tmp absent`；`$TMPDIR` 落在 `<sysroot>/session-tmp/<会话>` | hilog `IecRuntime`；`ls -ld "$TMPDIR"`；若 `/tmp` 仍存在，看 `removed legacy /tmp mirror` 日志 |
 | `id` / `whoami` / `logname` | `id; id -un; whoami; logname` | `id` 含 `uid=<应用真实 uid> gid=<gid>`，用户名 `guncat`；三条名字命令都输出 `guncat`；没有 `[FAIL] id` | `<sysroot>/etc/passwd`、`<sysroot>/etc/group`；`/bin/id` 兜底包装器；hilog `IecRuntime` 的 `cannot read uid` / `uid/gid unavailable` |
+| UTF-8 语义 | `x=中文; echo ${#x}`；`sh -c 'x=中文; echo ${#x}'`；`#!/bin/sh` 脚本里同样输出 | 三条都应输出 `2`；直接 `mksh script.sh` 默认按字节，用 `mksh -U` 或脚本内 `set -U` | 工具层以 `mksh -o utf8-mode` 启动；`/bin/sh` 是 `mksh -U` 薄包装 |
+| HOME / TMPDIR | `echo "$HOME"; echo "$TMPDIR"; [ -d "$TMPDIR" ]` | `HOME=<sysroot>/home/<会话>`、`TMPDIR=<sysroot>/session-tmp/<会话>`，目录存在 | `IecShellService` 环境注入；`<sysroot>` 写权限 |
+| `find -delete` | `mkdir -p _fd; touch _fd/a _fd/b; find _fd -type f -delete` | 不打印被删路径（GNU 语义），目录清空 | `libtoybox.so` 的 `find` 实现 |
+| stdin EOF / 数据 | 无 `stdin` 的 `cat`（应 rc=0，不能 124）；带 4 行 `stdin` 的 `cat` | 无 stdin 时不挂起；带 stdin 时原样输出 4 行 | exec 会话写端是否关闭；`IecRuntime` stdin feeder |
 | CA bundle | `echo "GIT_SSL_CAINFO=${GIT_SSL_CAINFO:-<empty>}"; [ -n "$GIT_SSL_CAINFO" ] && [ -f "$GIT_SSL_CAINFO" ] \|\| echo "[FAIL] CA bundle"` | `GIT_SSL_CAINFO=/data/storage/el2/base/files/etc/ssl/certs/cacert.pem`，且没有 `[FAIL] CA bundle`；`SSL_CERT_FILE`、`CURL_CA_BUNDLE` 同值（单独 `echo` 可确认）。要确认大小非 0 再加 `ls -l "$GIT_SSL_CAINFO"` | hilog `IecRuntime` 的 `ca bundle install failed`；确认 `<sysroot>/etc/ssl/certs/` 可写 |
 | git 走 https | `out=$(GIT_TERMINAL_PROMPT=0 timeout 10 git ls-remote https://github.com/git/git.git HEAD 2>&1); rc=$?; echo "$out" \| head -3; echo "git ls-remote rc=$rc (网络失败不算自检失败)"` | 前 3 行含一个 40 位 commit 加 `HEAD`，末尾 `git ls-remote rc=0 (网络失败不算自检失败)`。网络不通时 `rc=124/128` 只记录，**不判 `[FAIL]`** | 证书报错先看 CA 行；`Could not resolve host` 查设备网络；hilog `IecRuntime` |
 | `timeout` 收命令树 | `st=$(date +%s); out=$(timeout 1 sh -c 'sleep 4 & wait' 2>&1); rc=$?; en=$(date +%s); echo "timeout rc=$rc elapsed=$((en-st))"` | `timeout rc=124 elapsed` ≤ 3；没有 `[FAIL] timeout`。挂住说明子 job / `OP_SIGNAL_JOB` 没生效，`$(...)` 在等孙进程握住 stdout | hilog `[exec] signal job`；确认装的是当前包（`libtoybox.so` 与 `libiec_server.so` 同批构建） |
 | 嵌套 `timeout` | `out=$(timeout 1 timeout 5 sleep 4 2>&1); echo "outer rc=$?"`；`out=$(timeout 5 timeout 1 sleep 4 2>&1); echo "inner rc=$?"` | 两者 elapsed ≤ 3、rc=124；内层会换 pgrp，外层先按 ppid 级联再杀直接子进程 | hilog；确认 `libtoybox.so` 含 0002 补丁 |
-| 20k~60k 输出落盘 | `seq 1 8000`（约 38KB） | 结果正文只保留前 20k 字符，末尾 `.spill/iec-…-stdout.log` 路径可 `read_file` 读回；不应出现“落盘失败” | `IecShell.spill failed`；确认 `WORK_SHELL_HEAD_CHARS` 与 `spill()` 阈值一致 |
+| 20k~2MB 输出落盘 | `seq 1 8000`（约 38KB） | 结果正文只保留前 20k 字符，末尾 `.spill/iec-…-stdout.log` 路径可 `read_file` 读回；不应出现“落盘失败” | `IecShell.spill failed`；确认 `WORK_SHELL_HEAD_CHARS` 与 `spill()` 阈值一致（引擎 cap 2MB） |
 | python3 退出码 | `timeout 10 python3 -c "import sys; sys.exit(7)"; echo "rc=$? (expect 7)"; timeout 10 python3 -c "print(1+1)"` | 先 `rc=7 (expect 7)`，再输出 `2`；没有 `Fatal Python error` | `rc=127` 且 stderr 有 `cannot reach the interpreter runner` → 看 5 的 runner 行；`ModuleNotFoundError`/找不到标准库 → `PYTHONHOME`/`PYTHONPATH`（hilog `IecShell`） |
 | jq | `printf '{"a":1}\n' \| jq -r .a` | `1` | hilog `IecRuntime`；按 2.3 确认 `libjqcmd.so` 在包内 |
 | curl | `curl --version \| head -1` | 以 `curl 8.22.0` 开头（构建固定 8.22.0） | hilog `IecRuntime`；`libcurlcmd.so` |

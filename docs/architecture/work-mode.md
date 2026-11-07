@@ -8,7 +8,7 @@
 > **维护文档地图**（改哪块看哪份）：
 > 
 > - 本文档——架构、工具/技能/PPT 三套系统的设计与扩展步骤；
-> - `docs/ITERATION_LOG.md`——Agent Loop 核心层逐轮改动与验证记录（R1–R64）；
+> - `docs/ITERATION_LOG.md`——Agent Loop 核心层逐轮改动与验证记录（R1–R79）；
 > - `docs/BACKLOG.md`——当前待办与已完成的审计维度；
 > - `docs/PORT_NOTES.md`——dsh 移植对照与后续核心层迭代说明；
 > - `test/pptx-harness/README.md`——PPT 生成器与 CSV 写入器的离线验证环境（Node 构建 + python-pptx 校验 + PNG 目检），改 `export/` 下任何文件后必跑；
@@ -16,12 +16,12 @@
 
 ## 1. 身份与会话模型
 
-- **虚拟智能体**：`Constants.WORK_AGENT_ID = 'work'`。启动时由 `ChatViewModel.buildWorkAgent()` 注入智能体列表顶部；`AgentDrawerView` 将其拆为独立的「Agent模式」分组展示在「聊天模式」标题上方，与聊天智能体**平行**展示（对 `id === 'work'` 特判渲染 🛠 徽标）。
+- **虚拟智能体**：`Constants.WORK_AGENT_ID = 'work'`。启动时由 `ChatViewModel.buildWorkAgent()` 注入智能体列表**第二位**（交互模式之后）；`AgentDrawerView` 将其拆为独立的「Agent引擎（推荐）」分组展示在「聊天引擎」标题上方，`DswSidebar` 则归入「引擎」分组，与聊天智能体**平行**展示（对 `id === 'work'` 特判渲染 🛠 徽标）。
 - **进入/退出**：侧边栏点击「工作模式」= `selectAgent('work')`；点击任意真实智能体即退出（`lastChatAgentId` 记录最近使用的真实智能体，供工具行的工作模式胶囊退出时回切）。
 - **会话绑定**：`Conversation.mode = 'chat' | 'work'`；工作会话 `agentId` 固定为 `'work'`，启动时对旧数据自动迁移。删除工作会话会同步清理沙箱工作区目录。
 - **开关差异**：进入工作模式强制开启深度思考（工具行不显示该开关）；联网搜索保留（服务端搜索工具与客户端函数工具并存下发）；上传/拍照直接进入工作区而非聊天附件。
 - **文件入口**（与交互模式同一条口径，门禁是 `agentLoopMode`）：上传 / 拍照 → 只落工作区；系统分享 → 附件区暂存一份（留给切回聊天模式后发送）+ 工作区一份，发送时只按工作区送达，不再当聊天附件重复送一遍。详见[交互模式架构 · 文件入口](interactive-mode.md#11-文件入口工作区是唯一去处与工作模式同一条口径)。
-- **持久化**：会话 JSON 新增 `mode` 与 `Message.toolCalls`（`ToolCallRecord[]`，含调用参数/结果/耗时，重启后据此还原时间线与 LLM 历史）。会话存档（`filesDir/guncat_conversations.json`）与工作区文件本体都存沙箱 `filesDir`，不进 Preferences。
+- **持久化**：会话 JSON 新增 `mode` 与 `Message.toolCalls`（`ToolCallRecord[]`，含调用参数/结果/耗时，重启后据此还原时间线与 LLM 历史）。会话存档（`filesDir/guncat_conversations.json`）与工作区文件本体都存沙箱 `filesDir`，不进 Preferences；存档每 800ms 合并写，采用「主文件 + `.bak` + `.tmp`」三段式，切后台 / 停止生成 / 退出前强制刷盘。
 
 ## 2. Agent Loop（`ChatViewModel.executeWorkLoop`）
 
@@ -51,7 +51,7 @@ for step in 1..WORK_MAX_STEPS(200, 防失控保险):
   ② 本轮已经决定收尾、但队列里还有插话时，计划器返回 `WorkLoopStep.STEER` 让驱动再跑一轮（收尾竞态另由 `WORK_STEER_TAIL_ROUNDS` 兜底），否则这条补充会挂在时间线上却没人回应。
   任何在途工具/流式输出都不会被切断，`tool_calls` 与 `tool_result` 的协议配对也不会被拆散。执行中点发送该走哪条路（正常发送 / 插话 / 提示等待）由 `SendRoute.decide()` 一处判定。
 
-## 2.1 核心层纯逻辑迭代（R13–R64，维护者看这里）
+## 2.1 核心层纯逻辑迭代（R13–R79，维护者看这里）
 
 6.1 之后对 Agent Loop 核心层做了系统性迭代，把“可决策、可测试”的部分抽成 `common/` 纯逻辑模块，运行期只做 IO 注入。改循环逻辑先看这批文件：
 
@@ -60,7 +60,7 @@ for step in 1..WORK_MAX_STEPS(200, 防失控保险):
 - **错误/重试**：`RetryPolicy`（指数退避+jitter+retry-after 独立封顶 60s+可重试 kind）、`RetryAfterParser`（Retry-After 头解析）、`ToolRetryPolicy`（工具级重试）、`HttpErrorClassifier`（状态码 → 分类/文案，408/425→transport、409→server）、`HttpTimeouts`（按请求体放大 connectTimeout + 传输错误人话化）、`LoopError`（显式 `retryable`/`userMessage`，纯层可单测）。
 - **插件/技能**：`ToolRegistry`（工具+技能元数据单一事实源）、`PluginManifestLoader`（manifest 解析/apply/unload）、`PluginHotLoader`（rawfile 热加载/reloadAll）、`PluginToolExecutor`（插件工具声明式实现注册）、`SkillDirectoryFormatter`（技能目录 full_index/trigger_only A/B）。
 - **可观测**：`LoopMetrics`（重试/压缩/max_tokens 计数）、`SessionLogAggregator`（协议维度 + 工具延迟 p50/p90/p99 + 跨会话聚合）、`PromptBudget`（token 预算估算）。
-- **测试**：`test/guncat-harness` 纯逻辑用例 **633 项全绿**；改 `common/` 后跑 `node setup.mjs && node test-core.mjs`，再 `node check-setup.mjs && tsc -p check/tsconfig.json`，最后 `assembleHap` 真机构建。
+- **测试**：`test/guncat-harness` 纯逻辑用例 **760 项全绿**；改 `common/` 后跑 `node setup.mjs && node test-core.mjs`，再 `node check-setup.mjs && tsc -p check/tsconfig.json`，最后 `assembleHap` 真机构建。
 
 ## 2.2 网络中断与自动重试（对齐安卓版，2026-10）
 
@@ -121,12 +121,13 @@ for step in 1..WORK_MAX_STEPS(200, 防失控保险):
 | `session_search`                                        | HarnessTools.toolSessionSearch → SessionLogService                          | 检索会话事件日志（JSONL），找回被上下文压缩掉的历史细节                                                                                                                                                                     |
 | `run_js`                                                | HarnessTools → JsCodeService → 原生 `libguncatjs.so`（JSVM-API）                | **设备内 JS 执行沙箱**：任意小程序化处理（计算/正则/JSON 重塑/统计/程序化生成）＋显式文件进出（`files` 只读预载、`write()` 落盘）；详见下节                                                                                                            |
 | `shell`                                                 | HarnessTools → IecShellService → `IecRuntime`（IEC exec 服务）            | **设备内原生执行**（mksh + toybox/libarchive/git/dropbear/node，命令是 HarmonyOS `.so`，fork 后直接跑）：工作目录就是本会话工作区（同一文件系统，与 `read_file` 同 inode）；无虚拟机、无冷启动，单条命令 0.2~1.5 秒；最多 8 条并发。详见 [iec-runtime.md](iec-runtime.md)                                                  |
-| `run_python`                                            | HarnessTools → PythonService → 原生 `libguncatpy.so` + CPython 3.12           | **原生 CPython**：应用进程内直接执行，无指令仿真（比 VM 里的 `python3` 快 2~3 个数量级）；工作区同一份目录，可直接 `open("data/a.csv")`；无 shell、运行期不能 pip install（网络与 ssl 可用）；默认 30s、上限 180s。详见 [native-python.md](native-python.md) |
+| `run_python`                                            | HarnessTools → PythonService → 原生 `libguncatpy.so` + CPython 3.12           | **原生 CPython**：应用进程内直接执行，无指令仿真，接近原生速度；工作区同一份目录，可直接 `open("data/a.csv")`；无 shell、运行期不能 pip install（网络与 ssl 可用）；默认 30s、上限 180s。详见 [native-python.md](native-python.md) |
 
 路径安全：所有工具路径经 `resolveSafe()` 校验——拒绝绝对路径、盘符与 `..` 穿越，只能在 `filesDir/workspaces/<convId>/` 内操作。
 `run_js` 的输入/输出同样走 `resolveSafe()`：脚本本身没有文件系统能力，进出只能经由 ArkTS 侧这层校验。
-`shell` 不走 `resolveSafe()`（路径解析发生在客人侧），但宿主只把 `filesDir/workspaces` 与 `filesDir/linux/ipc` 两个目录
-用 9p 注入 VM，客人执行前把 `/workspace` bind 到 `/mnt/workspaces/<convId>` —— 越界能力被挂载点本身限制住。
+`shell` 不走文件工具的 `resolveSafe()`：`cwd` 仍由 `IecShellService` 校验为工作区内的相对路径（拒绝 `/` 开头与 `..`），
+命令本身运行在应用沙箱内的 IEC sysroot 中，能访问 sysroot 与本会话工作区；应用没有系统存储权限，
+看不到手机其它应用或公共目录，也没有对外监听端口。
 
 ## 3.1 PPT 生成链路（Deck JSON 中间层）
 

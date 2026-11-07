@@ -507,7 +507,7 @@ $interest = 34.8
 
 `list_files` · `read_file` · `search_files` · `glob` · `grep` · `parse_document` · `search_pdf` · `pdf_to_images` · `view_image` · `read_docx` · `read_xlsx` · `read_ppt` · `run_js` · `transform_file` · `web_fetch` · `local_web_search` · `write_file` · `append_file` · `create_dir` · `write_csv` · `write_svg` · `write_docx` · `write_xlsx` · `write_pptx` · `download_file` · `list_skills` · `load_skill`
 
-> 完整的 45 个工具名与被裁掉的 18 个（`todo_write` / `goal_*` / `schedule_*` / `subagent` / `session_search` /
+> 完整的 47 个工具名与被裁掉的 20 个（`todo_write` / `goal_*` / `schedule_*` / `subagent` / `session_search` /
 > `ask_user_question` / `edit` / `str_replace_editor` / `delete_file` / `move_file` / `edit_docx|edit_xlsx|edit_ppt` /
-> `record_search`）见 `test-core.mjs` 的 `allToolNames` 数组与 `ToolRegistry.INTERACTIVE_TOOL_WHITELIST`。
+> `record_search` / `shell` / `run_python`）见 `test-core.mjs` 的 `allToolNames` 数组与 `ToolRegistry.INTERACTIVE_TOOL_WHITELIST`。
 

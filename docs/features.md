@@ -19,7 +19,7 @@
   - Anthropic Messages：`thinking.type = enabled / disabled`，开启时另发 `output_config.effort = high`
   - OpenAI Responses：`reasoning.effort = high / none`（`none` 表示关闭思考）
 - 按钮状态优先于额外请求参数，避免界面状态与实际请求不一致。
-- 联网搜索开启时，多轮对话自动回传上一轮 assistant 的 `reasoning_content`（OpenAI Completions），避免 400。
+- **跨轮次思考记忆（7.1）**：三种协议都按各自规范回传历史思考——Completions 回传 `reasoning_content`（带 `tool_calls` 也回传）、Anthropic 回传 `thinking` 块与 `signature` / `redacted_thinking`、Responses 回传 reasoning output item。历史被修剪 / 压缩后失效的 Anthropic 签名会先清掉，避免 `Invalid signature` 400。
 - OpenAI Completions / Anthropic Messages 也会按各自格式发送联网搜索工具（是否生效取决于服务商支持）。
 - 深度思考和联网搜索状态会持久化保存；新建对话（含每次启动自动新建）按智能体名称重置深度思考默认值：效率模式默认关闭、轻简模式默认关闭、专家模式默认开启。
 
@@ -102,12 +102,37 @@
 
 - 内置多个通用、论文、法律检索、学术检索和模型评测智能体。
 - 对话、当前智能体、API 配置、功能开关及朗读配置均保存在本地。
+- 设置修改自动防抖保存；对话存档采用「主文件 + `.bak` + `.tmp`」三段式，主文件损坏时自动回退；用量账本单独保存在 `filesDir/guncat_usage.json`。
 - 支持新建、切换和删除对话。
 - 跟随系统切换深色/浅色主题，并同步状态栏、导航栏和 Markdown 样式。
 
+## 设置与用量（7.2）
+
+### 独立设置页
+
+- 设置从底部弹层改为独立路由页：一级分组为「模型」（模型配置 / 高级参数 / 用量与成本）、「能力」（本地联网搜索 / 多模态解析）、「声音」（朗读）、「系统」（终端 / 工具 / 检查更新）。
+- 模型配置把配置方案、接入方式、Base URL、API Key 与模型列表合并到一页；切换方案前先把当前草稿落盘，避免输入被静默丢弃。
+- 模型配置 / 高级参数 / 本地联网搜索 / 多模态解析分页共享同一份草稿，字段修改后自动防抖保存，返回或切换方案前再同步排队写盘；不再有手动保存按钮。设置页按需 push，聊天页不再常驻挂载整棵表单。
+- 「终端」为只读环境页：展示原生 Shell、原生 CPython 3.12 等运行组件，以及应用版本、系统版本、API 等级、设备类型、芯片平台与指令集。
+- 「工具」进入只读目录；「检查更新」显示当前版本并优先拉起 AppTest。
+
+### 用量与成本
+
+- **逐请求记账**：在 `AgentLoopService` / `ChatService` 请求收尾采集三种协议的 `usage`，统一归一化缓存命中、未命中、输出、服务端搜索与 OpenCode 额度字段；标题生成、上下文压缩、子代理、交互模式补救请求也会计入。
+- **按日聚合**：只保存最近 400 天的按日聚合与 8 天小时桶，更早数据只保留「全部」累计值，不保存逐请求明细；5 秒防抖写盘，切后台与退出时 flush，单文件通常几十 KB，不参与流式热路径。
+- **页面**：展示本月等价成本、今日 / 近 7 天 / 全部汇总、53 周热力图、费用 / Token / 请求数切换、服务商筛选、当天峰谷与模型明细；DeepSeek 与 OpenCode Go 两张卡片始终显示，未填 Key 的标注「未启用」。
+- **对账与导出**：支持月预算、CSV 导出与清空统计；侧边栏宽屏底部有「用量」快捷入口，聊天页显示最近一轮 Token 与费用。DeepSeek 余额改为手动刷新、仅作对账，不参与热力图。
+- **计价口径**：DeepSeek 峰谷按北京时间（UTC+8）工作日 09:00–12:00、14:00–18:00 计高峰，其余时段与法定节假日按谷时；价目表内置 2026/2027 节假日。OpenCode 按网关返回的 `opencode.tokens`、`allowance`、`cost`、`list_cost`、`billing_source` 统计，不套 DeepSeek 峰谷价。
+- **边界**：账本只在本地，不云同步、不上传；清除应用数据或卸载后丢失。缺失 `usage` 的响应会计数但不猜成本。
+
+### 工具目录与检查更新
+
+- 设置「系统 → 工具」：只读目录，按阅读与检索、写入与编辑、计算与执行、文档产出、联网与上下文、任务与协作、技能七组展示全部 47 项工具，每项只保留名称与一句用途说明；页首「工具自动管理」是锁定的开关组件，只作状态说明，不引入设置项或运行时逻辑。
+- 设置「系统 → 检查更新」：优先通过 `apptest://` Deep Linking 直达 AppTest 公开测试页；未安装 AppTest 时回退到官方公开链接，避免只弹出「链接无法打开」。`module.json5` 已声明 `apptest` 查询能力。
+
 ## 交互模式（Intelligent UI）
 
-交互模式是 **Agent 循环的第二种交付形态**（侧边栏「Agent模式」分组中排在「工作模式」之上的 ✦「交互模式」项，是该分组的第一项；**应用启动默认就落在交互模式**，空态大标题处的「交互模式 / 工作模式」胶囊可一键换挡）：它与工作模式**共用同一套 Agent Loop 与沙箱工作区**，但**行为纪律相反、下发的工具面也不同**——工作模式是「47 个工具全量 + 多轮工具循环 + 长程交付」，交互模式是「**一句话进来，一张能操作的界面出去**」：只下发 **27 个**工具、默认**零工具调用、一轮直出界面**，工具只在"界面里的数字必须来自真实数据"时破例。回答不再是纯文本，而是一份界面程序——应用把它渲染成原生可操作界面：标题/正文、图表（柱状 / 折线 / 面积 / 横向条 / 饼环 / 径向 / 雷达 / 堆叠条）、表格、指标卡、图片墙、选项卡 / 折叠面板 / 步骤条 / 卡片块、以及整套表单控件（滑块 / 开关 / 单选 / 多选 / 下拉 / 标签选择 / 选项卡 / 输入框 / 文本域）。对齐 GPT-6 的 Intelligent UI：说一句话，拿到一个能拖、能点、能改参数并即时重算的仪表盘。
+交互模式是 **Agent 循环的第二种交付形态**（窄屏抽屉「Agent引擎（推荐）」/宽屏侧栏「引擎」分组中排在「工作模式」之上的 ✦「交互模式」项，是该分组的第一项；**应用启动默认就落在交互模式**，空态大标题处的「交互模式 / 工作模式」胶囊可一键换挡）：它与工作模式**共用同一套 Agent Loop 与沙箱工作区**，但**行为纪律相反、下发的工具面也不同**——工作模式是「47 个工具全量 + 多轮工具循环 + 长程交付」，交互模式是「**一句话进来，一张能操作的界面出去**」：只下发 **27 个**工具、默认**零工具调用、一轮直出界面**，工具只在"界面里的数字必须来自真实数据"时破例。回答不再是纯文本，而是一份界面程序——应用把它渲染成原生可操作界面：标题/正文、图表（柱状 / 折线 / 面积 / 横向条 / 饼环 / 径向 / 雷达 / 堆叠条）、表格、指标卡、图片墙、选项卡 / 折叠面板 / 步骤条 / 卡片块、以及整套表单控件（滑块 / 开关 / 单选 / 多选 / 下拉 / 标签选择 / 选项卡 / 输入框 / 文本域）。对齐 GPT-6 的 Intelligent UI：说一句话，拿到一个能拖、能点、能改参数并即时重算的仪表盘。
 
 - **快车道：默认零工具、一轮直出、思考也要短（速度优先）**：交互模式**不复用工作模式的行为纪律**——"先建清单、先加载技能、反复核验、落盘成文"那套规则放进这个模式，会原样变成一串无用工具调用（`todo_write` / `list_files` / `load_skill` / 交付前自检…），用户干等的是本该直接渲染出来的卡片。因此 `AgentLoopService.buildInteractiveSystemPrompt()` 的底座改走 `PromptBuilder`（**最前方的一级标题** `interactivePrime()`：身份 + 第一纪律: 快 + 思考纪律: 短；随后是 `buildInteractive()`：工作区=素材区 + 工具名索引 + 真实数据纪律），不再拼接工作模式的 `build()`。纪律写明：**默认一次回答直接给界面、不调用任何工具**；工具是**破例**、一轮最多 1~2 次且优先只读，拿到结果立刻出界面；不要 `todo_write` / `goal_*` / `schedule_*` / `subagent` / `session_search`；不要 `ask_user_question`（要问就用界面问：`Form` / `OptionCards` / `Chips`）；不写自检报告、不画 mermaid 导图。**思考也有预算**：交付物是界面，思考是纯延迟，所以它只做"定界面骨架 → 定数据来源 → 定标题与结论"三件事，被明确禁止复述界面语法与组件清单、先草拟正文、逐位心算数字、反复权衡"要不要再画一个图"，长度目标几句话或几个短条目。只有用户**明确**要导出文件时才 `load_skill` + `write_*`（且走简化流程：不做技能里的前置提问、不写自检报告）。**工具面本身也按模式裁剪**：交互模式下发的不是工作模式那 47 个工具，而是 `ToolRegistry.INTERACTIVE_TOOL_WHITELIST` 筛出的 **27 个**（读素材 / 算真实数字 / 核实外部事实 / 出文件），`todo_write`、`goal_*`、`schedule_*`、`subagent`、`session_search`、`ask_user_question`、`edit`、`delete_file` 这些长程与维护类工具**根本不出现在请求里**——提示词里的"默认零工具"是纪律，工具面裁剪是物理保证（详见[架构文档 2.1](architecture/interactive-mode.md#21-工具面物理裁剪47--27)）；技能段也同步降为**极小索引**（`SkillDirectoryFormatter.interactiveIndex()`，只列 `docx` / `xlsx` / `ppt` / `svg` / `data` 五行，替代原来几十支技能的整段目录）。于是交互模式每一轮请求里，**工具定义少 20 份 schema、技能目录只剩五行**，提示词那 36.7k → 22.8k 的降幅之外又多省下这两块固定前缀。
 - **纪律前置：整段提示词的第 0 段是「最高优先级 · 快」**：这条第一纪律原来待在底座的 85% 处，前面隔着 8.3k 组件清单、3.5k 丰富度、2.2k 示例——而模型是顺序读的，等于先读完一整套语言契约才开始看纪律。现在抽成 `PromptBuilder.interactivePrime()`，由 `assembleInteractiveSystemPrompt()` 固定为**第 0 段**（唯一的一级标题，写明"与下文任何内容冲突时以本节为准"），内容含：身份一句话、默认零工具/破例四类/一轮 1~2 次、一律不用的长程工具、不要 `ask_user_question`、导出简化流程、以及 `## 思考纪律: 短`。底座不再重复（`interactiveIdentity()` 已删除），`INTERACTIVE_DUTY` 末尾只留一句"以开头那一节为准"的指针——**首尾各一次，中间不复述**。段序有断言钉住：`test-core.mjs` 断言组装结果的第一段就是它，且顺序为「快 → 界面语言契约 → 素材区/工具面 → 职责」（详见[架构文档 2.3](architecture/interactive-mode.md#23-纪律前置快是整段提示词第-0-段的一级标题r76)）。
@@ -133,14 +158,14 @@
 
 ## 工作模式（Agent Loop）
 
-工作模式是**与聊天智能体平行的独立身份**（侧边栏「聊天模式」标题上方的「Agent模式」分组中的 🛠「工作模式」项），进入后进入一个具备本地沙箱工作区与工具调用能力的 Agent 循环，可自主完成多步骤长程任务。完整架构见[工作模式架构与维护指南](architecture/work-mode.md)。
+工作模式是**与聊天智能体平行的独立身份**（窄屏抽屉「Agent引擎（推荐）」或宽屏侧栏「引擎」分组中的 🛠「工作模式」项），进入后进入一个具备本地沙箱工作区与工具调用能力的 Agent 循环，可自主完成多步骤长程任务。完整架构见[工作模式架构与维护指南](architecture/work-mode.md)。
 
 - **沙箱工作区**：每个工作会话对应 `filesDir/workspaces/<convId>/` 目录，支持上传文件、导出 `.zip` 打包、清空；全程应用沙箱内读写 + 系统安全组件选/存文件，无新增权限。
 - **@ 引用工作区文件**：输入框敲 `@` 会弹出工作区文件候选（按文件名前缀/包含/路径包含排序，最多 8 条），点一下把 `@完整路径` 填进输入框；发送时该文件正文直接附在本轮消息里交给模型（会话记录与界面仍是用户原话）。单文件 24000 字符、本轮合计 60000、最多 8 份；目录/二进制/不存在/越界（`@../x`）一律如实说明未附上，越界一个字节都不读；邮箱与 URL 里的 `@` 不触发。插话里同样可用（"按 @requirements.md 的口径重做"）。
 - **项目指令文件**：工作区根目录的 `AGENTS.md` / `CLAUDE.md` / `GUNCAT.md` 是项目约定，模型在快照文件树里看到它们就会先读一遍再动手；用户说"以后都按这个来"时，约定会被写进 `AGENTS.md` 长期生效。手机端不自动注入正文（省上下文），由模型自己读一次。
 - **编辑前必须读取**：`edit` / `str_replace_editor` 改动文件前，内核要求本会话先 `read_file` 过它——没读过返回 `ERROR[FS_NOT_OBSERVED]`，读过之后文件又被改过（自己写的、`shell` 改的、用户改的）返回 `ERROR[FS_STALE_VERSION]`，两种都拒绝落盘并直接给出可照抄的"先读再改"指令。守卫按「大小 + 修改时间 + 开头 8KB 指纹」比对，同一秒内的等长改动也能发现。
 - **图片一次一张、绝不覆盖**：一轮里调用多次 `view_image` 时，每张图各自作为一条视觉消息送达（带"第 n/N 张"与来源路径），不会再出现"并行读图只收到最后一张"。超过 8MB 的图片会自动压成 JPEG 兜底（仅此一种情况会压，平时送原图），结果文本里注明原图与压缩后大小。
-- **47 个本地工具**：文件 CRUD（list/read/write/append/delete/create_dir/move/search，search_files 支持 glob 文件名过滤）、任务清单（todo_write）、图片查看（view_image，走主模型多模态）、网络下载（download_file，把链接文件拉进工作区）、PDF 解析（parse_document + read_file 自动路由）、Office 生成（write_docx / write_xlsx / write_csv）、数据管道（transform_file，大文件本地清洗/转换/互转，数据不经模型上下文）、PPT 读写编辑（write_pptx / read_ppt / edit_ppt，基于 Deck JSON 中间层）、Word 读写编辑（write_docx / read_docx / edit_docx，基于 Doc JSON 中间层）、Excel 读写编辑（write_xlsx / read_xlsx / edit_xlsx，基于 Workbook JSON 中间层）、SVG 生图（write_svg，矢量出图 + PNG 预览）、技能系统（list_skills / load_skill，按需加载领域操作指南）。6.1 新增（DeepSeek Harness 移植）：glob / grep（模式找文件与正则搜索）、edit / str_replace_editor（逐字符精确编辑 + diff 卡片）、web_fetch（抓取网页/接口原文）、ask_user_question（向用户提问并等待作答）、schedule_create/list/delete（会话内定时提醒）、goal_create/get/update（会话自主目标）、subagent（子代理委派）、session_search（会话事件日志检索）。**run_js（JSVM-API 沙箱）**：纯计算环境下的"执行代码"能力，详见下文"run_js：设备内 JS 执行沙箱"。7.0.0 新增 **shell（IEC 原生执行核）**：命令是随包的 HarmonyOS 原生 `.so`（mksh、toybox、libarchive、git、dropbear、node），由 exec 服务 fork 后直接跑，无虚拟机、不需要 JIT 受限权限；工作目录与本会话工作区是同一份文件系统（`cat data/a.csv` 与 `read_file("data/a.csv")` 是同一份文件），详见 [IEC 运行时](architecture/iec-runtime.md)。
+- **47 个本地工具**：文件 CRUD（list/read/write/append/delete/create_dir/move/search，search_files 支持 glob 文件名过滤）、任务清单（todo_write）、图片查看（view_image，走主模型多模态）、网络下载（download_file，把链接文件拉进工作区）、PDF 解析（parse_document + read_file 自动路由）、Office 生成（write_docx / write_xlsx / write_csv）、数据管道（transform_file，大文件本地清洗/转换/互转，数据不经模型上下文）、PPT 读写编辑（write_pptx / read_ppt / edit_ppt，基于 Deck JSON 中间层）、Word 读写编辑（write_docx / read_docx / edit_docx，基于 Doc JSON 中间层）、Excel 读写编辑（write_xlsx / read_xlsx / edit_xlsx，基于 Workbook JSON 中间层）、SVG 生图（write_svg，矢量出图 + PNG 预览）、技能系统（list_skills / load_skill，按需加载领域操作指南）。6.1 新增（DeepSeek Harness 移植）：glob / grep（模式找文件与正则搜索）、edit / str_replace_editor（逐字符精确编辑 + diff 卡片）、web_fetch（抓取网页/接口原文）、ask_user_question（向用户提问并等待作答）、schedule_create/list/delete（会话内定时提醒）、goal_create/get/update（会话自主目标）、subagent（子代理委派）、session_search（会话事件日志检索）。**run_js（JSVM-API 沙箱）**：纯计算环境下的"执行代码"能力，详见下文"run_js：设备内 JS 执行沙箱"。**run_python（原生 CPython 3.12）**：解释器编成 HarmonyOS 原生 `.so` 在应用进程内直跑，与 shell 里的 `python3` 共用同一份解释器和标准库。**local_web_search / record_search**：设备内兜底联网搜索与搜索来源登记。7.0.0-alpha 新增 **shell（IEC 原生执行核）**：命令是随包的 HarmonyOS 原生 `.so`（mksh、toybox、libarchive、git、dropbear、node），由 exec 服务 fork 后直接跑，无虚拟机、不需要 JIT 受限权限；工作目录与本会话工作区是同一份文件系统（`cat data/a.csv` 与 `read_file("data/a.csv")` 是同一份文件），详见 [IEC 运行时](architecture/iec-runtime.md)。
 - **技能系统**：领域操作指南打包在 `rawfile/skills/`（主 Skill 在顶层、分支 Skill 位于主 Skill 子目录；SKILL.md + reference/*.md），系统提示词技能库默认 full_index 并注入「技能使用铁律」（命中第一步必须 `load_skill`、不确定先 `list_skills`、技能正文优先），模型通过 `list_skills`/`load_skill` 渐进式加载。内置 `ppt` 技能（Deck JSON 语法、设计规范、内容纪律、主题、常见演示文稿蓝图、自检清单）、`docx` 技能（Doc JSON 语法、排版规范、文档形态选型、常见 Word 文档蓝图、专业文书规范）、`xlsx` 技能（Workbook JSON 语法、公式优先、数字格式规范、数据分析链路、常见报表蓝图、数据分析玩法）、`svg` 技能（SVG 绘制规范、"生成→预览→修正"工作流、可视化类型选择、信息图蓝图、图标/流程图/柱状图/时间轴配方）与 `data` 技能（transform_file 管道 ops 与表达式完整语法、数据质量检查、清洗/提取/互转配方、能力边界）。**当前共 32 个技能**：除上述 10 个核心技能（另含 `paper`/`law`/`research`/`sift`/`llm-eval`）外，新增 22 个从四大主流 AI 工作平台移植并适配的领域技能——`humanizer`（去 AI 味/可读性）、`prompt-engineering`（提示词工程）、`pdf`（PDF 读取/搜索/扫描件阅读）、`translation`（法律/医学翻译与术语一致性）、`questionnaire`（问卷/深访/原声打标/定量分析）、`content-rewrite`（多平台内容改写分发）、`html`（单页 HTML 开发）、`paper-reviewer`（学术论文审稿）、`review-agent`（代码评审）、`paper-rebuttal`（审稿意见 rebuttal 回复）、`research-lineage-map`（研究谱系演进图）、`marketing-plan`（营销策划方案）、`reference-audit`（参考文献审计）、`paper-close-reading`（论文精读）、`khazix-writer`（公众号长文写作）、`newmedia-writing`（小红书/公众号/短视频新媒体写作）、`marketing-material-review`（营销素材审核）、`patent-drafting`（专利申请文件撰写）、`sentiment-tracker`（舆情追踪与溯源）、`journal-format`（学术论文 DOCX 格式排版）、`research-proposal`（学术立项书/基金申请撰写）、`industry-analysis`（行业深度研究）。**结构重组（6.2.0）**：25 个内容/学术/法律/AI 类分支技能已物理归入 5 个主 Skill 子目录（`research-intelligence` 7 个 / `academic-publishing` 7 个 / `content-writing` 5 个 / `legal-ip` 4 个 / `ai-tooling` 2 个），7 个格式分支（`docx`/`xlsx`/`ppt`/`svg`/`html`/`pdf`/`data`）保持顶层直连；`list_skills` 只暴露 12 个可见技能，分支由主 Skill 路由后按原 id 加载（物理路径经 `WorkSkillService.skillPath()` 映射）。
 - **本地解析引擎**：`.docx/.xlsx/.pptx/.pdf` 全部在设备本地抽取文本，不依赖多模态解析 API、不消耗配额。
 - **任务清单纪律**：复杂任务先 `todo_write` 建清单，清单与工作区状态经「运行时上下文」快照注入对话尾部，逐项推进、完成后更新。

@@ -10,7 +10,7 @@
 
 ## 环境要求
 
-- **DevEco Studio 6.0.1** 或兼容版本
+- **DevEco Studio 6.1.1** 或兼容版本
 - **HarmonyOS SDK API 24**（6.1.1）
 - **HarmonyOS 手机真机**（模拟器上 Preview Kit / Share Kit / CoreSpeechKit 等行为不一致）
 - **Node.js ≥ 22.6**（harness 依赖原生 TypeScript strip；CI 用 Node 24）
@@ -25,7 +25,7 @@
 ```bash
 cd test/guncat-harness
 node setup.mjs        # 把 entry/src/main/ets 下的纯逻辑模块移植为 Node 可运行的 .ts
-node test-core.mjs    # 当前 754 项
+node test-core.mjs    # 当前 760 项
 ```
 
 覆盖 `PathMatcher` / `DiffUtil` / `EditCore` / `FileSearchCore` / `ToolRegistry` / `PromptBuilder` / `LoopDecisions` / `SSEProtocolAdapter` / `GuncatUiLang` 等纯逻辑，以及**大量提示词断言**；shell 工具结果正文拼装（`ShellResultFormat`：状态行/超时/信号/dropped/二进制/截断）也在这一层逐字回归。
@@ -58,7 +58,7 @@ bash scripts/check-all.sh --fast   # 跳过 soname / py_runner / IEC 命令集 /
 bash scripts/check-all.sh --list   # 只看检查项清单
 ```
 
-按顺序执行 18 项：纯逻辑单测（754 项）、服务层 `tsc`、界面文案可复制护栏、
+按顺序执行 18 项：纯逻辑单测（760 项）、服务层 `tsc`、界面文案可复制护栏、
 Markdown 相对链接、随包许可、共享库 soname、`py_runner` 宿主协议、
 IEC 命令集宿主测试、IEC hexdump 属性对拍（200 组随机输入）、IEC nc 属性/边界、
 IEC diff 属性/边界对拍、mksh 64 位算术回归、toybox applet 解析交叉验证、
@@ -78,6 +78,17 @@ CA bundle 可用性（curl/python/git 真握手），以及 npm 解包宿主回�
 - soname 检查默认自动探测 DevEco / OHOS SDK 的 `native/llvm/bin`；也可手动指定
   `GUNCAT_LLVM_BIN=/path/to/native/llvm/bin`。WSL 里若只装了 Windows 版 DevEco，
   脚本会改用 GNU readelf 读取 ELF（Windows 的 `llvm-readelf.exe` 读不了 `/mnt` 路径）。
+
+> **用量账本回归不在 `check-all.sh` 里**（它有独立的 CI job）。改 `entry/src/main/ets/common/Usage*`、
+> `service/UsageMeter.ts` 或 `service/UsageSettingsStore.ts` 时单独跑：
+>
+> ```bash
+> cd test/usage-harness
+> npx -y -p typescript@5.5.4 tsc -p tsconfig.json
+> node out/test/usage-harness/usage-test.js
+> ```
+>
+> 覆盖北京时间归日、DeepSeek 峰谷与节假日、三协议 usage 归一化、OpenCode 字段、按日聚合 / 400 天裁剪 / CSV。
 
 > 一键入口只覆盖宿主侧检查；第 3 层真实 ArkTS 编译仍需本机 DevEco，见下节。
 
@@ -197,6 +208,10 @@ ArkTS 不是 TypeScript 的超集，它砍掉了大量动态特性。**最容易
 | 交互模式、`guncat-ui lang` 语言契约、界面渲染 | [交互模式架构](docs/architecture/interactive-mode.md) |
 | 目录布局、数据流、核心组件 | [项目结构](docs/architecture/project-structure.md) |
 | 客户端功能全貌 | [主要功能](docs/features.md) |
+| 设置页 / 用量与成本 / 工具目录 | [主要功能 · 设置与用量](docs/features.md#设置与用量72) |
+| 后台保活、短时 / 长时任务 | [后台保活策略](docs/architecture/background-keepalive.md) |
+| shell / IEC 真机验收 | [真机验收清单](docs/guides/device-verification.md) |
+| 发版、体积、Python 运行库门槛 | [发版前检查清单](docs/architecture/release-checklist.md) |
 | 版本变更史 | [更新记录](CHANGELOG.md) |
 | 待办与规划 | [`docs/BACKLOG.md`](docs/BACKLOG.md) |
 | Agent Loop 逐轮改动记录 | [`docs/ITERATION_LOG.md`](docs/ITERATION_LOG.md) |

@@ -10,12 +10,17 @@
 | --- | --- | --- |
 | `filesDir/workspaces/<会话ID>/` | **会话工作区**：上传件、模型产出、`.todo.json`、`.goal.json`、`.schedule.json`、`.searches.md`、`.spill/`（工具结果溢出全文）、`subagents/sa_*/`（子代理产出） | 会话删除时整目录删除；崩溃残留由启动清扫回收 |
 | `filesDir/sessions/<会话ID>.jsonl` | 会话事件日志（turn/tool/steer/driver_step…），`session_search` 的数据源 | 会话删除时删除；同样参与启动清扫 |
-| `filesDir/guncat_conversations.json` | 全部会话（含消息、附件解析文本；图片 base64 超阈值时剥离） | 每次变更原子写（`.tmp` + rename） |
+| `filesDir/guncat_conversations.json` | 全部会话（含消息、附件解析文本；图片 base64 超阈值时剥离） | 800ms 合并写；逐会话流式序列化；主文件 + `.bak` + `.tmp` 三段式提交，启动时按可用副本恢复 |
 | `filesDir/python/` | 原生 CPython 运行时（共享，约 1GB 量级） | 随包版本，与会话无关 |
 | `cacheDir/work_office/`、`cacheDir/dim_*` 等 | Office/PDF 解析的临时解包目录 | 每次解析 `finally` 删除；缓存目录由系统按需回收 |
 
 工作区目录名 = 会话 ID 经 `WorkFileService.workspaceDirName()` 净化后的形态（当前 ID 形如
 `conv_<时间戳>_<随机数>`，净化是恒等映射；保留净化是为了历史数据与注入防护）。
+
+会话存档不是每改一次就整份重写：工具步骤密集时最多每 800ms 合并一次，切后台 / 停止生成 /
+退出前强制刷盘；提交顺序是「临时文件 → 旧主文件转 `.bak` → 临时文件改名为主文件」，所以
+主文件损坏时可以回退 `.bak`，首次写入中途被杀也能从 `.tmp` 恢复。启动清扫只有在
+`StorageManager.conversationsLoadOk()` 为真时才执行，避免把损坏存档误判成“没有会话”而清空工作区。
 
 ## 二、删除链路
 

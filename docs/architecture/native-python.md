@@ -1,6 +1,6 @@
 # 原生 Python（run_python）与跨域桥（npy）
 
-> **历史文档**：本文记录 7.0.0 时期"QEMU VM + 原生 Python"的测量与设计。7.0.1 起 shell
+> **历史文档**：本文记录 7.0.0 时期"QEMU VM + 原生 Python"的测量与设计。7.0.0-alpha 起 shell
 > 已改为 IEC 原生执行核（无虚拟机），`npy` 跨域桥随 VM 一并移除；shell 里的 `python3`
 > 直接指向同一个 `libpython3.12.so`。当前架构见 [iec-runtime.md](iec-runtime.md)。
 
@@ -272,15 +272,16 @@ mini import _json=FAIL ModuleNotFoundError("No module named '_json'")
 | 测试 | 覆盖 | 结果 |
 | --- | --- | --- |
 | [`launcher-test.py`](../../tooling/python/launcher-test.py) | **43 项**启动器回归(桌面 CPython 直接跑模板): 输出捕获(含 fd 级 `os.write`/`buffer`/`fileno`)、跨调用状态隔离、超时(while/for)、只读守卫、spawn 守卫、用户命名空间释放、MPLCONFIGDIR、内存提示、诊断 | Windows 42/42、Linux 43/43(无 numpy 时跳过 2 项) |
-| [`verify-python-stack.py`](../../tooling/python/verify-python-stack.py) | **21 项**技术栈自检: 标准库(sqlite3/ssl/压缩/hash)、ctypes、numpy、pandas、Pillow、matplotlib、**中文渲染**、qrcode、lxml、regex、bs4、PyCryptodome、docx/pptx/xlsxwriter、sympy、psutil、requests+certifi、openpyxl/yaml/jinja2、reportlab、watchdog | 21/21 通过 |
+| [`verify-python-stack.py`](../../tooling/python/verify-python-stack.py) | **24 项**技术栈自检: 标准库(sqlite3/ssl/压缩/hash)、ctypes、numpy、pandas、scipy、Pillow、matplotlib、**中文渲染**、qrcode、lxml、regex、bs4、PyCryptodome、docx/pptx/xlsxwriter、sympy、psutil、requests+certifi、openpyxl/yaml/jinja2、multiprocessing/guncat_mp、reportlab、watchdog | 24/24 通过 |
 | [`run-verify-stack.sh`](../../tooling/python/run-verify-stack.sh) | **按真机布局**组装环境(qemu): extras 解压到临时目录、libs 只给 `.so`、`PYTHONPATH=stdlib:site-packages:extras:libs` | 同上 |
 | [`build-python-stack.sh`](../../tooling/python/build-python-stack.sh) | 12 个阶段全量重建(幂等) | 可一键重建 |
 | `npy-test.sh`（`tooling/linux-vm/`，已删除） | guest 脚本: 安装、数值、stdin、argv、管道进 jq、退出码、相对路径、子目录、异常、往返开销 | 12 项全过 |
 | `smoke-test.sh`（`tooling/linux-vm/`，已删除） | VM 引导、9p 一致性、cwd、超时、Python/pip/jq、npy 存在 | 18 项全过 |
-| `test/guncat-harness` | 工具目录、交互模式、超时/熔断、卡片路由、缺库提示等源码级守卫 | **543 项全过** |
+| `test/guncat-harness` | 工具目录、交互模式、超时/熔断、卡片路由、缺库提示等源码级守卫 | **760 项全过** |
 
-**打包门槛**: `tools/build-check.ps1` 在调 hvigor 之前先跑 21 项自检，失败即中止(exit 3)，
-避免带着坏掉的运行库出包。本机无 WSL/rootfs 时自动跳过，`-SkipPythonStack` 可强制跳过。
+**打包门槛**: `tools/build-check.ps1` 在调 hvigor 之前先跑快速门槛（服务层 `tsc` + 文档链接 / soname / 许可），
+加 `-Full` 或 `-WithPythonStack` 时再跑这 24 项自检，失败即中止(exit 3)，避免带着坏掉的运行库出包。
+本机无 WSL/rootfs 时自动跳过；需要跑时显式加 `-Full`。
 
 真机性能数字仍待补（原位对比表见 §6.2 的微基准）；`run_python` 的绝对值应接近原生
 （手机上 `sum(range(200000))` 预期 < 30 ms，对比 VM 的 1.65 s）。

@@ -1,5 +1,9 @@
 # Guncat Work 6.1.0 — DeepSeek Harness 移植说明
 
+> **历史文档**：记录 6.1.0 的 dsh 移植，当时工作模式没有 shell。7.0 起已有 IEC 原生
+> shell（`shell` 工具）与独立 `python3` runner；当前工具面、循环与运行环境以
+> [architecture/work-mode.md](architecture/work-mode.md) 和 [architecture/iec-runtime.md](architecture/iec-runtime.md) 为准。
+
 把 [DeepSeek Harness](https://github.com/deepseek-ai)（dsh）的核心 Agent Loop 能力移植到
 HarmonyOS 原生应用（基座为 GuncatAI_HMOS-APP 的「工作模式」），形成运行在鸿蒙 2in1/平板/手机
 上的 **Guncat Work 6.1**。无 shell 环境是前提：dsh 依赖进程的工具（bash/terminal/lsp）不移植，

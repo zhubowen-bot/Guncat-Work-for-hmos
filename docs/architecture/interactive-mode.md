@@ -7,7 +7,7 @@
 
 ## 1. 身份与会话模型
 
-- **虚拟智能体**：`Constants.INTERACTIVE_AGENT_ID = 'interactive'`，由 `ChatViewModel.buildInteractiveAgent()` 注入 `agents` 列表**第二位**（`work` 之后），`AgentDrawerView` / `DswSidebar` 把它和工作模式一起归入「Agent模式」分组（`workAgents()` 判定两个 id）。
+- **虚拟智能体**：`Constants.INTERACTIVE_AGENT_ID = 'interactive'`，由 `ChatViewModel.buildInteractiveAgent()` 注入 `agents` 列表**首位**（`ChatViewModel.restoreState()` 先 `unshift` 交互模式，再 `splice(1, 0)` 插入工作模式，所以分组里交互在上、工作在下）；`AgentDrawerView` 把它和工作模式一起归入「Agent引擎（推荐）」分组，`DswSidebar` 则归入「引擎」分组（`workAgents()` 判定两个 id）。
 - **会话绑定**：`Conversation.mode = 'chat' | 'work' | 'interactive'`，`agentId` 固定为 `'interactive'`；`startNewConversation()` / `selectAgent()` / `deleteConversation()` 三处的模式推导统一走 `Constants.MODE_*`。
 - **界面跟随**：`ChatPage` 用 `vm.agentLoopMode`（work 或 interactive）代替原来的 `vm.workMode` 选择时间线、工作区面板、上传落盘路径等共享能力；只有文案类差异走 `loopModeTitle` / `loopModeHint` / `loopModeInputPlaceholder` / `loopModeEmptyDescription` / `loopToolLabel` 五个 getter。
 - **深度思考**：与工作模式一致，进入即强制开启（工具行不显示该开关）；档位默认「**快速(Low)**」（`ChatViewModel.interactiveEffort`，存储键 `guncat_interactive_effort`），可在能力预设里切到均衡或关闭。
@@ -308,7 +308,7 @@ B. 回传助手（发一条消息, 触发新一轮回答）
 | 想改"快"的纪律 | 只改 `PromptBuilder.interactivePrime()`（它固定在第 0 段）；**不要**把纪律再抄进底座或职责段 —— 顺序与唯一性都有断言钉住（见 2.3） |
 
 > **回归护栏（三层，缺一不可）**
-> 1. 纯逻辑单测：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`（730 项，含 guncat-ui lang 的词法/语法/前向引用/流式补齐/绑定重算/`@Each`/内置函数/`Action`/片段切分/状态序列化/图表几何/组件库与提示词，以及交互模式提示词的**段序**（快在最前）、快车道纪律、思考纪律、单一家规则与工具面 47→27 的裁剪断言）。
+> 1. 纯逻辑单测：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`（760 项，含 guncat-ui lang 的词法/语法/前向引用/流式补齐/绑定重算/`@Each`/内置函数/`Action`/片段切分/状态序列化/图表几何/组件库与提示词，以及交互模式提示词的**段序**（快在最前）、快车道纪律、思考纪律、单一家规则与工具面 47→27 的裁剪断言）。
 > 2. 服务层类型检查：`node check-setup.mjs && npx tsc -p check/tsconfig.json`。
 > 3. **真实 ArkTS 编译**：`powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`（调用 DevEco 自带的 hvigor）。
 > 第 3 层不能省：ArkUI 有一批**只有编译器才知道**的规则——`@Builder` 方法体内不允许声明局部变量、自定义组件属性名不能与内置属性同名（`size` / `scale`）、`@Prop` 的 null 需要显式联合类型。这些在 node 侧 harness 里全都测不出来（harness 只覆盖 `common/**` 与 `service/**` 的纯 TS，不解析 `.ets`）。

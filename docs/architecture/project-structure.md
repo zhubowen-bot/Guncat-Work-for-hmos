@@ -9,6 +9,8 @@ entry/src/main/ets/
 │   └── EntryAbility.ets
 ├── pages/
 │   ├── ChatPage.ets                # 主页：聊天 + Agent 模式时间线（工作/交互）+ 工作区面板接线
+│   ├── SettingsPage.ets            # 独立设置页：模型/能力/声音/系统分组 + 二级详情（自动保存）
+│   ├── UsagePage.ets               # 用量与成本：账本汇总、53 周热力图、峰谷/额度、CSV 导出
 │   └── TableOcrPage.ets
 ├── views/
 │   ├── ChatBubbleView.ets          # 聊天气泡（含深度思考条 / 工具步骤时间线 / WorkStepFormat）
@@ -17,10 +19,14 @@ entry/src/main/ets/
 │   ├── GuncatUiCharts.ets          # 交互模式图表（柱/折线/面积/横向条/饼环/径向/雷达/堆叠条）
 │   ├── GuncatUiIcons.ets           # 交互模式图标（Unicode 字形，避免 SymbolGlyph 名字缺失时静默空白）
 │   ├── WorkspaceBar.ets            # Agent 模式工作区面板（文件列表/上传/导出/清空）
+│   ├── WorkArtifactsCard.ets       # 任务产物卡片（行级 diff、预览/分享）
+│   ├── DetailsPanelView.ets        # 宽屏右侧详情：本轮统计、目标、工作区文件
+│   ├── DswSidebar.ets              # 宽屏侧边栏（Agent 分组 / 会话 / 用量 / 设置）
+│   ├── AskUserCard.ets             # ask_user_question 的单选/多选/补充卡片
+│   ├── PlayGuidePanel.ets          # 「玩转应用」页
 │   ├── RichTextView.ets
 │   ├── MessageInputView.ets
 │   ├── AgentDrawerView.ets
-│   ├── SettingsPanel.ets
 │   ├── AboutPanel.ets
 │   ├── FlyInLaunchView.ets
 │   ├── ToastView.ets
@@ -36,6 +42,14 @@ entry/src/main/ets/
 │   ├── IecRuntime.ets              # IEC 原生执行核接入：启服务、铺 launcher、并发上限、跑命令
 │   ├── IecShellService.ets         # shell 工具实现（参数校验/环境/格式化/spill），挂在 HarnessTools 钩子上
 │   ├── PythonService.ts            # run_python 工具：原生 CPython（libpython3.12.so）
+│   ├── UsageMeter.ts               # 用量账本：逐请求归一化、按日/小时聚合、400 天/8 天裁剪、5s 防抖写盘
+│   ├── UsageSettingsStore.ts       # 用量页配置与 DeepSeek 余额快照（Preferences）
+│   ├── DeepSeekBalanceService.ts   # DeepSeek 余额手动刷新（仅对账）
+│   ├── BackgroundTaskService.ets   # 短时/长时任务分层保活、落盘与取消监听
+│   ├── LocalWebSearch.ts           # 设备内兜底联网搜索
+│   ├── WebFetchService.ts          # web_fetch：抓取网页/接口原文并剥离 HTML
+│   ├── SessionLogService.ts        # 会话事件日志（JSONL，session_search 数据源）
+│   ├── SpillStore.ts               # 工具结果溢出暂存（.spill/）
 │   ├── RawAsset.ts                 # rawfile 大资源分块释放（镜像 / Python 运行库）
 │   ├── WorkSkillService.ts         # 技能注册表（registry）+ rawfile 技能文档加载（list/load）
 │   ├── OfficeReader.ts             # docx/xlsx/pptx 本地文本抽取（zlib 解包 + XML 扫描）
@@ -71,7 +85,8 @@ entry/src/main/ets/
 │   └── StorageManager.ts
 ├── model/
 │   ├── Message.ts / Conversation.ts / Attachment.ts / ToolCallRecord.ts
-│   └── Agent.ts / ApiConfig.ts / ApiProfile.ts / MultimodalConfig.ts
+│   ├── Agent.ts / ApiConfig.ts / ApiProfile.ts / MultimodalConfig.ts
+│   └── ToolCatalog.ts (设置页只读目录) / UsageModels.ts (用量账本模型)
 └── common/
     ├── Constants.ts / Types.ts / Utils.ts / MarkdownSanitizer.ts
     ├── GuncatUiLang.ts              # 交互模式语言核心：guncat-ui lang 词法/语法/求值/围栏切分
@@ -103,6 +118,8 @@ entry/src/main/resources/rawfile/
     └── …/                          # 另含 html/pdf 格式分支与 5 主 Skill 下 25 个分支，注册表共 37 项 = 32 原始 + 5 主路由
 
 test/
+├── guncat-harness/                 # 纯逻辑单测 + 服务层 tsc + 界面文案护栏（760 项）
+├── usage-harness/                  # 用量账本纯逻辑回归（北京时间/峰谷/归一化/聚合/CSV）
 ├── pptx-harness/                   # PPT/CSV/Word/Excel 服务层离线验证（Node 构建 + python 校验 + tsc 类型检查）
 ├── docx-harness/                   # Word 生成器/导入器离线验证（Node 构建 + python-docx 校验）
 └── xlsx-harness/                   # Excel 生成器/导入器离线验证（Node 构建 + openpyxl 校验）
@@ -152,7 +169,7 @@ ChatService (SSE)
 2. **ChatService**
    
    - 实现 SSE 流式通信和请求中断。
-   - 支持 Chat Completions 与 Responses API。
+   - 支持 Chat Completions、Responses 与 Anthropic Messages 三种协议。
    - 解析增量回答并处理网络及服务端错误。
 
 3. **AgentLoopService / WorkToolRunner / WorkFileService（工作模式三件套）**
@@ -175,7 +192,7 @@ ChatService (SSE)
 
 6. **StorageManager**
    
-   - 封装本地持久化：对话历史存沙箱文件（`filesDir/guncat_conversations.json`），配置/开关/朗读偏好存 Preferences。
+   - 封装本地持久化：对话历史存沙箱文件（`filesDir/guncat_conversations.json`，800ms 合并写，主文件 + `.bak` + `.tmp` 三段式恢复），配置/开关/朗读偏好存 Preferences，用量账本存 `filesDir/guncat_usage.json`。
    - 管理对话、配置、开关和朗读偏好。
 
 7. **TextReaderService / BackgroundReaderService**

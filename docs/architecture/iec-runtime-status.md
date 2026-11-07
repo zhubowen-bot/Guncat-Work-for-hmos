@@ -19,8 +19,8 @@ node/npm/npx + python3**，不再有“node 编不出来”的缺口。命令 �
 | `HarnessTools` 里的回退分支 | 钩子为空时直接报“shell 后端未初始化” |
 
 `Constants` 里的 `WORK_LINUX_*` 一并移除；HAP 里已确认没有 `qemu` / `slirp` / `rawfile/vm`。
-这些名字只应出现在历史文档（`docs/releases/`、`native-python.md`、
-`jit-permission-application.md`、`ALIGNMENT_STATUS.md`、`CHANGELOG.md` 的旧版本小节）里。
+这些名字只应出现在历史文档（`docs/releases/`、`native-python.md`、`python-performance-plan.md`、
+`jit-permission-application.md`、`BACKGROUND_JOBS_PLAN.md`、`CHANGELOG.md` 的旧版本小节）里。
 
 ## 2. 已随包的命令 so
 
@@ -49,7 +49,7 @@ node/npm/npx + python3**，不再有“node 编不出来”的缺口。命令 �
 | `diff` | `libdiff.so` | `iec_diff_main` | 已在包 |
 | `node` / `nodejs` | `libnode.so`（node 22.19） | `iec_node_main` | 已在包 |
 | `npm` / `npx` | `libnode.so` + `rawfile/tools/npm.tar.gz` | `iec_npm_main` / `iec_npx_main` | 已在包 |
-| `python3` / `python` | `libpycmd.so` + `libpython3.12.so` | `iec_python_main` | 待真机复验 |
+| `python3` / `python` | `libpycmd.so` + `libpython3.12.so` | `iec_python_main` | 真机通过 |
 
 ### 2.1 python3：独立 runner，不继承应用进程的解释器
 
@@ -78,7 +78,7 @@ libpython3.12.so` 并跑 `Py_BytesMain`。
 
 ## 4. 体积
 
-当前签名 HAP 约 452.7 MB（约 432 MiB；精确字节数随构建与签名变化）。主要构成：
+当前 HAP 约 420 MiB（未签名；签名包约 429 MiB，精确字节数随构建与签名变化）。主要构成：
 `libnode.so`（约 108MB）、CPython + numpy/scipy/
 pandas/matplotlib 等运行库、命令 so 与技能资源。`libnode.so` 是可选能力，但当前
 **默认随包**；若要瘦身，可在构建时排除它，`node`/`npm`/`npx` 会干净地报
@@ -93,9 +93,12 @@ hdc shell aa start -a EntryAbility -b com.bowenapp.guncataibeta --ps iecSelfTest
 hdc shell hilog -x | grep -A 120 IecSelfTest
 ```
 
-自检分 8 组、共 13 个 `---` 段，互不阻断（每段先打印 `--- 名称`，失败只追加
-`[FAIL]`，末行 `SELFTEST DONE`）：PATH 枚举（19 个命令）、mksh 64 位算术、`$TMPDIR` 与 `id`、
-CA/git https、python3 退出码、jq/curl/bc/nc/hexdump/diff/sftp、node/npm、清理。
+自检当前覆盖 **31 个检查段**（另有首段只打印名称），互不阻断（每段先打印 `--- 名称`，
+失败只追加 `[FAIL]`，末行 `SELFTEST DONE`）：PATH 枚举（19 个命令）、cwd、mksh 64 位算术、
+`$TMPDIR`/`id`/`/tmp`、UTF-8 与 HOME/TMPDIR、CA/git https、`timeout` 命令树、文件语义、
+python3、stdin EOF、jq/curl/bc/nc/hexdump/base64/diff、大参数、awk 内部执行、sftp/scp、
+xargs、zip、tar xz/bz2、node/npm、stdin 数据与大输出落盘。逐项命令与期望输出见
+[真机验收清单](../guides/device-verification.md#3-自检已覆盖项)。
 
 重点看：
 

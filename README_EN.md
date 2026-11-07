@@ -40,7 +40,7 @@
 | ✦ **Interactive Mode** | GPT's **Intelligent UI** | One sentence in, a **draggable, clickable, instantly re-computing** native interface out: charts / tables / metric cards / tab sets / form controls all rendered natively; zero tool calls by default, the whole interface delivered in a single turn |
 | 🛠 **Work Mode** | **DeepSeek Harness** (dsh, a Codex-style Agent Loop) | Multi-turn tool loop + a per-conversation sandboxed workspace + 47 built-in tools; long-horizon tasks run autonomously and produce PPT / Word / Excel / SVG on-device, with artifact cards carrying line-level diffs |
 
-The two forms **share the same Agent Loop, the same sandboxed workspace and all 47 tools**. They differ only in behavioural discipline — Work Mode is "multi-turn tool loop + long-horizon delivery", Interactive Mode is "fast lane, interface in one turn". The app starts in Interactive Mode by default; the "Interactive Mode / Work Mode" pill in the empty state switches between them.
+The two forms **share the same Agent Loop and sandboxed workspace**, but expose different tool surfaces: Work Mode gets all **47** tools, while Interactive Mode gets a **27-tool subset** (read assets / compute real numbers / verify external facts / export files) and defaults to **zero tool calls and a single-turn interface**. The app starts in Interactive Mode by default; the "Interactive Mode / Work Mode" pill in the empty state switches between them.
 
 Underneath both sits **one on-device execution environment**: a complete Linux `shell` when a real terminal is needed, native CPython when data has to be computed, local Office generators when files have to be delivered — all on the phone, with no remote execution service involved.
 
@@ -67,6 +67,8 @@ Current app version: `7.2.0` · full change history in the [changelog](CHANGELOG
 - **Native CPython, no emulation**: `run_python` runs a real CPython 3.12 compiled as a HarmonyOS `.so` inside the app process (2–3 orders of magnitude faster than the earlier VM-based execution); numpy / pandas / scipy / matplotlib / Pillow / lxml / sympy / python-docx / python-pptx / reportlab all ship offline, and CJK charts work out of the box; `python3` in the shell is a separate process on the same bundled interpreter.
 - **On-device Office output**: PPT / Word / Excel / SVG are produced by local generators on a JSON intermediate layer, and documents can be read back losslessly and edited operator-style; PDFs and Office files are parsed entirely locally, consuming no multimodal quota.
 - **47 built-in tools**: file create/read/update/delete plus pattern-matched search, task lists, image viewing, web downloads, PDF parsing, Office read/write, data-pipeline cleaning / transformation / format conversion, the JSVM-API `run_js` code sandbox (no network, no filesystem access, runs on a background thread with a timeout guard), plus the `shell` / `run_python` execution layer described above.
+- **Usage and cost**: a local per-request ledger aggregated by day into a 53-week heatmap; built-in DeepSeek peak/off-peak pricing and OpenCode allowance tracking, monthly budget, CSV export and clear. Aggregation is O(1) at response end and never runs on the streaming hot path.
+- **Standalone settings pages**: model config / advanced parameters / usage & cost / local web search / multimodal parsing / read-aloud / terminal / tool catalogue / check for updates. Edits auto-save with debounce and are flushed before leaving the page or switching profiles.
 - **Three protocols**: OpenAI Completions (`/chat/completions`), OpenAI Responses (`/responses`) and Anthropic Messages (`/messages`), all supporting direct image upload; extended thinking and web search are controlled explicitly per protocol.
 - **Built-in local web search**: shipped inside the app with no manual toggle; available in both Work Mode and chat mode, so search is not at the mercy of a server-side switch.
 - **32 skills**: 5 top-level Skill routes + 7 format branches, loaded on demand when triggered; the PPT / Word / Excel skills use a "gate" discipline and generate a checkable self-report before delivery.
@@ -81,7 +83,7 @@ The complete feature inventory and implementation details are in [Features](docs
 
 ### Requirements
 
-- DevEco Studio 6.0.1 or a compatible version
+- DevEco Studio 6.1.1 or a compatible version
 - HarmonyOS SDK API 24 (`6.1.1`)
 - A physical HarmonyOS phone (tablets and 2-in-1 devices work too — wide screens expand into the three-column layout)
 
@@ -136,7 +138,7 @@ The `shell` tool depends on bundled HarmonyOS native `.so` files (checked into t
 
 ### First-time configuration
 
-The app settings let you save and switch between multiple API configurations:
+The settings page supports multiple API configurations; edits save automatically (no manual save button):
 
 1. Protocol (`openai-completions` / `openai-responses` / `anthropic-messages`)
 2. Base URL
@@ -164,14 +166,15 @@ Multimodal pre-parsing can be configured separately with its own model, endpoint
 - **toybox parsing cross-check**: `bash third_party/bettersh/iec/tests/toybox_parse/run.sh` (host-built toybox output fed through the ArkTS parser rules; explicit commands must win)
 - **CA bundle usability**: `bash third_party/bettersh/iec/tests/ca_bundle/run.sh` (121 roots, CMake/ArkTS wiring, real curl/python/git handshakes with an empty capath; SKIPs without network)
 - **npm unpack host regression**: `bash third_party/bettersh/iec/tests/npm_unpack/run.sh` (2697 entries compared file-by-file with a bsdtar reference tree; truncated/read-only failure paths)
-- Pure-logic regression (currently **754 tests**, all green): `cd test/guncat-harness && node setup.mjs && node test-core.mjs`
+- Pure-logic regression (currently **760 tests**, all green): `cd test/guncat-harness && node setup.mjs && node test-core.mjs`
+- Usage-ledger pure-logic regression: `cd test/usage-harness && npx -y -p typescript@5.5.4 tsc -p tsconfig.json && node out/test/usage-harness/usage-test.js` (wired into CI)
 - Service-layer type check: `cd test/guncat-harness && node check-setup.mjs && npx -y -p typescript@5.5.4 tsc -p check/tsconfig.json`
 - PPT / Word / Excel offline verification environments: `test/pptx-harness`, `test/docx-harness`, `test/xlsx-harness`
 - Real ArkTS compilation (requires DevEco locally): `powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`
 
 The last layer is not optional: ArkUI has a set of rules that **only the compiler knows** (no local variable declarations inside a `@Builder` method body, custom component property names must not collide with built-in property names, `@Prop` nulls need an explicit union type), and the Node-side harness only covers the pure TS in `common/**` and `service/**` — it never parses `.ets`.
 
-The first two layers and the three Office generator harnesses **run in CI** on every push and pull request (see the CI badge at the top); the third layer requires DevEco Studio locally, so please run it yourself before submitting.
+The pure-logic / type checks, UI-copy guard, usage ledger, IEC static consistency, docs / licence checks and the three Office generator harnesses **run in CI** on every push and pull request (see the CI badge at the top); the third layer requires DevEco Studio locally, so please run it yourself before submitting.
 
 ## Documentation
 
@@ -185,7 +188,11 @@ The first two layers and the three Office generator harnesses **run in CI** on e
 | [Usage guide](docs/guides/usage.md) | Step-by-step instructions per scenario |
 | [FAQ](docs/guides/faq.md) | Troubleshooting and known behaviour |
 | [Built-in agents](docs/reference/builtin-agents.md) | Agent inventory and differences |
-| [Persistence and theming](docs/reference/persistence-and-theme.md) | Local storage and theme implementation |
+| [Persistence and theming](docs/reference/persistence-and-theme.md) | Local storage, usage ledger and theme implementation |
+| [Workspace and conversation data lifecycle](docs/architecture/workspace-lifecycle.md) | On-disk layout, cascade cleanup, launch sweep and four residue cases |
+| [Device verification checklist (shell / IEC)](docs/guides/device-verification.md) | Install, self-test, per-command checks and troubleshooting |
+| [Background keep-alive](docs/architecture/background-keepalive.md) | Transient / continuous task layering, flush points and system constraints |
+| [Pre-release checklist](docs/architecture/release-checklist.md) | Fast gate, 24 Python runtime checks, size and version sync |
 | [Changelog](CHANGELOG.md) | Every version change from 4.2.0 to 7.2.0 |
 | [openui-lang spec](docs/reference/openui-lang-spec.md) | The upstream implementation-level spec `guncat-ui lang` is aligned with |
 | [open-intelligent-ui spec](docs/reference/open-intelligent-ui-spec.md) | The upstream Generated-Answer UI spec Interactive Mode is aligned with |
@@ -196,13 +203,13 @@ The first two layers and the three Office generator harnesses **run in CI** on e
 
 - `ohos.permission.INTERNET`: access to model APIs.
 - `ohos.permission.MICROPHONE`: voice input.
-- `ohos.permission.KEEP_BACKGROUND_RUNNING`: long-running background audio task for read-aloud.
+- `ohos.permission.KEEP_BACKGROUND_RUNNING`: background audio for read-aloud, plus transient / continuous task keep-alive for AI replies and the Agent Loop (`audioPlayback` / `dataTransfer` / `taskKeeping`).
 - Work Mode: all file reads and writes happen inside the app sandbox (`filesDir/workspaces/`), while file picking and saving go through system secure components (DocumentViewPicker) — **no new permissions were added**.
 - Shell tool (IEC native runtime): every command is a bundled HarmonyOS native `.so`, forked and executed by the exec service — **no JIT / executable-memory restricted permission** is required; there is no VM and no listening port, networking uses the app's existing `INTERNET` permission, and commands can only see the current conversation workspace.
 - Share Kit: receiving images and files shared from other apps.
 - CoreSpeechKit: text-to-speech and speech recognition.
 - AVSession Kit: background media session.
-- ArkData Preferences: local configuration persistence; conversation history is stored in the sandbox file `filesDir/guncat_conversations.json`.
+- ArkData Preferences: local configuration persistence; conversation history is stored in the sandbox file `filesDir/guncat_conversations.json` (main file + `.bak` + `.tmp`, recovered automatically on launch), and the usage ledger in `filesDir/guncat_usage.json`.
 
 ## Privacy
 

@@ -1,7 +1,16 @@
 # BACKLOG
 
+## 7.1 / 7.2 已完成（2026-11）
+
+- [x] 跨轮次思考记忆：三种协议按各自规范回传历史思考（Completions `reasoning_content`、Anthropic `thinking` + signature、Responses reasoning item），并持久化签名 / 加密思考 / reasoning item。
+- [x] Word 工具链公式修复：矩阵定界符、aligned/eqArr、单位与范数、`\lfloor`/`\mid`、`\mathbf` 上下标；写盘前扫描坏公式并拒绝。
+- [x] 本地用量账本与「用量与成本」页：逐请求归一化、按日聚合、53 周热力图、DeepSeek 峰谷、OpenCode 额度、CSV 导出与月预算。
+- [x] 设置页改版：独立路由页、模型配置 / 高级参数 / 用量 / 搜索 / 多模态 / 朗读 / 终端 / 工具 / 检查更新，自动保存。
+- [x] 工具目录只读页（七组 47 项）与检查更新（`apptest://` Deep Link + 公开链接回退）。
+- [x] 7.2 性能专项：会话存档合并写与三段式恢复、大输出上限、长历史裁剪、后台短时 / 长时任务分层保活、贴底跟随与主线程批处理。
+
 ## 交互模式（Intelligent UI，6.3.0）本轮完成
-- [x] 虚拟智能体与会话模式：`Constants.INTERACTIVE_AGENT_ID` / `MODE_INTERACTIVE`，`buildInteractiveAgent()` 注入列表第二位，`AgentDrawerView`/`DswSidebar` 归入「Agent模式」分组（`ic_interactive.svg` 图标）。
+- [x] 虚拟智能体与会话模式：`Constants.INTERACTIVE_AGENT_ID` / `MODE_INTERACTIVE`，`buildInteractiveAgent()` 注入列表第二位，`AgentDrawerView` 归入「Agent引擎（推荐）」、`DswSidebar` 归入「引擎」分组（`ic_interactive.svg` 图标）。
 - [x] DSL 单一事实源 `common/GuncatUiSpec.ts`：11 种元素 + 4 种控件 + 图表/动作模型、容错解析（补括号修复 → 逐元素退化 → 骨架）、流式渐进解析、围栏分词、回传载荷构造、系统提示词正文（含反例）。
 - [x] 消息体切分 `common/GuncatUiParts.ts`：文本片段 + 界面片段；非法块保留原文交还 Markdown，不丢内容。
 - [x] 原生渲染器 `views/GuncatUiView.ets`：指标卡/指标组/进度条/表格/横向柱状图/Shape+Path 折线图/Path 环形占比/提示条/卡片与分栏容器/表单控件（Slider·Toggle·Select·TextInput）/选项按钮；未被 form 引用的控件自动成卡。
@@ -13,10 +22,10 @@
 - [x] 快车道（速度优先，R69）：系统提示词不再复用工作模式底座，改走 `PromptBuilder.buildInteractive()` —— **默认零工具、一轮直出界面**，工具只在"界面必须引用真实数据"时破例（一轮 ≤1~2 次、优先只读）；禁 `todo_write`/`goal_*`/`schedule_*`/`subagent`/`session_search`/`ask_user_question`（要问就用界面问）；不写自检报告、不画 mermaid 导图；默认思考强度改「快速(Low)」。提示词 36.7k → 22.8k 字符（行为纪律段 15.6k → 1.7k）。
 - [x] 工具面物理裁剪（R74）：交互模式下发前按 `ToolRegistry.INTERACTIVE_TOOL_WHITELIST` 裁到 **27 个**（读素材 / 算真实数字 / 核实外部事实 / 出文件），长程与维护类工具**不在请求里**（提示词纪律之外再加物理保证）；技能段同步降为极小索引（`SkillDirectoryFormatter.interactiveIndex()`，只列 docx/xlsx/ppt/svg/data）。三个消费点（主循环 / 溢出重试 / 上下文压缩）共用 `AgentLoopService.toolDefsForMode()` 的同一份工具面。
 - [ ] 速度度量：按 mode 采样"首答 TTFT + 本轮工具调用数"（复用 `LoopMetrics` / `tool_latency` 事件），用数据持续验证快车道效果，并作为回归基线。
-- [ ] 交互状态归档：把用户提交过的控件取值随消息持久化（当前仅存于组件内 @State，重启后回到默认值）。
+- [x] 交互状态归档：用户提交过的控件取值以 `]]>guncat-ui:state` 尾标记随消息持久化，滚动、切会话、重启后仍在，下一轮翻译成一句人话交给模型。
 - [ ] 数据集绑定：让界面元素可绑定工作区数据文件（如 `table` 直接引用 `data.csv` 列），改参数由本地管道重算而不必再过模型。
 - [ ] 元素扩充：`timeline`（时间轴）、`kanban`（分组看板）、`slider` 双端区间、`date` 控件。
-- [ ] 界面块回退：解析失败时在气泡内给出「查看原始 JSON」折叠入口（当前仅按普通代码块渲染）。
+- [x] 界面块回退：界面底部提供「查看原始输出」；有解析诊断时显示「诊断 · N 条」面板。
 - [ ] 工具化渲染：新增 `render_ui` 工具，让模型在长任务中间主动弹界面，而不必等最终回答。
 
 ## 核心层待办（按杠杆排序，R1–R12 已完成项见 docs/ITERATION_LOG.md）

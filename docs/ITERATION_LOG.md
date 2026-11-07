@@ -1,5 +1,8 @@
 # ITERATION_LOG
 
+> 说明：本日志按轮次记录 Agent Loop 核心层改动（最新在前）。7.0 起的发布级变更见
+> [CHANGELOG](../CHANGELOG.md)，当前待办见 [BACKLOG](BACKLOG.md)。
+
 ## 2026-10-11 R79: Agent Loop 的文件只进工作区 —— 交互模式拍照/系统分享不再掉进附件区当附件送模型
 
 ### 需求

@@ -1,7 +1,7 @@
 # 性能问题分析与方案（Python / shell 工具）
 
 > **历史文档**：本文记录 7.0.0 时期（QEMU 虚拟机 + TCI 解释执行）的性能测量与方案
-> 论证。7.0.1 起 `shell` 已改为 IEC 原生执行核、Python 解释器直接在进程内原生运行，
+> 论证。7.0.0-alpha 起 `shell` 已改为 IEC 原生执行核、Python 解释器直接在进程内原生运行，
 > 文中的 QEMU/TCI 数据与 `tooling/linux-vm/` 脚本（已删除）仅作归档。
 > 当前实现见 [iec-runtime.md](iec-runtime.md) 与 [native-python.md](native-python.md)。
 

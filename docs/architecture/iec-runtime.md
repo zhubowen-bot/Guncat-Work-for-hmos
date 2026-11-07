@@ -131,13 +131,13 @@ GitHub 直连在 WSL 里通常不通（`codeload.github.com` 可以）：`pcre2`
   外层先走 ppid 级联再杀直接子进程（顺序反了子进程会先被重挂/换组），因此
   `timeout 1 timeout 5 sleep 4` 也能在 2 秒内收口。
 * 单流超过模型可见上限 `WORK_SHELL_HEAD_CHARS`（20k 字符）时就把已收到的全文落
-  `.spill/`，返回里给相对路径；引擎 cap 仍是 `WORK_SHELL_MAX_OUTPUT_BYTES`（60KB）。
-  两个阈值不能只按 60KB 判断：20k~60k 字符的输出不会被引擎 cap，但正文只回前 20k，
-  不落盘就会静默丢尾巴。
+  `.spill/`，返回里给相对路径；引擎 cap 是 `maxOutputBytes`（2MB，7.2 起由 8MB 下调）。
+  两个阈值不能只按 20k 判断：20k~2MB 的输出不会被引擎 cap，但正文只回前 20k，
+  不落盘就会静默丢尾巴；超过 2MB 的部分会被丢弃并在结果里标注 dropped 字节数。
 * 输出含非法 UTF-8 或 NUL 字节（图片/压缩包）时返回 `binary=true`，工具结果会明确提示改用
   "重定向到文件"或 `base64`，不把乱码当内容。
 * 并发：最多 8 条命令同时跑（`IecRuntime.MAX_RUNS`），超出的排队；每条命令最多占
-  5 个线程（stdin feeder、两条 reader、waiter、watchdog）与 8MB 输出缓冲，所以必须有上限。
+  5 个线程（stdin feeder、两条 reader、waiter、watchdog）与 2MB 输出缓冲，所以必须有上限。
 * 作业级取消：每个会话的命令带 `IEC_JOB`，取消时按 job 杀整棵树（管道里的每个
   进程、后台子进程都在内），不会留孤儿。
 
@@ -156,6 +156,9 @@ hdc shell aa start -a EntryAbility -b com.bowenapp.guncataibeta --ps iecSelfTest
 hdc shell hilog -x | grep -A 120 IecSelfTest
 ```
 
+> 上面以 Beta 包名 `com.bowenapp.guncataibeta` 为例；如果 `AppScope/app.json5` 当前是正式包
+> `com.bowenapp.guncatai`，把命令里的包名替换掉。
+>
 > `onNewWant()` 不处理 `iecSelfTest`，必须在应用未运行时冷启动；否则自检不会执行。
 
 自检由一组**互不阻断**的段组成：每段先打印 `--- 名称`，某项失败只追加一行
@@ -164,26 +167,16 @@ hdc shell hilog -x | grep -A 120 IecSelfTest
 （是否有失败再逐行看 `[FAIL]`）。因为最后一条是 `echo`，工具返回头应是
 `[exit 0 · …s · cwd .]`，这不代表所有段都通过。
 
-| 段 | 执行内容 | 期望值 |
-| --- | --- | --- |
-| 基线 | `uname -s`、`pwd` | `Linux`；工作区绝对路径（`<filesDir>/workspaces/__iec_selftest` 一类） |
-| PATH | `command -v` 枚举 `dd md5sum od nproc jq curl bc nc hexdump diff sftp node npm tar unzip zip git ssh python3` | 每个都打 `ok   <名字>`（`ok` 后 3 个空格）；缺失时单独一行 `[FAIL] <名字> not found`，不中断后续段 |
-| mksh 64 位算术 | `v=$((2000000000+2000000000)); echo "2000000000+2000000000=$v"` | `2000000000+2000000000=4000000000`（32 位会溢出成负数，并追加 `[FAIL] arithmetic`） |
-| `$TMPDIR` + `/tmp` 不存在 + `id` | `echo x > "$TMPDIR/_t" && cat "$TMPDIR/_t" && rm -f "$TMPDIR/_t"`；`[ -e /tmp ] && echo "[FAIL] /tmp should be absent"`；`id; id -un` | 打印 `x`；`ok /tmp absent`；`id` 含 `uid=<真实 uid>`、`id -un` 为 `guncat`，没有 `[FAIL]` |
-| CA + git 网络 | `echo "GIT_SSL_CAINFO=${GIT_SSL_CAINFO:-<empty>}"`；`[ -n "$GIT_SSL_CAINFO" ] && [ -f "$GIT_SSL_CAINFO" ]`；`GIT_TERMINAL_PROMPT=0 git ls-remote https://github.com/git/git.git HEAD` | `GIT_SSL_CAINFO=` 指向存在的 `…/etc/ssl/certs/cacert.pem`；git 输出前 3 行含 40 位 commit，末行 `git ls-remote rc=0 (网络失败不算自检失败)`（网络不通时 `rc=124/128` 只记录，**不判自检失败**） |
-| python3 | `python3 -c "import sys; sys.exit(7)"`；`python3 -c "print(1+1)"` | `rc=7 (expect 7)`（退出码原样透传）；`2` |
-| jq | `printf '{"a":1}\n' \| jq -r .a` | `1` |
-| curl | `curl --version \| head -1` | 以 `curl 8.22.0` 开头 |
-| bc | `echo '1+1' \| bc` | `2` |
-| nc | `nc -h` / 无参，取 usage 首行 | 含 `usage: nc`（自编 nc 没有 `-h` 也走 usage） |
-| hexdump | `printf AB \| hexdump -C` | 首行 `00000000  41 42` + 补齐空格 + `\|AB\|`（`\|` 在第 60 列），第二行 `00000002`（最终偏移） |
-| diff | `$TMPDIR/_d1`=a、`$TMPDIR/_d2`=b，`diff -u` | git 前缀 + unified diff（`-a` / `+b`），末行 `diff rc=1 (expect 1)`（有差异是正确结果） |
-| sftp | `sftp -V` / `sftp -h` / 无参，取首行 | OpenSSH sftp 的 `unknown option -- V` 或 `usage: sftp ...`（没有 `-V` 属正常） |
-| node/npm | `node -v`、`npm -v` | `v22.19.0` 与 `10.9.3`（npm 有版本号说明 `npm-cli.js` 解包与 launcher 都对） |
-| 清理 | `rm -f "$TMPDIR/_t" "$TMPDIR/_d1" "$TMPDIR/_d2" t.txt t.tar` | 无输出；随后 `SELFTEST DONE` |
+当前自检共 **31 个检查段**（另有首段只打印名称）：PATH、cwd、mksh 64 位算术、
+`TMPDIR` + `id`、`/tmp absent`、`utf8-mode`、`HOME/TMPDIR`、CA + git remote、
+`timeout` 命令树、`head` 负行数 / `rm`、`find -delete`、rename 覆盖软链、
+git quotepath、python3、stdin EOF、jq、curl、bc、nc、hexdump、base64、diff、
+大参数、awk 内部执行、sftp/scp、xargs、zip、tar xz/bz2、node/npm、stdin 数据、
+大输出落盘。
 
-`SELFTEST DONE` 之前的任一行 `[FAIL]` 都对应上表某一项；PATH 段的 `ok   <名字>` 行数应为 19。
-自检只读/临时写 `$TMPDIR` 与工作区内的 `t.txt`/`t.tar`（跑完即删），不碰用户数据。
+逐项命令、期望输出与故障对照见[真机验收清单 · 自检已覆盖项](../guides/device-verification.md#3-自检已覆盖项)；
+PATH 段的 `ok   <名字>` 行数应为 19。自检只读/临时写 `$TMPDIR` 与工作区内的
+`t.txt`/`t.tar`（跑完即删），不碰用户数据。
 
 ## 回退
 

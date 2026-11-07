@@ -1,6 +1,6 @@
 # JIT 受限权限申请材料（AGC）
 
-> **历史文档**：7.0.1 起 shell 已改为 IEC 原生执行核（命令是 HarmonyOS `.so`，不经虚拟机、
+> **历史文档**：7.0.0-alpha 起 shell 已改为 IEC 原生执行核（命令是 HarmonyOS `.so`，不经虚拟机、
 > 不需要 JIT），本文的 QEMU/JIT 申请材料不再适用于当前实现，保留作为归档。
 
 > 用途：向 AppGallery Connect 申请 `ohos.permission.kernel.ALLOW_USE_JITFORT_INTERFACE`（自研引擎 JIT），

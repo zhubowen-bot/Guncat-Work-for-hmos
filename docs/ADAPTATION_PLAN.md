@@ -9,7 +9,7 @@
 |---|---|---|
 | `journal-format` | 已深度接入 `load_skill("docx")` + `read_docx`/`edit_docx`/`write_docx`；PDF 用 `search_pdf`/`pdf_to_images`/`view_image` | ✅ 移植期完成 |
 | `pdf` | 已接入 `parse_document`/`pdf_to_images`/`view_image`/`search_pdf`，表格输出 `write_xlsx`，文档输出 `write_docx`/`write_pptx` | ✅ 移植期完成 |
-| `questionnaire` | 已声明 `load_skill("docx")`/`write_docx`、`load_skill("xlsx")`/`write_xlsx`/`edit_xlsx`、`transform_file` | ⏳ 待加深 |
+| `questionnaire` | 已声明 `load_skill("docx")`/`write_docx`、`load_skill("xlsx")`/`write_xlsx`/`edit_xlsx`、`transform_file` | ✅ 已完成（2026-09 R14 加深 M3/M4） |
 
 ## 批次 A（Office/方案类，已完成）
 
