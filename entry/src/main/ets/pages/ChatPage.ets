@@ -784,7 +784,8 @@ struct ChatPage {
               isListening: this.isListening,
               allowSteer: this.vm.agentLoopMode,
               getMentionPaths: (): string[] => this.mentionCandidatePaths(),
-              placeholder: this.vm.agentLoopMode ? this.vm.loopInputPlaceholder : '输入消息...',
+              // 聊天模式的输入框也要保持一行: 占位文案不带省略号, 避免被挤成两行
+              placeholder: this.vm.agentLoopMode ? this.vm.loopInputPlaceholder : '输入消息',
               onSend: (text: string) => {
                 this.handleSend(text);
               },

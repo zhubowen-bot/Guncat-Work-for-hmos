@@ -5,6 +5,17 @@ import { MentionQuery, MentionQueryParser } from '../common/MentionQuery';
 // @文件引用候选弹层的最大条数(再多就盖住半个屏幕了)
 const MENTION_MAX_ROWS: number = 8;
 
+// 输入框字号: 正文与占位文字必须一致。
+// TextArea 的 placeholder 默认按 16fp 绘制, 不跟随 fontSize(15): 流式执行时输入行还要多挤一个
+// "停止"按钮, 可用宽度只剩 ~76vp, 16fp 的「描述问题…」放不下。中文断行里「…」不能出现在行首,
+// 于是「题…」被一起挤到第二行, 空输入框被撑成两行高。显式写 placeholderFont 与正文同为 15fp,
+// 再配合占位文案去掉末尾省略号(见 ChatViewModel.loopInputPlaceholder), 一行就能放下。
+const INPUT_FONT_SIZE: number = 15;
+// 单行输入框高度: 15fp 一行 + 上下 padding 8 + 8
+const INPUT_ONE_LINE_HEIGHT: number = 36;
+// 用户输入多行内容时输入框的展开上限
+const INPUT_EXPAND_MAX_HEIGHT: number = 120;
+
 @Component
 export struct MessageInputView {
   @Link inputText: string;
@@ -13,7 +24,7 @@ export struct MessageInputView {
   @Prop isListening: boolean = false;
   // 工作模式执行中允许插话(steering): 流式时同时提供 发送(插话) 与 停止 两个按钮
   @Prop allowSteer: boolean = false;
-  @Prop placeholder: string = '输入消息...';
+  @Prop placeholder: string = '输入消息';
   // @文件引用候选的取数回调(工作区里的文件相对路径); 返回空数组表示当前形态没有工作区
   // (聊天模式), 此时输入框完全不认 @, 免得弹出一个永远选不中的空层。
   // 用回调而不是 @Prop 数组: 候选只在用户敲 @ 时才取一次, 不必跟着每次流式刷新深拷贝一遍。
@@ -233,10 +244,17 @@ export struct MessageInputView {
       })
         .layoutWeight(1)
         .backgroundColor(Color.Transparent)
-        .fontSize(15)
+        .fontSize(INPUT_FONT_SIZE)
+        // 占位文字默认 16fp 且不跟随 fontSize, 这里显式对齐正文, 否则流式时会被挤成两行
+        .placeholderFont({ size: INPUT_FONT_SIZE })
         .fontColor($r('app.color.text_primary'))
         .placeholderColor($r('app.color.text_secondary'))
-        .constraintSize({ minHeight: 36, maxHeight: 120 })
+        // 空输入时锁死一行高度: 占位文字再长也不许把输入框撑成两行(占位只是一行提示);
+        // 有内容时才放开, 保留多行草稿展开到 INPUT_EXPAND_MAX_HEIGHT 的能力。
+        .constraintSize({
+          minHeight: INPUT_ONE_LINE_HEIGHT,
+          maxHeight: this.inputText.length === 0 ? INPUT_ONE_LINE_HEIGHT : INPUT_EXPAND_MAX_HEIGHT
+        })
         .padding({ left: 14, right: 14, top: 8, bottom: 8 })
         .onChange((value: string) => {
           this.inputText = value;

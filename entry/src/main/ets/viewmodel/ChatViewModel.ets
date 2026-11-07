@@ -266,7 +266,10 @@ export class ChatViewModel {
   }
 
   get loopInputPlaceholder(): string {
-    return this.interactiveMode ? '描述问题…' : '描述任务...';
+    // 输入行的可用宽度很窄(流式时还要让出"插话"和"停止"两个按钮), 占位文案必须短到一行放得下:
+    // 末尾省略号在中文断行里不能单独落在行首, 会把最后一个字一起带到第二行、把输入框撑成两行,
+    // 所以这里只保留四个字的原意、去掉省略号。
+    return this.interactiveMode ? '描述问题' : '描述任务';
   }
 
   get loopEmptyDescription(): string {
