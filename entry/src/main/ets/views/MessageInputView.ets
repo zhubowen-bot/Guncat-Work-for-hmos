@@ -12,8 +12,10 @@ const INPUT_FONT_SIZE: number = 16;
 const INPUT_ONE_LINE_HEIGHT: number = 40;
 // 用户输入多行内容时输入框的展开上限
 const INPUT_EXPAND_MAX_HEIGHT: number = 140;
-// 容器底栏操作按钮的边长: 语音/拍照/附件/发送统一 40, 保证同一基线、同一触控面积
+// 容器底栏操作按钮的触控边长: 语音/拍照/附件统一 40, 保证同一基线、同一触控面积
 const ACTION_BTN_SIZE: number = 40;
+// 发送/插话/停止按键的视觉直径: 比图标键再小一圈, 外围与容器描边之间留出呼吸空间
+const PRIMARY_BTN_SIZE: number = 36;
 
 @Component
 export struct MessageInputView {
@@ -173,7 +175,7 @@ export struct MessageInputView {
         .padding({ left: 2 })
       }
       .width('100%')
-      .padding({ left: 6, right: 6, top: 6, bottom: 4 })
+      .padding({ left: 8, right: 8, top: 6, bottom: 6 })
       .backgroundColor($r('app.color.raised_surface'))
       .borderRadius(26)
       // 浅色模式下页面与容器同为白色, 一圈 10% 黑描边给悬浮层收边; 深色模式是 12% 白
@@ -304,17 +306,17 @@ export struct MessageInputView {
   @Builder
   buildSendButton() {
     if (this.isStreaming) {
-      Row({ space: 10 }) {
+      Row({ space: 8 }) {
         if (this.allowSteer) {
           // 插话发送: 任务执行中把输入内容作为"用户补充"注入下一步
           Button() {
             SymbolGlyph($r('sys.symbol.paperplane'))
-              .fontSize(19)
+              .fontSize(18)
               .fontColor([(this.inputText.trim() !== '') ? Color.White : $r('app.color.text_quaternary')])
           }
-          .width(ACTION_BTN_SIZE)
-          .height(ACTION_BTN_SIZE)
-          .borderRadius(ACTION_BTN_SIZE / 2)
+          .width(PRIMARY_BTN_SIZE)
+          .height(PRIMARY_BTN_SIZE)
+          .borderRadius(PRIMARY_BTN_SIZE / 2)
           .backgroundColor((this.inputText.trim() !== '') ?
             $r('app.color.brand') : $r('app.color.surface_secondary'))
           .onClick(() => {
@@ -328,14 +330,14 @@ export struct MessageInputView {
         }
         Button() {
           Stack()
-            .width(11)
-            .height(11)
+            .width(10)
+            .height(10)
             .backgroundColor(Color.White)
             .borderRadius(2.5)
         }
-        .width(ACTION_BTN_SIZE)
-        .height(ACTION_BTN_SIZE)
-        .borderRadius(ACTION_BTN_SIZE / 2)
+        .width(PRIMARY_BTN_SIZE)
+        .height(PRIMARY_BTN_SIZE)
+        .borderRadius(PRIMARY_BTN_SIZE / 2)
         .backgroundColor($r('app.color.stop_btn'))
         .onClick(() => {
           this.onStop();
@@ -344,13 +346,13 @@ export struct MessageInputView {
     } else {
       Button() {
         SymbolGlyph($r('sys.symbol.paperplane'))
-          .fontSize(19)
+          .fontSize(18)
           .fontColor([(this.inputText.trim() !== '' && !this.isParsing && !this.isListening) ?
             Color.White : $r('app.color.text_quaternary')])
       }
-      .width(ACTION_BTN_SIZE)
-      .height(ACTION_BTN_SIZE)
-      .borderRadius(ACTION_BTN_SIZE / 2)
+      .width(PRIMARY_BTN_SIZE)
+      .height(PRIMARY_BTN_SIZE)
+      .borderRadius(PRIMARY_BTN_SIZE / 2)
       .backgroundColor((this.inputText.trim() !== '' && !this.isParsing && !this.isListening) ?
         $r('app.color.brand') : $r('app.color.surface_secondary'))
       .onClick(() => {

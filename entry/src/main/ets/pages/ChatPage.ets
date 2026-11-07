@@ -772,7 +772,9 @@ struct ChatPage {
               }
             }
             .width('100%')
-            .padding({ left: 12, right: 12, top: 10, bottom: 8 })
+            // 上方一排小胶囊刻意比大输入容器再往右缩一点: 小按钮与大容器左边缘完全对齐会显得生硬,
+            // 留出 6vp 视觉错位后两者更像"悬浮在不同层", 右侧仍延伸到容器右边
+            .padding({ left: 18, right: 12, top: 8, bottom: 6 })
             // 文件预览条
             if (this.vm.pendingFiles.length > 0) {
               this.buildFilePreview();
@@ -818,10 +820,10 @@ struct ChatPage {
         } else {
           // 输入区出现前先用等高的占位保住消息区布局，
           // 避免空状态头像在 geometryTransition 过程中因布局变化而闪烁。
-          // 高度 = 胶囊行(34 + 10 + 8) + 输入容器(90 + 上 2 下 10), 与下面实际输入区一致。
+          // 高度 = 胶囊行(30 + 8 + 6) + 输入容器(92 + 上 2 下 10), 与下面实际输入区一致。
           Column()
             .width('100%')
-            .height(154)
+            .height(148)
             .backgroundColor(Color.Transparent)
         }
       }
@@ -2024,9 +2026,9 @@ struct ChatPage {
     Row() {
       // 胶囊只显示模型名: 服务商只在下方弹层里显示, 不在这里拼 "· 服务商"
       Text(this.currentModelLabel())
-        // 与右侧 ToggleSwitch 完全一致(13fp / 行高 18), 输入区上方所有胶囊同一套字号
-        .fontSize(13)
-        .lineHeight(18)
+        // 与右侧 ToggleSwitch 完全一致(12fp / 行高 16), 输入区上方所有胶囊同一套字号
+        .fontSize(12)
+        .lineHeight(16)
         .fontColor($r('app.color.text_secondary'))
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -2034,15 +2036,14 @@ struct ChatPage {
     }
     .justifyContent(FlexAlign.Center)
     .alignItems(VerticalAlign.Center)
-    // 手机: 继续占满剩余宽度; 桌面宽屏: 按内容自适应(108~200), 避免胶囊吞掉整行
-    .layoutWeight(this.isWide ? 0 : 1)
-    .constraintSize(this.isWide ? { minWidth: 108, maxWidth: 200 } : { minWidth: 108 })
-    // 与 ToggleSwitch 等高(34): 上方一排悬浮胶囊大小统一, 行间距交给外层 Row({ space: 8 })
-    .height(34)
-    .padding({ left: 14, right: 14 })
-    .borderRadius(17)
+    // 悬浮胶囊按内容取宽、靠左排列, 不再吃满整行; 上限 132 保证窄屏上三个胶囊 + 间距不会撑出屏幕
+    .constraintSize({ minWidth: 92, maxWidth: 132 })
+    // 与 ToggleSwitch 等高(30): 上方一排悬浮胶囊大小统一, 行间距交给外层 Row({ space: 8 })
+    .height(30)
+    .padding({ left: 12, right: 12 })
+    .borderRadius(15)
     .backgroundColor($r('app.color.raised_surface'))
-    .shadow({ radius: 14, color: '#14000000', offsetX: 0, offsetY: 3 })
+    .shadow({ radius: 12, color: '#12000000', offsetX: 0, offsetY: 2 })
     .enabled(!this.vm.isStreaming && !this.vm.isParsing && !this.isListening)
     // bindPopup 是纯状态驱动(不像 bindMenu 点击自动弹出), 需自行点击置位开关
     .onClick(() => {
