@@ -48,44 +48,44 @@ export class InteractiveTiers {
 
   private static buildAll(): InteractiveTier[] {
     let tiers: InteractiveTier[] = [];
-    tiers.push(InteractiveTiers.make('lite', '轻简', '交互模式快车道', '最快 · 一句话一张界面',
-      '复用交互模式最初的快车道提示词: 默认零工具、思考极短, 一句话直接出界面。' +
-        '适合日常问答、估算、方案对比这类不需要深挖的请求。',
+    tiers.push(InteractiveTiers.make('lite', '轻简', '交互模式快车道', '通用调度策略·轻量快速',
+      '默认零工具、思考较短, 追求快速问答，一句话直接出界面。' +
+        '适用于大多数日常问答请求。',
       '', '', 'low', []));
-    tiers.push(InteractiveTiers.make('efficiency', '效率', 'Guncat 3.0-Flash', '快在路径 · 内容不打折',
-      '移植 Guncat 3.0-Flash: 内化轻量思维链、按信息缺口决定检索, 执行路径最短, ' +
-        '但输出丰富度与专家档同一标准。适合大多数日常专业请求。',
+    tiers.push(InteractiveTiers.make('efficiency', '效率', 'Guncat 3.0-Flash', '通用调度策略·轻量全能',
+      '融合多轮搜索、多步推理与行业领先的反幻觉体系, ' +
+        '以较少的提示词工程量实现接近专家档的综合能力。适用于日常专业请求。',
       'Guncat 3.0-Flash_prompt_ZH_CN.md', 'interactive-tier-efficiency.md', 'low', ['record_search']));
-    tiers.push(InteractiveTiers.make('expert', '专家', 'Guncat 3.0-Pro', '最深思考 · 最强单体',
-      '移植 Guncat 3.0-Pro: 内化结构化思维链、极速/标准/深度三档按需自选、多轮检索与深度分析, ' +
-        '五大领域专家能力内化在单体里。适合复杂推理、跨领域综合与高要求交付。',
+    tiers.push(InteractiveTiers.make('expert', '专家', 'Guncat 3.0-Pro', '通用调度策略·超级全能',
+      '融合多轮搜索、多步推理、全系专家能力与行业领先的反幻觉体系, ' +
+        '五大领域专家能力内化在单体里。适用于复杂推理、跨领域综合与高要求回复。',
       'Guncat 3.0-Pro_prompt_ZH_CN.md', 'interactive-tier-expert.md', 'high',
       ['record_search', 'todo_write']));
-    tiers.push(InteractiveTiers.make('classic', '经典', 'Guncat 2.5-lite', '结构化思维链 · 高质量长输出',
-      '移植 Guncat 2.5-lite: Sequential Thinking 式结构化思维链引导高质量长输出, ' +
-        '执行开销小但成体系。适合需要条理与完整结构的常规任务。',
+    tiers.push(InteractiveTiers.make('classic', '经典', 'Guncat 2.5-lite', '通用调度策略·轻量详尽',
+      '以最小的提示词工程量实现内容的长输出, ' +
+        '执行开销小但输出内容详尽。适合需要条理与完整结构的常规任务。',
       'Guncat 2.5-lite _prompt.md', 'interactive-tier-classic.md', 'high', ['record_search']));
-    tiers.push(InteractiveTiers.make('paper', '论文转换', 'Guncat Cnvt-Paper', '非论文文体 → 学术论文',
-      '移植 Guncat Cnvt-Paper: 诊断源文体、确认改写参数、按学术规范重写并补全学术要素。' +
+    tiers.push(InteractiveTiers.make('paper', '论文转换', 'Guncat Cnvt-Paper', '专家能力调度·论文转换',
+      '提供任意文体材料，即可按学术规范重写为论文。' +
         '适合课程论文、文献综述、开题报告、期刊投稿等改写需求。',
       'Guncat Cnvt-Paper_prompt.md', 'interactive-tier-paper.md', 'low', []));
-    tiers.push(InteractiveTiers.make('legal', '法律检索', 'Guncat Srch-Law', '强制多轮检索 · 结构化法律意见',
-      '移植 Guncat Srch-Law: 国企法律事务专家, 强制实时法规检索 + 深度分析, ' +
+    tiers.push(InteractiveTiers.make('legal', '法律检索', 'Guncat Srch-Law', '专家能力调度·法律检索',
+      '法律事务专家, 通过强制实时法规检索和深度分析, ' +
         '输出逐节完整的结构化法律意见书。',
       'Guncat Srch-Law V1.0-prompt.md', 'interactive-tier-legal.md', 'high',
       ['record_search', 'todo_write']));
-    tiers.push(InteractiveTiers.make('research', '深度研究', 'Guncat Srch-Research', '多轮验证 · 研究报告',
-      '移植 Guncat Srch-Research: 跨领域多轮检索与多源交叉验证, ' +
+    tiers.push(InteractiveTiers.make('research', '深度研究', 'Guncat Srch-Research', '专家能力调度·深度研究',
+      '进行跨领域多轮检索与多源交叉验证, ' +
         '输出带来源验证矩阵的完整研究报告。',
       'Guncat Srch-Research-prompt.md', 'interactive-tier-research.md', 'high',
       ['record_search', 'todo_write']));
-    tiers.push(InteractiveTiers.make('sift', '信息筛滤', 'Guncat Srch-Sift', '九步搜索 · 官方溯源',
-      '移植 Guncat Srch-Sift: 九步深度搜索法、官方渠道溯源与 AI 内容过滤, ' +
-        '把噪声压到最低再给结论。',
+    tiers.push(InteractiveTiers.make('sift', '信息筛滤', 'Guncat Srch-Sift', '专家能力调度·信息筛滤',
+      '通过九步深度搜索法、官方渠道溯源与 AI 内容过滤, ' +
+        '把AI噪声、不可靠信源、过时数据等压到最低再给结论。',
       'Guncat Srch-Sift-prompt.md', 'interactive-tier-sift.md', 'high', ['record_search']));
-    tiers.push(InteractiveTiers.make('eval', 'LLM评估', 'Guncat Eval-LLM', '最小化幻觉 · 模型评估',
-      '移植 Guncat Eval-LLM: 按严格工作流与评估维度对 LLM 做可核验的评估, ' +
-        '所有事实有来源、结论有置信度。',
+    tiers.push(InteractiveTiers.make('eval', 'LLM评估', 'Guncat Eval-LLM', '专家能力调度·LLM评估',
+      '按严格工作流与评估维度对大语言模型的综合能力做可核验的评估, ' +
+        '极大地减少模型评估中时间与代际的幻觉问题，确保所有事实有来源、结论有置信度。',
       'Guncat Eval-LLM_prompt.md', 'interactive-tier-eval.md', 'high',
       ['record_search', 'todo_write']));
     return tiers;

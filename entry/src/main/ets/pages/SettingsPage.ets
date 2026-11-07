@@ -1334,14 +1334,14 @@ struct SettingsPage {
   private buildTierView() {
     Scroll() {
       Column() {
-        Text('能力调度决定交互模式使用哪套提示词与工具面。轻简档直接复用原有交互模式提示词（最快）；其余档位移植聊天引擎里效果更好的成熟提示词，并按交互模式做了少量适配。切换档位会把思考强度调到该档推荐值，之后仍可在模型弹层手动调整。')
+        Text('  ')
           .fontSize(12)
           .fontColor($r('app.color.text_secondary'))
           .lineHeight(19)
           .width('100%')
           .padding({ left: 4, right: 4, top: 4 })
 
-        this.buildSectionLabel('档位')
+        this.buildSectionLabel('档位 · 交互模式')
         Column() {
           ForEach(InteractiveTiers.ALL, (tier: InteractiveTier, index: number) => {
             if (index > 0) {
@@ -1359,7 +1359,7 @@ struct SettingsPage {
         .border({ width: 1, color: $r('app.color.divider') })
         .clip(true)
 
-        Text('档位只影响交互模式，工作模式与聊天模式不受影响。档位越靠后，提示词越长、思考越深，首答会慢一些，但内容更完整、专业流程更严格。')
+        Text('  ')
           .fontSize(11)
           .fontColor($r('app.color.text_tertiary'))
           .lineHeight(17)
