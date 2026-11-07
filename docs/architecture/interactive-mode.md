@@ -11,6 +11,7 @@
 - **会话绑定**：`Conversation.mode = 'chat' | 'work' | 'interactive'`，`agentId` 固定为 `'interactive'`；`startNewConversation()` / `selectAgent()` / `deleteConversation()` 三处的模式推导统一走 `Constants.MODE_*`。
 - **界面跟随**：`ChatPage` 用 `vm.agentLoopMode`（work 或 interactive）代替原来的 `vm.workMode` 选择时间线、工作区面板、上传落盘路径等共享能力；只有文案类差异走 `loopModeTitle` / `loopModeHint` / `loopModeInputPlaceholder` / `loopModeEmptyDescription` / `loopToolLabel` 五个 getter。
 - **深度思考**：与工作模式一致，进入即强制开启（工具行不显示该开关）；档位默认「**快速(Low)**」（`ChatViewModel.interactiveEffort`，存储键 `guncat_interactive_effort`），可在能力预设里切到均衡或关闭。
+- **能力调度**：设置 →「能力」→「能力调度」选择交互模式提示词档位（九档，默认轻简；存储键 `guncat_interactive_tier`）。档位决定系统提示词主体、档位工具面与推荐思考强度，只影响交互模式；详见 [2.4](#24-能力调度九档位r77当前)。
 
 ### 1.1 文件入口：工作区是唯一去处（与工作模式同一条口径）
 
@@ -33,12 +34,14 @@ Agent Loop 模式（`work` 与 `interactive`）里**模型的文件入口是沙�
 
 ```text
 ChatViewModel.executeWorkLoop(conv)
-  → AgentLoopService.buildWorkSystemPromptFor(conv.mode)
-      mode === 'interactive' → buildInteractiveSystemPrompt()   // 缓存于 cachedInteractivePrompt
+  → AgentLoopService.buildWorkSystemPromptFor(conv.mode, interactiveTier)
+      mode === 'interactive' → buildInteractiveSystemPrompt(tier)   // 按档位缓存于 cachedInteractivePrompts
       mode === 'work'        → buildWorkSystemPrompt()
 ```
 
-`buildInteractiveSystemPrompt()` = **`PromptBuilder.interactivePrime()`（最前方的一级标题「最高优先级 · 快」：身份 + 第一纪律 + 思考纪律）** + `GuncatUiPrompt.promptSection()`（guncat-ui lang 语法 + 组件清单 + **丰富度/组件选择优先级** + 交互闭环 + 输出顺序纪律 + 示例 + 反例）+ **快车道底座** `PromptBuilder.buildInteractive()`（工作区=素材区 + **裁剪后**工具名索引 + 真实数据纪律 + **极小技能索引**）+ `GuncatUiPrompt.INTERACTIVE_DUTY`（交付形态职责，收尾并给出回到开头的指针）。四段的**顺序由 `PromptBuilder.assembleInteractiveSystemPrompt()` 固定**（服务层只负责把四份文本传进去），拼接后**整体静态**、进程内缓存一次，KV 缓存前缀与工作模式同样逐字节稳定。
+**当前（R77 能力调度）**：交互模式的系统提示词由 `InteractiveTierPrompt.assemble(tier, body, skills, toolIndex)` 统一组装，`tier` 来自设置页「能力调度」（默认轻简）。轻简档依旧是原来的快车道提示词（第 0 段 `PromptBuilder.interactivePrime()` + `GuncatUiPrompt.promptSection()` + 快车道底座 + `GuncatUiPrompt.INTERACTIVE_DUTY`，**组装结果与旧四段组装逐字节一致，有断言**）；其余八档在共享层之间插入一份**档位主体** `rawfile/interactive-tier-*.md`（原聊天引擎智能体的成熟提示词，逐字保留 + 少量适配）。分层、九档清单、组装顺序、工具面扩展与丰富度口径见 [2.4](#24-能力调度九档位r77当前) 与 [提示词适配说明](../prompts/interactive-tier-adaptation.md)。
+
+**轻简档的历史设计（R75→R76）**：`buildInteractiveSystemPrompt()` = **`PromptBuilder.interactivePrime()`（最前方的一级标题「最高优先级 · 快」：身份 + 第一纪律 + 思考纪律）** + `GuncatUiPrompt.promptSection()`（guncat-ui lang 语法 + 组件清单 + **丰富度/组件选择优先级** + 交互闭环 + 输出顺序纪律 + 示例 + 反例）+ **快车道底座** `PromptBuilder.buildInteractive()`（工作区=素材区 + **裁剪后**工具名索引 + 真实数据纪律 + **极小技能索引**）+ `GuncatUiPrompt.INTERACTIVE_DUTY`（交付形态职责，收尾并给出回到开头的指针）。四段的**顺序由 `PromptBuilder.assembleInteractiveSystemPrompt()` 固定**（服务层只负责把四份文本传进去），拼接后**整体静态**、进程内缓存一次，KV 缓存前缀与工作模式同样逐字节稳定。能力调度上线后四段仍逐字节保留，只是外面多了一层档位组装。
 
 **为什么纪律必须放在最前方**（R76）：交互模式的提示词里有 **8.3k 的组件清单**，而模型是**顺序读**的 —— "要快"原来写在底座的 85% 处，等于先让模型读完一整套语言契约才开始考虑纪律。现在把它抽成唯一的一级标题放在第 0 段，并写明"与下文任何内容冲突时以本节为准"：**先立规矩，再给语言能力**；同时 `INTERACTIVE_DUTY` 末尾保留一句指针（"速度与工具纪律以开头那一节为准"），首尾各出现一次、中间不复述。顺序本身有断言钉住（`assembleInteractiveSystemPrompt()` 放在纯逻辑层而不是服务层，就是为了能被 `test-core.mjs` 测到）。
 
@@ -48,7 +51,7 @@ ChatViewModel.executeWorkLoop(conv)
 
 **交互模式提示词的真正体积**（R75 实测，14 段累加，共 **23865** 字符）：组件清单 `8297`（35%，76 个组件平均 106 字符/行 —— 就是签名 + 枚举取值，挤掉等于让模型猜参数）、RICHNESS `3462`、EXAMPLES `3068`、底座 `2473`（身份 1146 + 工作区 265 + 裁剪后工具面 872 + 真实数据 190）、ANTI_PATTERNS `1544`、INTERACTIVE_DUTY `1457`、SYNTAX `1231`、INTERACTION `1244`、STREAMING `444`、技能索引 `322`、PREAMBLE `323`。精简后 **21361**（组件清单占 39%）。
 
-> 想要当前全文：`cd test/guncat-harness && node setup.mjs && node dump-interactive-prompt.mjs`，输出即"结构一览 + 逐段全文"（本仓库 `build/interactive-prompt-preview.md` 就是这样生成的）。
+> 想要当前全文：`cd test/guncat-harness && node setup.mjs && node dump-interactive-tiers.mjs`，输出即九档的"结构一览 + 逐段全文"（`docs/prompts/interactive-tiers/`）并刷新轻简预览 `docs/interactive-prompt-preview.md`。旧的 `dump-interactive-prompt.mjs` 仅作旧格式对照保留。
 
 **水不在组件清单里，在"同一条规则被写了好几遍"**。规则是逐轮真机反馈攒起来的，每加一轮就在最顺手的段落里再说一遍，于是：`入口按需给` 5 处、`不要重复数据` 3 处、`真实数据/绝不编造` 3 处、`$变量不自动展开` 2 处、`root 必须第一行` 3 处、`位置参数` 3 处。**代价不只是 token**：模型要在思考里把这些重复表述对齐，正是"思考冗长"的一部分。
 
@@ -90,6 +93,56 @@ ChatViewModel.executeWorkLoop(conv)
 
 体量：21361 → **21287** 字符（移除 identity 1044、新增 prime 1171、DUTY 650 → 449）。本轮**不追求变小**，追求的是"纪律在模型读到语言契约之前就已经立下"。
 
+### 2.4 能力调度：九档位（R77，当前）
+
+**要解决的问题**：交互模式原来的提示词是 agent loop 架构工程师为"快"写的（默认零工具、一轮直出）；聊天引擎里另有一批由提示词工程师长期打磨的智能体提示词（轻简 / 效率 / 专家 / 经典 / 论文转换 / 法律检索 / 深度研究 / 信息筛滤 / LLM 评估），效果更成熟。随着聊天引擎逐步淘汰，这批提示词会闲置。能力调度把它们吸收成交互模式的可选**档位**：**提示词主体逐字保留、只做少量交付形态适配**，用户在设置里按任务复杂度挑档。
+
+**入口**：设置 → 能力 → 能力调度（`SettingsPage` 的 `tier` 详情页，九档单选）；持久化键 `guncat_interactive_tier`；`ChatViewModel.interactiveTier` 是唯一状态源，下发给 `buildWorkSystemPromptFor(mode, tier)` 与 `toolDefsForMode(mode, webSearchEnabled, tier)`。切档会同时把交互模式思考强度调到该档推荐值（仍可在模型弹层手改）。
+
+**九档**（`common/InteractiveTiers.ts`，顺序即设置页/导出文档顺序）：
+
+| id | 名称 | 移植来源 | 档位主体（rawfile） | 默认思考 | 追加工具 |
+| --- | --- | --- | --- | --- | --- |
+| `lite` | 轻简 | 原交互模式提示词（逐字节复用） | — | low | — |
+| `efficiency` | 效率 | `Guncat 3.0-Flash_prompt_ZH_CN.md` | `interactive-tier-efficiency.md` | low | `record_search` |
+| `expert` | 专家 | `Guncat 3.0-Pro_prompt_ZH_CN.md` | `interactive-tier-expert.md` | high | `record_search` `todo_write` |
+| `classic` | 经典 | `Guncat 2.5-lite _prompt.md` | `interactive-tier-classic.md` | high | `record_search` |
+| `paper` | 论文转换 | `Guncat Cnvt-Paper_prompt.md` | `interactive-tier-paper.md` | low | — |
+| `legal` | 法律检索 | `Guncat Srch-Law V1.0-prompt.md` | `interactive-tier-legal.md` | high | `record_search` `todo_write` |
+| `research` | 深度研究 | `Guncat Srch-Research-prompt.md` | `interactive-tier-research.md` | high | `record_search` `todo_write` |
+| `sift` | 信息筛滤 | `Guncat Srch-Sift-prompt.md` | `interactive-tier-sift.md` | high | `record_search` |
+| `eval` | LLM评估 | `Guncat Eval-LLM_prompt.md` | `interactive-tier-eval.md` | high | `record_search` `todo_write` |
+
+四个通用档位原始提示词有中英两版，档位统一用中文版（与交互模式环境语言一致）；英文版继续留给聊天引擎，不动。
+
+**分层（哪些共用、哪些按档）** —— 这是改这块提示词前必须先看的一张表：
+
+| 层 | 内容 | 谁提供 | 共用方式 |
+| --- | --- | --- | --- |
+| 档位声明 | 身份 + 第一纪律 + 工具面政策 + 思考政策 + 丰富度口径（唯一的一级标题） | `InteractiveTierPrompt.tierPrime()` | 每档不同；轻简 = 原 `interactivePrime()` |
+| 界面语言契约 | guncat-ui 语法 / 组件清单 / 交互闭环 / 流式顺序 / 示例 / 反例 | `GuncatUiPrompt` | 全档共用 |
+| 丰富度 | 选择优先级表 + 分层配方 + 数量口径 | `GuncatUiPrompt.richnessForTier()` | 结构全档共用；数量口径按档替换（轻简 8~14 够用、其余「越多越好」） |
+| 档位主体 | 角色/思维链/执行模式/工具方法论/反幻觉/领域工作流/输出模板/知识库 | `rawfile/interactive-tier-*.md` | 每档一份（轻简无）；迁移时逐字保留 + 只在约定锚点加适配块 |
+| 环境底座 | 工作区 / 本档工具面 / 真实数据纪律 / 技能索引 | `InteractiveTierPrompt.workspace()/tools()/truth()` | 全档共用；轻简=素材区口径，其余=素材区+产出区口径 |
+| 职责收尾 | 程序之外不写文字 / 往丰富一侧 / 冲突裁决（最后解释权） | `InteractiveTierPrompt.duty()` | 全档共用；按档位名参数化 |
+
+**组装顺序（`InteractiveTierPrompt.segments()` 单一事实源，段间空行）**：
+
+1. ① 档位声明（必须第一段：模型顺序读，契约段有 8k+ 组件清单，纪律写后面等于没写）
+2. ②~⑨ 界面语言契约（⑨ 反例清单收尾）
+3. ⑩ 档位主体（轻简无）
+4. ⑪~⑭ 环境底座（工作区 → 本档工具面 → 真实数据 → 技能索引）
+5. ⑮ 起手式
+6. ⑯ 交付形态职责（最后解释权）
+
+**输出丰富度口径**：轻简保持原文「典型 8~14 个组件是常态，不是越多越好」；其余档位把这一段换成「组件与篇幅：越多越好，12~20+ 个组件是常态、不设上限，宁多勿少」——这是 Guncat 系列「输出丰富性原则」在交互模式下的计量方式（组件/卡片/图表/层数/内容长度，越丰富越好），选择优先级表与分层配方仍全档共用。
+
+**工具面**：基础 27 个（见 2.1）不动；`InteractiveTiers.extraTools` 只在检索/多阶段档位追加 `record_search`（检索留痕到 `.searches.md`）与 `todo_write`（长流程清单）——**轻简档与论文转换档仍是 27 个**，物理裁剪的纪律不被破坏。`ToolRegistry.interactiveWhitelist(tier)` 是唯一入口。
+
+**缓存与回退**：系统提示词按档位缓存在 `AgentLoopService.cachedInteractivePrompts[tier]`，`lastPromptBudget` 取最后一次组装结果；工具面缓存键是 (联网开关, 档位)。档位主体 md 由 `AgentLoader.loadInteractiveTierPrompts()` 在 `ChatViewModel.restoreState()` 里随 agents 一起读入内存；**某个档位文件缺失/为空时 `buildInteractiveSystemPrompt()` 回退轻简档**，不会交付一份没有业务主体的空壳提示词。
+
+**导出与测试**：`test/guncat-harness/dump-interactive-tiers.mjs` 从真实模块 + rawfile 导出九档完整提示词到 `docs/prompts/interactive-tiers/`（并刷新轻简预览 `docs/interactive-prompt-preview.md`）；`test-core.mjs` 里新增的「能力调度」与「迁移」断言钉住：九档齐全/轻简逐字节复用/工具面只增不删/丰富度口径切换/组装顺序/迁移标题保留率/净增/无一级标题/无 TODO。适配说明见 [docs/prompts/interactive-tier-adaptation.md](../prompts/interactive-tier-adaptation.md)。
+
 ### 2.1 工具面物理裁剪（47 → 27）
 
 **纪律挡不住"工具就摆在那儿"。** R69 那一轮只改了提示词——工具定义照旧 45 个全量下发，靠一句"默认零工具"约束模型。真机反馈是：模型仍然会顺手调 `todo_write` 建清单、`load_skill` 加载技能、甚至 `subagent` 派子代理——因为这些 schema 就摆在它的可用工具列表里，提示词里的"请不要用"和眼前的工具清单打的是对手仗。所以这一轮改成**物理裁剪**：`AgentLoopService.interactiveToolDefs()` 在下发前把工具定义过一遍 `ToolRegistry.filterInteractive()`，白名单**只留四类场景**（`common/ToolRegistry.ts` 的 `INTERACTIVE_TOOL_WHITELIST`）：
@@ -105,8 +158,9 @@ ChatViewModel.executeWorkLoop(conv)
 
 维护这条边界要注意三件事：
 
-1. **三个消费点必须取同一个返回值**。工具定义是请求前缀的一部分，`ChatViewModel.runStepWithOverflowRetry()`（主循环 + 溢出重试）与上下文压缩 `compactWorkHistoryIfNeeded()` → `summarizeHistory(..., toolOverrides)` 都传 `AgentLoopService.toolDefsForMode(conv.mode, webSearchEnabled)`；其中压缩请求刻意复用上一请求的完整前缀以命中 KV 缓存，工具面一旦不一致，整段前缀的缓存全部作废。`interactiveToolDefs()` 内部做了按联网开关分档的缓存，避免热路径上每轮重复过滤。
+1. **三个消费点必须取同一个返回值**。工具定义是请求前缀的一部分，`ChatViewModel.runStepWithOverflowRetry()`（主循环 + 溢出重试）与上下文压缩 `compactWorkHistoryIfNeeded()` → `summarizeHistory(..., toolOverrides)` 都传 `AgentLoopService.toolDefsForMode(conv.mode, webSearchEnabled)`；其中压缩请求刻意复用上一请求的完整前缀以命中 KV 缓存，工具面一旦不一致，整段前缀的缓存全部作废。`interactiveToolDefs()` 内部做了按 (联网开关, 档位) 分档的缓存，避免热路径上每轮重复过滤；`toolDefsForMode(mode, webSearchEnabled, tier)` 的第三个参数即档位 id（工作模式忽略）。
 2. **新增工具默认不进交互模式**。白名单是**正表**：新工具想出现在交互模式，必须显式加进 `INTERACTIVE_TOOL_WHITELIST`（并同步这里的表格），否则默认只有工作模式看得到。这是有意的默认方向——交互模式的价值是快，不是能力全集。
+   - **例外是能力调度档位**：`InteractiveTiers.extraTools` 允许在基础白名单之上按档追加（检索/多阶段档位的 `record_search` / `todo_write`），实现仍是"白名单 + 追加表"两处显式声明，不是放开全量。轻简档与论文转换档没有追加项。
 3. **顺序不能变**。`filterInteractive()` 保持定义原有的物理顺序（只做过滤、不重排），否则相邻轮次的请求前缀会抖动。
 
 同一口径也用在**技能段**上：`SkillDirectoryFormatter.interactiveIndex()`（`INTERACTIVE_SKILL_IDS = docx / xlsx / ppt / svg / data`）替代原来的整段技能目录 —— 交互模式的产出是界面，做界面不需要任何技能，只有"用户明确要产出文件/转换数据"时才 `load_skill`。技能段自带标题与纪律，`PromptBuilder.buildInteractive()` 原样拼上、不再套一层"技能库"说明。
@@ -302,13 +356,16 @@ B. 回传助手（发一条消息, 触发新一轮回答）
 | 新增图标 | `views/GuncatUiIcons.ets` 的 `glyph()` 映射表（**用 Unicode 字形而不是 SymbolGlyph**：SymbolGlyph 的名字在不同 ROM 上可用集合不一致，缺失时渲染成空白且静默失败）。唯一的例外是折叠箭头 `GuncatUiChevron`：`⌃`/`⌄` 这类字符在不同字体下大小与基线差异极大，真机上是"右下角一个小小的尖、又没对齐"，所以那里特意改用 `sys.symbol.chevron_up/down` |
 | 交互模式专属文案 | `ChatViewModel` 的 `loopModeTitle` / `loopModeHint` / `loopInputPlaceholder` / `loopEmptyDescription` / `loopToolLabel` |
 | 模式常量 | `Constants.INTERACTIVE_AGENT_ID` / `MODE_*` / `UI_BLOCK_LANG` / `UI_CONTINUE_MESSAGE` / `UI_CONTINUE_MAX_ROUNDS` |
-| 交互模式能用哪些工具 | `common/ToolRegistry.ts` 的 `INTERACTIVE_TOOL_WHITELIST`（**正表**，新工具默认不进；改完同步本节 2.1 的表格与 `test-core.mjs` 的 47→27 断言） |
+| 交互模式能用哪些工具 | `common/ToolRegistry.ts` 的 `INTERACTIVE_TOOL_WHITELIST`（**正表**，新工具默认不进；改完同步本节 2.1 的表格与 `test-core.mjs` 的 47→27 断言）+ 按档位追加的 `InteractiveTiers.extraTools` |
+| 新增/调整能力调度档位 | `common/InteractiveTiers.ts`（id/名称/来源/主体文件/默认思考/追加工具）→ 放一份 `rawfile/interactive-tier-<id>.md` 档位主体 → `test-core.mjs` 的「能力调度」断言 → 重跑导出脚本；档位主体适配规则见 [提示词适配说明](../prompts/interactive-tier-adaptation.md) |
+| 改档位提示词（共享层） | `common/InteractiveTierPrompt.ts`（档位声明/底座/职责）与 `common/GuncatUiPrompt.ts`（界面契约/丰富度口径）；**不要**把共享规则抄进档位主体 md（那里只放原聊天引擎提示词与适配块） |
+| 重新导出档位全文 | `cd test/guncat-harness && node setup.mjs && node dump-interactive-tiers.mjs` → `docs/prompts/interactive-tiers/` + `docs/interactive-prompt-preview.md` |
 | 交互模式能用哪些技能 | `common/SkillDirectoryFormatter.ts` 的 `INTERACTIVE_SKILL_IDS` |
 | 想加一条提示词约束 | 先看本节 2.2 的"家"表 —— **加在它唯一的家里**，不要为了强调再铺一遍到其他段落（重复表述会变成模型的思考负担） |
 | 想改"快"的纪律 | 只改 `PromptBuilder.interactivePrime()`（它固定在第 0 段）；**不要**把纪律再抄进底座或职责段 —— 顺序与唯一性都有断言钉住（见 2.3） |
 
 > **回归护栏（三层，缺一不可）**
-> 1. 纯逻辑单测：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`（760 项，含 guncat-ui lang 的词法/语法/前向引用/流式补齐/绑定重算/`@Each`/内置函数/`Action`/片段切分/状态序列化/图表几何/组件库与提示词，以及交互模式提示词的**段序**（快在最前）、快车道纪律、思考纪律、单一家规则与工具面 47→27 的裁剪断言）。
+> 1. 纯逻辑单测：`cd test/guncat-harness && node setup.mjs && node test-core.mjs`（839 项，含 guncat-ui lang 的词法/语法/前向引用/流式补齐/绑定重算/`@Each`/内置函数/`Action`/片段切分/状态序列化/图表几何/组件库与提示词，以及交互模式提示词的**段序**（快在最前）、快车道纪律、思考纪律、单一家规则、工具面 47→27 的裁剪断言，以及**能力调度**的九档元数据/轻简逐字节复用/档位工具面只增不删/丰富度口径切换/档位组装顺序/档位主体迁移质量门）。
 > 2. 服务层类型检查：`node check-setup.mjs && npx tsc -p check/tsconfig.json`。
 > 3. **真实 ArkTS 编译**：`powershell -ExecutionPolicy Bypass -File tools/build-check.ps1`（调用 DevEco 自带的 hvigor）。
 > 第 3 层不能省：ArkUI 有一批**只有编译器才知道**的规则——`@Builder` 方法体内不允许声明局部变量、自定义组件属性名不能与内置属性同名（`size` / `scale`）、`@Prop` 的 null 需要显式联合类型。这些在 node 侧 harness 里全都测不出来（harness 只覆盖 `common/**` 与 `service/**` 的纯 TS，不解析 `.ets`）。

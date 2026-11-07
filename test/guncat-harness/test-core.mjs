@@ -55,8 +55,16 @@ import {
 } from './gen/GuncatUiRuntime.ts';
 import { GuncatUiParts, GuncatUiSegType } from './gen/GuncatUiParts.ts';
 import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// rawfile 目录(档位主体/原始聊天引擎提示词都在这里): 测试直接读仓库真实文件, 保证迁移产物没缺没空。
+const RAW_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'entry', 'src', 'main', 'resources', 'rawfile');
 import { UiChartGeom, UiBox, UiNum, UiPalette, UiPoint, UiScale } from './gen/GuncatUiPaint.ts';
 import { GuncatUiPrompt } from './gen/GuncatUiPrompt.ts';
+import { InteractiveTiers } from './gen/InteractiveTiers.ts';
+import { InteractiveTierPrompt } from './gen/InteractiveTierPrompt.ts';
+import { InteractiveTierPrompts } from './gen/InteractiveTierPrompts.ts';
 import {
   composeShellResult,
   formatBinaryCaveat,
@@ -2068,6 +2076,20 @@ console.log('[组件库与提示词]');
   check('组件数 >= 65', names.length >= 65);
   check('Card 已登记', GuncatUiLibrary.isKnown('Card'));
   check('未知组件未登记', !GuncatUiLibrary.isKnown('NoSuchComp'));
+  // 组件清单必须覆盖注册表里的每个分组: promptSection() 按 GROUP_ORDER 精确匹配分组名,
+  // 名字写错会让整组从提示词里消失(实际踩过: '列表' vs '列表与追问' → ListBlock/ListItem 不在清单里)。
+  const libPrompt = GuncatUiLibrary.promptSection();
+  const missingGroups = GuncatUiLibrary.GROUP_ORDER.filter((g) => libPrompt.indexOf('### ' + g) < 0);
+  check('组件清单覆盖所有分组(分组名与 definitions 逐字一致)',
+    missingGroups.length === 0 && GuncatUiLibrary.GROUP_ORDER.every((g) => libPrompt.indexOf('### ' + g) >= 0));
+  check('组件清单收录列表类组件(修好分组名后 ListBlock/ListItem 必须可见)',
+    GuncatUiLibrary.isKnown('ListBlock') && GuncatUiLibrary.isKnown('ListItem') &&
+    libPrompt.indexOf('ListBlock(') > 0 && libPrompt.indexOf('ListItem(') > 0);
+  check('组件清单里出现的每个组件名都是真实注册组件',
+    (libPrompt.match(/^- `([A-Z][A-Za-z0-9]*)\(/gm) || []).every((line) => {
+      const m = line.match(/^- `([A-Z][A-Za-z0-9]*)\(/);
+      return m !== null && GuncatUiLibrary.isKnown(m[1]);
+    }));
   check('Card 是容器', GuncatUiLibrary.isContainer('Card'));
   check('TextContent 非容器', !GuncatUiLibrary.isContainer('TextContent'));
   const sig = GuncatUiLibrary.signature('CardHeader');
@@ -2145,6 +2167,172 @@ console.log('[组件库与提示词]');
     PromptBuilder.buildInteractive('【技能】test-skill').indexOf('【技能】test-skill') > 0 &&
     PromptBuilder.buildInteractive('【技能】test-skill').indexOf('只在用户明确要文件时才用') < 0);
 
+  // ===== 交互模式「能力调度」档位: 元数据 / 工具面 / 丰富度口径 / 组装 =====
+  // 分层设计见 common/InteractiveTierPrompt.ts 顶部注释; 迁移规范见 docs/prompts/interactive-tier-adaptation.md。
+  const tierIds = InteractiveTiers.ALL.map((t) => t.id);
+  check('能力调度: 九档齐全且顺序固定(轻简→效率→专家→经典→论文→法律→研究→筛滤→评估)',
+    InteractiveTiers.ALL.length === 9 &&
+    tierIds.join(',') === 'lite,efficiency,expert,classic,paper,legal,research,sift,eval');
+  check('能力调度: 档位 id 唯一, 名称与聊天引擎智能体一一对应',
+    new Set(tierIds).size === 9 && InteractiveTiers.nameOf('lite') === '轻简' &&
+    InteractiveTiers.nameOf('efficiency') === '效率' && InteractiveTiers.nameOf('expert') === '专家' &&
+    InteractiveTiers.nameOf('classic') === '经典' && InteractiveTiers.nameOf('paper') === '论文转换' &&
+    InteractiveTiers.nameOf('legal') === '法律检索' && InteractiveTiers.nameOf('research') === '深度研究' &&
+    InteractiveTiers.nameOf('sift') === '信息筛滤' && InteractiveTiers.nameOf('eval') === 'LLM评估');
+  check('能力调度: 默认/未知/脏值一律回退轻简档(持久化旧值不能把交互模式打崩)',
+    InteractiveTiers.DEFAULT_ID === 'lite' && InteractiveTiers.normalize('') === 'lite' &&
+    InteractiveTiers.normalize('no-such-tier') === 'lite' && InteractiveTiers.byId('no-such-tier').id === 'lite' &&
+    InteractiveTiers.isLite('no-such-tier') && !InteractiveTiers.isLite('expert'));
+  check('能力调度: 轻简档不迁移(无主体文件), 其余八档各有一份主体文件',
+    InteractiveTiers.byId('lite').promptFile === '' &&
+    InteractiveTiers.ALL.filter((t) => t.promptFile !== '').length === 8);
+  check('能力调度: 默认思考强度都在交互模式的合法取值域(off/low/high)',
+    InteractiveTiers.ALL.every((t) => InteractiveTiers.isValidEffort(t.defaultEffort)) &&
+    InteractiveTiers.byId('expert').defaultEffort === 'high' &&
+    InteractiveTiers.byId('lite').defaultEffort === 'low');
+  for (const tier of InteractiveTiers.ALL) {
+    if (tier.promptFile === '') {
+      continue;
+    }
+    let body = '';
+    try {
+      body = readFileSync(join(RAW_DIR, tier.promptFile), 'utf8');
+    } catch (e) {
+      body = '';
+    }
+    check('能力调度: 档位主体 md 存在且非空 —— ' + tier.name, body.trim().length > 0);
+    if (body.trim().length > 0) {
+      const firstChar = body.replace(/^\uFEFF/, '').trimStart()[0];
+      check('能力调度: 档位主体以说明注释开头, 且不含一级标题(H1 归代码层) —— ' + tier.name,
+        firstChar === '<' && (body.match(/^# /gm) || []).length === 0);
+    }
+  }
+
+  // 工具面: 基础 27 个不动, 档位只做"追加"(长程工具仍然进不了轻简/论文这类档位)
+  check('能力调度: 轻简档工具面 = 原 27 个(逐项、按原顺序, 不放大)',
+    ToolRegistry.interactiveWhitelist('lite').length === 27 &&
+    ToolRegistry.interactiveWhitelist('lite').join(',') === ToolRegistry.INTERACTIVE_TOOL_WHITELIST.join(','));
+  check('能力调度: 档位工具面 = 基础白名单 + 该档追加, 只增不删',
+    ToolRegistry.interactiveWhitelist('expert').length === 29 &&
+    ToolRegistry.INTERACTIVE_TOOL_WHITELIST.every((n) => ToolRegistry.interactiveWhitelist('expert').indexOf(n) >= 0));
+  check('能力调度: 检索/多阶段档位才追加 record_search / todo_write',
+    ToolRegistry.interactiveWhitelist('legal').indexOf('record_search') > 0 &&
+    ToolRegistry.interactiveWhitelist('legal').indexOf('todo_write') > 0 &&
+    ToolRegistry.interactiveWhitelist('research').indexOf('todo_write') > 0 &&
+    ToolRegistry.interactiveWhitelist('sift').indexOf('record_search') > 0 &&
+    ToolRegistry.interactiveWhitelist('sift').indexOf('todo_write') < 0 &&
+    ToolRegistry.interactiveWhitelist('paper').indexOf('record_search') < 0);
+  check('能力调度: 轻简/论文档仍物理裁剪掉长程工具(不靠提示词自觉)',
+    ToolRegistry.interactiveWhitelist('lite').indexOf('todo_write') < 0 &&
+    ToolRegistry.interactiveWhitelist('paper').indexOf('todo_write') < 0 &&
+    ToolRegistry.interactiveWhitelist('paper').indexOf('record_search') < 0);
+
+  // 丰富度口径: 轻简"够用为准" vs 档位"越多越好"(用户明确要求的产品特色)
+  check('丰富度口径: 轻简档保持原样(8~14 个组件, "不是越多越好")',
+    GuncatUiPrompt.RICHNESS.indexOf('典型 8~14') > 0 &&
+    GuncatUiPrompt.RICHNESS.indexOf('不是越多越好') > 0 &&
+    GuncatUiPrompt.richnessForTier(false) === GuncatUiPrompt.RICHNESS);
+  check('丰富度口径: 档位版换成"越多越好"(不设上限, 且保留选择优先级/分层配方)',
+    GuncatUiPrompt.richnessForTier(true).indexOf('越多越好') > 0 &&
+    GuncatUiPrompt.richnessForTier(true).indexOf('不设上限') > 0 &&
+    GuncatUiPrompt.richnessForTier(true).indexOf('但也**不是越多越好**') < 0 &&
+    GuncatUiPrompt.richnessForTier(true).indexOf('选择优先级') > 0 &&
+    GuncatUiPrompt.richnessForTier(true).indexOf('分层配方') > 0);
+
+  // 组装: 轻简档必须与旧四段组装逐字节一致("直接复用现有交互模式提示词"是事实, 不是承诺)
+  const liteToolIdx = PromptBuilder.buildToolNameIndex(
+    ToolRegistry.interactiveWhitelist('lite').map((name) => ({ 'name': name })));
+  const legacyLite = PromptBuilder.assembleInteractiveSystemPrompt(
+    GuncatUiPrompt.promptSection(), '', liteToolIdx, GuncatUiPrompt.INTERACTIVE_DUTY);
+  check('能力调度: 轻简档组装结果 = 旧四段组装(逐字节相同)',
+    InteractiveTierPrompt.assemble('lite', '', '', liteToolIdx) === legacyLite);
+  check('能力调度: 轻简档的第一段仍是「最高优先级 · 快」宪法',
+    InteractiveTierPrompt.assemble('lite', '', '', liteToolIdx).indexOf('# 最高优先级 · 快') === 0);
+
+  const expertTier = InteractiveTiers.byId('expert');
+  let expertBody = '';
+  try {
+    expertBody = readFileSync(join(RAW_DIR, expertTier.promptFile), 'utf8');
+  } catch (e) {
+    expertBody = '';
+  }
+  if (expertBody !== '') {
+    const tierPrompt = InteractiveTierPrompt.assemble('expert', expertBody, '【技能】', liteToolIdx);
+    const orderProbe = [
+      '# 专家 · 能力调度档位',
+      '## 组件清单',
+      '# 工作区（素材区 + 产出区）',
+      '【技能】',
+      '# 交互模式职责（交付形态，拥有最终解释权）'
+    ];
+    let lastPos = -1;
+    let orderOk = true;
+    for (const probe of orderProbe) {
+      const at = tierPrompt.indexOf(probe);
+      if (at <= lastPos) {
+        orderOk = false;
+      }
+      lastPos = at;
+    }
+    check('能力调度: 组装顺序 = 档位声明 → 界面契约 → 档位主体 → 环境底座 → 职责收尾',
+      orderOk && tierPrompt.indexOf(expertBody) > 0 &&
+      tierPrompt.indexOf(expertBody) > tierPrompt.indexOf('## 组件清单') &&
+      tierPrompt.indexOf(expertBody) < tierPrompt.indexOf('# 工作区（素材区 + 产出区）'));
+    check('能力调度: 档位声明取代轻简的"默认零工具"宪法(档位有自己的第一纪律)',
+      tierPrompt.indexOf('# 最高优先级 · 快') < 0 &&
+      tierPrompt.indexOf('## 本档第一纪律') > 0 &&
+      tierPrompt.indexOf('## 档位边界与冲突裁决') > 0);
+    check('能力调度: 环境底座切到"素材区 + 产出区"口径, 工具面写明追加工具',
+      tierPrompt.indexOf('# 工作区（素材区, 不是交付区）') < 0 &&
+      tierPrompt.indexOf('record_search') > 0 && tierPrompt.indexOf('todo_write') > 0);
+    check('能力调度: 档位收尾仍锁定"程序之外不写任何文字"',
+      tierPrompt.indexOf('程序之外不写任何文字') > 0 &&
+      tierPrompt.lastIndexOf('# 交互模式职责') > tierPrompt.indexOf(expertBody));
+    const expertSegs = InteractiveTierPrompt.segments('expert', expertBody, '【技能】', liteToolIdx);
+    check('能力调度: 导出段拼接 = assemble 结果(导出文档与运行时同源)',
+      expertSegs.filter((sg) => sg.text !== '').map((sg) => sg.text).join('\n\n') === tierPrompt);
+  }
+  // 内存注册表: 加载/兜底语义
+  InteractiveTierPrompts.clear();
+  InteractiveTierPrompts.set('expert', '【专家主体】');
+  check('能力调度: 主体注册表 set/body/loadedIds/clear 语义正确',
+    InteractiveTierPrompts.body('expert') === '【专家主体】' &&
+    InteractiveTierPrompts.body('lite') === '' &&
+    InteractiveTierPrompts.body('no-such-tier') === '' &&
+    InteractiveTierPrompts.loadedIds().join(',') === 'expert');
+  InteractiveTierPrompts.clear();
+
+  // 迁移质量门: 原文标题必须保留(标题文字集合), 只允许"删掉原文件的标题型 H1";
+  // 且必须是净增(新增适配块)而不是精简, 并带「交互模式适配」标记。
+  const headingTexts = (text) => (text.match(/^#+ .*/gm) || [])
+    .map((line) => line.replace(/^[#\s]+/, '').trim())
+    .filter((h) => h !== '');
+  for (const tier of InteractiveTiers.ALL) {
+    if (tier.promptFile === '') {
+      continue;
+    }
+    const src = readFileSync(join(RAW_DIR, tier.sourceFile), 'utf8');
+    const dst = readFileSync(join(RAW_DIR, tier.promptFile), 'utf8');
+    const srcHeads = headingTexts(src);
+    const dstHeads = new Set(headingTexts(dst));
+    const missing = srcHeads.filter((h) => !dstHeads.has(h));
+    const titleLikeFirst = srcHeads.length > 0 && srcHeads[0].indexOf('提示词') >= 0;
+    const expectedMissing = titleLikeFirst ? 1 : 0;
+    check('迁移: ' + tier.name + ' 原文标题全部保留(标题型 H1 除外)',
+      missing.length <= expectedMissing && (missing.length === 0 || missing[0] === srcHeads[0]));
+    check('迁移: ' + tier.name + ' 带「交互模式适配」标注块(可审计)', (dst.match(/交互模式适配/g) || []).length >= 3);
+    check('迁移: ' + tier.name + ' 是净增而不是精简(适配只加不删)',
+      dst.length > src.length && dst.length > src.length * 1.02);
+    check('迁移: ' + tier.name + ' 没有残留待办占位',
+      dst.indexOf('TODO') < 0 && dst.indexOf('待补充') < 0 && dst.indexOf('【待适配】') < 0);
+    check('迁移: ' + tier.name + ' 原文首行内容锚点仍在(源文件前 3 个非空行至少 2 行逐字出现)',
+      (() => {
+        const srcLines = src.split(/\r?\n/).filter((l) => l.trim() !== '').slice(0, 3);
+        const hit = srcLines.filter((l) => dst.indexOf(l) >= 0).length;
+        return hit >= 2;
+      })());
+  }
+
   // ===== 交互模式工具面物理裁剪 =====
   // 纪律挡不住"工具就摆在那儿"的诱惑, 所以交互模式的工具定义在**下发前**就被裁掉。
   // 这几条是 45 → 27 的守门员: 谁把长程/维护/改稿类工具放回白名单, 这里立刻变红。
@@ -2186,6 +2374,10 @@ console.log('[组件库与提示词]');
     ToolRegistry.interactiveDropped(allDefs).indexOf('todo_write') >= 0);
   check('交互模式白名单里的工具都是真实工具(没有拼错的死名字)',
     ToolRegistry.INTERACTIVE_TOOL_WHITELIST.every((n) => allToolNames.indexOf(n) >= 0));
+  check('能力调度: 档位追加工具都是真实工具, 且能真的进入下发工具面',
+    InteractiveTiers.ALL.every((t) => t.extraTools.every((n) => allToolNames.indexOf(n) >= 0)) &&
+    ToolRegistry.filterInteractive(allToolNames.map((name) => ({ 'name': name })), 'expert')
+      .map((d) => d['name']).indexOf('record_search') > 0);
 
   // ===== 交互模式技能段: 极小索引 =====
   const skillListAll = [

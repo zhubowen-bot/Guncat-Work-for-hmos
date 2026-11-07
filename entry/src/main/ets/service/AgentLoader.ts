@@ -1,6 +1,8 @@
 // AgentLoader: 读取 rawfile 下的 agents.json 与对应提示词 .md
 import { Agent } from '../model/Agent';
 import { AgentConfigEntry } from '../common/Types';
+import { InteractiveTier, InteractiveTiers } from '../common/InteractiveTiers';
+import { InteractiveTierPrompts } from '../common/InteractiveTierPrompts';
 import { util } from '@kit.ArkTS';
 
 export class AgentLoader {
@@ -30,6 +32,28 @@ export class AgentLoader {
       agents[agents.length - 1].icon = entry.icon;
     }
     return agents;
+  }
+
+  // 读取交互模式「能力调度」各档位的档位主体提示词(rawfile/interactive-tier-*.md)到内存注册表。
+  // 轻简档没有主体文件(它就是原交互模式提示词), 跳过; 读失败/空文件的档位不登记,
+  // 服务层据此回退轻简档, 保证"档位没加载好"不会把交互模式弄成一份没有业务主体的空壳提示词。
+  // 在 ChatViewModel.restoreState() 里随 agents 一起加载一次, 之后系统提示词走进程内缓存。
+  static async loadInteractiveTierPrompts(context: Context): Promise<void> {
+    InteractiveTierPrompts.clear();
+    for (let i: number = 0; i < InteractiveTiers.ALL.length; i++) {
+      let tier: InteractiveTier = InteractiveTiers.ALL[i];
+      if (tier.promptFile === '') {
+        continue;
+      }
+      try {
+        let text: string = await AgentLoader.loadPromptContent(context, tier.promptFile);
+        if (text.trim() !== '') {
+          InteractiveTierPrompts.set(tier.id, text);
+        }
+      } catch (e) {
+        // 缺文件不致命: 该档位运行时回退轻简档(见 AgentLoopService.buildInteractiveSystemPrompt)
+      }
+    }
   }
 
   static async loadAgentConfig(context: Context): Promise<AgentConfigEntry[]> {

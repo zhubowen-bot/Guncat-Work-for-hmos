@@ -1,5 +1,7 @@
 // 一次性脚本: 导出交互模式系统提示词的实际结构(分段 + 体积 + 全文)。
 // 用法: node setup.mjs && node dump-interactive-prompt.mjs > ../../build/interactive-prompt-preview.md
+// 注意: 能力调度档位上线后, 权威导出脚本是 dump-interactive-tiers.mjs(含九档 + 轻简预览),
+//       本脚本仅保留作旧格式对照, 新增内容请改到 dump-interactive-tiers.mjs。
 // 说明: 组件库/语法/丰富度/示例/反例/职责全部来自真实模块;
 //       工具名索引取 ToolRegistry.INTERACTIVE_TOOL_WHITELIST(与请求里真正下发的 27 个工具名一致);
 //       技能段用真实的 5 支格式技能(id + 名称 + 注册顺序)。

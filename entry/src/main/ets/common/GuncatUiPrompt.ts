@@ -33,7 +33,7 @@ export class GuncatUiPrompt {
     '5. 可前向引用: 第 1 行的 Card 可以引用第 9 行才定义的图表。',
     '6. **每个定义出来的标识符都必须被引用**(直接或间接挂在 root 下), ',
     '   没被引用的语句不会渲染 —— 这是最常见的"界面少了一块"的原因。',
-    '7. 字符串用双引号, 内部换行写 `\\n`, 双引号写 `\\"`。',
+    '7. 字符串用双引号, 内部换行写 `\n`, 双引号写 `\\"`。',
     '8. 可以写 `//` 或 `#` 开头的注释行, 但**不要**用注释代替内容。',
     '',
     '## 表达式能力',
@@ -186,6 +186,42 @@ export class GuncatUiPrompt {
     '**不要照抄成"每轮都在末尾挂一组按钮"** —— 用户问的是一句简单问题、或者只是看一眼渲染效果时, 干净结束即可。'
   ].join('\n');
 
+  // ===== 丰富度的「计量」: 轻简 vs 能力调度档位 =====
+  //
+  // RICHNESS 里只有这一段是"数量口径"(组件数量多少算够), 其余都是"怎么选、怎么分层"(结构)。
+  // 分层设计后, 结构段全档共用, 数量口径按档位替换:
+  //   - 轻简: 保持原样("8~14 个组件是常态, 也不是越多越好" —— 快车道以够用为准);
+  //   - 其余档位: 换成"越多越好"计量(EFFICIENCY/EXPERT/... 这些档位的能力本身就在于内容量,
+  //     而且"输出丰富性原则"是 Guncat 智能体系列的标志性特色, 组件、卡片、图表、层数、内容长度
+  //     都该往多里给 —— 用户明确要求: 不要怕多, 就怕内容不够)。
+  // 替换走字符串定位(而不是把 RICHNESS 拆成很多段重拼), 好处是轻简档的 RICHNESS 逐字不变,
+  // 且只有一处口径需要维护。
+  static readonly RICHNESS_LITE_QUANTITY: string = [
+    '**典型 8~14 个组件是常态**, 不是"越少越好"; 但也**不是越多越好**:',
+    '同一份数据不要在指标卡、图表、表格里原样说三遍 —— 三者必须互补',
+    '(指标卡给总量与同比, 图表给趋势与分布, 表格给逐行明细与可核对的精确值)。',
+    '每个组件都要回答"它比上一版多告诉了用户什么"。'
+  ].join('\n');
+
+  // 能力调度档位(非轻简)的丰富度计量: 组件/层数/篇幅"越多越好", 互补性要求保留。
+  static readonly RICHNESS_TIER_QUANTITY: string = [
+    '**组件与篇幅: 越多越好**(这是本应用的产品特色, 不是缺陷):',
+    '一屏之内尽量把 5 层都铺满, 每层 2~4 个组件; **12~20+ 个组件是常态, 不设上限** ——',
+    '能多画一张图(趋势/构成/排名/对比)、多给一组指标卡、多开一层分节、多写一段展开, 就多给;',
+    '不要为了"怕多、怕啰嗦"删减任何组件或压缩内容长度, 就怕内容不够。',
+    '同一份数据仍不要在指标卡、图表、表格里原样重复 —— 但**互补**的处理方式是再补一个维度的组件, 不是删掉已有的;',
+    '每个组件都要回答"它比上一版多告诉了用户什么", 答不上来就换一个维度, 而不是拿掉它。'
+  ].join('\n');
+
+  // 按档位替换丰富度的数量口径; 轻简档原样返回 RICHNESS。
+  static richnessForTier(tierRich: boolean): string {
+    if (!tierRich) {
+      return GuncatUiPrompt.RICHNESS;
+    }
+    return GuncatUiPrompt.RICHNESS.split(GuncatUiPrompt.RICHNESS_LITE_QUANTITY)
+      .join(GuncatUiPrompt.RICHNESS_TIER_QUANTITY);
+  }
+
   static readonly EXAMPLES: string = [
     '## 输出形态: 只要程序, 不要正文',
     '',
@@ -297,8 +333,13 @@ export class GuncatUiPrompt {
     '   见本文档最开头的「最高优先级 · 快」。本节与它冲突时, 以**它**为准。'
   ].join('\n');
 
-  // 完整提示词段落(不含 INTERACTIVE_DUTY, 那一段要放在共享提示词之后)
+  // 完整提示词段落(不含 INTERACTIVE_DUTY, 那一段要放在共享提示词之后)。
+  // 轻简档 = 原样(richness 用 RICHNESS); 能力调度档位用 promptSectionWithRichness 换数量口径。
   static promptSection(): string {
+    return GuncatUiPrompt.promptSectionWithRichness(GuncatUiPrompt.RICHNESS);
+  }
+
+  static promptSectionWithRichness(richness: string): string {
     let parts: string[] = [];
     parts.push(GuncatUiPrompt.PREAMBLE);
     parts.push('');
@@ -306,7 +347,7 @@ export class GuncatUiPrompt {
     parts.push('');
     parts.push(GuncatUiLibrary.promptSection());
     parts.push('');
-    parts.push(GuncatUiPrompt.RICHNESS);
+    parts.push(richness);
     parts.push('');
     parts.push(GuncatUiPrompt.INTERACTION);
     parts.push('');

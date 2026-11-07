@@ -8,6 +8,7 @@ import { TOOL_CATALOG, ToolCatalogGroup, ToolCatalogItem, toolCatalogCount } fro
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { SettingsSession } from '../viewmodel/SettingsSession';
 import { Constants } from '../common/Constants';
+import { InteractiveTier, InteractiveTiers } from '../common/InteractiveTiers';
 import { SearchEngineSettings, SEARCH_ENGINE_BING, SEARCH_ENGINE_BRAVE, SEARCH_ENGINE_TAVILY,
   SEARCH_ENGINE_EXA, SEARCH_ENGINE_METASO, SEARCH_ENGINE_FIRECRAWL,
   searchEngineNeedsApiKey, searchEngineSupportsBaseUrl, searchEngineLabel } from '../service/LocalWebSearch';
@@ -72,6 +73,8 @@ struct SettingsPage {
 
   // 声音: 与聊天页右上角开关共用 VM.autoReadEnabled, 两边同步
   @State private autoReadEnabled: boolean = false;
+  // 能力调度: 当前交互模式档位 id(与 VM.interactiveTier 同步; 详情页切换后立即生效)
+  @State private interactiveTier: string = InteractiveTiers.DEFAULT_ID;
   // 终端信息页展示用
   @State private systemName: string = 'HarmonyOS';
   @State private deviceLabel: string = '本机设备';
@@ -194,6 +197,7 @@ struct SettingsPage {
     this.searchMaxResults = this.searchDraft.maxResults.toString();
 
     this.autoReadEnabled = vm.autoReadEnabled;
+    this.interactiveTier = vm.interactiveTier;
   }
 
   build() {
@@ -213,6 +217,8 @@ struct SettingsPage {
         this.buildTerminalView()
       } else if (this.view === 'tools') {
         this.buildToolsView()
+      } else if (this.view === 'tier') {
+        this.buildTierView()
       } else {
         this.buildRootView()
       }
@@ -298,6 +304,14 @@ struct SettingsPage {
 
           this.buildSectionLabel('能力')
           Column() {
+            this.buildOptionRow($r('sys.symbol.wand_and_stars'), '能力调度',
+              this.tierSummary(), (): void => {
+                this.view = 'tier';
+              })
+            Divider()
+              .strokeWidth(0.5)
+              .color($r('app.color.divider'))
+              .margin({ left: 56 })
             this.buildOptionRow($r('sys.symbol.magnifyingglass'), '本地联网搜索',
               this.searchSummary(), (): void => {
                 this.view = 'search';
@@ -1254,6 +1268,116 @@ struct SettingsPage {
     .edgeEffect(EdgeEffect.Spring)
   }
 
+  // ===== 能力调度(交互模式档位) =====
+  // 设置首页一行副标题: 当前档位名 + 定位
+  private tierSummary(): string {
+    if (this.vm !== null) {
+      return this.vm.interactiveTierSummary;
+    }
+    return '轻简 · 最快 · 一句话一张界面';
+  }
+
+  private isTierSelected(id: string): boolean {
+    return this.interactiveTier === id;
+  }
+
+  // 切档: 交给 VM 校验/落盘/同步推荐思考强度, 成功后刷新本页选中态。
+  private async selectTier(id: string): Promise<void> {
+    if (this.vm === null) {
+      return;
+    }
+    await this.vm.setInteractiveTier(id);
+    this.interactiveTier = this.vm.interactiveTier;
+  }
+
+  @Builder
+  private buildTierRow(tier: InteractiveTier) {
+    Row() {
+      Column() {
+        Text(tier.name)
+          .fontSize(15)
+          .fontWeight(this.isTierSelected(tier.id) ? FontWeight.Bold : FontWeight.Medium)
+          .fontColor(this.isTierSelected(tier.id) ? $r('app.color.brand') : $r('app.color.text_primary'))
+          .width('100%')
+        Text(tier.tagline)
+          .fontSize(11)
+          .fontColor($r('app.color.text_secondary'))
+          .width('100%')
+          .margin({ top: 3 })
+        Text(tier.description)
+          .fontSize(11)
+          .fontColor($r('app.color.text_tertiary'))
+          .lineHeight(16)
+          .width('100%')
+          .margin({ top: 5 })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      if (this.isTierSelected(tier.id)) {
+        SymbolGlyph($r('sys.symbol.checkmark_circle'))
+          .fontSize(22)
+          .fontColor([$r('app.color.brand')])
+          .margin({ left: 10 })
+      }
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 13, bottom: 13 })
+    .alignItems(VerticalAlign.Top)
+    .onClick((): void => {
+      this.selectTier(tier.id);
+    })
+  }
+
+  // 能力调度详情页: 九档位单选(轻简档 = 复用原交互模式提示词; 其余档位 = 移植聊天引擎提示词)
+  @Builder
+  private buildTierView() {
+    Scroll() {
+      Column() {
+        Text('能力调度决定交互模式使用哪套提示词与工具面。轻简档直接复用原有交互模式提示词（最快）；其余档位移植聊天引擎里效果更好的成熟提示词，并按交互模式做了少量适配。切换档位会把思考强度调到该档推荐值，之后仍可在模型弹层手动调整。')
+          .fontSize(12)
+          .fontColor($r('app.color.text_secondary'))
+          .lineHeight(19)
+          .width('100%')
+          .padding({ left: 4, right: 4, top: 4 })
+
+        this.buildSectionLabel('档位')
+        Column() {
+          ForEach(InteractiveTiers.ALL, (tier: InteractiveTier, index: number) => {
+            if (index > 0) {
+              Divider()
+                .strokeWidth(0.5)
+                .color($r('app.color.divider'))
+                .margin({ left: 16 })
+            }
+            this.buildTierRow(tier)
+          }, (tier: InteractiveTier) => tier.id)
+        }
+        .width('100%')
+        .backgroundColor($r('app.color.surface'))
+        .borderRadius(22)
+        .border({ width: 1, color: $r('app.color.divider') })
+        .clip(true)
+
+        Text('档位只影响交互模式，工作模式与聊天模式不受影响。档位越靠后，提示词越长、思考越深，首答会慢一些，但内容更完整、专业流程更严格。')
+          .fontSize(11)
+          .fontColor($r('app.color.text_tertiary'))
+          .lineHeight(17)
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .margin({ top: 18, bottom: 32 })
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 720 })
+      .padding({ left: 16, right: 16 })
+    }
+    .layoutWeight(1)
+    .width('100%')
+    .align(Alignment.Top)
+    .scrollBar(BarState.Off)
+    .edgeEffect(EdgeEffect.Spring)
+  }
+
   // ===== 朗读 =====
   @Builder
   private buildReadingView() {
@@ -1723,6 +1847,9 @@ struct SettingsPage {
     }
     if (this.view === 'tools') {
       return '工具';
+    }
+    if (this.view === 'tier') {
+      return '能力调度';
     }
     return '设置';
   }

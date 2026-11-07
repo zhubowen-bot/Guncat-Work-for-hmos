@@ -36,6 +36,9 @@ import { LoopError } from '../common/LoopError';
 import { HttpTimeouts } from '../common/HttpTimeouts';
 import { HttpErrorClassifier } from '../common/HttpErrorClassifier';
 import { GuncatUiPrompt } from '../common/GuncatUiPrompt';
+import { InteractiveTierPrompt } from '../common/InteractiveTierPrompt';
+import { InteractiveTierPrompts } from '../common/InteractiveTierPrompts';
+import { InteractiveTiers } from '../common/InteractiveTiers';
 import { GuncatUiLang, GuncatUiFences, UiNode } from '../common/GuncatUiLang';
 import { GuncatUiLibrary } from '../common/GuncatUiLibrary';
 import { GuncatUiParts } from '../common/GuncatUiParts';
@@ -229,30 +232,37 @@ export class AgentLoopService {
 
   // ===== 交互模式工具面(裁剪) =====
   // 交互模式与工作模式共用同一份工具定义, 但下发前按 ToolRegistry.INTERACTIVE_TOOL_WHITELIST
-  // **物理裁剪**(45 → 27): todo_write / goal_* / schedule_* / subagent / session_search /
-  // ask_user_question / edit / str_replace_editor / delete_file / move_file / record_search
-  // 等长程与维护类工具**根本不出现在请求里**。提示词里的"默认零工具"是纪律, 这里是物理保证。
-  // 缓存键与 getToolDefs 同因(联网搜索开关会改 local_web_search 的描述)。
+  // **物理裁剪**: todo_write / goal_* / schedule_* / subagent / session_search /
+  // ask_user_question / edit / str_replace_editor / delete_file / move_file 等长程与维护类工具
+  // **根本不出现在请求里**。提示词里的"默认零工具"是纪律, 这里是物理保证。
+  // 能力调度档位在此基础上按 InteractiveTiers.extraTools 追加少量工具(如 record_search / todo_write),
+  // 所以缓存键是 (联网搜索开关, 档位) —— 档位切换会换工具面, 必须换缓存。
   private static cachedInteractiveToolDefs: Record<string, Object>[] = [];
   private static cachedInteractiveToolDefsFlag: boolean = false;
+  private static cachedInteractiveToolDefsTier: string = '';
 
   // 交互模式的工具面。**主循环(含溢出重试)与上下文压缩必须取同一个返回值** ——
   // 压缩请求刻意复用上一请求的前缀(系统提示词 + 工具定义 + 历史)以命中 KV 缓存,
   // 工具面不一致会让整段前缀作废。(界面补救请求 includeTools=false, 不涉及工具面。)
-  static interactiveToolDefs(webSearchEnabled: boolean): Record<string, Object>[] {
+  static interactiveToolDefs(webSearchEnabled: boolean,
+    tierId: string = InteractiveTiers.DEFAULT_ID): Record<string, Object>[] {
+    let tier: string = InteractiveTiers.normalize(tierId);
     if (AgentLoopService.cachedInteractiveToolDefs.length === 0 ||
-      AgentLoopService.cachedInteractiveToolDefsFlag !== webSearchEnabled) {
+      AgentLoopService.cachedInteractiveToolDefsFlag !== webSearchEnabled ||
+      AgentLoopService.cachedInteractiveToolDefsTier !== tier) {
       AgentLoopService.cachedInteractiveToolDefs =
-        ToolRegistry.filterInteractive(AgentLoopService.getToolDefs(webSearchEnabled));
+        ToolRegistry.filterInteractive(AgentLoopService.getToolDefs(webSearchEnabled), tier);
       AgentLoopService.cachedInteractiveToolDefsFlag = webSearchEnabled;
+      AgentLoopService.cachedInteractiveToolDefsTier = tier;
     }
     return AgentLoopService.cachedInteractiveToolDefs;
   }
 
-  // 按会话模式取工具面: 交互模式返回裁剪后的定义, 其余模式返回 null(调用方走全量工具面)
-  static toolDefsForMode(mode: string, webSearchEnabled: boolean): Record<string, Object>[] | null {
+  // 按会话模式取工具面: 交互模式返回按档位裁剪后的定义, 其余模式返回 null(调用方走全量工具面)
+  static toolDefsForMode(mode: string, webSearchEnabled: boolean,
+    tierId: string = InteractiveTiers.DEFAULT_ID): Record<string, Object>[] | null {
     if (mode === Constants.MODE_INTERACTIVE) {
-      return AgentLoopService.interactiveToolDefs(webSearchEnabled);
+      return AgentLoopService.interactiveToolDefs(webSearchEnabled, tierId);
     }
     return null;
   }
@@ -1531,34 +1541,44 @@ export class AgentLoopService {
   // ===== 交互模式 (Intelligent UI) 系统提示词 =====
   // 与工作模式的区别**不只是**「交付形态」: 工具面与沙箱工作区照旧共享, 但**行为纪律相反**。
   // 工作模式的提示词是「多轮工具循环 + 长程交付」的(建清单/先加载技能/反复核验/落盘成文),
-  // 那套纪律放进交互模式会直接变成一串无用工具调用 —— 交互模式要的是"一句话进来, 一张界面出去",
-  // 所以底座改走 PromptBuilder.buildInteractive()(快车道), 不再拼接工作模式的 build()。
-  // 四分段(顺序由 PromptBuilder.assembleInteractiveSystemPrompt() 固定, 那里有断言钉住):
-  //   最高优先级·快(interactivePrime, **必须第一段**) + 界面语言契约(GuncatUiPrompt)
-  //   + 素材区/工具面/真实数据/技能索引(快车道底座) + 职责收尾(INTERACTIVE_DUTY)。
-  // 同样保持 100% 静态 + 进程内缓存, 以维持相邻轮次的 KV 缓存前缀一致。
-  private static cachedInteractivePrompt: string = '';
+  // 那套纪律放进交互模式会直接变成一串无用工具调用 —— 交互模式要的是"一句话进来, 一张界面出去"。
+  //
+  // 能力调度(档位)分层: 提示词由 InteractiveTierPrompt 统一组装, 顺序固定为
+  //   档位声明(轻简=原 interactivePrime / 其余档=档位头) + 界面语言契约(含档位丰富度口径)
+  //   + 档位主体(rawfile/interactive-tier-*.md, 轻简档没有) + 环境工具底座 + 交付形态职责。
+  // 轻简档的组装结果与旧的四段组装逐字节一致(见 InteractiveTierPrompt.segments 的断言),
+  // 所以"轻简 = 直接复用现有交互模式提示词"是事实而不是承诺。
+  // 同样保持 100% 静态 + 进程内按档位缓存, 以维持相邻轮次的 KV 缓存前缀一致。
+  private static cachedInteractivePrompts: Record<string, string> = {};
 
-  static buildInteractiveSystemPrompt(): string {
-    if (AgentLoopService.cachedInteractivePrompt !== '') {
-      return AgentLoopService.cachedInteractivePrompt;
+  static buildInteractiveSystemPrompt(tierId: string = InteractiveTiers.DEFAULT_ID): string {
+    let tier: string = InteractiveTiers.normalize(tierId);
+    let cached: string | undefined = AgentLoopService.cachedInteractivePrompts[tier];
+    if (cached !== undefined && cached !== '') {
+      return cached;
+    }
+    let body: string = InteractiveTierPrompts.body(tier);
+    if (!InteractiveTiers.isLite(tier) && body.trim() === '') {
+      // 档位主体没加载成功(缺文件/读取失败) → 回退轻简档, 绝不交付一份没有业务主体的空壳档位提示词。
+      // 不写缓存: 下一次(比如热重载后)还能重新尝试真正的档位。
+      return AgentLoopService.buildInteractiveSystemPrompt(InteractiveTiers.LITE_ID);
     }
     let skillsSection: string = WorkSkillService.interactiveIndex();
-    // 工具面**按交互模式白名单裁剪**(45 → 27), 索引取的是裁剪后的名字 ——
+    // 工具面按 (档位, 白名单) 裁剪, 索引取的是裁剪后的名字 ——
     // 提示词里列出的工具与请求里真正下发的工具定义严格同源, 不会出现"提示词里有、实际调不到"的漂移。
     // 这里固定传 false 只影响 local_web_search 的**描述**文字, 名字不随联网开关变化, 索引是稳定的。
-    let defs: Record<string, Object>[] = AgentLoopService.interactiveToolDefs(false);
-    AgentLoopService.cachedInteractivePrompt = PromptBuilder.assembleInteractiveSystemPrompt(
-      GuncatUiPrompt.promptSection(), skillsSection,
-      PromptBuilder.buildToolNameIndex(defs), GuncatUiPrompt.INTERACTIVE_DUTY);
-    AgentLoopService.lastPromptBudget = PromptBudget.fromPrompt(AgentLoopService.cachedInteractivePrompt);
-    return AgentLoopService.cachedInteractivePrompt;
+    let defs: Record<string, Object>[] = AgentLoopService.interactiveToolDefs(false, tier);
+    let prompt: string = InteractiveTierPrompt.assemble(tier, body, skillsSection,
+      PromptBuilder.buildToolNameIndex(defs));
+    AgentLoopService.cachedInteractivePrompts[tier] = prompt;
+    AgentLoopService.lastPromptBudget = PromptBudget.fromPrompt(prompt);
+    return prompt;
   }
 
-  // 按会话模式选择系统提示词(交互模式 = 界面语言契约 + 快车道底座 + 交付形态职责)
-  static buildWorkSystemPromptFor(mode: string): string {
+  // 按会话模式选择系统提示词(交互模式按能力调度档位组装; 工作模式固定)
+  static buildWorkSystemPromptFor(mode: string, tierId: string = InteractiveTiers.DEFAULT_ID): string {
     if (mode === Constants.MODE_INTERACTIVE) {
-      return AgentLoopService.buildInteractiveSystemPrompt();
+      return AgentLoopService.buildInteractiveSystemPrompt(tierId);
     }
     return AgentLoopService.buildWorkSystemPrompt();
   }

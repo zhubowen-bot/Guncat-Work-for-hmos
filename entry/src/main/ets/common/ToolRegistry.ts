@@ -3,6 +3,8 @@
 // 为动态工具目录注入、权限过滤、子代理工具面裁剪提供单一事实源。
 // 现有 WorkFileService.toolDefs() 仍是工具定义的唯一构造入口;
 // WorkFileService 在首次访问时把 defs + 分类名单同步进注册中心。
+import { InteractiveTiers } from './InteractiveTiers';
+
 export class ToolMeta {
   namespace: string = 'core';
   version: string = '1';
@@ -317,18 +319,38 @@ export class ToolRegistry {
     'list_skills', 'load_skill'
   ];
 
-  // 交互模式是否允许下发该工具
-  static interactiveAllows(name: string): boolean {
-    return ToolRegistry.INTERACTIVE_TOOL_WHITELIST.indexOf(name) !== -1;
+  // 交互模式是否允许下发该工具(默认轻简档的工具面 = 基础白名单)。
+  // 能力调度档位在基础白名单之上追加少量工具(见 InteractiveTiers.extraTools):
+  //   - record_search(检索留痕) / todo_write(多阶段清单) 只给需要它们的档位,
+  //     避免"工具就摆在那儿"把轻简档拖回工具循环(物理裁剪的意义就在这)。
+  static interactiveAllows(name: string, tierId: string = 'lite'): boolean {
+    return ToolRegistry.interactiveWhitelist(tierId).indexOf(name) !== -1;
   }
 
-  // 按交互模式白名单裁剪工具定义。**保持原有顺序** —— 工具的物理顺序即请求前缀的一部分,
+  // 某档位的完整交互模式工具面(基础 27 个 + 档位追加)。
+  // 顺序: 基础白名单在前、追加工具在后; 去重(追加项若已在基础里则跳过)。
+  static interactiveWhitelist(tierId: string = 'lite'): string[] {
+    let extras: string[] = InteractiveTiers.byId(tierId).extraTools;
+    if (extras.length === 0) {
+      return ToolRegistry.INTERACTIVE_TOOL_WHITELIST;
+    }
+    let out: string[] = ToolRegistry.INTERACTIVE_TOOL_WHITELIST.slice();
+    for (let i: number = 0; i < extras.length; i++) {
+      if (out.indexOf(extras[i]) === -1) {
+        out.push(extras[i]);
+      }
+    }
+    return out;
+  }
+
+  // 按档位工具面裁剪工具定义。**保持原有顺序** —— 工具的物理顺序即请求前缀的一部分,
   // 顺序稳定才能让相邻轮次的 KV 缓存命中。
-  static filterInteractive(defs: Record<string, Object>[]): Record<string, Object>[] {
+  static filterInteractive(defs: Record<string, Object>[], tierId: string = 'lite'): Record<string, Object>[] {
+    let whitelist: string[] = ToolRegistry.interactiveWhitelist(tierId);
     let out: Record<string, Object>[] = [];
     for (let i: number = 0; i < defs.length; i++) {
       let nameObj: Object | undefined = defs[i]['name'];
-      if (typeof nameObj === 'string' && ToolRegistry.interactiveAllows(nameObj as string)) {
+      if (typeof nameObj === 'string' && whitelist.indexOf(nameObj as string) !== -1) {
         out.push(defs[i]);
       }
     }
@@ -336,11 +358,12 @@ export class ToolRegistry {
   }
 
   // 被交互模式裁掉的工具名(供诊断/日志/回归断言; 顺序与传入定义一致)
-  static interactiveDropped(defs: Record<string, Object>[]): string[] {
+  static interactiveDropped(defs: Record<string, Object>[], tierId: string = 'lite'): string[] {
+    let whitelist: string[] = ToolRegistry.interactiveWhitelist(tierId);
     let out: string[] = [];
     for (let i: number = 0; i < defs.length; i++) {
       let nameObj: Object | undefined = defs[i]['name'];
-      if (typeof nameObj === 'string' && !ToolRegistry.interactiveAllows(nameObj as string)) {
+      if (typeof nameObj === 'string' && whitelist.indexOf(nameObj as string) === -1) {
         out.push(nameObj as string);
       }
     }

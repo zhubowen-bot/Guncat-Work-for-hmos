@@ -44,11 +44,13 @@
 | ✦ **交互模式**  | GPT 的 **Intelligent UI**                     | 一句话进来，一张**能拖、能点、能改参数并即时重算**的原生界面出去：图表 / 表格 / 指标卡 / 选项卡 / 表单控件全部原生渲染，默认零工具调用、一轮直出   |
 | 🛠 **工作模式** | **DeepSeek Harness**（dsh，Codex 式 Agent Loop） | 多轮工具循环 + 每会话独立沙箱工作区 + 47 个内置工具，长程任务自主执行，端侧直出 PPT / Word / Excel / SVG，产物卡片附行级 diff |
 
-两个形态**共用同一套 Agent Loop 与沙箱工作区**，差别在行为纪律与**下发的工具面**——工作模式是「47 个内置工具全量 + 多轮工具循环 + 长程交付」，交互模式只下发 **27 个**（读素材 / 算真实数字 / 核实外部事实 / 出文件），长程工具（`todo_write` / `goal_*` / `schedule_*` / `subagent` …）根本不出现在它的请求里，所以是「快车道、一轮直出界面」。应用启动默认落在交互模式，空态大标题处的「交互模式 / 工作模式」胶囊可一键换挡。
+两个形态**共用同一套 Agent Loop 与沙箱工作区**，差别在行为纪律与**下发的工具面**——工作模式是「47 个内置工具全量 + 多轮工具循环 + 长程交付」，交互模式默认只下发 **27 个**（读素材 / 算真实数字 / 核实外部事实 / 出文件），长程工具（`goal_*` / `schedule_*` / `subagent` …）根本不出现在它的请求里，所以是「快车道、一轮直出界面」；它的**能力调度**另有九档提示词可选（轻简 / 效率 / 专家 / 经典 / 论文转换 / 法律检索 / 深度研究 / 信息筛滤 / LLM评估，见下）。应用启动默认落在交互模式，空态大标题处的「交互模式 / 工作模式」胶囊可一键换挡。
 
 两者底下是**同一套端侧执行环境**：需要真终端时落到完整 Linux `shell`，需要算数据时用原生 CPython，需要出文件时走本地 Office 生成器——全部在机内完成，不依赖任何远程执行服务。
 
 交互模式复刻的是 GPT 那套 Intelligent UI 的交付方式：回答不再是纯文本，而是一份**界面程序**，由应用渲染成原生可操作界面——柱状 / 折线 / 面积 / 横向条 / 饼环 / 径向 / 雷达 / 堆叠条、表格、指标卡、图片墙、选项卡 / 折叠面板 / 步骤条 / 卡片块，以及整套表单控件（滑块 / 开关 / 单选 / 多选 / 下拉 / 标签选择 / 选项卡 / 输入框 / 文本域）；控件的取值还能回传模型触发重算。工作模式则把 DeepSeek Harness（dsh）的核心 Agent Loop 完整移植到了端侧。
+
+交互模式还带**能力调度**：设置 →「能力」→「能力调度」可在九个提示词档位里切换。轻简档就是原来的交互模式提示词（默认零工具、最快）；其余八档把聊天引擎里对应智能体的成熟提示词**正文逐字移植**进来（效率=3.0-Flash、专家=3.0-Pro、经典=2.5-lite、论文转换=Cnvt-Paper、法律检索=Srch-Law、深度研究=Srch-Research、信息筛滤=Srch-Sift、LLM评估=Eval-LLM），只做交付形态适配（文字进界面组件、mermaid 由界面分层替代、确认参数改界面表单、平台工具映射到真实工具），并按档位追加 `record_search` / `todo_write` 与推荐思考强度；输出丰富度原则在八档统一为「组件 / 卡片 / 图表 / 分层 / 内容长度越多越好」，轻简保持原「8~14 个组件、够用为准」。分层设计与逐档适配点见[提示词适配说明](docs/prompts/interactive-tier-adaptation.md)，九档组合后的完整系统提示词见[能力调度档位导出](docs/prompts/interactive-tiers/README.md)。
 
 对上游的研究材料也在仓库里：[open-intelligent-ui 规格](docs/reference/open-intelligent-ui-spec.md) · [openui-lang 规范](docs/reference/openui-lang-spec.md)。
 
@@ -214,6 +216,7 @@ HAP 约 420 MiB（未签名；签名包约 429 MiB。精确字节数随构建与
 | [Shell 工具：IEC 原生执行核](docs/architecture/iec-runtime.md)              | 命令 so 的 fork 执行、exec 会话 API、工作区一致性、并发与生命周期、构建链      |
 | [原生 Python 与跨域桥（历史）](docs/architecture/native-python.md)       | CPython 交叉编译、`run_python` 执行模型、`npy` 桥协议与性能数据（虚拟机方案已删除） |
 | [交互模式架构（Intelligent UI）](docs/architecture/interactive-mode.md)      | 提示词分叉、`guncat-ui lang` 契约、流式成形、交互闭环、扩展入口                      |
+| [交互模式能力调度提示词适配说明](docs/prompts/interactive-tier-adaptation.md) | 九档分层设计、共用/适配/轻简专属边界、逐档适配点、维护约定与未验证项 |
 | [项目结构](docs/architecture/project-structure.md)                       | 目录布局、数据流、核心组件                                                 |
 | [使用指南](docs/guides/usage.md)                                         | 分场景操作步骤                                                       |
 | [常见问题](docs/guides/faq.md)                                           | 排障与已知行为                                                       |

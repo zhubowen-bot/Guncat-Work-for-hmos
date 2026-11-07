@@ -25,6 +25,9 @@ export class Constants {
   // 交互模式要"快", 所以去掉 极高(max)、多了 关闭(off), 且默认档位是 low(见 ChatViewModel.interactiveEffort);
   // 两个模式各有各的档位, 互不影响。
   static readonly LS_KEY_INTERACTIVE_EFFORT: string = 'guncat_interactive_effort';
+  // 交互模式「能力调度」档位 id('lite' / 'efficiency' / 'expert' / ...; 见 common/InteractiveTiers.ts)。
+  // 档位决定交互模式的系统提示词主体与工具面; 未设置/脏值回退 light。
+  static readonly LS_KEY_INTERACTIVE_TIER: string = 'guncat_interactive_tier';
   static readonly LS_KEY_WEB_SEARCH_ENABLED: string = 'guncat_web_search_enabled';
   static readonly LS_KEY_AUTO_READ_ENABLED: string = 'guncat_auto_read_enabled';
   static readonly LS_KEY_CURRENT_AGENT_ID: string = 'guncat_current_agent';

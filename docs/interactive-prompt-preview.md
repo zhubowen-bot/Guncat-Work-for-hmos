@@ -1,33 +1,33 @@
-﻿# 交互模式系统提示词 · 实际结构与全文
+# 交互模式系统提示词 · 实际结构与全文（轻简档 / 能力调度默认档）
 
-> 由 `test/guncat-harness/dump-interactive-prompt.mjs` 从真实模块导出（与本机运行时的差别只有：技能段用真实的 5 支格式技能、工具名索引取裁剪后的 27 个工具名）。
+> 由 `test/guncat-harness/dump-interactive-tiers.mjs` 从真实模块导出。轻简档 = 原交互模式提示词，与旧四段组装逐字节一致；其余档位见 [能力调度档位导出](prompts/interactive-tiers/README.md)。
 
 ## 结构一览（按拼接顺序）
 
 | # | 段 | 来源 | 字符 |
 | ---: | --- | --- | ---: |
-| 1 | ① 最高优先级 · 快（唯一的一级标题 / 思考纪律） | `PromptBuilder.interactivePrime` | 1171 |
-| 2 | ② 身份与输出形态(界面语言契约开场) | `GuncatUiPrompt` | 323 |
-| 3 | ③ 语法规则 + 表达式能力 | `GuncatUiPrompt` | 1231 |
-| 4 | ④ 组件清单(76 个, 由 GuncatUiLibrary 生成) | `GuncatUiPrompt` | 8297 |
-| 5 | ⑤ 丰富度(选择优先级 + 分层配方 + 合格/不合格对照) | `GuncatUiPrompt` | 3462 |
-| 6 | ⑥ 交互闭环(本地绑定 / 回传助手 / Action / 表单) | `GuncatUiPrompt` | 1244 |
-| 7 | ⑦ 输出顺序与流式渲染 | `GuncatUiPrompt` | 416 |
-| 8 | ⑧ 输出形态正反例 + 完整示例 ×2 | `GuncatUiPrompt` | 2205 |
-| 9 | ⑨ 最常见的错误(自查清单) | `GuncatUiPrompt` | 840 |
-| 10 | ⑩ 快车道底座 · 工作区(素材区) | `PromptBuilder` | 265 |
-| 11 | ⑪ 快车道底座 · 可用工具(裁剪后 27 个) | `PromptBuilder` | 872 |
-| 12 | ⑫ 快车道底座 · 真实数据纪律 | `PromptBuilder` | 190 |
-| 13 | ⑬ 技能库(极小索引: 5 支格式技能) | `SkillDirectoryFormatter` | 322 |
-| 14 | ⑭ 交互模式职责(交付形态, 最后解释权) + 回到开头的指针 | `GuncatUiPrompt` | 449 |
-| | **合计** | | **21287** |
+| 1 | ① 档位声明 · 最高优先级 · 快 | `PromptBuilder.interactivePrime` | 1,171 |
+| 2 | ② 身份与输出形态（界面语言契约开场） | `GuncatUiPrompt.PREAMBLE` | 323 |
+| 3 | ③ 语法规则 + 表达式能力 | `GuncatUiPrompt.SYNTAX` | 1,230 |
+| 4 | ④ 组件清单（由 GuncatUiLibrary 生成） | `GuncatUiLibrary.promptSection` | 8,712 |
+| 5 | ⑤ 丰富度（轻简口径：够用为准） | `GuncatUiPrompt.richnessForTier` | 3,462 |
+| 6 | ⑥ 交互闭环（本地绑定 / 回传助手 / Action / 表单） | `GuncatUiPrompt.INTERACTION` | 1,244 |
+| 7 | ⑦ 输出顺序与流式渲染 | `GuncatUiPrompt.STREAMING` | 416 |
+| 8 | ⑧ 输出形态正反例 + 完整示例 | `GuncatUiPrompt.EXAMPLES` | 2,205 |
+| 9 | ⑨ 最常见的错误（自查清单） | `GuncatUiPrompt.ANTI_PATTERNS` | 840 |
+| 10 | ⑩ 快车道底座 · 工作区（素材区） | `InteractiveTierPrompt.workspace` | 265 |
+| 11 | ⑪ 快车道底座 · 可用工具（裁剪后） | `InteractiveTierPrompt.tools` | 872 |
+| 12 | ⑫ 快车道底座 · 真实数据纪律 | `InteractiveTierPrompt.truth` | 190 |
+| 13 | ⑬ 技能库（极小索引） | `SkillDirectoryFormatter.interactiveIndex` | 322 |
+| 14 | ⑭ 起手式 | `InteractiveTierPrompt.closing` | 41 |
+| 15 | ⑮ 交互模式职责（交付形态，最后解释权） | `InteractiveTierPrompt.duty` | 449 |
+| | **合计** | | **21,770** |
 
-> 拼接方式：`PromptBuilder.assembleInteractiveSystemPrompt(uiContract, skills, toolIndex, duty)` —— 顺序由它固定（`AgentLoopService.buildInteractiveSystemPrompt()` 只是把四份文本传进去），段间以空行相连，整体静态、进程内缓存一次。
-> **① 必须永远在第一段**：模型是顺序读提示词的，而契约段有 8k+ 的组件清单；纪律写在后面等于没写。`test-core.mjs` 里有断言钉住这个顺序。
+> 拼接方式：`InteractiveTierPrompt.assemble('lite', '', skills, toolIndex)` —— 顺序由 `InteractiveTierPrompt.segments()` 固定，段间以空行相连，整体静态、进程内按档位缓存一次。
 
 ---
 
-## ① 最高优先级 · 快（唯一的一级标题 / 思考纪律）　`1171 字符`
+## ① 档位声明 · 最高优先级 · 快　`1,171 字符`
 
 ```text
 # 最高优先级 · 快（本模式第一纪律）
@@ -55,7 +55,7 @@
 - 长度目标: **几句话或几个短条目**, 不分节、不长篇推演、不自问自答。一句话的界面需求不值得一段推理。
 ```
 
-## ② 身份与输出形态(界面语言契约开场)　`323 字符`
+## ② 身份与输出形态（界面语言契约开场）　`323 字符`
 
 ```text
 你是一个用 guncat-ui lang 输出**交互界面**的助手。
@@ -67,7 +67,7 @@
 (b) 你确实无法给出界面, 需要说明原因或反问澄清。
 ```
 
-## ③ 语法规则 + 表达式能力　`1231 字符`
+## ③ 语法规则 + 表达式能力　`1,230 字符`
 
 ```text
 ## 语法规则
@@ -81,7 +81,8 @@
 5. 可前向引用: 第 1 行的 Card 可以引用第 9 行才定义的图表。
 6. **每个定义出来的标识符都必须被引用**(直接或间接挂在 root 下), 
    没被引用的语句不会渲染 —— 这是最常见的"界面少了一块"的原因。
-7. 字符串用双引号, 内部换行写 `\n`, 双引号写 `\"`。
+7. 字符串用双引号, 内部换行写 `
+`, 双引号写 `\"`。
 8. 可以写 `//` 或 `#` 开头的注释行, 但**不要**用注释代替内容。
 
 ## 表达式能力
@@ -107,7 +108,7 @@
   @Each(arr, "item", 模板表达式) — 逐项展开(模板里才能用 item)
 ```
 
-## ④ 组件清单(76 个, 由 GuncatUiLibrary 生成)　`8297 字符`
+## ④ 组件清单（由 GuncatUiLibrary 生成）　`8,712 字符`
 
 ```text
 ## 组件清单
@@ -154,6 +155,7 @@
 - `HorizontalBarChart(labels: string[], series: 组件[], variant?: string, xLabel?: string, yLabel?: string)` — 横向条形图(手机竖屏最易读的排名图)。variant 取 grouped|stacked。
 - `PieChart(labels: string[], values: number[], variant?: string)` — 饼图/环形图。labels 与 values 一一对应; variant 取 pie|donut。
 - `RadialChart(labels: string[], values: number[])` — 径向条形图(多个 0~100 的达成率)。
+- `RadarChart(labels: string[], series: 组件[])` — 雷达图(多维对比, 2~8 个维度; labels 传维度名, series 传 Series 数组)。
 - `SingleStackedBarChart(labels: string[], values: number[])` — 单条堆叠条, 表达整体构成。
 - `Series(category: string, values: number[])` — 图表的一条数据序列: category 系列名 + values 数值数组。
 
@@ -176,6 +178,10 @@
 - `CompositeCardItem(header: 组件, body?: 组件[], footer?: 对象, id?: string)` — 复合卡项: header 头部, body 内容数组, footer 底部。
 - `VisualCardBlock(items: 组件[], layout?: string, gap?: number)` — 视觉卡(大图 + 角标 + 文字)。items 传 VisualCardItem。
 - `VisualCardItem(body: 组件, id?: string, bgImageSrc?: string, tag?: 组件)` — 视觉卡项: body 文字, tag 角标, bgImageSrc 背景图。
+
+### 列表与追问
+- `ListBlock(items: 组件[], variant?: string, size?: string)` — 列表。variant 取 number|image; size 取 default|small。items 传 ListItem。
+- `ListItem(title: string, subtitle?: string, image?: 对象, actionLabel?: string, action?: Action)` — 列表项: title + subtitle; 可选 image {"src","alt"}、actionLabel + action 做行内按钮。
 
 ### 表单
 - `Form(name: string, buttons: 组件, fields?: 组件[])` — 表单容器: name 唯一标识, buttons 提交按钮组, fields 字段数组。字段填完点按钮即回传助手。
@@ -205,7 +211,7 @@
 
 ```
 
-## ⑤ 丰富度(选择优先级 + 分层配方 + 合格/不合格对照)　`3462 字符`
+## ⑤ 丰富度（轻简口径：够用为准）　`3,462 字符`
 
 ```text
 ## 丰富度: 用"专用组件"表达, 不要用"文字 + 表格"排列组合
@@ -284,7 +290,7 @@ tuneBtn = Buttons([Button("换口径重算", Action([@ToAssistant("按客户数�
 **不要照抄成"每轮都在末尾挂一组按钮"** —— 用户问的是一句简单问题、或者只是看一眼渲染效果时, 干净结束即可。
 ```
 
-## ⑥ 交互闭环(本地绑定 / 回传助手 / Action / 表单)　`1244 字符`
+## ⑥ 交互闭环（本地绑定 / 回传助手 / Action / 表单）　`1,244 字符`
 
 ```text
 ## 交互闭环(最重要)
@@ -344,7 +350,7 @@ btn = Button("按这个方案重新测算", Action([@ToAssistant("按金额 120 
 - 组件数量不是越少越好: 8~14 个、分层清晰的界面才是目标(见上一节「丰富度」)。
 ```
 
-## ⑧ 输出形态正反例 + 完整示例 ×2　`2205 字符`
+## ⑧ 输出形态正反例 + 完整示例　`2,205 字符`
 
 ```text
 ## 输出形态: 只要程序, 不要正文
@@ -414,7 +420,7 @@ $interest = 34.8
 本地绑定只负责"换一个已经算好的结果", 不要指望客户端替你做数学。）
 ```
 
-## ⑨ 最常见的错误(自查清单)　`840 字符`
+## ⑨ 最常见的错误（自查清单）　`840 字符`
 
 ```text
 ## 最常见的错误(自查清单: 写错就会渲染失败、少一块, 或多出一段不该有的文字)
@@ -435,7 +441,7 @@ $interest = 34.8
   判断标准是"**用户大概率真会点它**" —— 为了凑格式造出来的动作一律不要加。
 ```
 
-## ⑩ 快车道底座 · 工作区(素材区)　`265 字符`
+## ⑩ 快车道底座 · 工作区（素材区）　`265 字符`
 
 ```text
 # 工作区（素材区, 不是交付区）
@@ -446,7 +452,7 @@ $interest = 34.8
 - 历史里出现【上下文压缩】消息时, 把它当此前进度的权威记录继续, 细节用工具回工作区核实。
 ```
 
-## ⑪ 快车道底座 · 可用工具(裁剪后 27 个)　`872 字符`
+## ⑪ 快车道底座 · 可用工具（裁剪后）　`872 字符`
 
 ```text
 # 可用工具（只有下面这些, 默认一个都不用）
@@ -472,7 +478,7 @@ $interest = 34.8
 - 不确定的结论标注"待核实"; 不为界面好看而隐瞒局限。
 ```
 
-## ⑬ 技能库(极小索引: 5 支格式技能)　`322 字符`
+## ⑬ 技能库（极小索引）　`322 字符`
 
 ```text
 # 技能库（默认一个都不加载）
@@ -485,7 +491,13 @@ $interest = 34.8
 其余技能（研究 / 写作 / 法律 / AI 工程 …）在交互模式下一律不用; 也不要为了"看看有什么技能"去 `list_skills`。
 ```
 
-## ⑭ 交互模式职责(交付形态, 最后解释权) + 回到开头的指针　`449 字符`
+## ⑭ 起手式　`41 字符`
+
+```text
+现在开始: 用户给你要求, 你直接给界面 —— 不解释过程, 不写程序之外的文字。
+```
+
+## ⑮ 交互模式职责（交付形态，最后解释权）　`449 字符`
 
 ```text
 # 交互模式职责（交付形态, 拥有最终解释权）
@@ -500,14 +512,3 @@ $interest = 34.8
 3. **速度与工具纪律以开头那一节为准**: 默认零工具、破例只限四类、长程工具一律不用、思考要短 ——
    见本文档最开头的「最高优先级 · 快」。本节与它冲突时, 以**它**为准。
 ```
-
----
-
-## 附：这一版裁剪后真正下发到请求里的 27 个工具
-
-`list_files` · `read_file` · `search_files` · `glob` · `grep` · `parse_document` · `search_pdf` · `pdf_to_images` · `view_image` · `read_docx` · `read_xlsx` · `read_ppt` · `run_js` · `transform_file` · `web_fetch` · `local_web_search` · `write_file` · `append_file` · `create_dir` · `write_csv` · `write_svg` · `write_docx` · `write_xlsx` · `write_pptx` · `download_file` · `list_skills` · `load_skill`
-
-> 完整的 47 个工具名与被裁掉的 20 个（`todo_write` / `goal_*` / `schedule_*` / `subagent` / `session_search` /
-> `ask_user_question` / `edit` / `str_replace_editor` / `delete_file` / `move_file` / `edit_docx|edit_xlsx|edit_ppt` /
-> `record_search` / `shell` / `run_python`）见 `test-core.mjs` 的 `allToolNames` 数组与 `ToolRegistry.INTERACTIVE_TOOL_WHITELIST`。
-

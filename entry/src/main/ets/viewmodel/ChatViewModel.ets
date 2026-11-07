@@ -10,6 +10,7 @@ import { MultimodalConfig } from '../model/MultimodalConfig';
 import { ApiProfile } from '../model/ApiProfile';
 import { UsageSnapshot } from '../model/UsageModels';
 import { LLMProtocol } from '../common/LLMProtocol';
+import { InteractiveTier, InteractiveTiers } from '../common/InteractiveTiers';
 import { FileItem, StreamCallbacks, AbortSignal, ParsedFileResult } from '../common/Types';
 import { ToolExecutionGuard } from '../common/ToolExecutionGuard';
 import { LoopMetrics } from '../common/LoopMetrics';
@@ -107,6 +108,9 @@ export class ChatViewModel {
   // 交互模式的交付物是界面、追求响应快, 所以不给 极高(max)、多了 关闭(off), 且**默认「快速(low)」** ——
   // 这个模式的产品力是"一句话进来, 一张界面出去", 首答速度比多思考两秒更重要(用户仍可手动切回均衡)。
   interactiveEffort: string = 'low';
+  // 交互模式「能力调度」档位(持久化键 guncat_interactive_tier): 决定交互模式的系统提示词主体与工具面。
+  // 轻简档 = 原交互模式提示词(默认); 其余档位把聊天引擎的成熟提示词移植进来(见 InteractiveTiers)。
+  interactiveTier: string = InteractiveTiers.DEFAULT_ID;
   webSearchEnabled: boolean = true;
   autoReadEnabled: boolean = false;
   pendingFiles: FileItem[] = [];
@@ -320,6 +324,13 @@ export class ChatViewModel {
       this.context, Constants.LS_KEY_INTERACTIVE_EFFORT, 'low');
     this.interactiveEffort = (savedInteractiveEffort === 'off' || savedInteractiveEffort === 'low') ?
       savedInteractiveEffort : 'high';
+    // 能力调度档位: 持久化值不认识时回退轻简(旧版本数据/脏值不能把交互模式打崩)
+    let savedTier: string = await StorageManager.loadString(
+      this.context, Constants.LS_KEY_INTERACTIVE_TIER, InteractiveTiers.DEFAULT_ID);
+    this.interactiveTier = InteractiveTiers.normalize(savedTier);
+    // 读取各档位主体提示词(interactive-tier-*.md)到内存注册表。必须在任何交互模式请求之前完成;
+    // 读不到的档位由 AgentLoopService 回退轻简档, 不会因此拿不到系统提示词。
+    await AgentLoader.loadInteractiveTierPrompts(this.context);
     this.webSearchEnabled = await StorageManager.loadBoolean(this.context, Constants.LS_KEY_WEB_SEARCH_ENABLED, true);
     this.autoReadEnabled = await StorageManager.loadBoolean(
       this.context, Constants.LS_KEY_AUTO_READ_ENABLED, false);
@@ -725,6 +736,48 @@ export class ChatViewModel {
   }
   openDrawer(): void {
     this.drawerOpen = true;
+  }
+
+  // 能力调度: 当前交互模式档位(设置页、系统提示词与工具面共用一个来源)
+  get interactiveTierInfo(): InteractiveTier {
+    return InteractiveTiers.byId(this.interactiveTier);
+  }
+
+  get interactiveTierName(): string {
+    return InteractiveTiers.nameOf(this.interactiveTier);
+  }
+
+  // 设置首页一行的副标题: "轻简 · 最快 · 一句话一张界面"
+  get interactiveTierSummary(): string {
+    let tier: InteractiveTier = this.interactiveTierInfo;
+    return tier.name + ' · ' + tier.tagline;
+  }
+
+  // 切换能力调度档位: 校验 → 落盘 → 同步该档位推荐的思考强度 → 刷新界面。
+  // 提示词与工具面不在这里重建: AgentLoopService 按档位缓存, 下一轮请求自然取到新档位(旧档缓存保留,
+  // 切回去时 KV 缓存前缀还能复用)。思考强度只做"切档时按推荐值设置", 用户之后仍可在模型弹层手动改。
+  async setInteractiveTier(id: string): Promise<void> {
+    let normalized: string = InteractiveTiers.normalize(id);
+    if (normalized === this.interactiveTier) {
+      return;
+    }
+    this.interactiveTier = normalized;
+    let tier: InteractiveTier = InteractiveTiers.byId(normalized);
+    if (InteractiveTiers.isValidEffort(tier.defaultEffort)) {
+      this.interactiveEffort = tier.defaultEffort;
+      if (this.context !== null) {
+        await StorageManager.saveString(this.context, Constants.LS_KEY_INTERACTIVE_EFFORT, tier.defaultEffort);
+      }
+    }
+    if (this.context !== null) {
+      await StorageManager.saveString(this.context, Constants.LS_KEY_INTERACTIVE_TIER, normalized);
+    }
+    this.notifyUIChange();
+  }
+
+  // 设置页/详情页展示用: 当前档位详情
+  get interactiveTierDescription(): string {
+    return this.interactiveTierInfo.description;
   }
 
   // 思考/联网开关
@@ -2392,7 +2445,7 @@ export class ChatViewModel {
     try {
       // 组装与协议无关的循环历史(含既有全部消息); 系统提示词为静态文本, 整个循环不重写
       let messages: LoopMessage[] = [];
-      messages.push(LoopMessage.system(AgentLoopService.buildWorkSystemPromptFor(conv.mode)));
+      messages.push(LoopMessage.system(AgentLoopService.buildWorkSystemPromptFor(conv.mode, this.interactiveTier)));
       // 只把最近 3 条用户消息的图片重新注入请求: 历史图片每轮都随 base64
       // 重发会让请求体随轮次线性膨胀, 是长任务内存/网络压力的重要来源。
       // 更早的图片仍保留在工作区/会话记录里, 模型需要时可用 read_file 重新读取。
@@ -2926,7 +2979,7 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
     try {
       // 组装与协议无关的循环历史(含既有全部消息); 系统提示词为静态文本, 整个循环不重写
       let messages: LoopMessage[] = [];
-      messages.push(LoopMessage.system(AgentLoopService.buildWorkSystemPromptFor(conv.mode)));
+      messages.push(LoopMessage.system(AgentLoopService.buildWorkSystemPromptFor(conv.mode, this.interactiveTier)));
       // 只把最近 3 条用户消息的图片重新注入请求: 历史图片每轮都随 base64
       // 重发会让请求体随轮次线性膨胀, 是长任务内存/网络压力的重要来源。
       // 更早的图片仍保留在工作区/会话记录里, 模型需要时可用 read_file 重新读取。
@@ -3578,7 +3631,7 @@ if (this.abortSignal.aborted) {
     // 其余模式传 null 走全量工具面。主循环与下面的溢出重试、以及上下文压缩必须用同一份工具面 ——
     // 请求前缀里工具定义不一致会让 KV 缓存整段失效, 也会让模型看到前后矛盾的工具清单。
     let toolOverride: Record<string, Object>[] | null =
-      AgentLoopService.toolDefsForMode(loopMode, this.webSearchEnabled);
+      AgentLoopService.toolDefsForMode(loopMode, this.webSearchEnabled, this.interactiveTier);
     try {
       return await AgentLoopService.runTurnWithRetry(
         this.apiConfig, messages, this.loopThinkingEnabled, this.loopEffortForRequest,
@@ -3674,7 +3727,7 @@ if (this.abortSignal.aborted) {
       try {
         summary = await AgentLoopService.summarizeHistory(
           this.apiConfig, messages, this.loopThinkingEnabled, this.loopEffortForRequest, this.webSearchEnabled,
-          this.abortSignal, AgentLoopService.toolDefsForMode(loopMode, this.webSearchEnabled));
+          this.abortSignal, AgentLoopService.toolDefsForMode(loopMode, this.webSearchEnabled, this.interactiveTier));
       } catch (e) {
         // 压缩失败(网络/中断) → 回退为整条裁剪
         summary = '';
@@ -3684,7 +3737,7 @@ if (this.abortSignal.aborted) {
           summary = summary.substring(0, Constants.WORK_SUMMARY_MAX_CHARS) + '…';
         }
         let kept: LoopMessage[] = messages.slice(oldEnd);
-        let rebuilt: LoopMessage[] = [LoopMessage.system(AgentLoopService.buildWorkSystemPromptFor(loopMode)),
+        let rebuilt: LoopMessage[] = [LoopMessage.system(AgentLoopService.buildWorkSystemPromptFor(loopMode, this.interactiveTier)),
           LoopMessage.user('【上下文压缩】以下为此前 ' + (oldEnd - 1).toString() +
             ' 条执行历史的状态摘要, 请基于它继续任务:\n' + summary)];
         for (let k: number = 0; k < kept.length; k++) {

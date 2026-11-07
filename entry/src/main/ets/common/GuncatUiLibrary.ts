@@ -98,9 +98,13 @@ function anyOf(name: string, required: boolean): UiParam {
 }
 
 export class GuncatUiLibrary {
+  // 分组顺序。**必须与 definitions() 里的 g1~g9 常量逐字一致**：promptSection() 按 group 精确匹配
+  // 分组标题，名字对不上那一组会整组从提示词里消失（2026-11 bug: 这里写的是 '列表'，而 g7 是
+  // '列表与追问' —— ListBlock / ListItem 因此一直没进过任何档位的组件清单）。test-core.mjs 有
+  // 断言钉住"每个分组都出现在清单里"。
   static readonly GROUP_ORDER: string[] = [
     '根与内容', '布局', '表格与数据', '图表', '指标与文本',
-    '卡片块', '列表', '表单', '按钮与图标'
+    '卡片块', '列表与追问', '表单', '按钮与图标'
   ];
 
   private static table: Record<string, UiComp> = {};
@@ -240,6 +244,13 @@ export class GuncatUiLibrary {
       [strings('labels', true), numbers('values', true), sOpt('variant')]));
     out.push(new UiComp('RadialChart', g4, '径向条形图(多个 0~100 的达成率)。',
       [strings('labels', true), numbers('values', true)]));
+    // 雷达图: 视图层早就有 GuncatUiRadarChart 渲染器, 但组件清单一直漏登记 ——
+    // 造成两个后果: ① 提示词 RICHNESS 的"多维对比 → RadarChart"实际点不到该组件;
+    // ② 能力调度档位(专家/评估)的界面映射表要用法等价于"多维对比"的雷达图时, 组件名不在清单里。
+    // 这里补登记(签名与视图层一致: labels 维度名 + series 序列)。
+    out.push(new UiComp('RadarChart', g4,
+      '雷达图(多维对比, 2~8 个维度; labels 传维度名, series 传 Series 数组)。',
+      [strings('labels', true), els('series', true)]));
     out.push(new UiComp('SingleStackedBarChart', g4, '单条堆叠条, 表达整体构成。',
       [strings('labels', true), numbers('values', true)]));
     out.push(new UiComp('Series', g4, '图表的一条数据序列: category 系列名 + values 数值数组。',

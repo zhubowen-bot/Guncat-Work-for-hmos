@@ -407,6 +407,10 @@ export class PromptBuilder {
   // 交互模式 System Prompt 底座(不含 `interactivePrime()`、GuncatUiPrompt 的界面语言契约与 INTERACTIVE_DUTY)
   // skillsSection 传入的是 SkillDirectoryFormatter.interactiveIndex() 的**极小索引**(只列格式技能,
   // 自带标题与纪律), 这里原样拼上, 不再套一层"技能库"说明; toolIndex 传入的是**裁剪后**工具面的名字。
+  // 轻简档快车道底座的收尾句。**单独成常量**: 能力调度档位的组装(InteractiveTierPrompt)要复用它,
+  // 两处必须是同一句话, 否则"轻简档 = 原交互模式提示词逐字节不变"就不成立。
+  static readonly INTERACTIVE_CLOSING: string = '现在开始: 用户给你要求, 你直接给界面 —— 不解释过程, 不写程序之外的文字。';
+
   static buildInteractive(skillsSection: string = '', toolIndex: string = ''): string {
     let sections: string[] = [];
     sections.push(PromptBuilder.interactiveWorkspace());
@@ -415,7 +419,7 @@ export class PromptBuilder {
     if (skillsSection !== '') {
       sections.push(skillsSection);
     }
-    sections.push('现在开始: 用户给你要求, 你直接给界面 —— 不解释过程, 不写程序之外的文字。');
+    sections.push(PromptBuilder.INTERACTIVE_CLOSING);
     return sections.join('\n\n');
   }
 
