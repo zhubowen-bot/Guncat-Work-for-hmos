@@ -215,15 +215,18 @@ ArkTS 不是 TypeScript 的超集，它砍掉了大量动态特性。**最容易
 | 版本变更史 | [更新记录](CHANGELOG.md) |
 | 待办与规划 | [`docs/BACKLOG.md`](docs/BACKLOG.md) |
 | Agent Loop 逐轮改动记录 | [`docs/ITERATION_LOG.md`](docs/ITERATION_LOG.md) |
+| AI 代理协作约定 | [`AGENTS.md`](AGENTS.md) |
+| 给 AI 的任务请求模板 | [`docs/templates/task-request.md`](docs/templates/task-request.md) |
 
 ---
 
 ## 提交与 PR 流程
 
 1. Fork 仓库，从 `main` 创建功能分支。
-2. 完成修改，跑通上面对应的验证层（PR 模板里有勾选项，**别勾没跑过的**）。
-3. 提交，遵循下面的提交信息约定。
-4. 发起 Pull Request，说明**改了什么、为什么、怎么验证的**；有 UI 改动请附前后截图。
+2. 使用 AI 代理时先读 [`AGENTS.md`](AGENTS.md)，任务描述可以直接套用[任务请求模板](docs/templates/task-request.md)。
+3. 完成修改，跑通上面对应的验证层（PR 模板里有勾选项，**别勾没跑过的**）。
+4. 提交，遵循下面的提交信息约定。
+5. 发起 Pull Request，说明**改了什么、为什么、怎么验证的**；有 UI 改动请附前后截图。
 
 ### 提交信息约定
 

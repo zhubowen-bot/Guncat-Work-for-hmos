@@ -59,16 +59,24 @@ libs 里的 `.py`，所以 `.py` 必须在 extras 或 zip 里）。
   `THIRD_PARTY_NOTICES.md` 对应小节（名称/版本/许可/产物路径）；
 - 新增随包资产（字体/模型/数据）→ 在 `docs/legal/` 放许可全文；
 - 用户可见的能力变化 → 更新 `docs/features.md`、`docs/guides/usage.md` 与 README（中英）；
-- 版本相关 → 同步 `CHANGELOG.md` 与 `docs/releases/vX.Y.Z.md`；
+- 版本相关 → 同步 `CHANGELOG.md`；三端发布说明与对照文档只在三端仓库齐备且实际同步时处理
+  （见 `AGENTS.md` §3.1）；
 - 文档改完跑 `python3 tooling/docs-check.py --strict`，坏链会让 CI 失败。
 
 ## 4. 版本号与发布物
 
 - `entry/src/main/ets/common/Constants.ts` 的 `APP_VERSION`；
 - `AppScope/app.json5` 的 `versionCode` / `versionName`；
-- README 徽章与「当前应用版本」行；
-- `docs/releases/vX.Y.Z.md` 的产物表与验证结果（尽量写实际构建出的字节数/大小）；
+- `README.md` / `README_EN.md` 的版本徽章、当前版本行与更新记录表格中的版本范围；
+- `entry/src/main/resources/rawfile/玩转应用/index.html` 的 `hero-sub`、首页「新功能体验」
+  入口与新版本子页；
+- `entry/src/main/resources/rawfile/玩转应用/维护指南.md` 的版本记录；
+- `CHANGELOG.md` 的 `## 未发布` 改为 `## X.Y.Z（YYYY-MM-DD）`；
+- `docs/guides/device-verification.md` 等文档中的当前版本引用；
 - 发布 HAP 必须签名；正式包与 Beta 包的 `bundleName` 以 `AppScope/app.json5` 为准。
+- 同步后用旧版本号全仓搜索一遍；历史发布说明与已发布版本的 changelog 小节保持原样。
+- `docs/releases/` 与 `docs/ALIGNMENT_STATUS.md` 是三端发布材料，不在单仓库发版清单内；
+  只有三端仓库都在上级目录且本次确实三端同步时才处理，规则见 `AGENTS.md` §3.1。
 
 ## 5. 提交前
 
