@@ -4,6 +4,8 @@
 /.idea
 **/build
 /.hvigor
+# 本地临时目录（构建日志、重定向的 hvigor/npm 缓存、临时截图等），不入库
+/.tmp/
 # harness 等子目录下的 hvigor 缓存/报告同样是本地产物（根目录那条规则覆盖不到）
 **/.hvigor/
 .cxx
