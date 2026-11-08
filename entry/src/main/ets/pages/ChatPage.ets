@@ -7,7 +7,6 @@ import { AgentDrawerView } from '../views/AgentDrawerView';
 import { DswSidebar } from '../views/DswSidebar';
 import { AskUserCard } from '../views/AskUserCard';
 import { FlyInLaunchView } from '../views/FlyInLaunchView';
-import { ToastView } from '../views/ToastView';
 import { ImageLightbox } from '../views/ImageLightbox';
 import { PlayGuidePanel } from '../views/PlayGuidePanel';
 import { WorkspaceBar, WorkspaceFileIcons } from '../views/WorkspaceBar';
@@ -120,8 +119,7 @@ struct ChatPage {
   private rootH: number = 780;
   @State private lightboxVisible: boolean = false;
   @State private lightboxUrl: string = '';
-  @State private toastMessage: string = '';
-  @State private toastVisible: boolean = false;
+
   @State private isListening: boolean = false;
   @State private refreshTick: number = 0;
   // 空态模式胶囊"正在切往哪一档"(agentId, 空串 = 没有换挡在飞, 完全跟随 vm 的真实模式)。
@@ -156,7 +154,6 @@ struct ChatPage {
   private followBottom: boolean = true;
   // 手动上翻后显示“回到底部”胶囊按钮(仅状态切换时赋值, 不在滚动帧里反复刷新)
   @State private showScrollToBottom: boolean = false;
-  private toastTimer: number = -1;
   // 会话工作时间计时: 工作模式任务执行期间每秒累计(秒数存 VM 供工作区面板显示), 切换/新建会话归零
   private workTickTimer: number = -1;
   private lastWorkConvId: string = '';
@@ -186,6 +183,9 @@ struct ChatPage {
   // 这正是"历史对话积累过多"后闪退/卡死的直接原因。窗口化后渲染成本与历史总长
   // 解耦, 仍可按需回看更早内容。
   private static readonly MESSAGE_WINDOW_STEP: number = 40;
+  // 顶部标题栏(公共头部)高度: 同时作为 Navigation 自定义标题栏高度与内容区顶部留白,
+  // 保证 STACK 模式下消息从毛玻璃标题栏下方透出而不会被盖住。
+  private static readonly TITLE_BAR_HEIGHT: number = 64;
   @State private messageWindowSize: number = ChatPage.MESSAGE_WINDOW_STEP;
   private lastWindowConvId: string = '';
 
@@ -413,10 +413,6 @@ struct ChatPage {
     }
     // 页面销毁时把合并窗口里的存档落盘(不阻塞, flush 内部同步写)
     this.vm.flushConversations();
-    if (this.toastTimer !== -1) {
-      clearTimeout(this.toastTimer);
-      this.toastTimer = -1;
-    }
     if (this.workTickTimer !== -1) {
       clearInterval(this.workTickTimer);
       this.workTickTimer = -1;
@@ -491,16 +487,14 @@ struct ChatPage {
     }, 380);
   }
 
+  // 应用内提示统一走系统 Toast: 只有系统 Toast / 弹窗类组件能吃到沉浸光感材质,
+  // 原来自绘的 ToastView 不在材质生效范围内, 已移除。
   private showToast(msg: string): void {
-    if (this.toastTimer !== -1) {
-      clearTimeout(this.toastTimer);
-    }
-    this.toastMessage = msg;
-    this.toastVisible = true;
-    this.toastTimer = setTimeout(() => {
-      this.toastVisible = false;
-      this.toastTimer = -1;
-    }, 1000);
+    this.getUIContext().getPromptAction().showToast({
+      message: msg,
+      duration: 2000,
+      systemMaterial: ImmersiveLight.toastMaterial()
+    });
   }
 
   // 设置页是独立路由页: 把当前 VM 交给设置页共享, 保存后由 VM 通知本页刷新。
@@ -697,11 +691,14 @@ struct ChatPage {
             .border({ width: { right: 1 }, color: { right: $r('app.color.divider') } })
         }
 
-      // 主聊天布局
-      Column() {
-        // 顶部 Header
-        this.buildHeader()
-
+      // 主聊天布局: 公共头部改为 Navigation 的自定义标题栏。
+      // 平台约束: 除弹窗类组件与 Toggle/Slider/Select 外, 通用组件的系统材质只在
+      // Navigation/NavDestination 标题栏或底部 TabBar 内生效 —— 自绘头部留在内容区
+      // 即使设置 systemMaterial 也不会显示, 所以把头部搬进标题栏, 让沉浸光感
+      // (含高算力设备的 EXQUISITE 档)真正作用在全局头部上。
+      // 标题栏用 STACK 样式: 内容区延伸到标题栏下方, 消息滚动时从毛玻璃标题栏下透出。
+      Navigation() {
+        Column() {
         // 消息区
         if (this.vm.currentMessages.length === 0) {
           // 空状态始终渲染以测量 hero 图标终点；启动期间被启动层遮挡，不会露出
@@ -829,10 +826,20 @@ struct ChatPage {
             .height(148)
             .backgroundColor(Color.Transparent)
         }
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor($r('app.color.background'))
       }
       .layoutWeight(1)
       .height('100%')
-      .backgroundColor($r('app.color.background'))
+      .mode(NavigationMode.Stack)
+      .hideBackButton(true)
+      .title({ builder: this.buildHeader, height: ChatPage.TITLE_BAR_HEIGHT }, {
+        barStyle: BarStyle.STACK,
+        // API 26+ 沉浸光感: 标题栏(含其中按钮)由系统材质接管; 低版本返回 undefined, 保持原样式
+        systemMaterial: ImmersiveLight.barMaterial()
+      })
 
       // 右详情列(宽屏 + 开关开启): 内联渲染, 不经过任何子组件/@ObjectLink/@Prop 观察链路,
       // 随页面每秒重建逐秒刷新(机制与消息时间线/文件预览条相同), 见 buildDetailsPanel
@@ -940,18 +947,6 @@ struct ChatPage {
           this.lightboxUrl = '';
         }
       })
-
-      // Toast
-      if (this.toastVisible) {
-        Stack() {
-          ToastView({ message: this.toastMessage })
-        }
-        .width('100%')
-        .height('100%')
-        .alignContent(Alignment.Top)
-        .padding({ top: 76 })
-        .hitTestBehavior(HitTestMode.None)
-      }
 
       // 开屏飞入动效
       if (this.launchVisible) {
@@ -1330,10 +1325,14 @@ struct ChatPage {
       })
     }
     .width('100%')
-    .height(64)
+    .height(ChatPage.TITLE_BAR_HEIGHT)
     .padding({ left: 8, right: 8 })
-    .backgroundColor($r('app.color.surface'))
-    .shadow({ radius: 18, color: '#0D000000', offsetX: 0, offsetY: 2 })
+    // API 26+ 沉浸光感: 标题栏背板与阴影由系统材质接管(不透明背景会遮挡材质);
+    // 低版本或设备不支持时保持原来的 surface 底色与阴影
+    .backgroundColor(ImmersiveLight.isAvailable() ? Color.Transparent : $r('app.color.surface'))
+    .shadow(ImmersiveLight.isAvailable() ?
+      { radius: 0, color: Color.Transparent, offsetX: 0, offsetY: 0 } :
+      { radius: 18, color: '#0D000000', offsetX: 0, offsetY: 2 })
     .alignItems(VerticalAlign.Center)
   }
 
@@ -1524,6 +1523,8 @@ struct ChatPage {
     }
     .layoutWeight(1)
     .width('100%')
+    // 空状态垂直居中时让出顶部标题栏高度, 避免大标题/模式胶囊被标题栏盖住
+    .padding({ top: ChatPage.TITLE_BAR_HEIGHT })
     .justifyContent(FlexAlign.Center)
     .onAreaChange((_old: Area, newArea: Area) => {
       // 同样记录窗口全局坐标(仅作 hero 初始落点兜底, 锚点自身已上报全局坐标)
@@ -1650,7 +1651,9 @@ struct ChatPage {
         Blank().height(8)
         }
         .width('100%')
-        .padding({ top: 16, bottom: 16, left: 12, right: 12 })
+        // 顶部额外留出标题栏高度: Navigation STACK 模式下内容区延伸到标题栏下方,
+        // 首条消息不被毛玻璃标题栏盖住; 上滑时消息从标题栏下方透出形成沉浸层次
+        .padding({ top: 16 + ChatPage.TITLE_BAR_HEIGHT, bottom: 16, left: 12, right: 12 })
       }
       .width('100%')
       .height('100%')

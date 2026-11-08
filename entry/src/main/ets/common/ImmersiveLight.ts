@@ -34,7 +34,9 @@ export enum ImmersiveSurface {
   /** 菜单、气泡、半模态：官方推荐 THICK，与底层内容拉开层次。 */
   MENU = 2,
   /** 弹窗、Toast：官方推荐 ULTRA_THICK，保证弹窗内容可读。 */
-  DIALOG = 3
+  DIALOG = 3,
+  /** 即时反馈 Toast：官方推荐 THICK。 */
+  TOAST = 4
 }
 
 export class ImmersiveLight {
@@ -85,6 +87,47 @@ export class ImmersiveLight {
     return ImmersiveLight.material(ImmersiveSurface.DIALOG);
   }
 
+  /** 即时反馈 Toast 材质（官方默认 THICK）。 */
+  static toastMaterial(): uiMaterial.Material | undefined {
+    return ImmersiveLight.material(ImmersiveSurface.TOAST);
+  }
+
+  /**
+   * 环境诊断文本，供设置页「终端」展示：应用级开关状态 · 设备能力 · 材质等级。
+   * 用来快速判断「看不到沉浸光感」是系统/设备原因还是界面原因。
+   */
+  static describe(): string {
+    if (!deviceInfo.apiAvailable('26.0.0')) {
+      return '系统低于 API 26，无沉浸光感';
+    }
+    let appState: string = '应用级默认';
+    // 兼容性保护：API 26 接口都在字面量 if 内调用
+    if (deviceInfo.apiAvailable('26.0.0')) {
+      try {
+        const info: uiMaterial.MaterialInfo = uiMaterial.getMaterialInfo();
+        if (info.state === uiMaterial.MaterialState.ENABLE) {
+          appState = '应用级已开启';
+        } else if (info.state === uiMaterial.MaterialState.DISABLE) {
+          appState = '应用级已关闭';
+        }
+      } catch (error) {
+        appState = '应用级状态未知';
+      }
+    }
+    if (!ImmersiveLight.isAvailable()) {
+      return appState + ' · 设备不支持沉浸式材质';
+    }
+    let levelText: string = '未知';
+    if (ImmersiveLight.deviceLevel === 0) {
+      levelText = 'EXQUISITE(精致)';
+    } else if (ImmersiveLight.deviceLevel === 1) {
+      levelText = 'GENTLE(轻柔)';
+    } else if (ImmersiveLight.deviceLevel === 2) {
+      levelText = 'SMOOTH(流畅)';
+    }
+    return appState + ' · 设备支持 · 等级 ' + levelText;
+  }
+
   /**
    * 按用途构建沉浸式系统材质。设备不支持或系统低于 API 26 时返回 undefined，
    * 调用方把 undefined 当作「不设置材质」即可（等于保留原有背景色/模糊/阴影）。
@@ -98,11 +141,11 @@ export class ImmersiveLight {
       if (ImmersiveLight.probeState !== 1) {
         return undefined;
       }
-      // 官方推荐样式：导航/控件用薄材质，菜单用厚材质，弹窗用超厚材质。
+      // 官方推荐样式：导航/控件用薄材质，菜单与 Toast 用厚材质，弹窗用超厚材质。
       let style: uiMaterial.ImmersiveStyle = uiMaterial.ImmersiveStyle.REGULAR;
       if (surface === ImmersiveSurface.BAR || surface === ImmersiveSurface.CONTROL) {
         style = uiMaterial.ImmersiveStyle.ULTRA_THIN;
-      } else if (surface === ImmersiveSurface.MENU) {
+      } else if (surface === ImmersiveSurface.MENU || surface === ImmersiveSurface.TOAST) {
         style = uiMaterial.ImmersiveStyle.THICK;
       } else {
         style = uiMaterial.ImmersiveStyle.ULTRA_THICK;
