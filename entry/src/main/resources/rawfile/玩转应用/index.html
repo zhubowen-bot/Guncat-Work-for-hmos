@@ -20,13 +20,13 @@
   5. 换图标 ──── 顶部应用图标是 assets/app-icon.png, 直接替换图片文件。
                  列表里的图标是单色实心 SVG, 换新图标去
                  https://fonts.google.com/icons 选 Filled 风格复制路径即可。
-  6. 图片说明 ── Version 7.2 新功能体验 (view-012) 的 012-1.png ~ 012-8.png 与
-                  Version 7.0 (view-011) 的 011-1.png ~ 011-10.png 都是正式配图，
+  6. 图片说明 ── Version 7.3 新功能体验 (view-013) 的 013-1.png ~ 013-6.png 与
+                 Version 7.2 (view-012) 的 012-1.png ~ 012-8.png 都是正式配图，
                  与下方介绍卡一一对应 (第 N 张图 ↔ 第 N 张卡);
                  想换图时用同名文件覆盖 assets/ 里的图片即可, 页面代码不用改。
                  交互模式 (view-009) 与 Version 6.3 (view-010) 仍是空占位文件名
                  (009-N.png / 010-N.png), 每页顶部注释写明「第 N 张该放什么」。
-                 原有页面的图片引用一律没动。
+                 Version 7.2 及更早页面的图片引用一律没动。
   ════════════════════════════════════════════════════════════════
 -->
 <html lang="zh-CN">
@@ -48,12 +48,23 @@
       <header class="hero">
         <img class="hero-icon" src="assets/app-icon.png" alt="应用图标">
         <h1 class="hero-title">玩转应用</h1>
-        <p class="hero-sub">Version 7.2.0 (720_1)</p>
+        <p class="hero-sub">Version 7.3.0 (730_1)</p>
       </header>
 
-      <!-- 新功能体验面板: 首页入口卡, 点击分别进入 Version 7.2 / 7.0 / 6.3 / 6.2 新功能子页 -->
+      <!-- 新功能体验面板: 首页入口卡, 点击分别进入 Version 7.3 / 7.2 / 7.0 / 6.3 / 6.2 新功能子页 -->
       <section class="toc toc-gap">
         <div class="toc-header">新功能体验</div>
+
+        <a class="card" href="#/013">
+          <div class="card-icon">
+            <svg viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></svg>
+          </div>
+          <div class="card-body">
+            <div class="card-title">Version 7.3 把日常操作再收拢一点</div>
+            <div class="card-text">个性化指令可以写下长期偏好，按生效范围自动拼进提示词；输入区换成悬浮容器，胶囊各自独立，键盘弹起也不挡按钮。交互模式多了九档能力调度，空输入框保持一行。</div>
+          </div>
+          <div class="card-arrow"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
+        </a>
 
         <a class="card" href="#/012">
           <div class="card-icon">
@@ -1772,6 +1783,104 @@
             <div class="card-text">设置「系统」分组新增「终端」页，用只读列表展示应用内的运行组件：原生 Shell、原生 CPython 3.12 等。</div>
             <div class="card-text">同一页还能看到应用版本、系统版本、API 等级、设备类型、芯片平台与指令集，排查兼容性问题时不用再靠猜。</div>
             <div class="card-text">页面只展示信息，不提供修改入口，也不会影响终端和 Python 的现有行为。</div>
+          </div>
+        </div>
+
+      </div>
+
+    </main>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       子页 · Version 7.3 新功能体验
+       ═══════════════════════════════════════════════════ -->
+  <section class="view" id="view-013">
+    <main class="page">
+
+      <div class="pagebar">
+        <a class="back" href="#/" aria-label="返回目录">
+          <svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg>
+        </a>
+        <div class="pagebar-title">Version 7.3 新功能体验</div>
+      </div>
+
+      <!-- 顶部图片轮播: 本页共 6 张图, 文件名 013-1.png ~ 013-6.png (本页配套插图);
+           每张图对应下面一张介绍卡, 增删时图和卡必须成对同步修改。
+           图片对应内容:
+           013-1 个性化指令     013-2 按生效范围生效   013-3 输入区悬浮改版
+           013-4 胶囊独立悬浮   013-5 能力调度九档     013-6 输入框保持单行 -->
+      <div class="gallery">
+        <div class="gallery-track">
+          <img src="assets/013-1.png" alt="写一次长期偏好，往后不用反复交代">
+          <img src="assets/013-2.png" alt="一份指令，按范围各管各的">
+          <img src="assets/013-3.png" alt="输入区换个形态，操作都收进底栏">
+          <img src="assets/013-4.png" alt="胶囊各自独立，键盘不再挡按钮">
+          <img src="assets/013-5.png" alt="交互模式九档能力调度，按需要挑一档">
+          <img src="assets/013-6.png" alt="空输入框从此只占一行">
+        </div>
+        <div class="gallery-dots"></div>
+      </div>
+
+      <!-- 与轮播联动的介绍卡: 第 N 张图对应第 N 张卡, 只显示当前那张 -->
+      <div class="gallery-cards">
+
+        <!-- 1 个性化指令 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">写下长期偏好，往后不用反复交代</div>
+            <div class="card-text">设置 →「能力」→「个性化指令」新增入口：把「先给结论再展开」「中文回答」这类长期要求写一次，之后每条对话都按它来，不用反复交代。</div>
+            <div class="card-text">一条指令可以填名称（可不填）和正文，正文支持 Markdown；点「Markdown 渲染」只切换编辑页的预览，保存的始终是你写的原文，纯文本也能直接保存。</div>
+            <div class="card-text">点「添加」或「保存」才写入，编辑时可以删除（会再确认一次）；指令只存在本机、不上传，单条最多 8000 字。</div>
+          </div>
+        </div>
+
+        <!-- 2 按生效范围生效 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">一条指令，只管你勾选的范围</div>
+            <div class="card-text">每条个性化指令都能勾选生效范围：交互模式、工作模式，以及每个聊天引擎，可以多选，至少选一个。新建时默认勾上交互模式和工作模式。</div>
+            <div class="card-text">保存后从下一次请求开始，勾中范围的系统提示词末尾会追加一段「个性化指令」，并说明这些是长期偏好、不是新任务；同一范围有多条时按添加顺序拼接。</div>
+            <div class="card-text">没勾中的模式不会带上这些内容；原有提示词只在结尾追加，前面的部分保持不变。</div>
+          </div>
+        </div>
+
+        <!-- 3 输入区悬浮改版 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">输入区换成悬浮容器，操作都收进底栏</div>
+            <div class="card-text">输入区改成一个大的圆角悬浮容器：文字独占一行，语音、拍照、附件和发送都收进容器底栏，按钮不再各自套一层白色小圆底。</div>
+            <div class="card-text">文字和占位文字都比原来大一号，单行更舒展，多行草稿照常向上展开；发送键保留主色圆底，其他按钮只留图标。</div>
+            <div class="card-text">底部不再铺独立色块，输入区与页面背景连成一片，层次改由容器和胶囊自身的描边、阴影表达，深浅色都跟着主题走。</div>
+          </div>
+        </div>
+
+        <!-- 4 胶囊独立悬浮 + 键盘避让 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">胶囊各管各的，键盘弹起也点得到按钮</div>
+            <div class="card-text">模型选择、联网搜索、深度思考或工作区，从一整条工具栏拆成几个独立胶囊：各自按内容取宽、彼此留出间距，靠左排开。</div>
+            <div class="card-text">页面改为按键盘高度压缩布局：键盘弹起时，语音、拍照、附件、发送不再被盖住，输入过程中也能直接点。</div>
+            <div class="card-text">这些变化只影响布局，操作路径和以前一样。</div>
+          </div>
+        </div>
+
+        <!-- 5 能力调度九档 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">交互模式新增九档，按需要挑一档</div>
+            <div class="card-text">设置 →「能力」→「能力调度」新增九档：轻简、效率、专家、经典、论文转换、法律检索、深度研究、信息筛滤、LLM评估。</div>
+            <div class="card-text">默认还是「轻简」，直接沿用原来的交互模式提示词，行为和速度不变；其余八档把聊天引擎里对应智能体的成熟提示词搬进交互模式，适合论文、法律、深度研究这类专门任务。</div>
+            <div class="card-text">只影响交互模式，工作模式和聊天模式不受影响；切到某档时，思考强度也会跟着推荐值调整。</div>
+          </div>
+        </div>
+
+        <!-- 6 输入框保持单行 -->
+        <div class="card">
+          <div class="card-body">
+            <div class="card-title">空输入框固定一行，草稿仍向上展开</div>
+            <div class="card-text">执行任务时输入行右侧会多出「停止」按钮，输入框被挤窄后，占位文字以前会折成两行，把空输入框撑高。</div>
+            <div class="card-text">现在占位文字和正文同字号，末尾的省略号也去掉了（「描述问题」「描述任务」「输入消息」），空输入框固定保持一行。</div>
+            <div class="card-text">自己输入多行草稿时仍照常向上展开，需要看更多内容不受影响。</div>
           </div>
         </div>
 
