@@ -10,7 +10,11 @@
       {
         "name": "default",
         "signingConfig": "default",
-        "targetSdkVersion": "6.1.1(24)",
+        // target 升到 API 26：沉浸光感（targetSdkVersion >= 26.0.0 才生效）。
+        // API 26 起 targetSdkVersion 采用不带括号的语义化版本号写法。
+        // compatible 保持 6.1.1(24)：老设备仍可安装，26 的新接口由
+        // deviceInfo.apiAvailable('26.0.0') 在运行时做兼容保护并降级。
+        "targetSdkVersion": "26.0.0",
         "compatibleSdkVersion": "6.1.1(24)",
         "runtimeOS": "HarmonyOS",
         "buildOption": {

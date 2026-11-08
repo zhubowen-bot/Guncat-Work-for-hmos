@@ -12,6 +12,16 @@
     "deliveryWithInstall": true,
     "installationFree": false,
     "pages": "$profile:main_pages",
+    // 应用级开启沉浸光感（API 26+）：Dialog / Toast / Menu / Select / Toggle /
+    // Slider / 文本选择菜单等系统组件按各自官方默认材质样式生效；低算力设备由系统
+    // 自动降级，应用侧不写设备分级分支。该配置只在 entry 类型 module 中生效，
+    // 低于 API 26 的系统会忽略未知 metadata。
+    "metadata": [
+      {
+        "name": "ohos.arkui.UIMaterial.state",
+        "value": "enable"
+      }
+    ],
     "querySchemes": [
       "apptest"
     ],

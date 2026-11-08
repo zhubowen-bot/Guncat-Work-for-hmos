@@ -6,7 +6,7 @@
 
 <!-- Demo slot (optional upgrade): a 30–60s real-device screen recording — enter work mode → generate a PPT from one sentence → expand the artifact card → switch to interactive mode and drag a slider to recompute. A moving GIF beats static screenshots. -->
 
-![HarmonyOS](https://img.shields.io/badge/HarmonyOS-API%2024%20(6.1.1)-blue)
+![HarmonyOS](https://img.shields.io/badge/HarmonyOS-API%2026%20target%20(min%2024)-blue)
 ![version](https://img.shields.io/badge/version-7.2.0-blue)
 ![forms](https://img.shields.io/badge/Agent%20Forms-Intelligent%20UI%20%2B%20Harness-blueviolet)
 ![shell](https://img.shields.io/badge/shell-IEC%20native%20%C2%B7%20no%20VM-orange)
@@ -76,6 +76,7 @@ Current app version: `7.2.0` · full change history in the [changelog](CHANGELOG
 - **Attachments and sharing**: direct or pre-parsed image / document upload, 256px thumbnails, quick camera capture, export a Markdown answer to Word (including LaTeX → native OMML formulas), and receiving HarmonyOS system shares.
 - **Voice**: CoreSpeechKit read-aloud (switchable system voices and speed, continues on the lock screen and in the background, draggable control bar) plus native voice input.
 - **Adaptive UI**: three columns on wide screens, single column plus drawer on narrow screens; follows the system light/dark theme and keeps the status bar, navigation bar and Markdown styles in sync.
+- **Immersive light (API 26)**: on HarmonyOS API 26+, system toasts, dialogs, menus, dropdown selects, toggles and sliders get a translucent glass material with refraction highlights and press glow, and the material level adapts to device capability and system settings. The app's custom-drawn header, input area, sidebar and drawer are outside the system material's scope, so they do not show it. Devices below API 26 (HarmonyOS 6.1.1+ remains supported) keep the previous styles.
 
 The complete feature inventory and implementation details are in [Features](docs/features.md).
 
@@ -83,8 +84,8 @@ The complete feature inventory and implementation details are in [Features](docs
 
 ### Requirements
 
-- DevEco Studio 6.1.1 or a compatible version
-- HarmonyOS SDK API 24 (`6.1.1`)
+- DevEco Studio 26 (`26.0.0` or later)
+- HarmonyOS SDK API 26 (target `26.0.0`; `compatibleSdkVersion` stays at `6.1.1(24)`, so devices on API 24 / HarmonyOS 6.1.1+ can still install it)
 - A physical HarmonyOS phone (tablets and 2-in-1 devices work too — wide screens expand into the three-column layout)
 
 ### Build
@@ -102,7 +103,7 @@ Build steps:
    `libnode.so` as `libnode.so.xz`, ~23 MB, because GitHub rejects files over 100 MB;
    skip it if you already ran `build_node.sh`, an existing `.so` is never overwritten).
 3. Open the **repository root** in DevEco Studio.
-4. Install and select HarmonyOS SDK API 24.
+4. Install and select HarmonyOS SDK API 26 (target `26.0.0`; requires DevEco Studio 26).
 5. Configure debug or release signing.
 6. Connect a physical HarmonyOS device.
 7. Run the `entry` module, or build the HAP with the command above.
@@ -190,6 +191,7 @@ The pure-logic / type checks, UI-copy guard, usage ledger, IEC static consistenc
 | [FAQ](docs/guides/faq.md) | Troubleshooting and known behaviour |
 | [Built-in agents](docs/reference/builtin-agents.md) | Agent inventory and differences |
 | [Persistence and theming](docs/reference/persistence-and-theme.md) | Local storage, usage ledger and theme implementation |
+| [Immersive light (API 26)](docs/architecture/immersive-light.md) | Capability switch, surface-to-material mapping, device-level fallback, the `apiAvailable` compatibility guard and scope limits |
 | [Workspace and conversation data lifecycle](docs/architecture/workspace-lifecycle.md) | On-disk layout, cascade cleanup, launch sweep and four residue cases |
 | [Device verification checklist (shell / IEC)](docs/guides/device-verification.md) | Install, self-test, per-command checks and troubleshooting |
 | [Background keep-alive](docs/architecture/background-keepalive.md) | Transient / continuous task layering, flush points and system constraints |

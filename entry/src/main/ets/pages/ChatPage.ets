@@ -17,6 +17,7 @@ import { WorkArtifactFile, WorkArtifactSummary, WorkArtifactUtil } from '../comm
 import { Constants } from '../common/Constants';
 import { GuncatUiEvent } from '../common/GuncatUiRuntime';
 import { GuncatUiParts } from '../common/GuncatUiParts';
+import { ImmersiveLight } from '../common/ImmersiveLight';
 import { SendRoute } from '../common/SteerQueue';
 import { Message } from '../model/Message';
 import { ToolCallRecord } from '../model/ToolCallRecord';
@@ -745,6 +746,8 @@ struct ChatPage {
                     // 透明遮罩: 点击面板外任意区域即收起, 且不压暗页面
                     mask: { color: Color.Transparent },
                     showInSubWindow: false,
+                    // API 26+ 沉浸光感: 弹层背板改用系统菜单材质; 低版本返回 undefined, 即不设置
+                    systemMaterial: ImmersiveLight.menuMaterial(),
                     onStateChange: (e: PopupStateChangeParam) => {
                       if (this.workspacePopupOpen !== e.isVisible) {
                         this.workspacePopupOpen = e.isVisible;
@@ -1106,7 +1109,11 @@ struct ChatPage {
           .borderRadius(16)
           .backgroundColor($r('app.color.raised_surface'))
           .shadow({ radius: 10, color: '#12000000', offsetX: 0, offsetY: 2 })
-          .bindMenu(this.buildReaderVoiceMenu(), { placement: Placement.Bottom })
+          .bindMenu(this.buildReaderVoiceMenu(), {
+            placement: Placement.Bottom,
+            // API 26+ 沉浸光感: 菜单背板改用系统菜单材质; 低版本返回 undefined, 即不设置
+            systemMaterial: ImmersiveLight.menuMaterial()
+          })
       }
       .width('100%')
     }
@@ -2055,6 +2062,8 @@ struct ChatPage {
       // 透明遮罩: 点击弹层外任意区域即收起, 且不压暗页面
       mask: { color: Color.Transparent },
       showInSubWindow: false,
+      // API 26+ 沉浸光感: 弹层背板改用系统菜单材质; 低版本返回 undefined, 即不设置
+      systemMaterial: ImmersiveLight.menuMaterial(),
       onStateChange: (e: PopupStateChangeParam) => {
         if (this.modelMenuOpen !== e.isVisible) {
           this.modelMenuOpen = e.isVisible;
@@ -2229,9 +2238,12 @@ struct ChatPage {
     }
     .width(240)
     .padding(6)
-    .backgroundColor($r('app.color.surface'))
+    // API 26+ 沉浸光感: 背板与阴影交给系统材质(自定义不透明背景会遮挡材质); 低版本保持原样式
+    .backgroundColor(ImmersiveLight.isAvailable() ? Color.Transparent : $r('app.color.surface'))
     .borderRadius(18)
-    .shadow({ radius: 16, color: '#1A000000', offsetX: 0, offsetY: 6 })
+    .shadow(ImmersiveLight.isAvailable() ?
+      { radius: 0, color: Color.Transparent, offsetX: 0, offsetY: 0 } :
+      { radius: 16, color: '#1A000000', offsetX: 0, offsetY: 6 })
   }
 
   // 胶囊只显示模型名(服务商只在弹层里显示)

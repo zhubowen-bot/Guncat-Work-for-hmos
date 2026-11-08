@@ -89,6 +89,7 @@ entry/src/main/ets/
 │   └── ToolCatalog.ts (设置页只读目录) / UsageModels.ts (用量账本模型)
 └── common/
     ├── Constants.ts / Types.ts / Utils.ts / MarkdownSanitizer.ts
+    ├── ImmersiveLight.ts            # 沉浸光感材质适配层（API 26 应用级开关、按用途材质、apiAvailable 兼容保护）
     ├── GuncatUiLang.ts              # 交互模式语言核心：guncat-ui lang 词法/语法/求值/围栏切分
     ├── GuncatUiLibrary.ts           # 交互模式组件库单一事实源（签名/描述/位置参数表 → 提示词）
     ├── GuncatUiPrompt.ts            # 交互模式系统提示词（语法/组件选择优先级与丰富度/交互/流式顺序/示例/反例/模式职责）

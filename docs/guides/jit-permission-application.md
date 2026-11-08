@@ -90,7 +90,7 @@ JIT 的输入仅来自随包分发的只读 Linux 镜像与用户本机工作区
 | 表单字段 | 填写 |
 | --- | --- |
 | 权限名称 | `ohos.permission.kernel.ALLOW_USE_JITFORT_INTERFACE` |
-| 起始版本 | API 8 起可用（当前 targetSdkVersion 24） |
+| 起始版本 | API 8 起可用（当前 targetSdkVersion 26.0.0） |
 | 使用场景 | 应用自研的虚拟机内代码生成（QEMU TCG），用于本地 Linux 命令执行 |
 | 申请理由 | 见上文第 1 节短版 |
 | 是否可回退 | 是：无权限/坚盾模式自动回退 TCI 解释执行 |

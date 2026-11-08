@@ -1,5 +1,6 @@
 // 工作模式工作区面板: 挂在"工作模式"胶囊上方的弹层(文件列表 + 上传 / 导出 zip)
 // 通过 @ObjectLink 直接观察 ChatViewModel 的工作区字段(workspaceFiles/workElapsedSec 变更时自动刷新)
+import { ImmersiveLight } from '../common/ImmersiveLight';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { WorkFileService, WorkspaceFileInfo } from '../service/WorkFileService';
 import { Message } from '../model/Message';
@@ -230,9 +231,12 @@ export struct WorkspaceBar {
     .width(220)
     .constraintSize({ minHeight: 268 })
     .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-    .backgroundColor($r('app.color.surface'))
+    // API 26+ 沉浸光感: 背板与阴影交给系统材质(自定义不透明背景会遮挡材质); 低版本保持原样式
+    .backgroundColor(ImmersiveLight.isAvailable() ? Color.Transparent : $r('app.color.surface'))
     .borderRadius(14)
-    .shadow({ radius: 24, color: '#2E000000', offsetX: 0, offsetY: 4 })
+    .shadow(ImmersiveLight.isAvailable() ?
+      { radius: 0, color: Color.Transparent, offsetX: 0, offsetY: 0 } :
+      { radius: 24, color: '#2E000000', offsetX: 0, offsetY: 4 })
   }
 
   @Builder
