@@ -50,6 +50,8 @@ for (const [relSrc, relDst, replaces] of [
   ['common/ToolSchemaValidator.ts', 'ToolSchemaValidator.ts', []],
   ['common/ToolRegistry.ts', 'ToolRegistry.ts', []],
   ['common/PromptBuilder.ts', 'PromptBuilder.ts', []],
+  ['model/PersonalInstruction.ts', 'PersonalInstruction.ts', []],
+  ['common/PersonalInstructionPrompt.ts', 'PersonalInstructionPrompt.ts', []],
   ['common/InteractiveTiers.ts', 'InteractiveTiers.ts', []],
   ['common/InteractiveTierPrompts.ts', 'InteractiveTierPrompts.ts', []],
   ['common/InteractiveTierPrompt.ts', 'InteractiveTierPrompt.ts', []],

@@ -4,8 +4,10 @@ import { deviceInfo } from '@kit.BasicServicesKit';
 import { ApiConfig } from '../model/ApiConfig';
 import { ApiProfile } from '../model/ApiProfile';
 import { MultimodalConfig } from '../model/MultimodalConfig';
+import { PersonalInstruction } from '../model/PersonalInstruction';
 import { TOOL_CATALOG, ToolCatalogGroup, ToolCatalogItem, toolCatalogCount } from '../model/ToolCatalog';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
+import { PersonalInstructionEditSession } from '../viewmodel/PersonalInstructionEditSession';
 import { SettingsSession } from '../viewmodel/SettingsSession';
 import { Constants } from '../common/Constants';
 import { InteractiveTier, InteractiveTiers } from '../common/InteractiveTiers';
@@ -75,6 +77,8 @@ struct SettingsPage {
   @State private autoReadEnabled: boolean = false;
   // 能力调度: 当前交互模式档位 id(与 VM.interactiveTier 同步; 详情页切换后立即生效)
   @State private interactiveTier: string = InteractiveTiers.DEFAULT_ID;
+  // 个性化指令条目快照(VM 内部数组不受本页状态观察, 进入本页与从编辑页返回时重新取一份)
+  @State private personalInstructions: PersonalInstruction[] = [];
   // 终端信息页展示用
   @State private systemName: string = 'HarmonyOS';
   @State private deviceLabel: string = '本机设备';
@@ -92,7 +96,13 @@ struct SettingsPage {
       return;
     }
     this.syncFromVm();
+    this.refreshPersonalInstructions();
     this.loadEnvironmentInfo();
+  }
+
+  // 从个性化指令编辑页返回时刷新条目: 新建、编辑、删除后首页副标题与列表立即更新
+  onPageShow(): void {
+    this.refreshPersonalInstructions();
   }
 
   // 终端页的只读环境信息: 系统名称与设备类型来自当前设备, 不展示任何设备标识
@@ -200,6 +210,45 @@ struct SettingsPage {
     this.interactiveTier = vm.interactiveTier;
   }
 
+  // ===== 个性化指令: 入口摘要与跳转 =====
+
+  // 从 VM 取一份个性化指令快照: 本页只读列表, 新建/编辑/删除都在独立编辑页完成
+  private refreshPersonalInstructions(): void {
+    let vm: ChatViewModel | null = this.vm;
+    if (vm === null) {
+      this.personalInstructions = [];
+      return;
+    }
+    this.personalInstructions = vm.listPersonalInstructions();
+  }
+
+  // 设置首页「能力 → 个性化指令」的副标题
+  private personalSummary(): string {
+    let count: number = this.personalInstructions.length;
+    if (count === 0) {
+      return '尚未添加';
+    }
+    return '共 ' + count.toString() + ' 条 · 自动拼进生效提示词';
+  }
+
+  // 条目第二行: 生效范围摘要(VM 为空时留空, 避免列表行出现异常文案)
+  private personalScopeText(item: PersonalInstruction): string {
+    let vm: ChatViewModel | null = this.vm;
+    if (vm === null) {
+      return '';
+    }
+    return vm.personalScopeSummary(item);
+  }
+
+  // 打开个性化指令编辑页: 空 id = 新建; 编辑页通过模块级会话取本次要编辑的 id
+  private openPersonalEditor(id: string): void {
+    if (this.vm === null) {
+      return;
+    }
+    PersonalInstructionEditSession.bind(id);
+    router.pushUrl({ url: 'pages/PersonalInstructionEditPage' }).catch((): void => {});
+  }
+
   build() {
     Column() {
       this.buildHeader()
@@ -219,6 +268,8 @@ struct SettingsPage {
         this.buildToolsView()
       } else if (this.view === 'tier') {
         this.buildTierView()
+      } else if (this.view === 'personal') {
+        this.buildPersonalView()
       } else {
         this.buildRootView()
       }
@@ -253,6 +304,26 @@ struct SettingsPage {
           .fontColor($r('app.color.text_primary'))
           .layoutWeight(1)
           .margin({ left: 8 })
+
+        if (this.view === 'personal') {
+          Row() {
+            SymbolGlyph($r('sys.symbol.plus'))
+              .fontSize(14)
+              .fontColor([$r('app.color.brand')])
+            Text('新建')
+              .fontSize(13)
+              .fontColor($r('app.color.brand'))
+              .margin({ left: 4 })
+          }
+          .height(32)
+          .padding({ left: 12, right: 12 })
+          .borderRadius(16)
+          .backgroundColor($r('app.color.brand_light'))
+          .alignItems(VerticalAlign.Center)
+          .onClick((): void => {
+            this.openPersonalEditor('');
+          })
+        }
       }
       .width('100%')
       .constraintSize({ maxWidth: 720 })
@@ -304,6 +375,14 @@ struct SettingsPage {
 
           this.buildSectionLabel('能力')
           Column() {
+            this.buildOptionRow($r('sys.symbol.doc_plaintext_and_pencil'), '个性化指令',
+              this.personalSummary(), (): void => {
+                this.view = 'personal';
+              })
+            Divider()
+              .strokeWidth(0.5)
+              .color($r('app.color.divider'))
+              .margin({ left: 56 })
             this.buildOptionRow($r('sys.symbol.wand_and_stars'), '能力调度',
               this.tierSummary(), (): void => {
                 this.view = 'tier';
@@ -1378,6 +1457,152 @@ struct SettingsPage {
     .edgeEffect(EdgeEffect.Spring)
   }
 
+  // ===== 个性化指令 =====
+  // 列表在本页内(空态卡片 / 非空列表卡片), 新建与编辑都跳独立编辑页;
+  // 编辑页返回时由 onPageShow 重新取快照, 保证条目与首页副标题立即更新。
+  @Builder
+  private buildPersonalView() {
+    Scroll() {
+      Column() {
+        if (this.personalInstructions.length === 0) {
+          this.buildPersonalEmpty()
+        } else {
+          this.buildPersonalList()
+        }
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 720 })
+      .padding({ left: 16, right: 16, bottom: 24 })
+    }
+    .layoutWeight(1)
+    .width('100%')
+    .align(Alignment.Top)
+    .scrollBar(BarState.Off)
+    .edgeEffect(EdgeEffect.Spring)
+  }
+
+  // 空态: 一张居中卡片, 说明用途并提供新建入口
+  @Builder
+  private buildPersonalEmpty() {
+    Column() {
+      SymbolGlyph($r('sys.symbol.doc_plaintext_and_pencil'))
+        .fontSize(44)
+        .fontColor([$r('app.color.brand')])
+        .opacity(0.35)
+      Text('还没有个性化指令')
+        .fontSize(16)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_primary'))
+        .margin({ top: 14 })
+      Text('添加后，会在你勾选的交互模式、工作模式或聊天引擎里自动附加这些偏好。')
+        .fontSize(12)
+        .fontColor($r('app.color.text_secondary'))
+        .lineHeight(19)
+        .textAlign(TextAlign.Center)
+        .width('100%')
+        .margin({ top: 8 })
+      Row() {
+        SymbolGlyph($r('sys.symbol.plus'))
+          .fontSize(14)
+          .fontColor([$r('app.color.brand')])
+        Text('新建个性化指令')
+          .fontSize(14)
+          .fontColor($r('app.color.brand'))
+          .margin({ left: 6 })
+      }
+      .height(42)
+      .padding({ left: 16, right: 16 })
+      .borderRadius(21)
+      .backgroundColor($r('app.color.brand_light'))
+      .alignItems(VerticalAlign.Center)
+      .margin({ top: 18 })
+      .onClick((): void => {
+        this.openPersonalEditor('');
+      })
+    }
+    .width('100%')
+    .padding({ left: 24, right: 24, top: 40, bottom: 36 })
+    .backgroundColor($r('app.color.surface'))
+    .borderRadius(22)
+    .border({ width: 1, color: $r('app.color.divider') })
+    .margin({ top: 16 })
+    .alignItems(HorizontalAlign.Center)
+  }
+
+  // 非空态: 顶部提示行 + 单张 surface 列表卡片
+  @Builder
+  private buildPersonalList() {
+    Column() {
+      Text('点击条目编辑指令与生效范围。')
+        .fontSize(12)
+        .fontColor($r('app.color.text_secondary'))
+        .width('100%')
+        .lineHeight(19)
+        .padding({ left: 4, right: 4, top: 8 })
+      Column() {
+        ForEach(this.personalInstructions, (item: PersonalInstruction, index: number) => {
+          if (index > 0) {
+            Divider()
+              .strokeWidth(0.5)
+              .color($r('app.color.divider'))
+              .margin({ left: 16 })
+          }
+          this.buildPersonalRow(item)
+        }, (item: PersonalInstruction) => item.id + '|' + item.updatedAt.toString())
+      }
+      .width('100%')
+      .backgroundColor($r('app.color.surface'))
+      .borderRadius(22)
+      .border({ width: 1, color: $r('app.color.divider') })
+      .clip(true)
+      .margin({ top: 8 })
+    }
+    .width('100%')
+  }
+
+  // 单条指令: 显示名 / 生效范围 / 正文摘要, 整行点击进入编辑页
+  @Builder
+  private buildPersonalRow(item: PersonalInstruction) {
+    Row() {
+      Column() {
+        Text(item.displayName())
+          .fontSize(15)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_primary'))
+          .width('100%')
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(this.personalScopeText(item))
+          .fontSize(11)
+          .fontColor($r('app.color.text_secondary'))
+          .width('100%')
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .margin({ top: 3 })
+        Text(item.summary())
+          .fontSize(11)
+          .fontColor($r('app.color.text_tertiary'))
+          .width('100%')
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .margin({ top: 3 })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      SymbolGlyph($r('sys.symbol.chevron_right'))
+        .fontSize(15)
+        .fontColor([$r('app.color.text_quaternary')])
+        .margin({ left: 10 })
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 13, bottom: 13 })
+    .alignItems(VerticalAlign.Center)
+    .onClick((): void => {
+      this.openPersonalEditor(item.id);
+    })
+  }
+
   // ===== 朗读 =====
   @Builder
   private buildReadingView() {
@@ -1850,6 +2075,9 @@ struct SettingsPage {
     }
     if (this.view === 'tier') {
       return '能力调度';
+    }
+    if (this.view === 'personal') {
+      return '个性化指令';
     }
     return '设置';
   }

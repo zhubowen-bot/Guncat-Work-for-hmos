@@ -9,8 +9,10 @@ import { ApiConfig } from '../model/ApiConfig';
 import { MultimodalConfig } from '../model/MultimodalConfig';
 import { ApiProfile } from '../model/ApiProfile';
 import { UsageSnapshot } from '../model/UsageModels';
+import { PersonalInstruction } from '../model/PersonalInstruction';
 import { LLMProtocol } from '../common/LLMProtocol';
 import { InteractiveTier, InteractiveTiers } from '../common/InteractiveTiers';
+import { PersonalInstructionPrompt } from '../common/PersonalInstructionPrompt';
 import { FileItem, StreamCallbacks, AbortSignal, ParsedFileResult } from '../common/Types';
 import { ToolExecutionGuard } from '../common/ToolExecutionGuard';
 import { LoopMetrics } from '../common/LoopMetrics';
@@ -41,6 +43,7 @@ import { SessionLogService } from '../service/SessionLogService';
 import { BackgroundTaskService } from '../service/BackgroundTaskService';
 import { WorkspaceMentionService, MentionRender } from '../service/WorkspaceMentionService';
 import { SubagentService } from '../service/SubagentService';
+import { PersonalInstructionStore } from '../service/PersonalInstructionStore';
 import { ToolCallRecord } from '../model/ToolCallRecord';
 import { FileUploadService } from '../service/FileUploadService';
 import { FileService, PickedFile } from '../service/FileService';
@@ -121,6 +124,9 @@ export class ChatViewModel {
   localSearchConfig: SearchEngineSettings = new SearchEngineSettings();
   apiProfiles: ApiProfile[] = [];
   currentApiProfileId: string = '';
+  // 个性化指令: 用户在设置页维护的长期偏好, 按生效范围自动拼进系统提示词末尾
+  // (拼装规则见 common/PersonalInstructionPrompt.ts; 持久化见 service/PersonalInstructionStore.ts)
+  personalInstructions: PersonalInstruction[] = [];
 
   // 工作模式(Agent Loop): 当前会话的工作区文件列表 + 刚上传尚未随任务发送的文件名
   workspaceFiles: WorkspaceFileInfo[] = [];
@@ -345,6 +351,8 @@ export class ChatViewModel {
 
     // 加载智能体; 工作模式作为与智能体平行的固定项注入列表顶部
     this.agents = await AgentLoader.loadAllAgents(this.context);
+    // 个性化指令: 纯偏好文本, 只用于拼系统提示词末尾; 读失败按空列表处理
+    this.personalInstructions = await PersonalInstructionStore.load(this.context);
 
     // 热加载 rawfile/plugins 插件(注册进 ToolRegistry, 工作模式动态目录自动包含)
     await PluginHotLoader.loadAll(this.context);
@@ -865,6 +873,117 @@ export class ChatViewModel {
     if (this.context !== null) {
       await StorageManager.saveBoolean(this.context, Constants.LS_KEY_WEB_SEARCH_ENABLED, enabled);
     }
+  }
+
+  // ===== 个性化指令(设置页维护; 按生效范围拼进系统提示词末尾) =====
+
+  // 当前全部条目(设置页/编辑页读取快照; 不改内存对象)
+  listPersonalInstructions(): PersonalInstruction[] {
+    return this.personalInstructions.slice();
+  }
+
+  personalInstructionById(id: string): PersonalInstruction | null {
+    let index: number = PersonalInstruction.indexOfId(this.personalInstructions, id);
+    return index >= 0 ? this.personalInstructions[index] : null;
+  }
+
+  // 新建或更新一条(id 命中则原位替换, 否则追加到末尾), 落盘后通知界面刷新
+  async savePersonalInstruction(item: PersonalInstruction): Promise<void> {
+    let index: number = PersonalInstruction.indexOfId(this.personalInstructions, item.id);
+    if (index >= 0) {
+      this.personalInstructions[index] = item;
+    } else {
+      this.personalInstructions.push(item);
+    }
+    this.personalInstructions = this.personalInstructions.slice();
+    if (this.context !== null) {
+      await PersonalInstructionStore.save(this.context, this.personalInstructions);
+    }
+    this.notifyUIChange();
+  }
+
+  // 删除一条; 返回是否真的删到了(设置页据此提示)
+  async deletePersonalInstruction(id: string): Promise<boolean> {
+    let index: number = PersonalInstruction.indexOfId(this.personalInstructions, id);
+    if (index < 0) {
+      return false;
+    }
+    this.personalInstructions.splice(index, 1);
+    this.personalInstructions = this.personalInstructions.slice();
+    if (this.context !== null) {
+      await PersonalInstructionStore.save(this.context, this.personalInstructions);
+    }
+    this.notifyUIChange();
+    return true;
+  }
+
+  // 聊天引擎列表(排除交互/工作两个虚拟项): 编辑页的「聊天引擎」范围分组用
+  chatEngines(): Agent[] {
+    let out: Agent[] = [];
+    for (let i: number = 0; i < this.agents.length; i++) {
+      let id: string = this.agents[i].id;
+      if (id !== Constants.WORK_AGENT_ID && id !== Constants.INTERACTIVE_AGENT_ID) {
+        out.push(this.agents[i]);
+      }
+    }
+    return out;
+  }
+
+  // 生效范围的可读名: 两个模式有固定中文名, 聊天引擎取智能体名, 未登记的旧值原样显示
+  personalScopeLabel(scope: string): string {
+    let fixed: string = PersonalInstructionPrompt.fixedScopeLabel(scope);
+    if (fixed !== '') {
+      return fixed;
+    }
+    for (let i: number = 0; i < this.agents.length; i++) {
+      if (this.agents[i].id === scope) {
+        return this.agents[i].name;
+      }
+    }
+    return scope;
+  }
+
+  // 列表副标题: 本条指令的生效范围摘要
+  personalScopeSummary(item: PersonalInstruction): string {
+    if (item.scopes.length === 0) {
+      return '未设置生效范围';
+    }
+    let labels: string[] = [];
+    for (let i: number = 0; i < item.scopes.length; i++) {
+      labels.push(this.personalScopeLabel(item.scopes[i]));
+    }
+    return labels.join('、');
+  }
+
+  // 某条指令生效时, 它在系统提示词末尾贡献的段落; 无条目生效返回空串
+  private personalPromptSection(scope: string): string {
+    return PersonalInstructionPrompt.section(scope, this.personalInstructions);
+  }
+
+  // 工作/交互模式的系统提示词: 原有提示词 + 本模式生效的个性化指令
+  private modeSystemPrompt(mode: string): string {
+    let base: string = AgentLoopService.buildWorkSystemPromptFor(mode, this.interactiveTier);
+    let scope: string = mode === Constants.MODE_INTERACTIVE ?
+      PersonalInstructionPrompt.SCOPE_INTERACTIVE : PersonalInstructionPrompt.SCOPE_WORK;
+    return PersonalInstructionPrompt.appendSection(base, this.personalPromptSection(scope));
+  }
+
+  // 聊天模式的请求智能体: 复制一份并把当前引擎生效的个性化指令拼进 systemPrompt。
+  // 不原地改 this.currentAgent, 避免把偏好写进会话状态/下次切引擎时串味。
+  private agentWithPersonalInstructions(agent: Agent | null): Agent | null {
+    if (agent === null) {
+      return null;
+    }
+    let section: string = this.personalPromptSection(agent.id);
+    if (section === '') {
+      return agent;
+    }
+    let copy: Agent = Agent.of(agent.id, agent.name, agent.description, agent.category,
+      agent.promptFile, '');
+    copy.shortDescription = agent.shortDescription;
+    copy.icon = agent.icon;
+    copy.systemPrompt = PersonalInstructionPrompt.appendSection(agent.systemPrompt, section);
+    return copy;
   }
 
   // ===== 工作模式 (Agent Loop + 沙箱工作区) =====
@@ -2448,7 +2567,7 @@ export class ChatViewModel {
     try {
       // 组装与协议无关的循环历史(含既有全部消息); 系统提示词为静态文本, 整个循环不重写
       let messages: LoopMessage[] = [];
-      messages.push(LoopMessage.system(AgentLoopService.buildWorkSystemPromptFor(conv.mode, this.interactiveTier)));
+      messages.push(LoopMessage.system(this.modeSystemPrompt(conv.mode)));
       // 只把最近 3 条用户消息的图片重新注入请求: 历史图片每轮都随 base64
       // 重发会让请求体随轮次线性膨胀, 是长任务内存/网络压力的重要来源。
       // 更早的图片仍保留在工作区/会话记录里, 模型需要时可用 read_file 重新读取。
@@ -2982,7 +3101,7 @@ private async executeWorkLoopDriver(conv: Conversation): Promise<void> {
     try {
       // 组装与协议无关的循环历史(含既有全部消息); 系统提示词为静态文本, 整个循环不重写
       let messages: LoopMessage[] = [];
-      messages.push(LoopMessage.system(AgentLoopService.buildWorkSystemPromptFor(conv.mode, this.interactiveTier)));
+      messages.push(LoopMessage.system(this.modeSystemPrompt(conv.mode)));
       // 只把最近 3 条用户消息的图片重新注入请求: 历史图片每轮都随 base64
       // 重发会让请求体随轮次线性膨胀, 是长任务内存/网络压力的重要来源。
       // 更早的图片仍保留在工作区/会话记录里, 模型需要时可用 read_file 重新读取。
@@ -3740,7 +3859,7 @@ if (this.abortSignal.aborted) {
           summary = summary.substring(0, Constants.WORK_SUMMARY_MAX_CHARS) + '…';
         }
         let kept: LoopMessage[] = messages.slice(oldEnd);
-        let rebuilt: LoopMessage[] = [LoopMessage.system(AgentLoopService.buildWorkSystemPromptFor(loopMode, this.interactiveTier)),
+        let rebuilt: LoopMessage[] = [LoopMessage.system(this.modeSystemPrompt(loopMode)),
           LoopMessage.user('【上下文压缩】以下为此前 ' + (oldEnd - 1).toString() +
             ' 条执行历史的状态摘要, 请基于它继续任务:\n' + summary)];
         for (let k: number = 0; k < kept.length; k++) {
@@ -3940,6 +4059,8 @@ if (this.abortSignal.aborted) {
     let currentUserText: string = userText;
     let currentHistory: Message[] = history;
     let failed: boolean = false;
+    // 当前聊天引擎生效的个性化指令拼进系统提示词(只复制一份请求用智能体, 不改会话状态)
+    let requestAgent: Agent | null = this.agentWithPersonalInstructions(this.currentAgent);
     while (true) {
       round++;
       let streamStartMs: number = Date.now();
@@ -3996,7 +4117,7 @@ if (this.abortSignal.aborted) {
       callbacks.onDone = (_full: string): void => {};
 
       let result: ChatStreamResult = await ChatService.streamChat(
-        this.apiConfig, this.currentAgent, currentHistory, currentUserText,
+        this.apiConfig, requestAgent, currentHistory, currentUserText,
         this.thinkingEnabled, this.webSearchEnabled, callbacks, this.abortSignal);
       this.lastTurnTokens = result.usage.totalTokens();
       this.lastTurnCostText = ChatViewModel.formatUsageCost(result.usage);

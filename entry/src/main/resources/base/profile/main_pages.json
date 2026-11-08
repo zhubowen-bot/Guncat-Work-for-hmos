@@ -3,6 +3,7 @@
     "pages/ChatPage",
     "pages/SettingsPage",
     "pages/TableOcrPage",
-    "pages/UsagePage"
+    "pages/UsagePage",
+    "pages/PersonalInstructionEditPage"
   ]
 }

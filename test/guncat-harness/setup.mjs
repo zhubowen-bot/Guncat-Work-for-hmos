@@ -42,6 +42,9 @@ port('common/ToolExecutionGuard.ts', 'ToolExecutionGuard.ts', []);
 port('common/ToolSchemaValidator.ts', 'ToolSchemaValidator.ts', []);
 port('common/ToolRegistry.ts', 'ToolRegistry.ts', []);
 port('common/PromptBuilder.ts', 'PromptBuilder.ts', []);
+port('model/PersonalInstruction.ts', 'PersonalInstruction.ts', []);
+port('common/PersonalInstructionPrompt.ts', 'PersonalInstructionPrompt.ts',
+  [["from '../model/PersonalInstruction'", "from './PersonalInstruction.ts'"]]);
 port('common/InteractiveTiers.ts', 'InteractiveTiers.ts', []);
 port('common/InteractiveTierPrompts.ts', 'InteractiveTierPrompts.ts', []);
 port('common/InteractiveTierPrompt.ts', 'InteractiveTierPrompt.ts', []);

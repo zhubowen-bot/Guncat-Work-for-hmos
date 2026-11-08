@@ -9,6 +9,8 @@ import { ToolExecutionGuard } from './gen/ToolExecutionGuard.ts';
 import { ToolSchemaValidator } from './gen/ToolSchemaValidator.ts';
 import { ToolRegistry, SkillMeta, SkillFileMeta } from './gen/ToolRegistry.ts';
 import { PromptBuilder } from './gen/PromptBuilder.ts';
+import { PersonalInstruction } from './gen/PersonalInstruction.ts';
+import { PersonalInstructionPrompt } from './gen/PersonalInstructionPrompt.ts';
 import { LoopMetrics } from './gen/LoopMetrics.ts';
 import { ToolScheduler } from './gen/ToolScheduler.ts';
 import { SessionLogAggregator } from './gen/SessionLogAggregator.ts';
@@ -573,6 +575,95 @@ console.log('[PromptBuilder]');
   check('A/B dynamic_only 不含静态目录', dynOnly.indexOf('STATIC_DIR') === -1 && dynOnly.indexOf('DYNAMIC_DIR') !== -1);
   const bothMode = PromptBuilder.buildWithToolDirectoryMode('', 'STATIC_DIR', 'DYNAMIC_DIR', 'static_plus_dynamic');
   check('A/B static_plus_dynamic 双目录', bothMode.indexOf('STATIC_DIR') !== -1 && bothMode.indexOf('DYNAMIC_DIR') !== -1);
+}
+
+// ===== PersonalInstruction =====
+console.log('[PersonalInstruction]');
+
+{
+  const rawList = JSON.stringify([
+    { id: 'a', name: '', content: '# 用英文回答\n\n所有回答必须用英文。', scopes: ['interactive', 'work'], updatedAt: 1 },
+    { id: 'b', name: '表格', content: '表格优先用 Markdown。', scopes: ['work'], updatedAt: 2 },
+    { id: '', content: '缺 id 的脏数据', scopes: ['work'], updatedAt: 3 },
+    { id: 'c', content: '   ', scopes: ['work'], updatedAt: 4 },
+    { id: 'd', name: '坏范围', content: 'x', scopes: 'work', updatedAt: 5 }
+  ]);
+  const parsed = PersonalInstruction.parseList(rawList);
+  check('persist: 丢弃缺 id / 空正文条目', parsed.length === 3 &&
+    parsed.map((i) => i.id).join(',') === 'a,b,d');
+  check('persist: 非数组范围按空处理', parsed[2].scopes.length === 0);
+  check('persist: 坏 JSON 返回空列表', PersonalInstruction.parseList('{not json').length === 0);
+  check('persist: 空串返回空列表', PersonalInstruction.parseList('   ').length === 0);
+  check('displayName: 无名称时取正文首行并去 Markdown 标题记号',
+    parsed[0].displayName() === '用英文回答');
+  check('displayName: 有名称用名称', parsed[1].displayName() === '表格');
+  check('summary: 正文压成单行', parsed[0].summary().indexOf('\n') === -1);
+  check('hasScope: 命中持久化范围', parsed[0].hasScope('work') && !parsed[1].hasScope('interactive'));
+
+  const roundTrip = PersonalInstruction.fromJson(parsed[1].toJson());
+  check('toJson/fromJson 往返保留名称与范围',
+    roundTrip !== null && roundTrip.name === '表格' && roundTrip.scopes.join(',') === 'work');
+  check('create: 正文去首尾空白并去重范围',
+    PersonalInstruction.create('', '  正文  ', ['work', 'work', ' ']).scopes.join(',') === 'work');
+
+  const interactiveItem = PersonalInstruction.create('', '永远用中文。', ['interactive']);
+  const workItem = PersonalInstruction.create('工作偏好', '每次交付都要附自检清单。', ['work']);
+  const engineItem = PersonalInstruction.create('', '回答要简洁。', ['guncat-3.0-flash']);
+  const items = [interactiveItem, workItem, engineItem];
+
+  const interactiveSection = PersonalInstructionPrompt.section('interactive', items);
+  const workSection = PersonalInstructionPrompt.section('work', items);
+  const engineSection = PersonalInstructionPrompt.section('guncat-3.0-flash', items);
+  check('scope: 交互模式只拼勾选交互的条目',
+    interactiveSection.indexOf('永远用中文') !== -1 &&
+    interactiveSection.indexOf('自检清单') === -1);
+  check('scope: 工作模式只拼勾选工作的条目',
+    workSection.indexOf('自检清单') !== -1 && workSection.indexOf('永远用中文') === -1);
+  check('scope: 具体聊天引擎按引擎 id 命中', engineSection.indexOf('回答要简洁') !== -1);
+  check('scope: 未勾选的引擎 / 未知范围返回空段',
+    PersonalInstructionPrompt.section('guncat-3.0-pro', items) === '' &&
+    PersonalInstructionPrompt.section('', items) === '');
+
+  check('wrap: 标题 + 一级标题 + 包裹标签',
+    workSection.indexOf('# 个性化指令（用户在设置中添加）') === 0 &&
+    workSection.indexOf('<personal-instruction name="工作偏好">') !== -1 &&
+    workSection.indexOf('</personal-instruction>') !== -1);
+  check('wrap: 用户正文原样保留（含 Markdown 记号）',
+    PersonalInstructionPrompt.section('interactive',
+      [PersonalInstruction.create('', '# 用英文回答\n\n- 术语保留原文', ['interactive'])])
+      .indexOf('# 用英文回答\n\n- 术语保留原文') !== -1);
+  check('wrap: 空名称不写 name 属性',
+    interactiveSection.indexOf('<personal-instruction>') !== -1);
+  check('wrap: 名称按 XML 属性转义',
+    PersonalInstructionPrompt.escapeAttribute('A"<&>') === 'A&quot;&lt;&amp;&gt;');
+
+  check('append: 原有提示词前缀逐字节不变',
+    PersonalInstructionPrompt.append('BASE_PROMPT', 'work', items).startsWith('BASE_PROMPT\n\n'));
+  check('append: 老提示词为空时直接返回段落',
+    PersonalInstructionPrompt.append('', 'work', items).indexOf('# 个性化指令') === 0);
+  check('append: 无生效条目时原样返回',
+    PersonalInstructionPrompt.append('BASE_PROMPT', 'unknown-scope', items) === 'BASE_PROMPT');
+  check('appendSection: 空段落原样返回',
+    PersonalInstructionPrompt.appendSection('BASE_PROMPT', '') === 'BASE_PROMPT');
+  check('appendSection: 段落追加在末尾',
+    PersonalInstructionPrompt.appendSection('BASE_PROMPT', 'SECTION')
+      .startsWith('BASE_PROMPT\n\nSECTION'));
+
+  const many = [];
+  for (let i = 0; i < 3; i++) {
+    many.push(PersonalInstruction.create('', 'x'.repeat(8000), ['work']));
+  }
+  const capped = PersonalInstructionPrompt.section('work', many);
+  check('budget: 超出总预算时截断并标注',
+    capped.indexOf(PersonalInstructionPrompt.TRUNCATED_NOTE) !== -1);
+  check('budget: 截断后不再拼第三条',
+    (capped.match(/<personal-instruction>/g) || []).length === 2);
+
+  const ordered = PersonalInstructionPrompt.section('interactive',
+    [PersonalInstruction.create('', '第一条', ['interactive']),
+      PersonalInstruction.create('', '第二条', ['interactive'])]);
+  check('order: 按存储顺序拼接',
+    ordered.indexOf('第一条') < ordered.indexOf('第二条'));
 }
 
 // ===== LoopMetrics =====

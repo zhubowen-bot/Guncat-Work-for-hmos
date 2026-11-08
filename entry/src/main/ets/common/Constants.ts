@@ -30,6 +30,9 @@ export class Constants {
   static readonly LS_KEY_INTERACTIVE_TIER: string = 'guncat_interactive_tier';
   static readonly LS_KEY_WEB_SEARCH_ENABLED: string = 'guncat_web_search_enabled';
   static readonly LS_KEY_AUTO_READ_ENABLED: string = 'guncat_auto_read_enabled';
+  // 个性化指令(JSON 数组: 每条含 id/名称/正文/生效范围/更新时间)。
+  // 它们是用户长期偏好, 定时拼在系统提示词末尾, 不进会话存档。
+  static readonly LS_KEY_PERSONAL_INSTRUCTIONS: string = 'guncat_personal_instructions';
   static readonly LS_KEY_CURRENT_AGENT_ID: string = 'guncat_current_agent';
   static readonly LS_KEY_CURRENT_CONV_ID: string = 'guncat_current_conv';
   // 表格识别页当前选择的配置 ('multimodal' / 'main'), 决定引用多模态解析还是主模型配置
