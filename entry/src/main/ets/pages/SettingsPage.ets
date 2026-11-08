@@ -1341,7 +1341,7 @@ struct SettingsPage {
           .width('100%')
           .padding({ left: 4, right: 4, top: 4 })
 
-        this.buildSectionLabel('档位 · 交互模式')
+        this.buildSectionLabel('交互模式')
         Column() {
           ForEach(InteractiveTiers.ALL, (tier: InteractiveTier, index: number) => {
             if (index > 0) {

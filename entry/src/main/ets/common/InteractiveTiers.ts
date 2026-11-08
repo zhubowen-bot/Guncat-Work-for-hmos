@@ -52,9 +52,9 @@ export class InteractiveTiers {
       '默认零工具、思考较短, 追求快速问答，一句话直接出界面。' +
         '适用于大多数日常问答请求。',
       '', '', 'low', []));
-    tiers.push(InteractiveTiers.make('efficiency', '效率', 'Guncat 3.0-Flash', '通用调度策略·轻量全能',
+    tiers.push(InteractiveTiers.make('efficiency', '效率', 'Guncat 3.0-Flash', '通用调度策略·高效全能',
       '融合多轮搜索、多步推理与行业领先的反幻觉体系, ' +
-        '以较少的提示词工程量实现接近专家档的综合能力。适用于日常专业请求。',
+        '以中等的提示词工程量实现接近专家档的综合能力。适用于日常专业请求。',
       'Guncat 3.0-Flash_prompt_ZH_CN.md', 'interactive-tier-efficiency.md', 'low', ['record_search']));
     tiers.push(InteractiveTiers.make('expert', '专家', 'Guncat 3.0-Pro', '通用调度策略·超级全能',
       '融合多轮搜索、多步推理、全系专家能力与行业领先的反幻觉体系, ' +
