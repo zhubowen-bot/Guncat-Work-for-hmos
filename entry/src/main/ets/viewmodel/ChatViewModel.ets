@@ -48,7 +48,6 @@ import { MultimodalService } from '../service/MultimodalService';
 import { HarnessTools, WEB_FETCH_TOOL_NAME } from '../service/HarnessTools';
 import { StorageManager } from '../data/StorageManager';
 import { Constants } from '../common/Constants';
-import { ImmersiveLight } from '../common/ImmersiveLight';
 import { generateMessageId } from '../common/Utils';
 import { arrayBufferToBase64 } from '../common/Utils';
 import {
@@ -1144,9 +1143,7 @@ export class ChatViewModel {
         buttons: [
           { text: '取消', color: '#6B7280' },
           { text: '删除', color: '#E05252' }
-        ],
-        // API 26+ 沉浸光感: 弹窗背板改用系统弹窗材质; 低版本返回 undefined, 即保持系统默认样式
-        systemMaterial: ImmersiveLight.dialogMaterial()
+        ]
       });
       return res.index === 1;
     } catch (e) {
@@ -1199,9 +1196,7 @@ export class ChatViewModel {
         buttons: [
           { text: '取消', color: '#6B7280' },
           { text: '清空', color: '#E05252' }
-        ],
-        // API 26+ 沉浸光感: 弹窗背板改用系统弹窗材质; 低版本返回 undefined, 即保持系统默认样式
-        systemMaterial: ImmersiveLight.dialogMaterial()
+        ]
       });
       if (res.index !== 1) {
         return;
@@ -1442,9 +1437,7 @@ export class ChatViewModel {
         buttons: [
           { text: '取消', color: '#6B7280' },
           { text: '删除', color: '#E05252' }
-        ],
-        // API 26+ 沉浸光感: 弹窗背板改用系统弹窗材质; 低版本返回 undefined, 即保持系统默认样式
-        systemMaterial: ImmersiveLight.dialogMaterial()
+        ]
       });
       if (res.index !== 1) {
         return false;

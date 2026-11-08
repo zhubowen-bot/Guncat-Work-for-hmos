@@ -10,7 +10,7 @@
 
 <!-- 演示位（可选升级）：真机录屏 30–60 秒 —— 进工作模式 → 一句话生成 PPT → 产物卡片展开 → 切到交互模式拖滑块重算。动态 GIF 比静态截图更有说服力。 -->
 
-![HarmonyOS](https://img.shields.io/badge/HarmonyOS-API%2026%20target%20(min%2024)-blue)
+![HarmonyOS](https://img.shields.io/badge/HarmonyOS-API%2024%20(6.1.1)-blue)
 ![version](https://img.shields.io/badge/version-7.2.0-blue)
 ![forms](https://img.shields.io/badge/Agent%20Forms-Intelligent%20UI%20%2B%20Harness-blueviolet)
 ![shell](https://img.shields.io/badge/shell-IEC%20native%20%C2%B7%20no%20VM-orange)
@@ -82,7 +82,6 @@ Guncat Work 是**鸿蒙手机上的原生 AI 工作台**：它不只负责对话
 - **附件与分享**：图片 / 文档直传或预解析、256px 缩略图、快捷拍照、导出 Markdown 回答为 Word（含 LaTeX → OMML 原生公式）、接收 HarmonyOS 系统分享。
 - **语音**：CoreSpeechKit 朗读（可切换系统音色与倍速、支持锁屏与后台继续、控制条可拖动）与原生语音输入。
 - **自适应界面**：宽屏三栏、窄屏单列加抽屉；跟随系统切换深浅色主题，并同步状态栏、导航栏与 Markdown 样式。
-- **沉浸光感（API 26）**：HarmonyOS API 26+ 设备上，系统 Toast / 弹窗 / 菜单 / 下拉选择 / 开关 / 滑条呈现通透的玻璃材质、折射高光与按压光效，材质档位随设备算力与系统设置自动适配；应用的公共头部、输入区、侧栏与抽屉是自绘容器，不在系统材质的生效范围内，因此不呈现该效果；API 26 以下的老设备（仍兼容 HarmonyOS 6.1.1+）自动保持原样式。
 
 完整功能清单与实现细节见 [主要功能](docs/features.md)。
 
@@ -90,8 +89,8 @@ Guncat Work 是**鸿蒙手机上的原生 AI 工作台**：它不只负责对话
 
 ### 环境要求
 
-- DevEco Studio 26（`26.0.0` 及以上）
-- HarmonyOS SDK API 26（target `26.0.0`；`compatibleSdkVersion` 仍为 `6.1.1(24)`，最低兼容 API 24，HarmonyOS 6.1.1+ 老设备仍可安装）
+- DevEco Studio 6.1.1 或兼容版本
+- HarmonyOS SDK API 24（`6.1.1`）
 - HarmonyOS 手机真机（平板 / 2in1 亦可，宽屏自动展开三栏布局）
 
 ### 构建
@@ -109,7 +108,7 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
    `libnode.so.xz`，约 23MB；GitHub 拒绝 >100MB 单文件。跑过 `build_node.sh` 的
    可跳过，已存在的 `.so` 不会被覆盖）。
 3. 使用 DevEco Studio 打开**仓库根目录**。
-4. 安装并选择 HarmonyOS SDK API 26（target `26.0.0`；构建工具需 DevEco Studio 26）。
+4. 安装并选择 HarmonyOS SDK API 24。
 5. 配置调试或发布签名。
 6. 连接 HarmonyOS 真机。
 7. 运行 `entry` 模块，或使用上述命令构建 HAP。
@@ -223,7 +222,6 @@ HAP 约 420 MiB（未签名；签名包约 429 MiB。精确字节数随构建与
 | [常见问题](docs/guides/faq.md)                                           | 排障与已知行为                                                       |
 | [内置智能体](docs/reference/builtin-agents.md)                            | 智能体清单与差异                                                      |
 | [持久化与主题系统](docs/reference/persistence-and-theme.md)                  | 本地存储与主题实现                                                     |
-| [沉浸光感（API 26）](docs/architecture/immersive-light.md)                | 能力开关、材质用途映射、设备档位降级、`apiAvailable` 兼容保护与生效范围限制                |
 | [工作区与会话数据的生命周期](docs/architecture/workspace-lifecycle.md)            | 磁盘布局、删除会话时的连带清理、启动清扫与四类残留对策                                   |
 | [真机验收清单（shell / IEC）](docs/guides/device-verification.md)               | 安装、自检、逐项命令、补测项与故障对照                                           |
 | [后台保活策略](docs/architecture/background-keepalive.md)                       | 短时 / 长时任务分层、落盘时机、系统约束与排障                                     |

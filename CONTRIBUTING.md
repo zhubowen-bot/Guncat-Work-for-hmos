@@ -10,8 +10,8 @@
 
 ## 环境要求
 
-- **DevEco Studio 26**（`26.0.0` 及以上）
-- **HarmonyOS SDK API 26**（target `26.0.0`；`compatibleSdkVersion` 仍为 `6.1.1(24)`，最低兼容 API 24）
+- **DevEco Studio 6.1.1** 或兼容版本
+- **HarmonyOS SDK API 24**（6.1.1）
 - **HarmonyOS 手机真机**（模拟器上 Preview Kit / Share Kit / CoreSpeechKit 等行为不一致）
 - **Node.js ≥ 22.6**（harness 依赖原生 TypeScript strip；CI 用 Node 24）
 - **Python 3.11+**，跑 Office 生成器验证时需 `python-docx`、`openpyxl`、`python-pptx`、`Pillow`

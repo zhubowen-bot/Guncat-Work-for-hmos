@@ -23,7 +23,6 @@ import {
 import { UsageMeter } from '../service/UsageMeter';
 import { UsageSettingsStore } from '../service/UsageSettingsStore';
 import { DeepSeekBalanceService } from '../service/DeepSeekBalanceService';
-import { ImmersiveLight } from '../common/ImmersiveLight';
 import { UsagePricing } from '../common/UsagePricing';
 import { UsageTime } from '../common/UsageTime';
 
@@ -547,9 +546,7 @@ struct UsagePage {
         buttons: [
           { text: '取消', color: '#6B7280' },
           { text: '清空', color: '#E05252' }
-        ],
-        // API 26+ 沉浸光感: 弹窗背板改用系统弹窗材质; 低版本返回 undefined, 即保持系统默认样式
-        systemMaterial: ImmersiveLight.dialogMaterial()
+        ]
       });
       if (res.index !== 1) {
         return;
