@@ -29,6 +29,7 @@ entry/src/main/ets/
 │   ├── AgentDrawerView.ets
 │   ├── AboutPanel.ets
 │   ├── FlyInLaunchView.ets
+│   ├── ToastView.ets
 │   ├── FilePreviewBar.ets
 │   └── ImageLightbox.ets
 ├── viewmodel/

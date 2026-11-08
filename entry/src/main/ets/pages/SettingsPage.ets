@@ -8,7 +8,6 @@ import { TOOL_CATALOG, ToolCatalogGroup, ToolCatalogItem, toolCatalogCount } fro
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { SettingsSession } from '../viewmodel/SettingsSession';
 import { Constants } from '../common/Constants';
-import { ImmersiveLight } from '../common/ImmersiveLight';
 import { InteractiveTier, InteractiveTiers } from '../common/InteractiveTiers';
 import { SearchEngineSettings, SEARCH_ENGINE_BING, SEARCH_ENGINE_BRAVE, SEARCH_ENGINE_TAVILY,
   SEARCH_ENGINE_EXA, SEARCH_ENGINE_METASO, SEARCH_ENGINE_FIRECRAWL,
@@ -82,8 +81,6 @@ struct SettingsPage {
   @State private abiList: string = '—';
   @State private sdkApiVersion: string = '—';
   @State private chipType: string = '—';
-  // 沉浸光感环境诊断: 应用级开关 / 设备是否支持 / 设备材质等级(EXQUISITE/GENTLE/SMOOTH)
-  @State private immersiveInfo: string = '—';
 
   aboutToAppear(): void {
     this.vm = SettingsSession.current();
@@ -128,11 +125,6 @@ struct SettingsPage {
       this.chipType = chip !== '' ? chip : '—';
     } catch (e) {
       this.chipType = '—';
-    }
-    try {
-      this.immersiveInfo = ImmersiveLight.describe();
-    } catch (e) {
-      this.immersiveInfo = '—';
     }
   }
 
@@ -1525,10 +1517,6 @@ struct SettingsPage {
             .strokeWidth(0.5)
             .color($r('app.color.divider'))
           this.buildInfoRow('API 等级', this.sdkApiVersion)
-          Divider()
-            .strokeWidth(0.5)
-            .color($r('app.color.divider'))
-          this.buildInfoRow('沉浸光感', this.immersiveInfo)
           Divider()
             .strokeWidth(0.5)
             .color($r('app.color.divider'))

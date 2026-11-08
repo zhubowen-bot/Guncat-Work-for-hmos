@@ -4,7 +4,7 @@
 
 沉浸光感是 ArkUI 在 **API 26.0.0** 引入的系统视觉能力：沉浸式系统材质（毛玻璃、折射、高光、阴影）+ 沉浸式空间动效（弹层形变、边缘流光、粒子动画）。它不在应用里自绘，而是**由系统按组件接管背景、边框、阴影**；应用只决定「开不开」和「哪些组件用什么材质」。
 
-这份文档说明本应用的接入方式、兼容保护与平台限制。先记住一条边界：**材质只在系统划定的范围内生效**——弹窗类组件 / Toast / 菜单 / Popup / 半模态 / Slider / Toggle / Select 全页面生效；其余组件只在 `Navigation` / `NavDestination` 标题栏或横向 `Tabs` 的底部 TabBar 内生效。本应用已把**顶部公共头部**改成 `Navigation` 的自定义标题栏（`BarStyle.STACK`，内容区延伸至标题栏下方），因此头部背板与其中的按钮可以呈现材质；输入区、侧栏与抽屉仍是内容区的自绘容器，不在生效范围（见第 5 节）。
+这份文档说明本应用的接入方式、兼容保护与平台限制。先记住一条边界：**材质只在系统划定的范围内生效**——弹窗类组件 / Toast / 菜单 / Popup / 半模态 / Slider / Toggle / Select 全页面生效；其余组件只在 `Navigation` / `NavDestination` 标题栏或横向 `Tabs` 的底部 TabBar 内生效。本应用的公共头部、输入区、侧栏与抽屉是**自绘容器**，不属于生效区域，本次接入**不改动界面结构**，因此它们不呈现材质（见第 5 节）。
 
 ## 1. 能力开关：应用级 enable
 
@@ -50,9 +50,7 @@
 | `ImmersiveLight.barMaterial()` | 标题栏 / 浮动工具栏 |
 | `ImmersiveLight.controlMaterial()` | 选择、开关、滑条等控件 |
 | `ImmersiveLight.menuMaterial()` | 菜单 / 气泡 / 半模态 |
-| `ImmersiveLight.dialogMaterial()` | 弹窗（`ULTRA_THICK`） |
-| `ImmersiveLight.toastMaterial()` | 即时反馈 Toast（`THICK`） |
-| `ImmersiveLight.describe()` | 环境诊断文本（设置 → 终端展示）：应用级开关 / 设备是否支持 / 材质等级 |
+| `ImmersiveLight.dialogMaterial()` | 弹窗 / Toast |
 | `ImmersiveLight.material(surface)` | 按用途返回 `uiMaterial.Material \| undefined` |
 
 用途到官方材质样式的映射（与官方「组件适配沉浸光感」推荐的厚薄一致）：
@@ -62,8 +60,7 @@
 | 标题栏 / 浮动工具栏 | `BAR` | `ULTRA_THIN` | EXQUISITE 设备叠加 `colorInvert`（自动反色） |
 | 控件（选择 / 开关 / 滑条） | `CONTROL` | `ULTRA_THIN` | 非 SMOOTH 设备叠加 `interactive`（按压形变）+ `lightEffect`（点光源流光）；EXQUISITE 再叠加 `colorInvert` |
 | 菜单 / 气泡 / 半模态 | `MENU` | `THICK` | — |
-| 即时反馈 Toast | `TOAST` | `THICK` | — |
-| 弹窗 | `DIALOG` | `ULTRA_THICK` | — |
+| 弹窗 / Toast | `DIALOG` | `ULTRA_THICK` | — |
 
 约定：
 
@@ -101,20 +98,16 @@
 
 维护时不要让新的 API 26 调用绕开这两层判断——包括以后新增的 `systemMaterial` 设置点。
 
-## 5. 平台生效范围：哪些地方有材质
+## 5. 平台生效范围：为什么头部 / 输入区没有材质
 
 这是本次接入最重要的一条限制，官方原文的口径是：
 
 - **全页面生效**：指定弹窗类组件（AlertDialog、CustomDialog、ActionSheet、各类 PickerDialog、SelectionMenu、AlphabetIndexer 提示弹窗、Text 开启 `copyOption` 后的文本菜单）；指定弹窗类接口（`PromptAction` 的弹窗/Toast、Popup、Tips、Menu、`bindSheet` 半模态）；`Slider` / `Toggle` / `Select`。
 - **只在导航容器内生效**：其余组件必须位于 `Navigation` / `NavDestination` 标题栏，或横向 `Tabs` 且 `barPosition` 为 `BarPosition.End` 的底部 TabBar（悬浮样式还要求 `barOverlap: true`、`vertical: false`）。在普通内容区、自绘容器里设置 `systemMaterial` 不生效，日志会打印 `Material inactive: out of scope. Use component in navigation title bar or Tabbar.`
 
-本应用的落地方式：
+本应用的界面骨架是自绘的 `Column` / `Row` / `Stack`：公共头部、输入区、侧栏、抽屉都不在 `Navigation` 标题栏，也没有底部 `Tabs`，因此**即使给它们设置材质也不会显示**。本次接入不改这些结构——把整页改成 `Navigation + BarStyle.STACK` 属于布局重构，而且官方功耗优化也建议把材质限定在顶部标题栏 / 底部 Tabs 这类局部区域，硬加材质只会得到「写了代码但不生效」的假象。
 
-- **顶部公共头部已改成 `Navigation` 的自定义标题栏**：`ChatPage` 的主聊天列改为 `Navigation() { 内容 }`，原 `buildHeader()` 通过 `.title({ builder: this.buildHeader, height: 64 }, { barStyle: BarStyle.STACK })` 作为标题栏内容，标题栏背景由 `ImmersiveLight.barMaterial()`（`ULTRA_THIN`）接管，头部里的按钮处在标题栏范围内、同样可呈现材质。`STACK` 样式让内容区延伸到标题栏下方，消息列表顶部留出 `TITLE_BAR_HEIGHT`（64vp）的初始空白，上滑时消息从毛玻璃标题栏下方透出，形成沉浸层次。
-- **输入区、侧栏、抽屉仍是内容区的自绘容器**，不在生效范围，给它们设置 `systemMaterial` 也不会显示；本次没有为它们改结构（输入区悬挂在底部、侧栏属于常驻布局，硬套 `Navigation` / 底部 TabBar 会改变现有交互，收益与风险不成比例）。
-- 结论：**头部与所有弹层有材质；输入区、侧栏、抽屉没有**。这是平台规则的结果，不是配置写错。
-
-> 关于「强制 EXQUISITE 档」：ArkUI 的 `uiMaterial.MaterialLevel` 由设备算力写死（高算力 EXQUISITE / 中 GENTLE / 低 SMOOTH），应用只能读取、不能指定；能主动设档的只有 HDS 的 `hdsMaterial`（`HdsNavigation` / `HdsTabs` 的 `SystemMaterialParams.materialLevel`）。本应用当前用 ArkUI 路径，档位跟随设备；如果确需强制 EXQUISITE，需把头部换成 HDS 导航标题栏（见第 8 节），且对低算力设备有卡顿/发热风险。
+结论：**不承诺头部 / 输入区有材质**。弹层类不受这条限制，聊天页、设置页的弹窗 / 菜单 / Toast 照常生效。
 
 ## 6. 接入点与维护约定
 
@@ -124,23 +117,19 @@
 
 | 位置 | 组件 | 材质 |
 | --- | --- | --- |
-| `ChatPage` 顶部公共头部 | Navigation 自定义标题栏 | `barMaterial()`（ULTRA_THIN，标题栏背景 + 头部按钮） |
-| `ChatPage` 应用内 Toast（`showToast`） | 系统 Toast | `toastMaterial()`（THICK） |
 | `ChatPage` 工作区弹层（`bindPopup`） | Popup | `menuMaterial()`（THICK） |
 | `ChatPage` 模型选择弹层（`bindPopup`） | Popup | `menuMaterial()`（THICK） |
 | `ChatPage` 阅读器语音菜单（`bindMenu`） | Menu | `menuMaterial()`（THICK） |
 | `ChatViewModel` 的确认弹窗（删除会话 / 清空工作区 / 删除配置，`promptAction.showDialog`） | Dialog | `dialogMaterial()`（ULTRA_THICK） |
 | `UsagePage` 的确认弹窗（用量清理，`promptAction.showDialog`） | Dialog | `dialogMaterial()`（ULTRA_THICK） |
 
-`controlMaterial()` 是给后续在 Navigation 标题栏 / 底部 TabBar 内做控件级开启预留的；应用级 `enable` 已覆盖 Select / Toggle / Slider 的默认材质，暂不需要逐个设置。
-
-设置 → 终端页新增「沉浸光感」只读行（`ImmersiveLight.describe()`）：显示「应用级已开启 / 已关闭 / 默认 · 设备支持 / 不支持 · 等级 EXQUISITE / GENTLE / SMOOTH」，用于快速确认「看不到效果」是环境原因还是界面原因。
+当前接入只用到 `menuMaterial()` 与 `dialogMaterial()`；`barMaterial()` / `controlMaterial()` 是给后续 Navigation 标题栏 / 底部 TabBar / 控件级开启预留的，接入前先确认目标组件处于第 5 节的生效范围。
 
 配套的样式处理也收在接入点：弹层 / 弹窗的内容容器在 `ImmersiveLight.isAvailable()` 为真时把不透明背板背景设为透明、阴影归零，把层次交给系统材质；低版本保持原来的背景与阴影（例如 `WorkspaceBar` 工作区面板与模型选择弹层内容）。
 
 新增浮层时的检查清单：
 
-1. 先判断它属于哪一类：**弹窗类接口**（Toast / Dialog / Popup / Tips / Menu / Sheet）还是**普通容器**。普通容器只有放进第 5 节的导航标题栏 / 底部 TabBar 才有材质；不要给输入区、侧栏、抽屉这些自绘容器加。
+1. 先判断它属于哪一类：**弹窗类接口**（Toast / Dialog / Popup / Tips / Menu / Sheet）还是**普通容器**。普通容器只在第 5 节的导航容器内才有材质的可能，不要给自绘头部 / 输入区加。
 2. 弹窗类优先用 `ImmersiveLight` 的现成方法，不要在各处手写 `new uiMaterial.ImmersiveMaterial(...)`。
 3. 去掉会遮挡材质的 `backgroundColor` / `backgroundBlurStyle` / `shadow`；确实需要自定义阴影时先 `applyShadow: false`。
 4. 材质参数一次定好并保持稳定，不要在定时器 / 滚动回调里反复改 `style` / `materialColor`，也不要频繁增删材质区域内的子节点。
@@ -148,18 +137,17 @@
 
 ## 7. 验证方式
 
-- **API 26+ 真机**：进入聊天页上下滑动，确认消息从顶部毛玻璃标题栏下方透出、标题栏有通透的材质与描边高光；操作中确认 Toast / 确认弹窗 / 菜单 / Select / 开关 / 滑条呈玻璃材质；按压控件看是否有形变与流光；深色模式切换后材质随之变化。
-- **档位确认**：设置 → 终端 → 「沉浸光感」行应显示「应用级已开启 · 设备支持 · 等级 EXQUISITE/GENTLE/SMOOTH」。等级由设备决定，高算力设备即 EXQUISITE；若显示「设备不支持」或「系统低于 API 26」，则任何界面都不会有材质。
-- **低版本真机（API 24 / HarmonyOS 6.1.1）**：安装、启动、头部、弹层与菜单行为正常，无崩溃、无白屏；界面与升级前一致（无材质，头部保留原背景与阴影）。
-- **日志检查**：如果误给输入区 / 抽屉这类内容区容器设置材质，确认日志出现 `Material inactive: out of scope`，说明这是平台限制而不是配置写错。
+- **API 26+ 真机**：升级后首次启动看 Toast / 确认弹窗 / 菜单 / Select / 开关 / 滑条是否呈玻璃材质；按压控件看是否有形变与流光；深色模式切换后材质随之变化。
+- **低版本真机（API 24 / HarmonyOS 6.1.1）**：安装、启动、弹层与菜单行为正常，无崩溃、无白屏；界面与升级前一致（无材质）。
+- **日志检查**：给自绘头部 / 输入区设置材质时，确认日志出现 `Material inactive: out of scope`，说明平台限制符合预期，而不是配置写错。
 - **工作区弹层 / 阅读器语音菜单**：确认显式设置的弹层仍可正常交互（材质不吞点击、不改变弹层尺寸）。
 
 ## 8. 后续可扩展点
 
-- **强制 EXQUISITE 档（HDS 路径）**：ArkUI 的 `uiMaterial` 只能跟随设备档位；如果产品上要求在所有设备强制 `EXQUISITE`，需要把顶部头部从 ArkUI `Navigation` 换成 `HdsNavigation`，在 `titleBar.style.systemMaterialEffect` 里设 `materialType: IMMERSIVE`、`materialLevel: EXQUISITE`，并用 `hdsMaterial.getSystemMaterialTypes()` 在低端设备上降级到 SMOOTH。代价是头部换成 HDS 标题栏结构（标题/菜单/返回键布局由 HDS 决定），且 `materialLevel: ADAPTIVE` 才是官方推荐值——强制 EXQUISITE 在低算力设备上有卡顿与发热风险。
+- **Navigation / NavDestination 标题栏 + `BarStyle.STACK`**：官方典型场景，也是让「头部」进入生效范围的唯一正路；需要把页面骨架改成 `Navigation`（内容区 `contentStartOffset` 避让标题栏），改动面大，单独立项再做。
 - **底部 Tabs 悬浮页签**：若以后新增底部导航，可用 `barFloatingStyle` + `systemMaterial` 获得材质，条件是 `barOverlap: true`、`vertical: false`、`barPosition: BarPosition.End`。
-- **输入区 / 抽屉 / 半模态面板**：`bindSheet` 半模态在应用级 `enable` 下默认不开材质，可按需显式接入；抽屉与输入区若未来愿意改成 `bindSheet` / Navigation 结构，也能获得材质，但属于交互重构。
-- **更多弹窗类组件**：`Tips`、Toast 的 `options.systemMaterial`（本应用已用）、`bindSheet` 可按需接入；`CustomDialog` 的 `customStyle: true` 背板由开发者自绘，暂不支持材质。
+- **UI Design Kit（HDS）**：`HdsNavigation` / `HdsTabs` 提供等价的 `systemMaterialEffect`，`hdsMaterial` 允许主动设 `MaterialLevel`（含 `ADAPTIVE`）；但会引入 HDS 组件体系，与当前自绘 UI 不兼容，仅在整体迁移 HDS 时考虑。
+- **更多弹窗类组件**：`bindSheet` 半模态、`Tips`、Toast 的 `options.systemMaterial` 等可按需接入；`CustomDialog` 的 `customStyle: true` 背板由开发者自绘，暂不支持材质。
 
 ## 9. 参考
 
