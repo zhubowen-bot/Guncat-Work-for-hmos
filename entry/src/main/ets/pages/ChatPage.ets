@@ -1327,11 +1327,8 @@ struct ChatPage {
     .width('100%')
     .height(ChatPage.TITLE_BAR_HEIGHT)
     .padding({ left: 8, right: 8 })
-    // API 26+ 沉浸光感: 头部本身处在 Navigation 标题栏的生效范围内, 直接把系统材质
-    // 挂在标题栏内容上(标题栏的 systemMaterial 选项只作用于系统自带标题区, 自定义
-    // 标题栏内容需要用通用属性接管背板, 否则 STACK 下标题栏默认是全透明的)。
-    // 低版本/设备不支持时返回 undefined, 保持原来的 surface 底色与阴影。
-    .systemMaterial(ImmersiveLight.barMaterial())
+    // API 26+ 沉浸光感: 标题栏背板与阴影由系统材质接管(不透明背景会遮挡材质);
+    // 低版本或设备不支持时保持原来的 surface 底色与阴影
     .backgroundColor(ImmersiveLight.isAvailable() ? Color.Transparent : $r('app.color.surface'))
     .shadow(ImmersiveLight.isAvailable() ?
       { radius: 0, color: Color.Transparent, offsetX: 0, offsetY: 0 } :

@@ -110,7 +110,7 @@
 
 本应用的落地方式：
 
-- **顶部公共头部已改成 `Navigation` 的自定义标题栏**：`ChatPage` 的主聊天列改为 `Navigation() { 内容 }`，原 `buildHeader()` 通过 `.title({ builder: this.buildHeader, height: 64 }, { barStyle: BarStyle.STACK })` 作为标题栏内容。注意：`NavigationTitleOptions.systemMaterial` 只作用于系统自带标题区，**自定义标题栏内容必须在头部容器上直接使用通用属性 `.systemMaterial(ImmersiveLight.barMaterial())`**（官方 FAQ 的做法），否则 `STACK` 样式下标题栏默认完全透明、看不到材质。`STACK` 让内容区延伸到标题栏下方，消息列表顶部留出 `TITLE_BAR_HEIGHT`（64vp）的初始空白，上滑时消息从毛玻璃标题栏下方透出，形成沉浸层次。
+- **顶部公共头部已改成 `Navigation` 的自定义标题栏**：`ChatPage` 的主聊天列改为 `Navigation() { 内容 }`，原 `buildHeader()` 通过 `.title({ builder: this.buildHeader, height: 64 }, { barStyle: BarStyle.STACK })` 作为标题栏内容，标题栏背景由 `ImmersiveLight.barMaterial()`（`ULTRA_THIN`）接管，头部里的按钮处在标题栏范围内、同样可呈现材质。`STACK` 样式让内容区延伸到标题栏下方，消息列表顶部留出 `TITLE_BAR_HEIGHT`（64vp）的初始空白，上滑时消息从毛玻璃标题栏下方透出，形成沉浸层次。
 - **输入区、侧栏、抽屉仍是内容区的自绘容器**，不在生效范围，给它们设置 `systemMaterial` 也不会显示；本次没有为它们改结构（输入区悬挂在底部、侧栏属于常驻布局，硬套 `Navigation` / 底部 TabBar 会改变现有交互，收益与风险不成比例）。
 - 结论：**头部与所有弹层有材质；输入区、侧栏、抽屉没有**。这是平台规则的结果，不是配置写错。
 
