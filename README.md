@@ -10,7 +10,7 @@
 
 <!-- 演示位（可选升级）：真机录屏 30–60 秒 —— 进工作模式 → 一句话生成 PPT → 产物卡片展开 → 切到交互模式拖滑块重算。动态 GIF 比静态截图更有说服力。 -->
 
-![HarmonyOS](https://img.shields.io/badge/HarmonyOS-API%2024%20(6.1.1)-blue)
+![HarmonyOS](https://img.shields.io/badge/HarmonyOS-API%2026%20(26.0.0)-blue)
 ![version](https://img.shields.io/badge/version-7.3.0-blue)
 ![forms](https://img.shields.io/badge/Agent%20Forms-Intelligent%20UI%20%2B%20Harness-blueviolet)
 ![shell](https://img.shields.io/badge/shell-IEC%20native%20%C2%B7%20no%20VM-orange)
@@ -91,8 +91,8 @@ Guncat Work 是**鸿蒙手机上的原生 AI 工作台**：它不只负责对话
 
 ### 环境要求
 
-- DevEco Studio 6.1.1 或兼容版本
-- HarmonyOS SDK API 24（`6.1.1`）
+- DevEco Studio 26.0.0 或兼容版本
+- HarmonyOS SDK API 26（`26.0.0`），应用最低运行 API 24（`6.1.1`）
 - HarmonyOS 手机真机（平板 / 2in1 亦可，宽屏自动展开三栏布局）
 
 ### 构建
@@ -110,7 +110,7 @@ hvigorw --mode module -p product=default -p module=entry@default -p buildMode=de
    `libnode.so.xz`，约 23MB；GitHub 拒绝 >100MB 单文件。跑过 `build_node.sh` 的
    可跳过，已存在的 `.so` 不会被覆盖）。
 3. 使用 DevEco Studio 打开**仓库根目录**。
-4. 安装并选择 HarmonyOS SDK API 24。
+4. 安装并选择 HarmonyOS SDK API 26。
 5. 配置调试或发布签名。
 6. 连接 HarmonyOS 真机。
 7. 运行 `entry` 模块，或使用上述命令构建 HAP。

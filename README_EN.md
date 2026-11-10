@@ -6,7 +6,7 @@
 
 <!-- Demo slot (optional upgrade): a 30–60s real-device screen recording — enter work mode → generate a PPT from one sentence → expand the artifact card → switch to interactive mode and drag a slider to recompute. A moving GIF beats static screenshots. -->
 
-![HarmonyOS](https://img.shields.io/badge/HarmonyOS-API%2024%20(6.1.1)-blue)
+![HarmonyOS](https://img.shields.io/badge/HarmonyOS-API%2026%20(26.0.0)-blue)
 ![version](https://img.shields.io/badge/version-7.3.0-blue)
 ![forms](https://img.shields.io/badge/Agent%20Forms-Intelligent%20UI%20%2B%20Harness-blueviolet)
 ![shell](https://img.shields.io/badge/shell-IEC%20native%20%C2%B7%20no%20VM-orange)
@@ -85,8 +85,8 @@ The complete feature inventory and implementation details are in [Features](docs
 
 ### Requirements
 
-- DevEco Studio 6.1.1 or a compatible version
-- HarmonyOS SDK API 24 (`6.1.1`)
+- DevEco Studio 26.0.0 or a compatible version
+- HarmonyOS SDK API 26 (`26.0.0`); the app runs on API 24 (`6.1.1`) and later
 - A physical HarmonyOS phone (tablets and 2-in-1 devices work too — wide screens expand into the three-column layout)
 
 ### Build
@@ -104,7 +104,7 @@ Build steps:
    `libnode.so` as `libnode.so.xz`, ~23 MB, because GitHub rejects files over 100 MB;
    skip it if you already ran `build_node.sh`, an existing `.so` is never overwritten).
 3. Open the **repository root** in DevEco Studio.
-4. Install and select HarmonyOS SDK API 24.
+4. Install and select HarmonyOS SDK API 26.
 5. Configure debug or release signing.
 6. Connect a physical HarmonyOS device.
 7. Run the `entry` module, or build the HAP with the command above.
