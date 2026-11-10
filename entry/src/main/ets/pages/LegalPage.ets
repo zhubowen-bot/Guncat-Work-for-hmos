@@ -139,15 +139,10 @@ struct LegalPage {
   private buildHero() {
     Column() {
       Row({ space: 14 }) {
-        Stack() {
-          SymbolGlyph($r('sys.symbol.lock'))
-            .fontSize(26)
-            .fontColor([$r('app.color.brand')])
-        }
-        .width(54)
-        .height(54)
-        .borderRadius(18)
-        .backgroundColor($r('app.color.brand_light'))
+        SymbolGlyph($r('sys.symbol.doc_text'))
+          .fontSize(34)
+          .fontColor([$r('app.color.brand')])
+          .flexShrink(0)
 
         Column({ space: 4 }) {
           Text('合规与许可')
@@ -163,14 +158,6 @@ struct LegalPage {
         .alignItems(HorizontalAlign.Start)
       }
       .width('100%')
-
-      Row({ space: 8 }) {
-        this.buildChip('随包声明')
-        this.buildChip('许可证原文')
-        this.buildChip('本地可查')
-      }
-      .width('100%')
-      .margin({ top: 14 })
     }
     .width('100%')
     .padding(18)
@@ -178,16 +165,6 @@ struct LegalPage {
     .borderRadius(24)
     .border({ width: 1, color: $r('app.color.divider') })
     .alignItems(HorizontalAlign.Start)
-  }
-
-  @Builder
-  private buildChip(text: string) {
-    Text(text)
-      .fontSize(10)
-      .fontColor($r('app.color.brand'))
-      .padding({ left: 9, right: 9, top: 4, bottom: 4 })
-      .borderRadius(999)
-      .backgroundColor($r('app.color.brand_light'))
   }
 
   @Builder
@@ -264,15 +241,14 @@ struct LegalPage {
   @Builder
   private buildDocRow(icon: Resource, doc: LegalDoc, onTap: () => void) {
     Row({ space: 12 }) {
-      Stack() {
+      Row() {
         SymbolGlyph(icon)
-          .fontSize(21)
+          .fontSize(22)
           .fontColor([$r('app.color.brand')])
       }
-      .width(40)
-      .height(40)
-      .borderRadius(12)
-      .backgroundColor($r('app.color.brand_light'))
+      .width(26)
+      .height(26)
+      .justifyContent(FlexAlign.Center)
 
       Column({ space: 3 }) {
         Text(doc.title)
@@ -306,15 +282,14 @@ struct LegalPage {
   @Builder
   private buildActionRow(icon: Resource, title: string, subtitle: string, onTap: () => void) {
     Row({ space: 12 }) {
-      Stack() {
+      Row() {
         SymbolGlyph(icon)
-          .fontSize(21)
+          .fontSize(22)
           .fontColor([$r('app.color.brand')])
       }
-      .width(40)
-      .height(40)
-      .borderRadius(12)
-      .backgroundColor($r('app.color.brand_light'))
+      .width(26)
+      .height(26)
+      .justifyContent(FlexAlign.Center)
 
       Column({ space: 3 }) {
         Text(title)
@@ -453,7 +428,7 @@ struct LegalPage {
     .width('100%')
     .height(46)
     .borderRadius(16)
-    .backgroundColor($r('app.color.brand_light'))
+    .backgroundColor($r('app.color.surface_secondary'))
     .margin({ top: 12 })
     .onClick(() => {
       onTap();

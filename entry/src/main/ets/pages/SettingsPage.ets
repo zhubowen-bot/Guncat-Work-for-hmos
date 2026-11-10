@@ -449,7 +449,7 @@ struct SettingsPage {
               .strokeWidth(0.5)
               .color($r('app.color.divider'))
               .margin({ left: 56 })
-            this.buildOptionRow($r('sys.symbol.lock'), '合规与许可',
+            this.buildOptionRow($r('sys.symbol.doc_text'), '合规与许可',
               'AI 生成内容标识 · 第三方组件与许可', (): void => {
                 router.pushUrl({ url: 'pages/LegalPage' }).catch((): void => {});
               })
