@@ -34,3 +34,6 @@ entry/libs/arm64-v8a/libqemu-img.so
 
 # 本机签名配置（含密码与证书路径），只入库 build-profile.json5.example
 /build-profile.json5
+
+# 个人开发者合规说明函含实名/联系方式，只在本地保存，不进入公开仓库
+docs/合规/AI生成标识材料及资质文件/00-说明函/

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900"><metadata id="aigc-mark"><![CDATA[{"AIGC":{"Label":"1","ContentProducer":"Guncat Work (com.bowenapp.guncataibeta)","ProduceID":"GW-20261110220403-b653e3e7","ReservedCode1":"","ContentPropagator":"Guncat Work (com.bowenapp.guncataibeta)","PropagateID":"GW-20261110220403-b653e3e7","ReservedCode2":""}}]]></metadata>
+  <title>单页调试背景装饰</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FBF7F0"/>
+      <stop offset="1" stop-color="#F1EADE"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0A3D62" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#0A3D62" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1600" height="900" fill="url(#bg)"/>
+  <circle cx="1470" cy="-40" r="300" fill="url(#ring)"/>
+  <circle cx="1470" cy="-40" r="300" fill="none" stroke="#0A3D62" stroke-opacity="0.12" stroke-width="2"/>
+  <circle cx="1470" cy="-40" r="200" fill="none" stroke="#E8590C" stroke-opacity="0.16" stroke-width="2"/>
+  <g stroke="#0A3D62" stroke-opacity="0.07" stroke-width="1.5">
+    <path d="M0 760 H1600"/>
+    <path d="M0 800 H1600"/>
+    <path d="M0 840 H1600"/>
+    <path d="M100 700 V900"/>
+    <path d="M180 700 V900"/>
+    <path d="M260 700 V900"/>
+  </g>
+  <rect x="0" y="0" width="14" height="900" fill="#0A3D62"/>
+  <rect x="0" y="0" width="14" height="240" fill="#E8590C"/>
+  <g fill="none" stroke="#E8590C" stroke-width="3" stroke-opacity="0.55">
+    <path d="M60 690 h54 v-54"/>
+    <path d="M1540 210 h-54 v54"/>
+  </g>
+  <g fill="#0A3D62" fill-opacity="0.10">
+    <rect x="1310" y="690" width="26" height="26" rx="6"/>
+    <rect x="1350" y="690" width="26" height="26" rx="6"/>
+    <rect x="1390" y="690" width="26" height="26" rx="6"/>
+    <rect x="1430" y="690" width="26" height="26" rx="6"/>
+  </g>
+<text x="1582" y="884.25" font-family="sans-serif" font-size="45" fill="#6B7280" fill-opacity="0.75" text-anchor="end" paint-order="stroke" stroke="#FFFFFF" stroke-width="2" stroke-opacity="0.6">AI生成</text></svg>
