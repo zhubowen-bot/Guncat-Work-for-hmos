@@ -50,8 +50,13 @@ export interface PyRunResult {
 /** 运行库可用性: 返回空串表示可用, 否则为不可用原因 */
 export const isAvailable: () => string;
 
-/** 在常驻解释器里执行一段 Python(同步调用, 调用方应放到异步任务里) */
 /** 0=可用 1=忙(上一个调用还在跑/在回收, 结束即恢复) */
 export const pyState: () => number;
 
-export const runPython: (options: PyRunOptions) => PyRunResult;
+/**
+ * 在常驻解释器里异步执行一段 Python。
+ *
+ * 原生侧把执行交给专属 runner 线程，UI 线程只等待 Promise，不会被 import/计算
+ * 卡住（同步调用曾导致主线程阻塞 6 秒，被系统按 THREAD_BLOCK_6S 杀掉）。
+ */
+export const runPython: (options: PyRunOptions) => Promise<PyRunResult>;

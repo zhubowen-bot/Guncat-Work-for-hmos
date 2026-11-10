@@ -22,10 +22,12 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <pthread.h>
 #include <signal.h>
+#include <sys/resource.h>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -1440,7 +1442,31 @@ std::shared_ptr<PyJob> g_pending;
 std::atomic<bool> g_runnerStarted{false};
 std::atomic<int> g_busy{0};          // 排队 + 执行中的调用数(>0 表示运行时忙)
 
+// Python/import 是 CPU 密集型任务。nice 在 Linux 上是**每线程**属性: 把 runner
+// 线程调低一档, 让 ArkTS 主线程/渲染/输入在满载时仍能优先拿到 CPU。
+// 之前主线程会被同步 NAPI 调用整段卡住(系统按 THREAD_BLOCK_6S 杀进程), 现在
+// 调用已改成异步; 这里再补一层调度保险, 避免 import numpy/scipy 时 UI 明显掉帧。
+void LowerRunnerPriority() {
+    if (::setpriority(PRIO_PROCESS, 0, 5) != 0) {
+        OH_LOG_WARN(LOG_APP, "setpriority(python runner) failed: %{public}d", errno);
+    }
+}
+
+// Python 堆在长时间运行后会保留大量已释放的 arena; musl 没有 malloc_trim,
+// glibc 有。只在耗时超过 1s 的调用后尝试归还, 避免每次轻量调用都白付开销。
+void TrimHeapIfNeeded(int64_t durationMs) {
+    if (durationMs < 1000) {
+        return;
+    }
+    using FnMallocTrim = int (*)(size_t);
+    static FnMallocTrim trim = reinterpret_cast<FnMallocTrim>(::dlsym(RTLD_DEFAULT, "malloc_trim"));
+    if (trim != nullptr) {
+        trim(0);
+    }
+}
+
 void RunnerLoop() {
+    LowerRunnerPriority();
     for (;;) {
         std::shared_ptr<PyJob> job;
         {
@@ -1459,6 +1485,9 @@ void RunnerLoop() {
             out.ok = false;
             out.error = std::string("native 异常: ") + e.what();
         }
+        // 放在通知调用方之前: 大脚本跑完后先把可归还的堆页还给系统, 再让下一次
+        // 调用进来, 避免"连着跑几个重任务, RSS 只涨不落"。
+        TrimHeapIfNeeded(out.durationMs);
         bool orphan = false;
         {
             std::lock_guard<std::mutex> lock(job->mutex);
@@ -1575,14 +1604,101 @@ napi_value JsPyState(napi_env env, napi_callback_info) {
     return out;
 }
 
+napi_value BuildRunResult(napi_env env, const PyRunOutcome& outcome) {
+    napi_value result = nullptr;
+    if (napi_create_object(env, &result) != napi_ok) {
+        return nullptr;
+    }
+    napi_set_named_property(env, result, "ok", MakeBool(env, outcome.ok));
+    napi_set_named_property(env, result, "timedOut", MakeBool(env, outcome.timedOut));
+    napi_set_named_property(env, result, "softTimeout", MakeBool(env, outcome.softTimeout));
+    napi_set_named_property(env, result, "exitCode", MakeInt(env, outcome.exitCode));
+    napi_set_named_property(env, result, "stdout", MakeString(env, outcome.stdoutText));
+    napi_set_named_property(env, result, "stderr", MakeString(env, outcome.stderrText));
+    napi_set_named_property(env, result, "error", MakeString(env, outcome.error));
+    napi_set_named_property(env, result, "warning", MakeString(env, outcome.warning));
+    napi_set_named_property(env, result, "durationMs", MakeInt(env, outcome.durationMs));
+    return result;
+}
+
+// 出错也 resolve(而不是 reject): ArkTS 侧统一按 PyRunResult 处理
+void ResolvePyError(napi_env env, napi_deferred deferred, const std::string& message) {
+    PyRunOutcome outcome;
+    outcome.ok = false;
+    outcome.error = message;
+    napi_value result = BuildRunResult(env, outcome);
+    if (result != nullptr) {
+        napi_resolve_deferred(env, deferred, result);
+    }
+}
+
+struct AsyncPyRun {
+    napi_async_work work = nullptr;
+    napi_deferred deferred = nullptr;
+    PyRunOptions opt;
+    PyRunOutcome outcome;
+};
+
+void ExecutePyRun(napi_env /*env*/, void* data) {
+    // worker 线程: 严禁调用任何 napi_* 接口。DispatchToRunner 会等专属 runner 线程
+    // 把这次调用跑完; 真正耗时的是 runner, 这里只是"替 JS 线程等"。
+    AsyncPyRun* run = static_cast<AsyncPyRun*>(data);
+    try {
+        run->outcome = DispatchToRunner(run->opt);
+    } catch (const std::exception& e) {
+        run->outcome.ok = false;
+        run->outcome.error = std::string("native 异常: ") + e.what();
+    } catch (...) {
+        run->outcome.ok = false;
+        run->outcome.error = "native 异常: unknown";
+    }
+}
+
+void CompletePyRun(napi_env env, napi_status status, void* data) {
+    AsyncPyRun* run = static_cast<AsyncPyRun*>(data);
+    if (status != napi_ok) {
+        run->outcome = PyRunOutcome();
+        run->outcome.error = "Python 执行任务被取消或失败(status=" +
+            std::to_string(static_cast<int>(status)) + ")";
+    }
+    // 注意: 这里**不能**按 outcome.timedOut 记账 —— 硬超时(AST 截止)是干净回收的,
+    // 只有 softTimeout(宿主放弃等待、线程还卡在调用里)才算"未回收"。
+    // 那个计数已经在 DispatchToRunner 里加、在 RunnerLoop 里任务真正结束时减。
+    std::string errHead = run->outcome.error.size() > 160
+        ? run->outcome.error.substr(0, 160) : run->outcome.error;
+    OH_LOG_INFO(LOG_APP, "run_python ok=%{public}d timeout=%{public}d rc=%{public}d %{public}lldms err=%{public}s",
+        run->outcome.ok ? 1 : 0, run->outcome.timedOut ? 1 : 0, run->outcome.exitCode,
+        static_cast<long long>(run->outcome.durationMs), errHead.c_str());
+    napi_value result = BuildRunResult(env, run->outcome);
+    if (result != nullptr) {
+        napi_resolve_deferred(env, run->deferred, result);
+    }
+    if (run->work != nullptr) {
+        napi_delete_async_work(env, run->work);
+    }
+    g_running.store(false);
+    delete run;
+}
+
 // runPython({ code, workDir, scratchDir, pythonHome, pythonPath, argvJson, timeoutMs })
+//
+// 必须异步: 这是 ArkTS 直接调用的 NAPI 函数, 同步实现会把 UI 线程整段卡在
+// DispatchToRunner 的 condition_variable 上。实测 import numpy/pandas/scipy 时
+// 主线程阻塞超过 6 秒, 系统按 THREAD_BLOCK_6S 直接杀进程(闪退), 用户侧表现为
+// "冻屏 + 闪退"。现在参数解析仍在 JS 线程(很快), 执行交给 Node-API 的异步任务,
+// 完成后再回 JS 线程 resolve Promise。
 napi_value JsRunPython(napi_env env, napi_callback_info info) {
     std::size_t argc = 1;
     napi_value args[1] = {nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
 
-    napi_value result = nullptr;
-    napi_create_object(env, &result);
+    napi_deferred deferred = nullptr;
+    napi_value promise = nullptr;
+    if (napi_create_promise(env, &deferred, &promise) != napi_ok) {
+        napi_value undefined = nullptr;
+        napi_get_undefined(env, &undefined);
+        return undefined;
+    }
 
     PyRunOptions opt;
     if (argc >= 1) {
@@ -1601,67 +1717,66 @@ napi_value JsRunPython(napi_env env, napi_callback_info info) {
         opt.timeoutMs = PropToInt(env, args[0], "timeoutMs", 60000);
     }
     if (opt.code.empty()) {
-        napi_set_named_property(env, result, "ok", MakeBool(env, false));
-        napi_set_named_property(env, result, "error", MakeString(env, "缺少参数 code"));
-        return result;
+        ResolvePyError(env, deferred, "缺少参数 code");
+        return promise;
     }
     if (opt.scratchDir.empty()) {
-        napi_set_named_property(env, result, "ok", MakeBool(env, false));
-        napi_set_named_property(env, result, "error", MakeString(env, "缺少参数 scratchDir"));
-        return result;
-    }
-    if (g_running.load()) {
-        napi_set_named_property(env, result, "ok", MakeBool(env, false));
-        napi_set_named_property(env, result, "error", MakeString(env, "已有 Python 调用在执行(串行模型)"));
-        return result;
+        ResolvePyError(env, deferred, "缺少参数 scratchDir");
+        return promise;
     }
     if (g_abandoned.load() >= kMaxAbandoned) {
-        napi_set_named_property(env, result, "ok", MakeBool(env, false));
-        napi_set_named_property(env, result, "error",
-            MakeString(env, "已有 2 个超时后仍在后台运行的 Python 调用(未回收), 为避免持续占 CPU 暂不执行。"
-                            "它们一结束就自动恢复, 不需要重启应用。"));
-        return result;
+        ResolvePyError(env, deferred,
+            "已有 2 个超时后仍在后台运行的 Python 调用(未回收), 为避免持续占 CPU 暂不执行。"
+            "它们一结束就自动恢复, 不需要重启应用。");
+        return promise;
     }
     if (g_busy.load() > 0) {
         // 上一个调用还在跑(通常是超时被放弃、仍在后台执行的任务)。
         // 绝不排队: 队列只有一个槽位, 排进来会覆盖/饿死, 而且把 CPU 越烧越满。
-        napi_set_named_property(env, result, "ok", MakeBool(env, false));
-        napi_set_named_property(env, result, "error",
-            MakeString(env, "上一个 Python 调用还没结束(超时后仍在后台运行, 未能中断)。"
-                            "它结束后会自动恢复, 这里不会排队。"));
-        return result;
+        ResolvePyError(env, deferred,
+            "上一个 Python 调用还没结束(超时后仍在后台运行, 未能中断)。"
+            "它结束后会自动恢复, 这里不会排队。");
+        return promise;
+    }
+    // 原子占位: 两个并发调用只有一个能进来(ArkTS 侧还有 promise 链, 这里是原生兜底)。
+    bool expected = false;
+    if (!g_running.compare_exchange_strong(expected, true)) {
+        ResolvePyError(env, deferred, "已有 Python 调用在执行(串行模型)");
+        return promise;
     }
 
-    g_running.store(true);
-    PyRunOutcome outcome;
+    AsyncPyRun* run = nullptr;
     try {
-        // 关键: 必须交给"调用过 Py_Initialize 的那个线程"执行。CPython 只有在它认定的
-        // main thread 上才会处理中断信号 —— 实机现象是 PyErr_SetInterrupt 被丢掉
-        // ("Signal 2 ignored due to race condition"), timeout_ms 完全失效。
-        outcome = DispatchToRunner(opt);
-    } catch (const std::exception& e) {
-        outcome.ok = false;
-        outcome.error = std::string("native 异常: ") + e.what();
+        run = new AsyncPyRun();
+    } catch (...) {
+        g_running.store(false);
+        ResolvePyError(env, deferred, "内存不足, 无法创建 Python 执行任务");
+        return promise;
     }
-    g_running.store(false);
+    run->deferred = deferred;
+    run->opt = opt;
 
-    // 注意: 这里**不能**按 outcome.timedOut 记账 —— 硬超时(AST 截止)是干净回收的,
-    // 只有 softTimeout(宿主放弃等待、线程还卡在调用里)才算"未回收"。
-    // 那个计数已经在 DispatchToRunner 里加、在 RunnerLoop 里任务真正结束时减。
-    std::string errHead = outcome.error.size() > 160 ? outcome.error.substr(0, 160) : outcome.error;
-    OH_LOG_INFO(LOG_APP, "run_python ok=%{public}d timeout=%{public}d rc=%{public}d %{public}lldms err=%{public}s",
-        outcome.ok ? 1 : 0, outcome.timedOut ? 1 : 0, outcome.exitCode,
-        static_cast<long long>(outcome.durationMs), errHead.c_str());
-    napi_set_named_property(env, result, "ok", MakeBool(env, outcome.ok));
-    napi_set_named_property(env, result, "timedOut", MakeBool(env, outcome.timedOut));
-    napi_set_named_property(env, result, "softTimeout", MakeBool(env, outcome.softTimeout));
-    napi_set_named_property(env, result, "exitCode", MakeInt(env, outcome.exitCode));
-    napi_set_named_property(env, result, "stdout", MakeString(env, outcome.stdoutText));
-    napi_set_named_property(env, result, "stderr", MakeString(env, outcome.stderrText));
-    napi_set_named_property(env, result, "error", MakeString(env, outcome.error));
-    napi_set_named_property(env, result, "warning", MakeString(env, outcome.warning));
-    napi_set_named_property(env, result, "durationMs", MakeInt(env, outcome.durationMs));
-    return result;
+    napi_value resourceName = nullptr;
+    napi_create_string_utf8(env, "guncatpy.runPython", NAPI_AUTO_LENGTH, &resourceName);
+    napi_status status = napi_create_async_work(env, nullptr, resourceName, ExecutePyRun,
+                                               CompletePyRun, run, &run->work);
+    if (status != napi_ok) {
+        delete run;
+        g_running.store(false);
+        ResolvePyError(env, deferred, "创建 Python 异步任务失败(status=" +
+            std::to_string(static_cast<int>(status)) + ")");
+        return promise;
+    }
+    status = napi_queue_async_work(env, run->work);
+    if (status != napi_ok) {
+        napi_delete_async_work(env, run->work);
+        delete run;
+        g_running.store(false);
+        ResolvePyError(env, deferred, "提交 Python 异步任务失败(status=" +
+            std::to_string(static_cast<int>(status)) + ")");
+        return promise;
+    }
+    return promise;
 }
 
 }  // namespace

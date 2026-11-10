@@ -7,6 +7,14 @@
 > 关于 QEMU / Alpine / `npy` / `tooling/linux-vm` 的描述仅代表当时状态；当前实现见
 > [docs/architecture/iec-runtime.md](docs/architecture/iec-runtime.md)。
 
+## 未发布
+
+### Python 执行稳定性
+
+- **run_python 不再冻屏/闪退**：原生调用改为异步执行，Python 在专属后台线程跑，界面线程只等待结果；导入 numpy/pandas/scipy 或长计算时仍可滚动、点按、查看日志。此前同步调用会让主线程阻塞 6 秒以上，被系统判定无响应后直接杀掉进程。
+- **重计算让出 CPU**：Python 执行线程的调度优先级降低一档，长时间计算时界面、输入和渲染仍能优先拿到 CPU；耗时超过 1 秒的调用结束后会尝试归还已释放的堆内存。
+- **首次释放运行库不再卡界面**：标准库/三方库 zip 落地沙箱改为异步分块拷贝，首次调用 `run_python` 时界面不会被十几 MB 的同步写入卡住。
+
 ## 7.3.0（2026-11-09）
 
 ### 个性化指令

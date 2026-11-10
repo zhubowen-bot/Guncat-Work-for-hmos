@@ -132,9 +132,11 @@ finders)、导出 `GUNCAT_PY_LIBDIR` 给 PyCryptodome 这类用 ctypes 按路径
 
 ## 6. 执行模型与限制
 
-* **单实例、串行**：native 侧有 `g_running`/`g_busy` 前置判定，ArkTS 侧还有 promise 链；两个调用
-  不会同时进解释器。超时后被"放弃等待"的任务没结束之前，新调用**直接拒绝**（不排队，避免把 CPU
-  烧满），任务一结束自动恢复 —— 不需要重启应用。
+* **单实例、串行、但对 UI 异步**：native 侧有 `g_running`/`g_busy` 前置判定，ArkTS 侧还有 promise
+  链；两个调用不会同时进解释器。NAPI 入口本身是 `napi_async_work`：参数解析在 JS 线程完成，Python
+  在专属 runner 线程执行，JS/UI 线程只等待 Promise。长 `import` / 计算期间界面仍可滚动、点按、
+  查看日志，不会把主线程卡住。超时后被"放弃等待"的任务没结束之前，新调用**直接拒绝**（不排队，
+  避免把 CPU 烧满），任务一结束自动恢复 —— 不需要重启应用。
 * **globals 隔离 + 进程级状态回滚**：每次执行用全新 dict；除此之外每次调用前后对 `sys.path` /
   `os.environ` / `warnings.filters` / logging 根级别与 handler / `random`（重新播种）/ numpy 打印
   选项与 `seterr` 做快照与回滚。解释器常驻不能让上一轮的副作用漏到下一轮（实机复现过：
@@ -229,6 +231,16 @@ finders)、导出 `GUNCAT_PY_LIBDIR` 给 PyCryptodome 这类用 ctypes 按路径
 执行本身固定在一个**专属线程**上(第一次调用时创建, 由它 `Py_Initialize`, 之后所有调用都投递给它) ——
 解释器的线程态、GIL 记录都绑在初始化它的线程上, NAPI 回调落在别的线程会出各种怪问题。
 
+**为什么 NAPI 入口必须是异步的**: 早先 `runPython` 是同步 NAPI 函数, ArkTS 调用它时 UI 线程会
+一直等 `DispatchToRunner` 的 condition_variable。实测一次 `import numpy/pandas/scipy` 就让主线程
+阻塞超过 6 秒, 系统 `FreezeDetector` 按 `THREAD_BLOCK_6S` 记录 `APP_FREEZE` 并杀掉进程 ——
+用户看到的就是"冻屏一下, 然后应用直接消失", 不是 Python 自己崩。现在执行放在
+`napi_async_work` 的 worker 上, 完成后再回 JS 线程 resolve, UI 线程全程不等待。
+
+runner 线程还会把 nice 值调低一档(`setpriority(PRIO_PROCESS, 0, 5)`), 让主线程/渲染/输入在
+CPU 满载时仍能优先调度; 耗时超过 1 秒的调用结束后会尝试 `malloc_trim(0)`(glibc 有, musl
+没有, 缺失时无副作用), 把已释放的堆页尽量还给系统。
+
 ## 6.3 内存(进程被杀是 SIGKILL, 捕获不到)
 
 * **常驻成本**: 解释器不重启, 已经 import 的库就一直占着 —— 全库(numpy/pandas/scipy/
@@ -272,6 +284,7 @@ mini import _json=FAIL ModuleNotFoundError("No module named '_json'")
 | 测试 | 覆盖 | 结果 |
 | --- | --- | --- |
 | [`launcher-test.py`](../../tooling/python/launcher-test.py) | **43 项**启动器回归(桌面 CPython 直接跑模板): 输出捕获(含 fd 级 `os.write`/`buffer`/`fileno`)、跨调用状态隔离、超时(while/for)、只读守卫、spawn 守卫、用户命名空间释放、MPLCONFIGDIR、内存提示、诊断 | Windows 42/42、Linux 43/43(无 numpy 时跳过 2 项) |
+| `run_python` 长任务不冻屏(真机) | `run_python` 执行 `import time; time.sleep(8); print("ok")`，同时拖动界面/开关侧栏 | 8 秒内界面仍可交互，结果正常返回；hilog 无 `THREAD_BLOCK_6S` / `APP_FREEZE` |
 | [`verify-python-stack.py`](../../tooling/python/verify-python-stack.py) | **24 项**技术栈自检: 标准库(sqlite3/ssl/压缩/hash)、ctypes、numpy、pandas、scipy、Pillow、matplotlib、**中文渲染**、qrcode、lxml、regex、bs4、PyCryptodome、docx/pptx/xlsxwriter、sympy、psutil、requests+certifi、openpyxl/yaml/jinja2、multiprocessing/guncat_mp、reportlab、watchdog | 24/24 通过 |
 | [`run-verify-stack.sh`](../../tooling/python/run-verify-stack.sh) | **按真机布局**组装环境(qemu): extras 解压到临时目录、libs 只给 `.so`、`PYTHONPATH=stdlib:site-packages:extras:libs` | 同上 |
 | [`build-python-stack.sh`](../../tooling/python/build-python-stack.sh) | 12 个阶段全量重建(幂等) | 可一键重建 |

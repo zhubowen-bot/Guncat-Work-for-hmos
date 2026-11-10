@@ -2020,6 +2020,19 @@ console.log('[GuncatUiParts 切分]');
       cpp.indexOf('"warning"') >= 0);
     check('ArkTS: 把 cacheDir 传给原生并展示提醒', py.indexOf('cacheDir: context.cacheDir') >= 0 &&
       py.indexOf('r.warning') >= 0);
+    // 实机 THREAD_BLOCK_6S: 同步 NAPI 把 UI 线程卡在 Python 执行上, 系统直接杀进程。
+    check('native: run_python 走异步 NAPI(不卡 UI 线程)',
+      cpp.indexOf('napi_create_promise') >= 0 && cpp.indexOf('napi_create_async_work') >= 0 &&
+      cpp.indexOf('ExecutePyRun') >= 0 && cpp.indexOf('napi_queue_async_work') >= 0);
+    check('native: 串行占位是原子的', cpp.indexOf('g_running.compare_exchange_strong') >= 0);
+    check('native: runner 线程降优先级并回收堆',
+      cpp.indexOf('LowerRunnerPriority') >= 0 && cpp.indexOf('setpriority') >= 0 &&
+      cpp.indexOf('TrimHeapIfNeeded') >= 0);
+    check('ArkTS: await 原生异步调用后再释放串行链',
+      py.indexOf('await pyRunNative(options)') >= 0);
+    check('ArkTS: 首次释放运行库走异步拷贝', py.indexOf('await RawAsset.extractAsync') >= 0);
+    const pyTypes = readFileSync(root + '/entry/src/main/cpp/types/libguncatpy/index.d.ts', 'utf8');
+    check('类型: runPython 返回 Promise', pyTypes.indexOf('Promise<PyRunResult>') >= 0);
   }
 
   check('hasProgram 判定', GuncatUiParts.hasProgram('root = Card([') === true &&

@@ -105,16 +105,16 @@ export class PythonService {
       if (!fileIo.accessSync(stdlib)) {
         fileIo.mkdirSync(stdlib, true);
       }
-      RawAsset.extract(context, RAW_ZIP, stdlib + '/python312.zip');
+      await RawAsset.extractAsync(context, RAW_ZIP, stdlib + '/python312.zip');
       // 纯 Python 三方库(独立 zip, 与标准库分开升级)
       try {
-        RawAsset.extract(context, RAW_SITE, stdlib + '/site-packages.zip');
+        await RawAsset.extractAsync(context, RAW_SITE, stdlib + '/site-packages.zip');
       } catch (e) {
         hilog.warn(DOMAIN, TAG, 'extract site-packages failed: %{public}s', (e as Error).message);
       }
       // XlsxWriter(文档曾提到但实际没随包): 单独一个 zip, 直接挂在 PYTHONPATH 上。
       try {
-        RawAsset.extract(context, RAW_XLSX, stdlib + '/xlsxwriter.zip');
+        await RawAsset.extractAsync(context, RAW_XLSX, stdlib + '/xlsxwriter.zip');
       } catch (e) {
         hilog.warn(DOMAIN, TAG, 'extract xlsxwriter failed: %{public}s', (e as Error).message);
       }
@@ -124,7 +124,7 @@ export class PythonService {
       // zipimport 的开销。
       try {
         let extrasZip: string = stdlib + '/extras.zip';
-        RawAsset.extract(context, RAW_EXTRAS, extrasZip);
+        await RawAsset.extractAsync(context, RAW_EXTRAS, extrasZip);
         let extrasDir: string = stdlib + '/extras';
         // 旧版本把 extras.zip **原样**放在这个路径(是个文件), 现在要的是目录。
         // 这里不用 statSync().isFile() —— harness 的类型桩里没有该方法(CI 会报 TS2339),
@@ -153,7 +153,7 @@ export class PythonService {
       }
       // https 用的 CA 证书(应用沙箱里没有系统 CA)
       try {
-        RawAsset.extract(context, RAW_CERT, root + '/cacert.pem');
+        await RawAsset.extractAsync(context, RAW_CERT, root + '/cacert.pem');
       } catch (e) {
         hilog.warn(DOMAIN, TAG, 'extract cacert failed: %{public}s', (e as Error).message);
       }
@@ -166,7 +166,7 @@ export class PythonService {
         if (!fileIo.accessSync(fontDir)) {
           fileIo.mkdirSync(fontDir, true);
         }
-        RawAsset.extract(context, RAW_FONT, fontDir + '/' + FONT_FILE);
+        await RawAsset.extractAsync(context, RAW_FONT, fontDir + '/' + FONT_FILE);
       } catch (e) {
         hilog.warn(DOMAIN, TAG, 'extract cjk font failed: %{public}s', (e as Error).message);
       }
@@ -244,7 +244,9 @@ export class PythonService {
       release = resolve;
     });
     try {
-      return pyRunNative(options);
+      // 原生侧是异步 Promise: 必须 await 到执行结束再释放 promise 链,
+      // 否则下一个 Python 调用会在解释器还忙的时候挤进来。
+      return await pyRunNative(options);
     } finally {
       release();
     }

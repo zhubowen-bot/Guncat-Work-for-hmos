@@ -206,9 +206,9 @@ writeFileSync(join(allDir, 'py-shim.ts'),
   `  error: string;\n  warning?: string;\n  durationMs: number;\n}\n` +
   `export function isAvailable(): string { return 'py-shim: 原生模块仅在设备侧可用'; }\n` +
   `export function pyState(): number { return 0; }\n` +
-  `export function runPython(options: PyRunOptions): PyRunResult {\n` +
-  `  return { ok: false, timedOut: false, softTimeout: false, exitCode: 1, stdout: '', stderr: '',\n` +
-  `    error: 'py-shim: 原生模块仅在设备侧可用', durationMs: 0 };\n}\n`);
+  `export function runPython(options: PyRunOptions): Promise<PyRunResult> {\n` +
+  `  return Promise.resolve({ ok: false, timedOut: false, softTimeout: false, exitCode: 1,\n` +
+  `    stdout: '', stderr: '', error: 'py-shim: 原生模块仅在设备侧可用', durationMs: 0 });\n}\n`);
 
 // ===== @kit 桩 =====
 writeFileSync(join(stubsDir, '@kit.CoreFileKit.ts'),
@@ -218,10 +218,14 @@ writeFileSync(join(stubsDir, '@kit.CoreFileKit.ts'),
   `  enum OpenMode { READ_ONLY = 0, READ_WRITE = 1, CREATE = 2, TRUNC = 4, APPEND = 8 }\n` +
   `  function accessSync(path: string): boolean;\n  function statSync(path: string): Stat;\n` +
   `  function mkdirSync(path: string, recursion?: boolean): void;\n  function listFileSync(path: string): string[];\n` +
+  `  function open(path: string, mode?: number): Promise<File>;\n` +
   `  function openSync(path: string, mode: number): File;\n` +
   `  function readTextSync(path: string): string;\n` +
+  `  function read(fd: number, buffer: ArrayBuffer, opts?: { offset?: number; length?: number }): Promise<number>;\n` +
   `  function readSync(fd: number, buffer: ArrayBuffer, opts?: { offset?: number; length?: number }): number;\n` +
+  `  function write(fd: number, buffer: ArrayBuffer | string, opts?: { offset?: number; length?: number }): Promise<number>;\n` +
   `  function writeSync(fd: number, buffer: ArrayBuffer | string, opts?: { offset?: number; length?: number }): number;\n` +
+  `  function close(fileOrFd: File | number): Promise<void>;\n` +
   `  function closeSync(fileOrFd: File | number): void;\n` +
 `  function unlinkSync(path: string): void;  function rmdirSync(path: string): void;\n` +
 `  function copyFileSync(src: string, dest: string): void;\n` +
@@ -236,6 +240,8 @@ writeFileSync(join(stubsDir, '@kit.AbilityKit.ts'),
   `  interface ResourceManager {\n` +
   `    getRawFileContent(path: string): Promise<Uint8Array>;\n` +
   `    getRawFileContentSync(path: string): Uint8Array;\n` +
+  `    getRawFd(path: string): Promise<RawFileDescriptor>;\n` +
+  `    closeRawFd(path: string): Promise<void>;\n` +
   `    getRawFdSync(path: string): RawFileDescriptor;\n` +
   `    closeRawFdSync(path: string): void;\n  }\n` +
   `  class UIAbilityContext { filesDir: string; cacheDir: string; tempDir: string; resourceManager: ResourceManager; }\n}\n` +
