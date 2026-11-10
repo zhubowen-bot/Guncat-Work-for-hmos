@@ -11,6 +11,7 @@ import { ToastView } from '../views/ToastView';
 import { ImageLightbox } from '../views/ImageLightbox';
 import { PlayGuidePanel } from '../views/PlayGuidePanel';
 import { WorkspaceBar, WorkspaceFileIcons } from '../views/WorkspaceBar';
+import { AigcBadge } from '../views/AigcBadge';
 import { WorkTurnView } from '../views/WorkTurnView';
 import { WorkArtifactsCard } from '../views/WorkArtifactsCard';
 import { WorkArtifactFile, WorkArtifactSummary, WorkArtifactUtil } from '../common/WorkArtifacts';
@@ -1011,6 +1012,8 @@ struct ChatPage {
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .fontColor($r('app.color.text_primary'))
         .layoutWeight(1)
+        // 朗读的是 AI 生成文本; 控制条上同时给出显式提示。
+        AigcBadge()
         Button() {
           Text('×')
             .fontSize(16)
@@ -1269,7 +1272,7 @@ struct ChatPage {
       }
 
       // 标题 (智能体名, 居中显示)
-      Row() {
+      Column({ space: 2 }) {
         if (this.vm.currentAgent !== null) {
           Text(this.vm.currentAgent.name)
             .fontSize(17)
@@ -1277,12 +1280,12 @@ struct ChatPage {
             .fontColor($r('app.color.text_primary'))
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .constraintSize({ maxWidth: 200 })
+            .constraintSize({ maxWidth: this.isWide ? 200 : 180 })
         }
       }
       .layoutWeight(1)
       .justifyContent(FlexAlign.Center)
-      .alignItems(VerticalAlign.Center)
+      .alignItems(HorizontalAlign.Center)
 
       // 自动朗读
       Button() {

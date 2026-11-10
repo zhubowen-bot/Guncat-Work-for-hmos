@@ -5,6 +5,7 @@ import { util } from '@kit.ArkTS';
 import { ZipWriter, ZipEntry } from './ZipWriter';
 import { XmlUtil } from './XmlUtil';
 import { XlsxWorkbook, XlsxSheet, XlsxStylePalette, XlsxStyleColors, XlsxParser, XlsxJson } from './XlsxModel';
+import { AigcMark } from '../common/AigcMark';
 
 // 数字格式 hint -> 自定义 numFmtId(>=164 需在 numFmts 声明; 0=General 内置)
 const FMT_GENERAL: number = 0;
@@ -20,6 +21,8 @@ const XML_HEAD: string = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?
 export class XlsxBuilder {
   private wb: XlsxWorkbook = new XlsxWorkbook();
   private colors: XlsxStyleColors = new XlsxStyleColors();
+  // 单个工作簿只生成一个内容制作编号, 文件内仅保留一份 AIGC 隐式标识。
+  private produceId: string = AigcMark.newProduceId();
   // 用到的自定义格式 id 集合(去重, 声明 numFmts 用)
   private usedFormats: number[] = [];
 
@@ -46,6 +49,8 @@ export class XlsxBuilder {
     entries.push(XlsxBuilder.entryBytes('docProps/workbook.json', XlsxParser.toJson(this.wb)));
     entries.push(XlsxBuilder.entry('docProps/core.xml', this.coreXml()));
     entries.push(XlsxBuilder.entry('docProps/app.xml', this.appXml()));
+    entries.push(XlsxBuilder.entry('docProps/custom.xml',
+      AigcMark.customPropertiesXml(this.produceId)));
     return ZipWriter.create(entries);
   }
 
@@ -82,6 +87,7 @@ export class XlsxBuilder {
     }
     ct += '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>' +
       '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>' +
+      AigcMark.customContentTypeOverride() +
       '</Types>';
     return ct;
   }
@@ -92,6 +98,7 @@ export class XlsxBuilder {
       '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
       '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>' +
       '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>' +
+      AigcMark.customRootRelationship('rId4') +
       '</Relationships>';
   }
 
@@ -155,6 +162,10 @@ export class XlsxBuilder {
       r++;
     }
     sb += '</sheetData>';
+    // 显式标识: 打印/页面布局时页脚左下角显示 "AI生成"; 屏幕上的表格数据保持原样。
+    sb += '<headerFooter><oddFooter>&amp;L ' + AigcMark.LABEL + '</oddFooter>' +
+      '<evenFooter>&amp;L ' + AigcMark.LABEL + '</evenFooter>' +
+      '<firstFooter>&amp;L ' + AigcMark.LABEL + '</firstFooter></headerFooter>';
     sb += '</worksheet>';
     return sb;
   }

@@ -3,6 +3,7 @@
 import { WorkArtifactFile } from '../common/WorkArtifacts';
 import { FileDiff } from '../common/DiffUtil';
 import { WorkspaceFileIcons } from './WorkspaceBar';
+import { AigcBadge } from './AigcBadge';
 
 class ArtifactDiffRow {
   type: string = 'same';
@@ -28,10 +29,13 @@ export struct WorkArtifactsCard {
           .fontSize(16)
           .fontColor([$r('app.color.brand')])
         Column() {
-          Text('产物')
-            .fontSize(13)
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.text_primary'))
+          Row({ space: 6 }) {
+            Text('产物')
+              .fontSize(13)
+              .fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.text_primary'))
+            AigcBadge()
+          }
           Text(this.files.length.toString() + ' 个文件 · +' + this.totalAdds.toString() +
             ' -' + this.totalDels.toString())
             .fontSize(10)

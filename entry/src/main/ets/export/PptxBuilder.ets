@@ -10,6 +10,7 @@ import { Deck, DeckSlide, DeckBullet, DeckElement, DeckTable, DECK_MAX_SLIDES } 
 import { PptxThemes, ThemeColors } from './PptxThemes';
 import { PptxCharts } from './PptxCharts';
 import { Constants } from '../common/Constants';
+import { AigcMark } from '../common/AigcMark';
 
 // 16:9 画布 (EMU)
 const SLIDE_W: number = 12192000;
@@ -74,6 +75,7 @@ export class PptxBuilder {
     let imageCache: Map<string, PptxImagePart> = new Map();
     let contexts: SlideContext[] = [];
     let chartCount: number = 0;
+    let produceId: string = AigcMark.newProduceId();
 
     // ===== 第一遍: 解析全部图片 + 预建每页上下文 =====
     for (let i: number = 0; i < deck.slides.length && i < DECK_MAX_SLIDES; i++) {
@@ -128,6 +130,7 @@ export class PptxBuilder {
     entries.push(PptxBuilder.xmlEntry('_rels/.rels', PptxBuilder.rootRelsXml()));
     entries.push(PptxBuilder.xmlEntry('docProps/core.xml', PptxBuilder.coreXml(deck.title)));
     entries.push(PptxBuilder.xmlEntry('docProps/app.xml', PptxBuilder.appXml(slideCount)));
+    entries.push(PptxBuilder.xmlEntry('docProps/custom.xml', AigcMark.customPropertiesXml(produceId)));
     // 内嵌 Deck 源: read_ppt/edit_ppt 的无损往返依赖它
     let deckSource: ZipEntry = new ZipEntry();
     deckSource.name = 'docProps/deck.json';
@@ -338,9 +341,15 @@ export class PptxBuilder {
       spTree += PptxBuilder.rect(90, 0, 0, SLIDE_W, SLIDE_H,
         PptxBuilder.resolve(colors, slide.background.color, colors.bg));
     }
+    // 显式标识: 每页左下角 8pt "AI生成"; 半透明白底保证在深色/图片背景上也清晰。
+    // 放在 body 之后绘制, 避免 image-full 等版式的图片盖住标识。
+    let aigcMark: string = PptxBuilder.overlayRect(9999, MARGIN_X - 30000, SLIDE_H - 395000,
+      1200000, 240000, 'FFFFFF', 55) +
+      PptxBuilder.textBox(10000, MARGIN_X, SLIDE_H - 395000, 1100000, 240000,
+        PptxBuilder.para(AigcMark.LABEL, 800, '5B6577', false, 'left'), '');
     return XML_HEAD +
       '<p:sld ' + NS_A + ' ' + NS_R + ' ' + NS_P + '>' +
-      '<p:cSld><p:spTree>' + spTree + body + '</p:spTree></p:cSld>' +
+      '<p:cSld><p:spTree>' + spTree + body + aigcMark + '</p:spTree></p:cSld>' +
       '<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>' +
       '</p:sld>';
   }
@@ -1055,6 +1064,7 @@ export class PptxBuilder {
     }
     sb += '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>';
     sb += '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>';
+    sb += AigcMark.customContentTypeOverride();
     sb += '</Types>';
     return sb;
   }
@@ -1065,6 +1075,7 @@ export class PptxBuilder {
       '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>' +
       '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>' +
       '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>' +
+      AigcMark.customRootRelationship('rId4') +
       '</Relationships>';
   }
 

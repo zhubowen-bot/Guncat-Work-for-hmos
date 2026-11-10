@@ -39,7 +39,8 @@ port('export/DocModel.ets', 'DocModel.ts', [
   ["from '../common/Constants'", "from './Constants'"]
 ]);
 port('export/DocxBuilder.ets', 'DocxBuilder.ts', [
-  ["from '../common/Constants'", "from './Constants'"]
+  ["from '../common/Constants'", "from './Constants'"],
+  ["from '../common/AigcMark'", "from './AigcMark'"]
 ]);
 port('export/DocxAudit.ets', 'DocxAudit.ts', []);
 port('export/MarkdownParser.ets', 'MarkdownParser.ts', []);
@@ -50,7 +51,8 @@ port('export/XlsxModel.ets', 'XlsxModel.ts', [
   ["from '../common/CsvParser'", "from './CsvParser'"]
 ]);
 port('export/XlsxBuilder.ets', 'XlsxBuilder.ts', [
-  ["from '../common/Constants'", "from './Constants'"]
+  ["from '../common/Constants'", "from './Constants'"],
+  ["from '../common/AigcMark'", "from './AigcMark'"]
 ]);
 port('export/XlsxImporter.ets', 'XlsxImporter.ts', [
   ["from '../common/Constants'", "from './Constants'"]
@@ -62,13 +64,15 @@ port('common/CsvParser.ts', 'CsvParser.ts', []);
 port('common/DataPipeline.ts', 'DataPipeline.ts', []);
 port('export/SvgUtil.ts', 'SvgUtil.ts', []);
 port('export/PptxBuilder.ets', 'PptxBuilder.ts', [
-  ["from '../common/Constants'", "from './Constants'"]
+  ["from '../common/Constants'", "from './Constants'"],
+  ["from '../common/AigcMark'", "from './AigcMark'"]
 ]);
 port('export/XmlUtil.ets', 'XmlUtil.ts', []);
 port('export/ZipWriter.ets', 'ZipWriter.ts', [
   ["from '@kit.ArkTS'", "from './arkts-shim'"]
 ]);
 port('common/Constants.ts', 'Constants.ts', []);
+port('common/AigcMark.ts', 'AigcMark.ts', []);
 port('export/DocxImporter.ets', 'DocxImporter.ts', [
   ["from '../common/Constants'", "from './Constants'"]
 ]);

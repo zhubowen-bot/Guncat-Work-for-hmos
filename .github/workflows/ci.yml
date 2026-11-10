@@ -171,6 +171,13 @@ jobs:
           python validate.py gen/out_all.pptx gen/out_dark.pptx gen/out_outline.pptx gen/out_edit.pptx
           python deep-check.py
 
+      - name: AI 生成内容标识检查
+        run: |
+          python tools/check-aigc-mark.py \
+            test/docx-harness/gen/out_all.docx \
+            test/xlsx-harness/gen/out_all.xlsx \
+            test/pptx-harness/gen/out_all.pptx
+
       - name: 失败时保留生成物以便排查
         if: failure()
         uses: actions/upload-artifact@v7

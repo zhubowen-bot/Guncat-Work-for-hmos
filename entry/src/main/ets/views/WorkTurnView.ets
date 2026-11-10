@@ -11,6 +11,7 @@ import { RichTextView } from './RichTextView';
 import { WorkStepFormat } from './ChatBubbleView';
 import { FileDiff } from '../common/DiffUtil';
 import { GuncatUiView } from './GuncatUiView';
+import { AigcBadge } from './AigcBadge';
 import { GuncatUiParts, GuncatUiSeg, GuncatUiSegType } from '../common/GuncatUiParts';
 import { GuncatUiEvent } from '../common/GuncatUiRuntime';
 import { Constants } from '../common/Constants';
@@ -393,6 +394,16 @@ export struct WorkTurnView {
       if (this.isStreaming || this.message.content !== '') {
         Column() {
           this.buildTurnContent()
+          // AI 生成显式标识: 最终回复/历史正文末尾常驻, 尺寸压到 9fp 不抢正文。
+          if (!this.isStreaming && this.message.content !== '' &&
+            (this.isLastAssistant || this.section !== 'full')) {
+            Row() {
+              Blank()
+              AigcBadge()
+            }
+            .width('100%')
+            .padding({ top: 2, bottom: 2 })
+          }
           // 流式光标: 仅在模型仍在输出文本(尚无工具调用)时显示;
           // 工具执行阶段正文已停, 挂着光标反而像多出一个空行
           if (this.isStreaming && this.message.content !== '' &&

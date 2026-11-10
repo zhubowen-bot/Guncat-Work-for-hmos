@@ -51,6 +51,7 @@ import { MultimodalService } from '../service/MultimodalService';
 import { HarnessTools, WEB_FETCH_TOOL_NAME } from '../service/HarnessTools';
 import { StorageManager } from '../data/StorageManager';
 import { Constants } from '../common/Constants';
+import { AigcMark } from '../common/AigcMark';
 import { generateMessageId } from '../common/Utils';
 import { arrayBufferToBase64 } from '../common/Utils';
 import {
@@ -1451,7 +1452,10 @@ export class ChatViewModel {
       promptAction.showToast({ message: '文件不存在或已被删除', duration: 1500 });
       return;
     }
-    let uri: string = fileUri.getUriFromPath(abs);
+    // 分享属于"生成合成内容导出/下载": 文本类文件在临时副本里补显式标识,
+    // 不改动工作区里的原始文件。Office/SVG 在生成时已写入标识。
+    let shareAbs: string = this.buildAigcShareCopy(rel, abs);
+    let uri: string = fileUri.getUriFromPath(shareAbs);
     let baseName: string = rel.substring(rel.lastIndexOf('/') + 1);
     let dot: number = rel.lastIndexOf('.');
     let ext: string = dot >= 0 ? rel.substring(dot) : '';
@@ -1468,6 +1472,57 @@ export class ChatViewModel {
     } catch (e) {
       let err: Error = e as Error;
       promptAction.showToast({ message: '分享失败: ' + (err.message !== undefined ? err.message : String(e)), duration: 2000 });
+    }
+  }
+
+  // 分享前生成带显式标识的临时副本(md/txt/svg); 其他格式原样返回。
+  // 只写 cacheDir, 不触碰工作区原文件; 失败时回退原文件, 保证分享可用。
+  private buildAigcShareCopy(rel: string, abs: string): string {
+    if (this.context === null) {
+      return abs;
+    }
+    let lower: string = rel.toLowerCase();
+    if (!lower.endsWith('.md') && !lower.endsWith('.txt') && !lower.endsWith('.svg') &&
+      !lower.endsWith('.html') && !lower.endsWith('.htm')) {
+      return abs;
+    }
+    try {
+      let buf: ArrayBuffer = WorkFileService.readBytesPublic(abs, 4 * 1024 * 1024);
+      let decoder: util.TextDecoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
+      let text: string = decoder.decodeToString(new Uint8Array(buf), { stream: false });
+      let marked: string = text;
+      if (lower.endsWith('.md')) {
+        marked = AigcMark.stampMarkdown(text);
+      } else if (lower.endsWith('.txt')) {
+        marked = AigcMark.stampPlainText(text);
+      } else if (lower.endsWith('.html') || lower.endsWith('.htm')) {
+        marked = AigcMark.stampHtml(text);
+      } else {
+        marked = AigcMark.stampSvg(text, AigcMark.newProduceId());
+      }
+      if (marked === text) {
+        return abs;
+      }
+      let dir: string = this.context.cacheDir + '/aigc_share';
+      WorkFileService.ensureDir(dir);
+      let name: string = rel.substring(rel.lastIndexOf('/') + 1);
+      let out: string = dir + '/' + AigcMark.newProduceId() + '_' + name;
+      let encoder: util.TextEncoder = new util.TextEncoder();
+      let bytes: Uint8Array = encoder.encode(marked);
+      let file: fileIo.File = fileIo.openSync(out,
+        fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+      try {
+        let buffer: ArrayBuffer = bytes.buffer as ArrayBuffer;
+        if (bytes.byteOffset !== 0 || bytes.byteLength !== buffer.byteLength) {
+          buffer = bytes.slice().buffer as ArrayBuffer;
+        }
+        fileIo.writeSync(file.fd, buffer);
+      } finally {
+        fileIo.closeSync(file);
+      }
+      return out;
+    } catch (e) {
+      return abs;
     }
   }
 
@@ -4483,7 +4538,8 @@ if (this.abortSignal.aborted) {
     for (let i: number = 0; i < conv.messages.length; i++) {
       if (conv.messages[i].id === msgId) {
         let plain: string = stripMarkdown(conv.messages[i].content);
-        await this.copyText(plain);
+        // 复制属于"生成合成内容复制", 文本末尾必须带显式标识。
+        await this.copyText(AigcMark.stampPlainText(plain));
         return;
       }
     }
@@ -4496,7 +4552,7 @@ if (this.abortSignal.aborted) {
     }
     for (let i: number = 0; i < conv.messages.length; i++) {
       if (conv.messages[i].id === msgId) {
-        await this.copyText(conv.messages[i].content);
+        await this.copyText(AigcMark.stampMarkdown(conv.messages[i].content));
         return;
       }
     }

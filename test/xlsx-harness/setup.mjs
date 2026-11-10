@@ -36,6 +36,7 @@ port('export/XlsxModel.ets', 'XlsxModel.ts', [
 ]);
 port('export/XlsxBuilder.ets', 'XlsxBuilder.ts', [
   ["from '../common/Constants'", "from './Constants'"],
+  ["from '../common/AigcMark'", "from './AigcMark'"],
   ["from '@kit.ArkTS'", "from './arkts-shim'"]
 ]);
 port('common/CsvParser.ts', 'CsvParser.ts', []);
@@ -44,6 +45,7 @@ port('export/ZipWriter.ets', 'ZipWriter.ts', [
   ["from '@kit.ArkTS'", "from './arkts-shim'"]
 ]);
 port('common/Constants.ts', 'Constants.ts', []);
+port('common/AigcMark.ts', 'AigcMark.ts', []);
 port('export/XlsxImporter.ets', 'XlsxImporter.ts', [
   ["from '../common/Constants'", "from './Constants'"],
   ["import { fileIo } from '@kit.CoreFileKit';", "import { fileIo, util } from './kit-shim';"],

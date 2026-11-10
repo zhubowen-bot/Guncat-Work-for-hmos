@@ -35,7 +35,8 @@ port('export/DocModel.ets', 'DocModel.ts', [
   ["from '../common/Constants'", "from './Constants'"]
 ]);
 port('export/DocxBuilder.ets', 'DocxBuilder.ts', [
-  ["from '../common/Constants'", "from './Constants'"]
+  ["from '../common/Constants'", "from './Constants'"],
+  ["from '../common/AigcMark'", "from './AigcMark'"]
 ]);
 port('export/DocxAudit.ets', 'DocxAudit.ts', []);
 port('export/MarkdownParser.ets', 'MarkdownParser.ts', []);
@@ -45,6 +46,7 @@ port('export/ZipWriter.ets', 'ZipWriter.ts', [
   ["from '@kit.ArkTS'", "from './arkts-shim'"]
 ]);
 port('common/Constants.ts', 'Constants.ts', []);
+port('common/AigcMark.ts', 'AigcMark.ts', []);
 port('export/DocxImporter.ets', 'DocxImporter.ts', [
   ["from '../common/Constants'", "from './Constants'"],
   ["import { fileIo } from '@kit.CoreFileKit';", "import { fileIo, util } from './kit-shim';"],

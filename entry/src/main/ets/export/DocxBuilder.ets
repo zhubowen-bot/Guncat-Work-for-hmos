@@ -12,6 +12,7 @@ import { InlineParser, InlineToken } from './MarkdownParser';
 import { OmmlConverter } from './OmmlConverter';
 import { DocxAudit } from './DocxAudit';
 import { Constants } from '../common/Constants';
+import { AigcMark } from '../common/AigcMark';
 
 // A4 页面(twips)与边距
 const PAGE_W: number = 11906;
@@ -78,6 +79,8 @@ export class DocxBuilder {
   private relCounter: number = 1;
   private drawIdCounter: number = 1;
   private palette: DocStyleColors = new DocStyleColors();
+  // 单个文档只生成一个内容制作编号, 文件内仅保留一份 AIGC 隐式标识。
+  private produceId: string = AigcMark.newProduceId();
 
   // Doc -> docx 字节(兼容旧调用; 自检不过会抛错)
   static async buildDocxBytes(doc: Doc, resolveImage: DocImageResolver): Promise<Uint8Array> {
@@ -110,6 +113,8 @@ export class DocxBuilder {
     entries.push(DocxBuilder.xmlEntry('_rels/.rels', builder.buildRootRelsXml()));
     entries.push(DocxBuilder.xmlEntry('docProps/core.xml', builder.buildCoreXml(doc)));
     entries.push(DocxBuilder.xmlEntry('docProps/app.xml', builder.buildAppXml()));
+    entries.push(DocxBuilder.xmlEntry('docProps/custom.xml',
+      AigcMark.customPropertiesXml(builder.produceId)));
     // 内嵌 Doc 源: read_docx/edit_docx 的无损往返依赖它
     let docSource: ZipEntry = new ZipEntry();
     docSource.name = 'docProps/doc.json';
@@ -118,6 +123,7 @@ export class DocxBuilder {
     entries.push(DocxBuilder.xmlEntry('word/document.xml', documentXml));
     entries.push(DocxBuilder.xmlEntry('word/styles.xml', builder.buildStylesXml(doc.style)));
     entries.push(DocxBuilder.xmlEntry('word/numbering.xml', builder.buildNumberingXml()));
+    entries.push(DocxBuilder.xmlEntry('word/footer1.xml', AigcMark.docxFooterXml()));
     entries.push(DocxBuilder.xmlEntry('word/_rels/document.xml.rels', builder.buildDocumentRelsXml()));
     for (let i: number = 0; i < builder.mediaParts.length; i++) {
       let part: DocxMediaPart = builder.mediaParts[i];
@@ -223,7 +229,9 @@ export class DocxBuilder {
     for (let i: number = 0; i < this.blocks.length; i++) {
       body += this.renderBlock(this.blocks[i]);
     }
-    body += '<w:sectPr><w:pgSz w:w="' + PAGE_W.toString() + '" w:h="' + PAGE_H.toString() + '"/>' +
+    body += AigcMark.docxEndParagraphXml();
+    body += '<w:sectPr><w:footerReference w:type="default" r:id="rIdFooter1"/>' +
+      '<w:pgSz w:w="' + PAGE_W.toString() + '" w:h="' + PAGE_H.toString() + '"/>' +
       '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" ' +
       'w:header="708" w:footer="708" w:gutter="0"/></w:sectPr>';
     return XML_HEAD + '<w:document xmlns:w="' + NS_W + '" xmlns:r="' + NS_R + '" xmlns:wp="' + NS_WP +
@@ -751,6 +759,8 @@ export class DocxBuilder {
       '<Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>' +
       '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>' +
       '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>' +
+      AigcMark.customContentTypeOverride() +
+      '<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>' +
       '</Types>';
   }
 
@@ -759,13 +769,15 @@ export class DocxBuilder {
       '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
       '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>' +
       '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>' +
+      AigcMark.customRootRelationship('rId4') +
       '</Relationships>';
   }
 
   private buildDocumentRelsXml(): string {
     let rels: string = XML_HEAD + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
       '<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
-      '<Relationship Id="rIdNumbering" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>';
+      '<Relationship Id="rIdNumbering" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>' +
+      '<Relationship Id="rIdFooter1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>';
     for (let i: number = 0; i < this.mediaParts.length; i++) {
       let part: DocxMediaPart = this.mediaParts[i];
       rels += '<Relationship Id="' + part.relId +

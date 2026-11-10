@@ -29,6 +29,7 @@ import { ToolExecutionGuard } from '../common/ToolExecutionGuard';
 import { ToolSchemaValidator } from '../common/ToolSchemaValidator';
 import { ToolRetryPolicy } from '../common/ToolRetryPolicy';
 import { ToolRegistry } from '../common/ToolRegistry';
+import { AigcMark } from '../common/AigcMark';
 import { PluginToolExecutor, PluginToolResult } from '../common/PluginToolExecutor';
 import { AbortSignal } from '../common/Types';
 
@@ -721,9 +722,11 @@ export class WorkToolRunner {
     }
     // 规整: 缺失 width/height 时自动按 viewBox 补齐(实机栅格引擎必需), 再落盘
     let normalized: string = SvgUtil.normalize(svg, 512);
+    // AI 生成图片的显式 + 隐式标识: 右下角 "AI生成" + <metadata id="aigc-mark">
+    let marked: string = AigcMark.stampSvg(normalized, AigcMark.newProduceId());
     let encoder: util.TextEncoder = new util.TextEncoder();
     let saveResult: ToolExecResult = WorkFileService.writeBytesAt(context, convId, rel,
-      encoder.encode(normalized));
+      encoder.encode(marked));
     if (!saveResult.ok) {
       return saveResult;
     }
@@ -751,11 +754,13 @@ export class WorkToolRunner {
     try {
       let png: PptxImagePart = await WorkToolRunner.rasterizeSvgFile(abs, width, dims,
         context.cacheDir + '/work_svg');
+      // 预览 PNG 也属于 AI 生成图片: 写入 AIGC tEXt 块(不可见), 图片右下角已由 SVG 带出可见标识。
+      let previewData: Uint8Array = AigcMark.stampPng(png.data, AigcMark.newProduceId());
       let previewResult: ToolExecResult = WorkFileService.writeBytesAt(context, convId,
-        previewRel, png.data);
+        previewRel, previewData);
       if (previewResult.ok) {
         out += '\n预览已生成: ' + previewRel + ' (' + png.widthPx.toString() + '×' +
-          png.heightPx.toString() + ' PNG, ' + WorkFileService.formatSize(png.data.length) + ')' +
+          png.heightPx.toString() + ' PNG, ' + WorkFileService.formatSize(previewData.length) + ')' +
           '\n—— 立即用 view_image 查看 ' + previewRel + ' 自检; write_pptx 可直接引用 ' + rel +
           '(自动栅格化), write_docx 引用预览 PNG。';
       } else {

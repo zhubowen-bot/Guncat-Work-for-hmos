@@ -17,6 +17,7 @@ import { HarnessTools } from './HarnessTools';
 import { arrayBufferToBase64 } from '../common/Utils';
 import { ToolRegistry } from '../common/ToolRegistry';
 import { Constants } from '../common/Constants';
+import { AigcMark } from '../common/AigcMark';
 import { FileObservation } from '../common/FileObservation';
 import { OrphanSweep } from '../common/OrphanSweep';
 import { LocalWebSearch, LocalSearchOutcome, LOCAL_SEARCH_TOOL_DESC_WORK, LOCAL_SEARCH_TOOL_DESC_WORK_FALLBACK,
@@ -591,10 +592,15 @@ export class WorkFileService {
     const maxTotalBytes: number = 128 * 1024 * 1024;
     let totalBytes: number = 0;
     let entries: ZipEntry[] = [];
+    let produceId: string = AigcMark.newProduceId();
+    let noticeName: string = '_' + AigcMark.ZIP_NOTICE_FILE;
     for (let i: number = 0; i < items.length; i++) {
       let item: WorkspaceFileInfo = items[i];
       if (item.isDir) {
         continue;
+      }
+      if (item.path === noticeName) {
+        noticeName = '_' + noticeName;
       }
       if (item.size > maxSingleBytes) {
         throw new Error('文件过大, 无法打包导出: ' + item.path + ' (' +
@@ -611,6 +617,31 @@ export class WorkFileService {
         continue;
       }
       let data: Uint8Array = WorkFileService.readBytes(abs);
+      // 导出副本里的文本类文件补显式标识; 工作区原文件保持不变。
+      let lower: string = item.path.toLowerCase();
+      if (lower.endsWith('.md') || lower.endsWith('.txt') || lower.endsWith('.svg') ||
+        lower.endsWith('.html') || lower.endsWith('.htm')) {
+        try {
+          let decoder: util.TextDecoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
+          let text: string = decoder.decodeToString(data, { stream: false });
+          let marked: string = text;
+          if (lower.endsWith('.md')) {
+            marked = AigcMark.stampMarkdown(text);
+          } else if (lower.endsWith('.txt')) {
+            marked = AigcMark.stampPlainText(text);
+          } else if (lower.endsWith('.html') || lower.endsWith('.htm')) {
+            marked = AigcMark.stampHtml(text);
+          } else {
+            marked = AigcMark.stampSvg(text, AigcMark.newProduceId());
+          }
+          if (marked !== text) {
+            let encoder: util.TextEncoder = new util.TextEncoder();
+            data = encoder.encode(marked);
+          }
+        } catch (e) {
+          // 不是可解码的 UTF-8 文本时保持原字节, 不破坏文件。
+        }
+      }
       let entry: ZipEntry = new ZipEntry();
       entry.name = item.path;
       entry.data = data;
@@ -620,6 +651,11 @@ export class WorkFileService {
     if (!hasFile) {
       throw new Error('工作区为空');
     }
+    let notice: ZipEntry = new ZipEntry();
+    notice.name = noticeName;
+    let encoder: util.TextEncoder = new util.TextEncoder();
+    notice.data = encoder.encode(AigcMark.zipNotice(produceId, entries.length));
+    entries.push(notice);
     return ZipWriter.create(entries);
   }
 

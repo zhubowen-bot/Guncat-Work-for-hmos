@@ -36,6 +36,7 @@ function port(relSrc, relDst, replaces) {
 // ===== 纯逻辑与导出模块 =====
 for (const [relSrc, relDst, replaces] of [
   ['common/Constants.ts', 'Constants.ts', []],
+  ['common/AigcMark.ts', 'AigcMark.ts', []],
   ['common/Utils.ts', 'Utils.ts', []],
   ['common/CsvParser.ts', 'CsvParser.ts', []],
   ['common/DataPipeline.ts', 'DataPipeline.ts', []],

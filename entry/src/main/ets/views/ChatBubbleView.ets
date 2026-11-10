@@ -3,6 +3,7 @@ import { Attachment } from '../model/Attachment';
 import { ToolCallRecord } from '../model/ToolCallRecord';
 import { RichTextView } from './RichTextView';
 import { GuncatUiView } from './GuncatUiView';
+import { AigcBadge } from './AigcBadge';
 import { GuncatUiParts, GuncatUiSeg, GuncatUiSegType } from '../common/GuncatUiParts';
 import { GuncatUiEvent } from '../common/GuncatUiRuntime';
 
@@ -715,6 +716,16 @@ export struct ChatBubbleView {
         Column() {
           // 消息内容: 普通文本片段走 Markdown, guncat-ui 块走原生交互渲染
           this.buildAIContent()
+
+          // AI 生成显式标识: 放在正文末尾, 与内容同屏可见。
+          if (!this.isStreaming && this.message.content !== '') {
+            Row() {
+              Blank()
+              AigcBadge()
+            }
+            .width('100%')
+            .padding({ left: 12, right: 12, top: 2, bottom: 6 })
+          }
 
           // 流式光标(读 visibleText, 避免每批 token 直接登记对 message.content 的依赖)
           if (this.isStreaming && this.visibleText !== '') {
