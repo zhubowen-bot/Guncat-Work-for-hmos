@@ -1,6 +1,5 @@
 // 关于弹层 (对齐 web 版本 .about-panel)
 import { common } from '@kit.AbilityKit';
-import { promptAction } from '@kit.ArkUI';
 import { Constants } from '../common/Constants';
 
 const REPO_URL: string = 'https://github.com/zhubowen-bot/Guncat-AI';
@@ -66,42 +65,7 @@ export struct AboutPanel {
             Text(`version ${Constants.APP_VERSION}`)
               .fontSize(14)
               .fontColor($r('app.color.text_secondary'))
-              .margin({ bottom: 12 })
-
-            // AI 生成内容标识说明: 应用不内置模型, 内容由用户配置的模型服务生成。
-            Text('本应用不内置、不代理大模型服务；对话与文件由你配置的模型服务生成，界面与导出文件会标注“AI生成”。')
-              .fontSize(12)
-              .fontColor($r('app.color.text_secondary'))
-              .lineHeight(18)
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: 18 })
-
-            // AI 生成内容标识说明
-            Row() {
-              SymbolGlyph($r('sys.symbol.info_circle'))
-                .fontSize(16)
-                .fontColor([$r('app.color.text_primary')])
-              Text('AI 生成内容标识说明')
-                .fontSize(14)
-                .fontColor($r('app.color.text_primary'))
-                .margin({ left: 8 })
-            }
-            .padding({ left: 18, right: 18, top: 10, bottom: 10 })
-            .borderRadius(16)
-            .backgroundColor($r('app.color.raised_surface'))
-            .shadow({ radius: 10, color: '#12000000', offsetX: 0, offsetY: 2 })
-            .margin({ bottom: 12 })
-            .onClick(() => {
-              promptAction.showDialog({
-                title: 'AI 生成内容标识',
-                message: '本应用不内置、不代理大模型服务。你在设置中自行配置模型 API，请求由设备直接发送到你选择的服务商。\n\n' +
-                  '依据《人工智能生成合成内容标识办法》，本应用对 AI 生成内容添加显式标识（界面、复制文本、导出文件中的“AI生成”）' +
-                  '和隐式标识（文件元数据中的 AIGC 字段）。请在使用生成内容时注意甄别。',
-                buttons: [
-                  { text: '知道了', color: '#2E6BE6' }
-                ]
-              });
-            })
+              .margin({ bottom: 20 })
 
             // 开源仓库
             Row() {

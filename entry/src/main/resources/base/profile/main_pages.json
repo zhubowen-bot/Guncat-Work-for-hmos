@@ -4,6 +4,7 @@
     "pages/SettingsPage",
     "pages/TableOcrPage",
     "pages/UsagePage",
-    "pages/PersonalInstructionEditPage"
+    "pages/PersonalInstructionEditPage",
+    "pages/LegalPage"
   ]
 }
