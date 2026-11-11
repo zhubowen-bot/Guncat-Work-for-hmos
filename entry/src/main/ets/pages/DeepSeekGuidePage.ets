@@ -1,8 +1,8 @@
 // DeepSeek 配置指引: 设置 →「模型」→「模型配置」右上角入口。
 //
 // 目标是把「选内置方案 → 注册开放平台 → 创建 API Key → 粘贴回应用」讲清楚。
-// 截图放在 rawfile/guides/deepseek/ 下，其中 01 / 05 是应用界面截图占位，
-// 用真实截图覆盖同名文件即可；平台截图随官网改版可能需要替换。
+// 截图放在 rawfile/guides/deepseek/ 下；01 / 05 已裁成界面区域（去掉手机边框和状态栏），
+// 替换时保持相近比例即可；平台截图随官网改版可能需要替换。
 import { router, promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 
@@ -37,7 +37,7 @@ struct DeepSeekGuidePage {
           this.buildStepCard('01', '选择 Deepseek 方案',
             '打开 设置 → 模型 → 模型配置，在「配置方案」里点选内置的 Deepseek。接入协议、Base URL 和模型都已经填好，不需要修改。',
             'guides/deepseek/01-select-profile.png',
-            '在配置方案列表中点选 Deepseek', 1.5)
+            '在配置方案列表中点选 Deepseek', 1.28)
           this.buildStepCard('02', '注册或登录开放平台',
             '在浏览器打开 platform.deepseek.com，输入手机号，点「发送验证码」，填入收到的验证码后登录。未注册的手机号会自动完成注册。',
             'guides/deepseek/02-sign-in.png',
@@ -53,7 +53,7 @@ struct DeepSeekGuidePage {
           this.buildStepCard('05', '粘贴回应用并开始对话',
             '回到 设置 → 模型 → 模型配置，把密钥粘贴到「API Key」输入框。返回聊天页，在模型选择器里选中 Deepseek 即可开始对话。',
             'guides/deepseek/05-paste-key.png',
-            '把 Key 粘贴到「API Key」输入框', 1.5)
+            '把 Key 粘贴到「API Key」输入框', 1.25)
 
           this.buildSectionLabel('小提示')
           Column() {
