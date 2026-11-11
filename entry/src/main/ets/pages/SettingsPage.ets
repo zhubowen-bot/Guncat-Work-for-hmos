@@ -323,6 +323,26 @@ struct SettingsPage {
           .onClick((): void => {
             this.openPersonalEditor('');
           })
+        } else if (this.view === 'model') {
+          Row() {
+            SymbolGlyph($r('sys.symbol.list_book'))
+              .fontSize(14)
+              .fontColor([$r('app.color.brand')])
+            Text('配置指引')
+              .fontSize(13)
+              .fontColor($r('app.color.brand'))
+              .margin({ left: 4 })
+          }
+          .height(32)
+          .padding({ left: 12, right: 12 })
+          .borderRadius(16)
+          .backgroundColor($r('app.color.brand_light'))
+          .alignItems(VerticalAlign.Center)
+          .onClick((): void => {
+            // 先把当前草稿排队落盘, 再打开指引; 返回设置页时表单仍是刚才的内容
+            this.flushSave();
+            router.pushUrl({ url: 'pages/DeepSeekGuidePage' }).catch((): void => {});
+          })
         }
       }
       .width('100%')

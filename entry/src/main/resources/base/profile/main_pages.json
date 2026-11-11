@@ -2,6 +2,7 @@
   "src": [
     "pages/ChatPage",
     "pages/SettingsPage",
+    "pages/DeepSeekGuidePage",
     "pages/TableOcrPage",
     "pages/UsagePage",
     "pages/PersonalInstructionEditPage",

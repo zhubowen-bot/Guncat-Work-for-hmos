@@ -10,6 +10,7 @@ entry/src/main/ets/
 ├── pages/
 │   ├── ChatPage.ets                # 主页：聊天 + Agent 模式时间线（工作/交互）+ 工作区面板接线
 │   ├── SettingsPage.ets            # 独立设置页：模型/能力/声音/系统分组 + 二级详情（自动保存）
+│   ├── DeepSeekGuidePage.ets       # 模型配置「配置指引」：DeepSeek 注册、API Key 创建与粘贴五步说明
 │   ├── UsagePage.ets               # 用量与成本：账本汇总、53 周热力图、峰谷/额度、CSV 导出
 │   └── TableOcrPage.ets
 ├── views/
