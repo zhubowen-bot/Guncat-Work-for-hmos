@@ -179,15 +179,10 @@ struct DeepSeekGuidePage {
   private buildHero() {
     Column() {
       Row({ space: 14 }) {
-        Stack() {
-          SymbolGlyph($r('sys.symbol.list_book'))
-            .fontSize(30)
-            .fontColor([$r('app.color.brand')])
-        }
-        .width(54)
-        .height(54)
-        .borderRadius(18)
-        .backgroundColor($r('app.color.brand_light'))
+        SymbolGlyph($r('sys.symbol.list_book'))
+          .fontSize(34)
+          .fontColor([$r('app.color.brand')])
+          .flexShrink(0)
 
         Column({ space: 4 }) {
           Text('用 DeepSeek 开始对话')
@@ -256,20 +251,17 @@ struct DeepSeekGuidePage {
     Column() {
       Row() {
         Text(no)
-          .fontSize(12)
+          .fontSize(13)
           .fontWeight(FontWeight.Bold)
-          .fontColor(Color.White)
-          .textAlign(TextAlign.Center)
-          .width(28)
-          .height(28)
-          .borderRadius(14)
-          .backgroundColor($r('app.color.brand'))
+          .fontColor($r('app.color.brand'))
+          .letterSpacing(1)
+          .width(26)
         Text(title)
           .fontSize(16)
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.text_primary'))
           .layoutWeight(1)
-          .margin({ left: 10 })
+          .margin({ left: 6 })
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)

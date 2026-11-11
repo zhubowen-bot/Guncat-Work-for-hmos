@@ -334,9 +334,7 @@ struct SettingsPage {
               .margin({ left: 4 })
           }
           .height(32)
-          .padding({ left: 12, right: 12 })
-          .borderRadius(16)
-          .backgroundColor($r('app.color.brand_light'))
+          .padding({ left: 8, right: 4 })
           .alignItems(VerticalAlign.Center)
           .onClick((): void => {
             // 先把当前草稿排队落盘, 再打开指引; 返回设置页时表单仍是刚才的内容
