@@ -43,7 +43,7 @@ struct DeepSeekGuidePage {
             'guides/deepseek/02-sign-in.png',
             '开放平台登录页：手机号 + 验证码，未注册会自动注册', 1.5)
           this.buildStepCard('03', '进入 API keys 页面',
-            '登录后进入「API keys」页面（桌面端在左侧菜单，手机上可能在菜单按钮里）。页面会列出已有的密钥，右上角就是创建入口。',
+            '登录后请确保账户有余额，推荐先充值1-2元进行尝试。然后进入「API keys」页面（桌面端在左侧菜单，手机上可能在菜单按钮里）。页面会列出已有的密钥，右上角就是创建入口。',
             'guides/deepseek/03-api-keys.png',
             'API keys 页面：右上角「创建 API key」', 1.9)
           this.buildStepCard('04', '创建并复制 API Key',
